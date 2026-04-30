@@ -1,0 +1,13 @@
+{
+  "name": "laundry-saas-root",
+  "version": "1.0.0",
+  "scripts": {
+    "start:cloud": "cd cloud-backend && node server.js",
+    "start:desktop": "cd desktop-app && npm run dev:electron",
+    "dev": "concurrently \"npm run start:cloud\" \"npm run start:desktop\"",
+    "install:all": "npm install && cd cloud-backend && npm install && cd ../desktop-app && npm install && cd local-server && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

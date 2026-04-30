@@ -1,0 +1,245 @@
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.headerRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.headerTitle h1 {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #1E293B;
+  margin-bottom: 0.25rem;
+}
+
+.headerTitle p {
+  color: #64748B;
+  font-size: 0.95rem;
+}
+
+.dateFilter {
+  display: flex;
+  background: white;
+  padding: 0.25rem;
+  border-radius: 10px;
+  border: 1px solid #E2E8F0;
+  gap: 0.25rem;
+}
+
+.dateBtn {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  font-weight: 600;
+  color: #64748B;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dateBtn.active {
+  background: #F1F5F9;
+  color: #1E293B;
+}
+
+/* Stats Grid */
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+}
+
+.statCard {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.iconWrapper {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.primary { background: #EFF6FF; color: #2563EB; }
+.success { background: #ECFDF5; color: #10B981; }
+.warning { background: #FFF7ED; color: #F97316; }
+.danger { background: #FEF2F2; color: #EF4444; }
+
+.statInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.statTitle {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.statValue {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.statTrend {
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.up { color: #10B981; }
+.down { color: #EF4444; }
+
+/* Charts and Widgets */
+.bottomRow {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1.5rem;
+}
+
+.chartCard {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.chartHeader {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1E293B;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* Recent Orders Widget */
+.recentOrders {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.orderItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.orderItem:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.orderId {
+  font-weight: 700;
+  color: #2563EB;
+  font-size: 0.9rem;
+}
+
+.orderCust {
+  font-size: 0.85rem;
+  color: #64748B;
+  display: block;
+}
+
+.orderStatus {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: 20px;
+}
+
+.statusDelivered { background: #ECFDF5; color: #059669; }
+.statusProcessing { background: #FFF7ED; color: #EA580C; }
+.statusReady { background: #EFF6FF; color: #2563EB; }
+
+/* Insights and Storage (from mockup) */
+.insightsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.insightCard {
+  background: #0F172A;
+  border-radius: 12px;
+  padding: 1.5rem;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 140px;
+}
+
+.insightTag {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: white;
+  margin-bottom: 0.5rem;
+}
+
+.insightText {
+  font-size: 0.9rem;
+  color: #94A3B8;
+  line-height: 1.5;
+}
+
+.capacityCard {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.capacityTitle {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+}
+
+.capacityItem {
+  margin-bottom: 1rem;
+}
+
+.capacityHeader {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748B;
+}
+
+.capacityBar {
+  height: 8px;
+  background: #F1F5F9;
+  border-radius: 4px;
+}
+
+.capacityFill {
+  height: 100%;
+  border-radius: 4px;
+}

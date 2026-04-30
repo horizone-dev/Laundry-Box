@@ -1,0 +1,252 @@
+.customersPage {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.headerRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.headerTitle h1 {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #1E293B;
+  margin-bottom: 0.25rem;
+}
+
+.headerTitle p {
+  color: #64748B;
+  font-size: 0.95rem;
+}
+
+/* Filters */
+.filtersCard {
+  background: white;
+  padding: 1rem 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: #F1F5F9;
+  border-radius: 8px;
+  padding: 0.6rem 1rem;
+  width: 350px;
+}
+
+.searchBox input {
+  background: transparent;
+  border: none;
+  outline: none;
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.filterActions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.secondaryBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  background: white;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #64748B;
+  cursor: pointer;
+}
+
+/* Table Section */
+.tableCard {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  overflow: hidden;
+}
+
+.customersTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.customersTable th {
+  text-align: left;
+  padding: 1.25rem 1.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #64748B;
+  text-transform: uppercase;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.customersTable td {
+  padding: 1.25rem 1.5rem;
+  font-size: 0.95rem;
+  color: #1E293B;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.customerInfo {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.customerDetails {
+  display: flex;
+  flex-direction: column;
+}
+
+.customerName {
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.customerTag {
+  font-size: 0.75rem;
+  color: #64748B;
+}
+
+.ordersBadge {
+  background: #EFF6FF;
+  color: #2563EB;
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 12px;
+}
+
+.actionsBtn {
+  color: #94A3B8;
+  cursor: pointer;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.5rem;
+  border-top: 1px solid #F1F5F9;
+}
+
+.paginationInfo {
+  font-size: 0.85rem;
+  color: #64748B;
+}
+
+.paginationBtns {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.pageBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid #E2E8F0;
+  background: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #64748B;
+  cursor: pointer;
+}
+
+.pageBtn.active {
+  background: #2563EB;
+  color: white;
+  border-color: #2563EB;
+}
+
+/* KPI Cards */
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+}
+
+.kpiCard {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.kpiCardPrimary {
+  background: #2563EB;
+  color: white;
+}
+
+.kpiCardPrimary .kpiValue { color: white; }
+.kpiCardPrimary .kpiLabel { color: rgba(255,255,255,0.8); }
+
+.kpiIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #F1F5F9;
+  color: #2563EB;
+}
+
+.kpiCardPrimary .kpiIcon {
+  background: rgba(255,255,255,0.2);
+  color: white;
+}
+
+.kpiValueWrapper {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.kpiValue {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.kpiTrend {
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: 20px;
+}
+
+.kpiTrendPos { background: rgba(255,255,255,0.2); color: white; }
+
+.kpiLabel {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #64748B;
+}

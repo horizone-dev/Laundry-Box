@@ -1,0 +1,285 @@
+.invoicePage {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.topBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.backBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #64748B;
+  cursor: pointer;
+}
+
+.topActions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.closeBtn {
+  background: white;
+  border: 1px solid #E2E8F0;
+  padding: 0.6rem 1.25rem;
+  border-radius: 8px;
+  font-weight: 600;
+  color: #64748B;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+/* Invoice Card */
+.invoiceCard {
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  padding: 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3rem;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.invoiceHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.logoBox {
+  width: 48px;
+  height: 48px;
+  background: #EFF6FF;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #2563EB;
+}
+
+.statusBadge {
+  background: #ECFDF5;
+  color: #10B981;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0.3rem 0.75rem;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  background: #10B981;
+  border-radius: 50%;
+}
+
+.invoiceInfo h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  color: #0F172A;
+  margin: 1rem 0 0.25rem;
+}
+
+.invoiceInfo p {
+  color: #64748B;
+  font-size: 0.95rem;
+}
+
+.billTo {
+  text-align: right;
+}
+
+.billToLabel {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #94A3B8;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.customerName {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #1E293B;
+  margin-top: 0.25rem;
+}
+
+.customerRes {
+  font-size: 0.9rem;
+  color: #64748B;
+  font-style: italic;
+}
+
+/* Table */
+.itemsTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.itemsTable th {
+  text-align: left;
+  padding: 1rem 0;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #94A3B8;
+  text-transform: uppercase;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.itemsTable td {
+  padding: 1.5rem 0;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.itemDesc {
+  display: flex;
+  flex-direction: column;
+}
+
+.itemName {
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.itemSub {
+  font-size: 0.8rem;
+  color: #94A3B8;
+}
+
+.cellValue {
+  font-weight: 600;
+  color: #1E293B;
+}
+
+.cellTotal {
+  font-weight: 800;
+  color: #0F172A;
+  text-align: right;
+}
+
+/* Bottom Section */
+.bottomSection {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 2rem;
+}
+
+.trackBox {
+  background: #F8FAFC;
+  border-radius: 16px;
+  padding: 1.25rem;
+  display: flex;
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.qrCode {
+  width: 80px;
+  height: 80px;
+  background: white;
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+
+.trackInfo h4 {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #1E293B;
+  margin-bottom: 0.25rem;
+}
+
+.trackInfo p {
+  font-size: 0.85rem;
+  color: #64748B;
+  line-height: 1.4;
+}
+
+.totals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.totalRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.grandTotalRow {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #F1F5F9;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.grandTotalLabel {
+  font-weight: 800;
+  color: #0F172A;
+  font-size: 1rem;
+}
+
+.grandTotalValue {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: #2563EB;
+}
+
+/* Footer Actions */
+.footerActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.printBtn {
+  background: white;
+  border: 2px solid #2563EB;
+  color: #2563EB;
+  padding: 1rem;
+  border-radius: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  cursor: pointer;
+}
+
+.waBtn {
+  background: #22C55E;
+  color: white;
+  border: none;
+  padding: 1rem;
+  border-radius: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  cursor: pointer;
+}
+
+@media print {
+  .topBar, .footerActions { display: none; }
+  .invoiceCard { box-shadow: none; border: none; padding: 0; }
+}

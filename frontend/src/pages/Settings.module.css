@@ -1,0 +1,385 @@
+.settingsPage {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.headerRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.headerRow h1 {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.headerRow p {
+  color: #64748B;
+  font-size: 0.95rem;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid #E2E8F0;
+  gap: 2rem;
+  margin-top: 1rem;
+}
+
+.tab {
+  padding: 1rem 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #64748B;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.2s;
+}
+
+.tab.active {
+  color: #2563EB;
+}
+
+.tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #2563EB;
+}
+
+/* Settings Layout */
+.settingsGrid {
+  display: grid;
+  grid-template-columns: 1fr 350px;
+  gap: 2rem;
+  align-items: flex-start;
+}
+
+.mainContent {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.sideContent {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Card Styling */
+.card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  padding: 1.5rem;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.cardTitle {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+/* Table */
+.settingsTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.settingsTable th {
+  text-align: left;
+  padding: 1rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #94A3B8;
+  text-transform: uppercase;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.settingsTable td {
+  padding: 1rem;
+  font-size: 0.9rem;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: 20px;
+  background: #EFF6FF;
+  color: #2563EB;
+}
+
+.editBtn {
+  color: #2563EB;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Add-ons Grid */
+.addonsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.addonCard {
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.addonInfo {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.addonIcon {
+  width: 40px;
+  height: 40px;
+  background: #F8FAFC;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94A3B8;
+}
+
+.addonName {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.addonSub {
+  font-size: 0.75rem;
+  color: #94A3B8;
+}
+
+.addonPrice {
+  font-weight: 700;
+  color: #2563EB;
+}
+
+/* POS Preview */
+.posPreviewGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+.previewItem {
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+}
+
+.previewItem.active {
+  border-color: #2563EB;
+  box-shadow: 0 0 0 1px #2563EB;
+}
+
+.previewIcon {
+  color: #2563EB;
+}
+
+.previewLabel {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #1E293B;
+  text-transform: uppercase;
+}
+
+/* Sidebar Specifics */
+.formGroup {
+  margin-bottom: 1.25rem;
+}
+
+.formGroup label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1E293B;
+  margin-bottom: 0.5rem;
+}
+
+.inputField {
+  width: 100%;
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #E2E8F0;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.inputField:focus {
+  border-color: #2563EB;
+}
+
+.uploadBox {
+  border: 2px dashed #E2E8F0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: #64748B;
+  font-size: 0.85rem;
+}
+
+.uploadBox:hover {
+  border-color: #CBD5E1;
+}
+
+.uploadLabel {
+  display: block;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.btnRow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.saveBtn {
+  background: #2563EB;
+  color: white;
+  border: none;
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.discardBtn {
+  background: white;
+  border: 1px solid #E2E8F0;
+  color: #64748B;
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Quick Tip */
+.tipBox {
+  background: #EFF6FF;
+  padding: 1.25rem;
+  border-radius: 12px;
+  display: flex;
+  gap: 1rem;
+}
+
+.tipContent h4 {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #1E3A8A;
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+}
+
+.tipContent p {
+  font-size: 0.75rem;
+  color: #1E40AF;
+  line-height: 1.4;
+}
+
+.statusBox {
+  background: #ECFDF5;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.statusText h4 {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #065F46;
+  text-transform: uppercase;
+}
+
+.statusText p {
+  font-size: 0.75rem;
+  color: #065F46;
+}
+/* New Settings Sections */
+.formGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.rulesList {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.ruleItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background: #F8FAFC;
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+}
+
+.gatewaysGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+}
+
+.gatewayCard {
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 1.25rem;
+  background: white;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.gatewayCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.gatewayHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
