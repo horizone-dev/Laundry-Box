@@ -1,53 +1,68 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  ArrowLeft, X, Printer, Send, MessageCircle, 
-  QrCode, Activity, CheckCircle
-} from 'lucide-react';
+import { ArrowLeft, X, Printer, Send, FileText } from 'lucide-react';
+import { useSettings } from '../context/SettingsContext';
+import InvoiceTemplate from '../components/InvoiceTemplate';
+import html2pdf from 'html2pdf.js';
 import styles from './Invoice.module.css';
 
 export default function Invoice() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { settings } = useSettings();
   const [order, setOrder] = useState(null);
+  const invoiceRef = React.useRef();
 
   useEffect(() => {
     const fetchOrder = async () => {
-      // Logic: id from params might already have AG- or be just the number
-      // We stored it as #AG-12345
       const cleanId = id.replace('AG-', '').replace('#', '');
       const fullId = `#AG-${cleanId}`;
       
-      console.log("Fetching order:", fullId);
-
       if (window.electronAPI?.dbQuery) {
         try {
-          const res = await window.electronAPI.dbQuery('SELECT * FROM orders WHERE id = ?', [fullId]);
-          if (res.success && res.data.length > 0) {
-            const rawOrder = res.data[0];
+          // Try multiple ID formats for robustness
+          const idVariations = [
+            id,
+            `#${id}`,
+            id.startsWith('#') ? id.substring(1) : `#${id}`,
+            id.replace('#', '').replace('AG-', '#AG-'),
+            id.replace('#', '').replace('AG-', '')
+          ];
+          
+          let rawOrder = null;
+          for (const variant of idVariations) {
+            const res = await window.electronAPI.dbQuery('SELECT * FROM orders WHERE id = ? OR billNumber = ?', [variant, variant]);
+            if (res.success && res.data.length > 0) {
+              rawOrder = res.data[0];
+              break;
+            }
+          }
+
+          if (rawOrder) {
+            const taxRate = settings.isTaxEnabled ? (settings.taxRate || 0) / 100 : 0;
+            const subtotal = rawOrder.totalAmount / (1 + taxRate);
             setOrder({
               id: rawOrder.id,
               date: new Date(rawOrder.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-              customer: rawOrder.customerId,
+              customer: rawOrder.customerName || rawOrder.customerId,
+              customerPhone: rawOrder.customerPhone || '',
               residency: 'Customer Residency',
               status: rawOrder.status,
-              items: JSON.parse(rawOrder.items).map(item => ({
+              items: JSON.parse(rawOrder.items || '[]').map(item => ({
                 name: item.name,
                 sub: item.type || 'Standard Treatment',
                 qty: item.qty,
                 price: item.price,
                 total: item.price * item.qty
               })),
-              subtotal: rawOrder.totalAmount / 1.085,
-              tax: rawOrder.totalAmount - (rawOrder.totalAmount / 1.085),
+              subtotal: subtotal,
+              tax: rawOrder.totalAmount - subtotal,
               total: rawOrder.totalAmount
             });
           } else {
-            console.warn("Order not found in DB, using fallback");
             useFallback();
           }
         } catch (err) {
-          console.error("DB Error:", err);
           useFallback();
         }
       } else {
@@ -76,6 +91,48 @@ export default function Invoice() {
     fetchOrder();
   }, [id]);
 
+  const generatePDF = async () => {
+    const element = invoiceRef.current;
+    const opt = {
+      margin: [10, 10],
+      filename: `Invoice_${order.id}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+
+    try {
+      await html2pdf().set(opt).from(element).save();
+      return true;
+    } catch (err) {
+      console.error("PDF Generation failed:", err);
+      return false;
+    }
+  };
+
+  const handleWhatsApp = async () => {
+    // 1. Generate and download PDF
+    const pdfSuccess = await generatePDF();
+    
+    // 2. Format WhatsApp Message
+    const cleanPhone = (order.customerPhone || '').replace(/\D/g, '');
+    const countryCode = settings.waCountryCode || '';
+    let finalPhone = cleanPhone;
+    if (countryCode && !finalPhone.startsWith(countryCode)) {
+      finalPhone = countryCode + finalPhone;
+    }
+
+    const itemsSummary = order.items.map(item => `- ${item.qty} x ${item.name} (${settings.currencySymbol || 'AED'} ${item.total.toFixed(2)})`).join('%0A');
+    const message = `*INVOICE RECEIVED* %0A%0AHello! Here is your bill for order *${order.id}*.%0A%0A*Items:*%0A${itemsSummary}%0A%0A*Total Amount: ${settings.currencySymbol || 'AED'} ${order.total.toFixed(2)}*%0A%0A_Your PDF invoice has been generated and downloaded. Please attach it here to share._`;
+    
+    const url = `https://wa.me/${finalPhone}?text=${message}`;
+    if (window.electronAPI?.openExternal) {
+      window.electronAPI.openExternal(url);
+    } else {
+      window.open(url, '_blank');
+    }
+  };
+
   if (!order) return <div className={styles.loading}>Loading Invoice...</div>;
 
   return (
@@ -96,92 +153,20 @@ export default function Invoice() {
         </div>
       </div>
 
-      {/* Invoice Card */}
-      <div className={styles.invoiceCard}>
-        <div className={styles.invoiceHeader}>
-          <div className={styles.companySide}>
-            <div className={styles.logoBox}>
-              <Activity size={28} />
-            </div>
-            <div className={styles.invoiceInfo}>
-              <h1>Invoice {order.id}</h1>
-              <p>Issued on {order.date}</p>
-            </div>
-          </div>
-          <div className={styles.billTo}>
-            <div className={styles.statusBadge}>
-              <span className={styles.statusDot}></span>
-              {order.status}
-            </div>
-            <div style={{ marginTop: '1.5rem' }}>
-              <span className={styles.billToLabel}>BILL TO</span>
-              <span className={styles.customerName}>{order.customer}</span>
-              <span className={styles.customerRes}>{order.residency}</span>
-            </div>
-          </div>
-        </div>
+      <div ref={invoiceRef} style={{ padding: '2rem' }}>
+        <InvoiceTemplate order={order} settings={settings} />
+      </div>
 
-        <table className={styles.itemsTable}>
-          <thead>
-            <tr>
-              <th style={{ width: '60%' }}>ITEM DESCRIPTION</th>
-              <th style={{ textAlign: 'center' }}>QTY</th>
-              <th style={{ textAlign: 'center' }}>PRICE</th>
-              <th style={{ textAlign: 'right' }}>TOTAL</th>
-            </tr>
-          </thead>
-          <tbody>
-            {order.items.map((item, idx) => (
-              <tr key={idx}>
-                <td>
-                  <div className={styles.itemDesc}>
-                    <span className={styles.itemName}>{item.name}</span>
-                    <span className={styles.itemSub}>{item.sub}</span>
-                  </div>
-                </td>
-                <td style={{ textAlign: 'center' }} className={styles.cellValue}>{item.qty}</td>
-                <td style={{ textAlign: 'center' }} className={styles.cellValue}>${item.price.toFixed(2)}</td>
-                <td className={styles.cellTotal}>${item.total.toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className={styles.bottomSection}>
-          <div className={styles.trackBox}>
-            <div className={styles.qrCode}>
-              <QrCode size={64} color="#0F172A" />
-            </div>
-            <div className={styles.trackInfo}>
-              <h4>Track Progress</h4>
-              <p>Scan this code to see real-time cleaning status of your items.</p>
-            </div>
-          </div>
-
-          <div className={styles.totals}>
-            <div className={styles.totalRow}>
-              <span>Subtotal</span>
-              <span>${order.subtotal.toFixed(2)}</span>
-            </div>
-            <div className={styles.totalRow}>
-              <span>Service Tax (8%)</span>
-              <span>${order.tax.toFixed(2)}</span>
-            </div>
-            <div className={styles.grandTotalRow}>
-              <span className={styles.grandTotalLabel}>Total Amount</span>
-              <span className={styles.grandTotalValue}>${order.total.toFixed(2)}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className={styles.footerActions}>
-          <button className={styles.printBtn} onClick={() => window.print()}>
-            <Printer size={20} /> Print Receipt
-          </button>
-          <button className={styles.waBtn}>
-            <Send size={20} /> Send via WhatsApp
-          </button>
-        </div>
+      <div className={styles.footerActions} style={{ maxWidth: '800px', margin: '0 auto 2rem auto', display: 'flex', gap: '1rem', padding: '0 2rem' }}>
+        <button className={styles.printBtn} onClick={() => window.print()}>
+          <Printer size={20} /> Print Receipt
+        </button>
+        <button className={styles.pdfBtn} onClick={generatePDF}>
+          <FileText size={20} /> Download PDF
+        </button>
+        <button className={styles.waBtn} onClick={handleWhatsApp}>
+          <Send size={20} /> Send via WhatsApp
+        </button>
       </div>
     </div>
   );

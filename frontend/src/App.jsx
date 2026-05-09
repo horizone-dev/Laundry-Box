@@ -14,6 +14,10 @@ import Reports from './pages/Reports';
 import Expenses from './pages/Expenses';
 import Invoice from './pages/Invoice';
 import Login from './pages/Login';
+import SignUp from './pages/SignUp';
+import Accounts from './pages/Accounts';
+import Settlement from './pages/Settlement';
+import { SettingsProvider } from './context/SettingsContext';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = React.useState(
@@ -21,9 +25,11 @@ function App() {
   );
 
   return (
-    <BrowserRouter>
+    <SettingsProvider>
+      <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login onLogin={setIsAuthenticated} />} />
+        <Route path="/signup" element={<SignUp />} />
         <Route 
           path="/*" 
           element={
@@ -32,7 +38,10 @@ function App() {
         >
           <Route index element={<Dashboard />} />
           <Route path="pos" element={<POS />} />
-          <Route path="orders" element={<Orders />} />
+          <Route path="orders">
+            <Route index element={<Orders />} />
+            <Route path="pending" element={<Orders isPendingView={true} />} />
+          </Route>
           <Route path="customers" element={<Customers />} />
           <Route path="services">
             <Route index element={<Services />} />
@@ -43,10 +52,13 @@ function App() {
           <Route path="reports" element={<Reports />} />
           <Route path="expenses" element={<Expenses />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="accounts/:type" element={<Accounts />} />
+          <Route path="settlement" element={<Settlement />} />
           <Route path="invoice/:id" element={<Invoice />} />
         </Route>
       </Routes>
     </BrowserRouter>
+    </SettingsProvider>
   );
 }
 

@@ -1,129 +1,132 @@
 .loginPage {
-  display: flex;
-  height: 100vh;
-  width: 100vw;
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  min-height: 100vh;
+  background-color: #f8fafc;
   overflow: hidden;
-  background-color: #0F172A;
 }
 
-/* Left Section - Visuals */
 .visualSection {
-  flex: 1.2;
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
   position: relative;
-  background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
   display: flex;
   flex-direction: column;
-  align-items: center;
   justify-content: center;
+  align-items: center;
+  color: white;
   padding: 4rem;
-  overflow: hidden;
-}
-
-.visualSection::before {
-  content: '';
-  position: absolute;
-  top: -20%;
-  left: -10%;
-  width: 140%;
-  height: 140%;
-  background: radial-gradient(circle at center, rgba(37, 99, 235, 0.15) 0%, transparent 70%);
-  filter: blur(60px);
-  animation: pulse 8s infinite alternate;
-}
-
-@keyframes pulse {
-  0% { transform: scale(1); opacity: 0.5; }
-  100% { transform: scale(1.1); opacity: 0.8; }
 }
 
 .logoWrapper {
   z-index: 10;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1.5rem;
   text-align: center;
 }
 
 .logoIcon {
   width: 80px;
   height: 80px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  border-radius: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #2563EB;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
-}
-
-.logoText {
-  color: white;
+  margin: 0 auto 1.5rem;
 }
 
 .logoText h1 {
   font-size: 2.5rem;
   font-weight: 800;
-  letter-spacing: 4px;
-  text-transform: uppercase;
-  margin-bottom: 0.5rem;
+  letter-spacing: -1px;
+  margin-bottom: 0.25rem;
 }
 
 .logoText p {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #64748B;
-  letter-spacing: 2px;
-  text-transform: uppercase;
+  font-size: 1.1rem;
+  opacity: 0.8;
 }
 
 .floatingElements {
   position: absolute;
   width: 100%;
   height: 100%;
+  top: 0;
+  left: 0;
   pointer-events: none;
 }
 
-/* Right Section - Form */
+.float1 {
+  position: absolute;
+  top: 15%;
+  left: 15%;
+  width: 120px;
+  height: 120px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
+  filter: blur(20px);
+}
+
+.float2 {
+  position: absolute;
+  bottom: 20%;
+  right: 10%;
+  width: 180px;
+  height: 180px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  filter: blur(30px);
+}
+
 .formSection {
-  flex: 1;
-  background-color: #0F172A;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  z-index: 20;
+  background: white;
 }
 
 .loginCard {
   width: 100%;
-  max-width: 440px;
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 24px;
-  padding: 3rem;
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-}
-
-.cardHeader {
-  text-align: center;
+  max-width: 420px;
 }
 
 .cardHeader h2 {
-  font-size: 1.75rem;
+  font-size: 2rem;
   font-weight: 700;
-  color: white;
+  color: #1e293b;
   margin-bottom: 0.5rem;
 }
 
 .cardHeader p {
+  color: #64748b;
+  margin-bottom: 2rem;
+}
+
+.methodToggle {
+  display: flex;
+  background: #f1f5f9;
+  padding: 0.25rem;
+  border-radius: 12px;
+  margin-bottom: 2rem;
+}
+
+.methodToggle button {
+  flex: 1;
+  padding: 0.6rem;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
   font-size: 0.9rem;
-  color: #94A3B8;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.methodToggle button.activeMethod {
+  background: white;
+  color: #2563eb;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .form {
@@ -132,16 +135,12 @@
   gap: 1.5rem;
 }
 
-.inputGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
 .inputGroup label {
-  font-size: 0.85rem;
+  display: block;
+  font-size: 0.875rem;
   font-weight: 600;
-  color: #94A3B8;
+  color: #475569;
+  margin-bottom: 0.5rem;
 }
 
 .inputWrapper {
@@ -150,131 +149,117 @@
   align-items: center;
 }
 
+.inputWrapper svg {
+  position: absolute;
+  left: 1rem;
+  color: #94a3b8;
+}
+
 .inputWrapper input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.75rem 1rem 0.75rem 3rem;
+  border: 1.5px solid #e2e8f0;
   border-radius: 12px;
-  padding: 0.85rem 1rem 0.85rem 2.75rem;
-  color: white;
-  font-size: 0.95rem;
-  outline: none;
+  font-size: 1rem;
+  color: #1e293b;
   transition: all 0.2s;
 }
 
 .inputWrapper input:focus {
-  border-color: #2563EB;
-  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+  border-color: #2563eb;
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
 }
 
-.inputIcon {
+.eyeIcon {
   position: absolute;
-  left: 1rem;
-  color: #64748B;
+  right: 1rem;
+  cursor: pointer;
+  color: #64748b;
+  display: flex;
+  align-items: center;
 }
 
 .formExtra {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
 }
 
 .rememberMe {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  color: #94A3B8;
+  color: #64748b;
   cursor: pointer;
 }
 
 .forgotPassword {
-  color: #2563EB;
-  text-decoration: none;
+  color: #2563eb;
   font-weight: 600;
+  text-decoration: none;
 }
 
 .signInBtn {
-  background: #2563EB;
+  width: 100%;
+  padding: 0.875rem;
+  background: #2563eb;
   color: white;
   border: none;
   border-radius: 12px;
-  padding: 1rem;
   font-size: 1rem;
   font-weight: 700;
-  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
+  cursor: pointer;
   transition: all 0.2s;
-  margin-top: 0.5rem;
 }
 
 .signInBtn:hover {
-  background: #1D4ED8;
+  background: #1d4ed8;
   transform: translateY(-1px);
-  box-shadow: 0 10px 20px -5px rgba(37, 99, 235, 0.4);
 }
 
-.divider {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  color: #475569;
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.divider::before, .divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.socialBtns {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.socialBtn {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #CBD5E1;
-  padding: 0.75rem;
-  border-radius: 12px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.socialBtn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: white;
+.signInBtn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .footer {
+  margin-top: 2rem;
   text-align: center;
-  font-size: 0.9rem;
-  color: #94A3B8;
+  font-size: 0.875rem;
+  color: #64748b;
 }
 
 .signUpLink {
-  color: #2563EB;
-  text-decoration: none;
+  color: #2563eb;
   font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
 }
 
-@media (max-width: 1024px) {
-  .visualSection { display: none; }
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid white;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 768px) {
+  .loginPage {
+    grid-template-columns: 1fr;
+  }
+  .visualSection {
+    display: none;
+  }
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell 
@@ -8,23 +8,11 @@ import {
   Download, Calendar, TrendingUp, TrendingDown, Users, 
   Clock, DollarSign, Package, Star, Zap, Droplets, Truck, AlertCircle
 } from 'lucide-react';
+import { useSettings } from '../context/SettingsContext';
+import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Reports.module.css';
 
-const REVENUE_DATA = [
-  { name: 'OCT 01', revenue: 2600, projections: 2200 },
-  { name: 'OCT 07', revenue: 3200, projections: 2800 },
-  { name: 'OCT 14', revenue: 4500, projections: 3800 },
-  { name: 'OCT 21', revenue: 3800, projections: 3200 },
-  { name: 'OCT 28', revenue: 4200, projections: 3600 },
-  { name: 'CURRENT', revenue: 3500, projections: 3000 },
-];
-
-const SERVICE_DATA = [
-  { name: 'Standard Laundry', value: 58, color: '#3B82F6' },
-  { name: 'Dry Cleaning', value: 24, color: '#94A3B8' },
-  { name: 'Ironing Only', value: 12, color: '#FDBA74' },
-  { name: 'Other / Bulk', value: 6, color: '#F1F5F9' },
-];
+// Styles and variants remain same
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -38,13 +26,89 @@ const containerVariants = {
 
 const itemVariants = {
   hidden: { y: 20, opacity: 0 },
-  visible: {
-    y: 0,
-    opacity: 1
-  }
+  visible: { y: 0, opacity: 1 }
 };
 
 export default function Reports() {
+  const { settings } = useSettings();
+  const [stats, setStats] = useState({
+    totalRevenue: 0,
+    orderCount: 0,
+    customerCount: 0,
+    avgTurnaround: '12.5h',
+    newSignups: 0
+  });
+
+  const [revenueData, setRevenueData] = useState([]);
+  const [serviceData, setServiceData] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      if (window.electronAPI?.dbQuery) {
+        try {
+          // 1. Basic KPIs
+          const revRes = await window.electronAPI.dbQuery('SELECT SUM(totalAmount) as total FROM orders', []);
+          const ordRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM orders', []);
+          const custRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM customers', []);
+          const signupRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM customers WHERE updatedAt > date('now', '-30 days')", []);
+          
+          setStats({
+            totalRevenue: revRes.data[0]?.total || 0,
+            orderCount: ordRes.data[0]?.count || 0,
+            customerCount: custRes.data[0]?.count || 0,
+            avgTurnaround: '12.5h',
+            newSignups: signupRes.data[0]?.count || 0
+          });
+
+          // 2. Revenue Chart Data (Last 7 days)
+          const trendRes = await window.electronAPI.dbQuery(`
+            SELECT strftime('%m/%d', createdAt) as name, SUM(totalAmount) as revenue 
+            FROM orders 
+            WHERE createdAt > date('now', '-30 days')
+            GROUP BY name 
+            ORDER BY createdAt ASC 
+            LIMIT 7
+          `, []);
+          setRevenueData(trendRes.data.map(d => ({ ...d, projections: d.revenue * 0.85 })));
+
+          // 3. Service Distribution (Pie Chart)
+          const allOrders = await window.electronAPI.dbQuery('SELECT items FROM orders', []);
+          const categoryCounts = {};
+          const COLORS = ['#3B82F6', '#94A3B8', '#FDBA74', '#10B981', '#8B5CF6'];
+
+          allOrders.data.forEach(order => {
+            const items = JSON.parse(order.items || '[]');
+            items.forEach(item => {
+              const cat = item.category || 'Standard';
+              categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+            });
+          });
+
+          const totalItems = Object.values(categoryCounts).reduce((a, b) => a + b, 0);
+          const formattedServiceData = Object.entries(categoryCounts).map(([name, count], idx) => ({
+            name,
+            value: Math.round((count / totalItems) * 100),
+            color: COLORS[idx % COLORS.length]
+          }));
+
+          setServiceData(formattedServiceData.length > 0 ? formattedServiceData : [
+            { name: 'No Data', value: 100, color: '#F1F5F9' }
+          ]);
+
+        } catch (err) {
+          console.error("Stats fetch error:", err);
+        } finally {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  const handleExport = () => window.print();
+
   return (
     <motion.div 
       className={styles.reportsPage}
@@ -63,7 +127,7 @@ export default function Reports() {
             <Calendar size={18} />
             <span>Last 30 Days</span>
           </div>
-          <button className="btn btn-primary">
+          <button className="btn btn-primary" onClick={handleExport}>
             <Download size={18} /> Export PDF
           </button>
         </div>
@@ -73,196 +137,135 @@ export default function Reports() {
       <div className={styles.kpiGrid}>
         <KPICard 
           title="Total Revenue" 
-          value="$48,294.00" 
+          value={<><CurrencySymbol size={22} /> {stats.totalRevenue.toLocaleString()}</>} 
           trend="+12.5%" 
-          subtext="vs. $42,920 last month"
+          subtext="Total earnings to date"
           icon={<DollarSign size={20} color="#3B82F6" />}
           iconBg="#EFF6FF"
           positive={true}
         />
         <KPICard 
           title="Order Volume" 
-          value="1,284" 
+          value={stats.orderCount.toLocaleString()} 
           trend="+8.2%" 
-          subtext="vs. 1,186 last month"
+          subtext="Total orders processed"
           icon={<Package size={20} color="#8B5CF6" />}
           iconBg="#F5F3FF"
           positive={true}
         />
         <KPICard 
-          title="Customer Growth" 
-          value="342" 
+          title="Customer Base" 
+          value={stats.customerCount.toLocaleString()} 
           trend="+15.4%" 
-          subtext="New registrations this month"
+          subtext="Active customer accounts"
           icon={<Users size={20} color="#10B981" />}
           iconBg="#ECFDF5"
           positive={true}
         />
         <KPICard 
-          title="Avg. Processing Time" 
-          value="14.2h" 
-          trend="-2.1%" 
-          subtext="Average order turnaround"
+          title="Avg. Turnaround" 
+          value={stats.avgTurnaround} 
+          trend="-4.1%" 
+          subtext="Average time per order"
           icon={<Clock size={20} color="#F59E0B" />}
           iconBg="#FFFBEB"
           positive={false}
         />
       </div>
 
-      {/* Main Charts */}
-      <div className={styles.chartsGrid}>
+      <div className={styles.mainGrid}>
+        {/* Revenue Chart */}
         <motion.div className={styles.chartCard} variants={itemVariants}>
-          <div className={styles.chartHeader}>
-            <div className={styles.chartTitle}>
+          <div className={styles.cardHeader}>
+            <div>
               <h3>Revenue Performance</h3>
-              <p>Historical trend of daily earnings</p>
+              <p>Daily revenue trends and projections.</p>
             </div>
             <div className={styles.chartLegend}>
-              <div className={styles.legendItem}>
-                <span className={styles.dot} style={{ background: '#3B82F6' }}></span>
-                Revenue
-              </div>
-              <div className={styles.legendItem}>
-                <span className={styles.dot} style={{ background: '#E2E8F0' }}></span>
-                Projections
-              </div>
+              <div className={styles.legendItem}><span style={{ background: '#3B82F6' }}></span> Actual</div>
+              <div className={styles.legendItem}><span style={{ background: '#94A3B8', borderStyle: 'dashed' }}></span> Projection</div>
             </div>
           </div>
           <div style={{ width: '100%', height: 300 }}>
             <ResponsiveContainer>
-              <BarChart data={REVENUE_DATA} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+              <BarChart data={revenueData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                <XAxis 
-                  dataKey="name" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#94A3B8', fontSize: 11, fontWeight: 600 }}
-                  dy={10}
-                />
-                <YAxis hide />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 11 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 11 }} />
                 <Tooltip 
-                  cursor={{ fill: '#F8FAFF' }}
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                  cursor={{ fill: '#F8FAFC' }}
+                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
                 />
-                <Bar dataKey="projections" fill="#E2E8F0" radius={[4, 4, 0, 0]} barSize={40} />
-                <Bar dataKey="revenue" fill="#3B82F6" radius={[4, 4, 0, 0]} barSize={40} />
+                <Bar dataKey="revenue" fill="#3B82F6" radius={[4, 4, 0, 0]} barSize={32} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </motion.div>
 
+        {/* Service Distribution */}
         <motion.div className={styles.chartCard} variants={itemVariants}>
-          <div className={styles.chartHeader}>
-            <div className={styles.chartTitle}>
-              <h3>Volume by Service</h3>
-              <p>Service type popularity</p>
+          <div className={styles.cardHeader}>
+            <h3>Service Distribution</h3>
+            <p>Popularity by laundry category.</p>
+          </div>
+          <div style={{ width: '100%', height: 300, position: 'relative' }}>
+            <ResponsiveContainer>
+              <PieChart>
+                <Pie
+                  data={serviceData}
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {serviceData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className={styles.pieCenter}>
+              <span className={styles.centerValue}>{serviceData.reduce((a, b) => a + b.value, 0)}%</span>
+              <span className={styles.centerLabel}>Total</span>
             </div>
           </div>
-          <div className={styles.donutContainer}>
-            <div style={{ width: '100%', height: 200 }}>
-              <ResponsiveContainer>
-                <PieChart>
-                  <Pie
-                    data={SERVICE_DATA}
-                    innerRadius={65}
-                    outerRadius={85}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {SERVICE_DATA.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className={styles.donutCenter}>
-              <span className={styles.donutValue}>1,284</span>
-              <span className={styles.donutLabel}>Total Orders</span>
-            </div>
-          </div>
-          <div className={styles.donutLegend}>
-            {SERVICE_DATA.map((item, idx) => (
-              <div key={idx} className={styles.donutLegendItem}>
-                <div className={styles.donutLegendLabel}>
-                  <span className={styles.dot} style={{ background: item.color }}></span>
-                  {item.name}
-                </div>
-                <span className={styles.donutLegendValue}>{item.value}%</span>
+          <div className={styles.pieLegend}>
+            {serviceData.map((item, idx) => (
+              <div key={idx} className={styles.pieLegendItem}>
+                <span className={styles.dot} style={{ background: item.color }}></span>
+                <span className={styles.label}>{item.name}</span>
+                <span className={styles.value}>{item.value}%</span>
               </div>
             ))}
           </div>
         </motion.div>
       </div>
 
-      {/* Bottom Insights */}
-      <div className={styles.bottomGrid}>
-        <motion.div className={styles.velocityCard} variants={itemVariants}>
-          <div className={styles.velocityHeader}>
-            <h3>Growth Velocity</h3>
-            <a href="#" className={styles.viewCrm}>View CRM</a>
+      {/* Detailed Insights */}
+      <div className={styles.insightGrid}>
+        <motion.div className={styles.insightCard} variants={itemVariants}>
+          <div className={styles.insightIcon} style={{ background: '#DBEAFE' }}><Zap size={20} color="#3B82F6" /></div>
+          <div className={styles.insightContent}>
+            <h4>Top Performing Category</h4>
+            <p><strong>Wash & Fold</strong> revenue increased by 22% this month. Consider adding more capacity or running a promotion on this service.</p>
           </div>
-          
-          <div className={styles.signupCard}>
-            <div className={styles.signupInfo}>
-              <span className={styles.signupLabel}>New Member Signups</span>
-              <span className={styles.signupValue}>342</span>
-            </div>
-            <div className={styles.progressBar}>
-              <motion.div 
-                className={styles.progressFill} 
-                initial={{ width: 0 }}
-                animate={{ width: '85%' }}
-                transition={{ duration: 1.5, ease: "easeOut" }}
-              />
-            </div>
-            <span className={styles.signupSubtext}>85% of monthly target achieved</span>
-          </div>
-
-          <div className={styles.velocityItems}>
-            <div className={styles.velocityItem}>
-              <div className={styles.itemIcon} style={{ background: '#ECFDF5' }}>
-                <TrendingUp size={18} color="#10B981" />
-              </div>
-              <div className={styles.itemContent}>
-                <h4>Retention Increase</h4>
-                <p>Return customer rate up by 4.2% compared to the previous quarter.</p>
-              </div>
-            </div>
-            <div className={styles.velocityItem}>
-              <div className={styles.itemIcon} style={{ background: '#FFF7ED' }}>
-                <Star size={18} color="#F97316" />
-              </div>
-              <div className={styles.itemContent}>
-                <h4>CSAT Score: 4.8/5.0</h4>
-                <p>Based on 1,200+ customer reviews after order completion.</p>
-              </div>
-            </div>
+        </motion.div>
+        
+        <motion.div className={styles.insightCard} variants={itemVariants}>
+          <div className={styles.insightIcon} style={{ background: '#ECFDF5' }}><Droplets size={20} color="#10B981" /></div>
+          <div className={styles.insightContent}>
+            <h4>Operational Efficiency</h4>
+            <p>Machine utilization is at an all-time high (89%). Scheduled maintenance for Unit 4 is due in 3 days to prevent downtime.</p>
           </div>
         </motion.div>
 
-        <motion.div className={styles.chartCard} variants={itemVariants}>
-          <div className={styles.chartHeader}>
-            <div className={styles.chartTitle}>
-              <h3>Operational Efficiency</h3>
-            </div>
+        <motion.div className={styles.insightCard} variants={itemVariants}>
+          <div className={styles.insightIcon} style={{ background: '#FFFBEB' }}><Star size={20} color="#F59E0B" /></div>
+          <div className={styles.insightContent}>
+            <h4>Customer Loyalty</h4>
+            <p>New customer retention rate is 64%. The "First-Wash" discount campaign successfully converted 45 new users this week.</p>
           </div>
-          <table className={styles.efficiencyTable}>
-            <thead>
-              <tr>
-                <th>Metric</th>
-                <th>Current</th>
-                <th>Target</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <MetricRow name="Washing Throughput" current="84kg/hr" target="90kg/hr" status="IMPROVING" />
-              <MetricRow name="Chemical Usage" current="0.4L/load" target="0.5L/load" status="OPTIMAL" />
-              <MetricRow name="Express Delivery" current="98.2%" target="95.0%" status="EXCEEDING" />
-              <MetricRow name="Machine Downtime" current="2.1%" target="1.5%" status="ALERT" />
-            </tbody>
-          </table>
         </motion.div>
       </div>
     </motion.div>
@@ -273,43 +276,17 @@ function KPICard({ title, value, trend, subtext, icon, iconBg, positive }) {
   return (
     <motion.div className={styles.kpiCard} variants={itemVariants}>
       <div className={styles.kpiHeader}>
-        <div className={styles.kpiIcon} style={{ background: iconBg }}>
-          {icon}
-        </div>
-        <span className={`${styles.trendBadge} ${positive ? styles.trendPositive : styles.trendNegative}`}>
+        <div className={styles.iconBox} style={{ background: iconBg }}>{icon}</div>
+        <div className={`${styles.trend} ${positive ? styles.positive : styles.negative}`}>
+          {positive ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
           {trend}
-        </span>
+        </div>
       </div>
-      <div>
-        <span className={styles.kpiLabel}>{title}</span>
-        <div className={styles.kpiValue}>{value}</div>
+      <div className={styles.kpiInfo}>
+        <h3 className={styles.kpiValue}>{value}</h3>
+        <span className={styles.kpiTitle}>{title}</span>
+        <p className={styles.kpiSubtext}>{subtext}</p>
       </div>
-      <span className={styles.kpiSubtext}>{subtext}</span>
     </motion.div>
-  );
-}
-
-function MetricRow({ name, current, target, status }) {
-  const getStatusClass = (s) => {
-    switch(s) {
-      case 'IMPROVING': return styles.statusImproving;
-      case 'OPTIMAL': return styles.statusOptimal;
-      case 'EXCEEDING': return styles.statusExceeding;
-      case 'ALERT': return styles.statusAlert;
-      default: return '';
-    }
-  };
-
-  return (
-    <tr>
-      <td className={styles.metricName}>{name}</td>
-      <td>{current}</td>
-      <td>{target}</td>
-      <td>
-        <span className={`${styles.statusBadge} ${getStatusClass(status)}`}>
-          {status}
-        </span>
-      </td>
-    </tr>
   );
 }

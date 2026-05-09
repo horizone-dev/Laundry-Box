@@ -243,3 +243,31 @@
   height: 100%;
   border-radius: 4px;
 }
+
+/* Responsive Queries */
+@media (max-width: 1200px) {
+  .statsGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .headerRow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  
+  .statsGrid {
+    grid-template-columns: 1fr;
+  }
+  
+  .bottomRow {
+    grid-template-columns: 1fr;
+  }
+  
+  .insightsGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
