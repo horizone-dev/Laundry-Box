@@ -77,7 +77,7 @@ export default function OverdueStatement() {
           <div className={styles.shopInfo}>
              <img src="/logo.png" alt="" className={styles.logo} onError={(e) => e.target.style.display='none'} />
              <div className={styles.shopDetails}>
-                <h2>{settings.shopName || 'Antigravity Laundry'}</h2>
+                <h2>{settings.shopName || 'Laundry Management System'}</h2>
                 <p>{settings.shopAddress || 'Dubai, UAE'}</p>
                 <p>Tel: {settings.shopPhone || '+971 00 000 0000'}</p>
              </div>

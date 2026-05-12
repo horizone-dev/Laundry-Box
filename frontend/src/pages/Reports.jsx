@@ -131,7 +131,7 @@ export default function Reports() {
       <div className={styles.headerRow}>
         <div className={styles.headerInfo}>
           <h1>Business Analytics</h1>
-          <p>Real-time performance metrics and operational insights for Antigravity Laundry.</p>
+          <p>Real-time performance metrics and operational insights for Laundry Management System.</p>
         </div>
         <div className={styles.headerActions}>
           <div className={styles.datePicker}>

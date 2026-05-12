@@ -33,7 +33,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/roles', roleRoutes);
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Antigravity Backend Running' });
+  res.json({ status: 'ok', message: 'Laundry Management System Backend Running' });
 });
 
 app.listen(PORT, () => {

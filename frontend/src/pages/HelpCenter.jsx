@@ -23,7 +23,7 @@ const initialFaqs = [
   },
   {
     question: 'What happens if I go offline?',
-    answer: 'Antigravity works offline! Your data is saved locally. Once you reconnect to the internet, the sync indicator in the bottom right will turn green and upload your changes.'
+    answer: 'Laundry Management System works offline! Your data is saved locally. Once you reconnect to the internet, the sync indicator in the bottom right will turn green and upload your changes.'
   },
   {
     question: 'Can I customize service categories?',

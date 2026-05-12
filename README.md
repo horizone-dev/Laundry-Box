@@ -1,4 +1,4 @@
-# 🧺 Antigravity Laundry Management System
+# 🧺 Laundry Management System
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/Muhammedbn/laundry-billing-software)
 [![License](https://img.shields.io/badge/license-ISC-green.svg)](LICENSE)
@@ -110,4 +110,4 @@ This project is licensed under the ISC License - see the [LICENSE](LICENSE) file
 **Project:** [Laundry Billing Software](https://github.com/Muhammedbn/laundry-billing-software)
 
 ---
-*Developed with ❤️ by Antigravity Team*
+*Developed with ❤️ by Laundry Management System Team*

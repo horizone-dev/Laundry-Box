@@ -106,7 +106,7 @@ export default function Login({ onLogin }) {
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.2 }}
           >
-            <h1>{settings.companyName || 'ANTIGRAVITY'}</h1>
+            <h1>{settings.companyName || 'Laundry Management System'}</h1>
             <p>Next-Generation POS Ecosystem</p>
           </motion.div>
 
@@ -258,7 +258,7 @@ export default function Login({ onLogin }) {
           </form>
 
           <footer className={styles.formFooter}>
-            <p>© 2026 Antigravity Systems. All rights reserved.</p>
+            <p>© 2026 Laundry Management System. All rights reserved.</p>
           </footer>
         </motion.div>
       </div>
