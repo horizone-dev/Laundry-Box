@@ -19,6 +19,7 @@ export default function OutstandingBills() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('All'); // All, Overdue, Due Soon
+  const [globalOutstanding, setGlobalOutstanding] = useState(0);
 
   useEffect(() => {
     fetchOutstandingBills();
@@ -32,13 +33,19 @@ export default function OutstandingBills() {
           SELECT o.*, c.name as customerName, c.phone as customerPhone, c.balance as customerBalance 
           FROM orders o 
           LEFT JOIN customers c ON o.customerId = c.id
-          WHERE (o.dueAmount > 0 OR o.paymentStatus IN ('Credit', 'Partial', 'Pending'))
+          WHERE (o.dueAmount > 0 OR o.paymentStatus NOT IN ('Paid', 'Settled'))
           AND o.status != 'Cancelled'
           ORDER BY o.createdAt DESC
         `;
         const res = await window.electronAPI.dbQuery(query, []);
         if (res.success) {
           setBills(res.data);
+          
+          // Also fetch the global outstanding sum to match Settlement page
+          const globalRes = await window.electronAPI.dbQuery('SELECT SUM(balance) as total FROM customers WHERE balance > 0', []);
+          if (globalRes.success) {
+            setGlobalOutstanding(globalRes.data[0]?.total || 0);
+          }
         }
       }
     } catch (err) {
@@ -69,7 +76,7 @@ export default function OutstandingBills() {
     return matchesSearch;
   });
 
-  const totalOutstanding = bills.reduce((sum, b) => sum + (b.dueAmount || b.totalAmount || 0), 0);
+  const totalOutstanding = globalOutstanding || bills.reduce((sum, b) => sum + (b.dueAmount || b.totalAmount || 0), 0);
   const overdueCount = bills.filter(b => isOverdue(b)).length;
 
   return (
