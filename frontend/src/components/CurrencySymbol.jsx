@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 
 export default function CurrencySymbol({ size = 16, className = "" }) {
   const { settings } = useSettings();
@@ -16,7 +16,7 @@ export default function CurrencySymbol({ size = 16, className = "" }) {
         display: 'inline-block'
       }}
     >
-      {settings.currencySymbol || 'AED'}
+      {(settings && settings.currencySymbol !== undefined && settings.currencySymbol !== null && settings.currencySymbol !== '') ? settings.currencySymbol : 'AED'}
     </span>
   );
 }

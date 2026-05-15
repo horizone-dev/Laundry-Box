@@ -23,7 +23,7 @@ export function SettingsProvider({ children }) {
     taxMethod: 'exclusive',
     invoiceTemplate: 'standard',
     waCountryCode: '971',
-    currencySymbol: 'د.إ',
+    currencySymbol: '',
     activationCode: '',
     expiryDate: '',
     isActivated: true,
@@ -37,7 +37,9 @@ export function SettingsProvider({ children }) {
       cloudSync: true
     },
     bankAccounts: [],
-    defaultBankId: ''
+    defaultBankId: '',
+    autoBackupPath: '',
+    lastBackupTime: ''
   });
 
   useEffect(() => {
@@ -70,7 +72,7 @@ export function SettingsProvider({ children }) {
             taxMethod: shopSettings?.taxMethod || 'exclusive',
             invoiceTemplate: shopSettings?.invoiceTemplate || 'standard',
             waCountryCode: shopSettings?.waCountryCode || '971',
-            currencySymbol: shopSettings?.currencySymbol || 'د.إ',
+            currencySymbol: shopSettings?.currencySymbol ?? '',
             activationCode: shopSettings?.activationCode || '',
             expiryDate: shopSettings?.expiryDate || '',
             isActivated: shop.isActivated === 1,
@@ -84,7 +86,9 @@ export function SettingsProvider({ children }) {
               cloudSync: true
             },
             bankAccounts: shopSettings?.bankAccounts || [],
-            defaultBankId: shopSettings?.defaultBankId || ''
+            defaultBankId: shopSettings?.defaultBankId || '',
+            autoBackupPath: shopSettings?.autoBackupPath || '',
+            lastBackupTime: shopSettings?.lastBackupTime || ''
           });
         }
       } catch (err) {
@@ -122,12 +126,14 @@ export function SettingsProvider({ children }) {
           expiryDate: updated.expiryDate,
           licenseFeatures: updated.licenseFeatures,
           bankAccounts: updated.bankAccounts,
-          defaultBankId: updated.defaultBankId
+          defaultBankId: updated.defaultBankId,
+          autoBackupPath: updated.autoBackupPath,
+          lastBackupTime: updated.lastBackupTime
         });
 
         await window.electronAPI.dbQuery(
-          'INSERT OR REPLACE INTO shops (shopId, name, settings, updatedAt) VALUES (?, ?, ?, ?)',
-          ['SHOP_01', updated.companyName, settingsJson, new Date().toISOString()]
+          'UPDATE shops SET name = ?, settings = ?, updatedAt = ? WHERE shopId = ?',
+          [updated.companyName, settingsJson, new Date().toISOString(), 'SHOP_01']
         );
       } catch (err) {
         console.error("Failed to save settings:", err);

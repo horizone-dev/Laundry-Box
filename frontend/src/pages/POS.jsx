@@ -7,7 +7,7 @@ import {
   Gift, Printer, Receipt, Edit3, UserPlus, Phone, Mail, MapPin, MessageCircle, Landmark
 } from 'lucide-react';
 import axios from 'axios';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './POS.module.css';
 
@@ -18,6 +18,7 @@ export default function POS() {
   const [services, setServices] = useState([]);
   const [serviceTypes, setServiceTypes] = useState([]);
   const [addons, setAddons] = useState([]);
+  const [categories, setCategories] = useState([]);
   
   const [step, setStep] = useState('pos'); // pos, checkout
   const [cart, setCart] = useState([]);
@@ -34,10 +35,17 @@ export default function POS() {
         const sRes = await window.electronAPI.dbQuery('SELECT * FROM services', []);
         const tRes = await window.electronAPI.dbQuery('SELECT * FROM service_types', []);
         const aRes = await window.electronAPI.dbQuery('SELECT * FROM addons', []);
+        const cRes = await window.electronAPI.dbQuery('SELECT * FROM service_categories', []);
         
         if (sRes.success) setServices(sRes.data);
         if (tRes.success) setServiceTypes(tRes.data);
         if (aRes.success) setAddons(aRes.data);
+        if (cRes.success) {
+          setCategories(cRes.data);
+          if (cRes.data.length > 0 && !selectedCategory) {
+            setSelectedCategory(cRes.data[0].name);
+          }
+        }
       } catch (err) {
         console.error("Failed to fetch POS data:", err);
       }
@@ -134,7 +142,8 @@ export default function POS() {
   };
 
   // POS Features
-  const [selectedCategory, setSelectedCategory] = useState('Laundry');
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [itemSearch, setItemSearch] = useState('');
   const [discount, setDiscount] = useState(0);
 
   const handleDiscount = () => {
@@ -297,11 +306,14 @@ export default function POS() {
             customerPhone: selectedCustomer ? selectedCustomer.phone : '',
             shopId: 'SHOP_01',
             branchId: 'BRANCH_01',
-            status: paymentMethod === 'credit' ? 'Credit' : 'Paid',
+            status: paymentMethod === 'credit' ? 'Payment Pending' : 'Paid',
             totalAmount: total,
+            paidAmount: paymentMethod === 'credit' ? 0 : total,
+            dueAmount: paymentMethod === 'credit' ? total : 0,
+            paymentStatus: paymentMethod === 'credit' ? 'Credit' : 'Paid',
             paymentMethod: paymentMethod === 'cash' ? 'Cash' : (paymentMethod === 'card' ? 'Card' : (paymentMethod === 'credit' ? 'Credit' : 'UPI / QR Payment')),
             items: cart,
-            statusHistory: [{ status: paymentMethod === 'credit' ? 'Credit' : 'Paid', updatedBy: 'POS System' }]
+            statusHistory: [{ status: paymentMethod === 'credit' ? 'Credit' : 'Paid', updatedBy: 'POS System', timestamp: new Date().toISOString() }]
           });
         } catch (syncErr) {
           console.warn('Backend sync failed, but local order saved:', syncErr);
@@ -317,7 +329,7 @@ export default function POS() {
         // Record Transaction in Accounts
         const txnId = `TXN-${Date.now()}`;
         const txnTimestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
-        const accountType = paymentMethod === 'card' || paymentMethod === 'upi' ? 'BANK' : 'CASH';
+        const accountType = (paymentMethod === 'card' || paymentMethod === 'wallet') ? 'BANK' : 'CASH';
         
         if (paymentMethod !== 'credit') {
           const desc = `Order ${orderId}${accountType === 'BANK' ? ` via ${selectedBank}` : ''}`;
@@ -352,10 +364,10 @@ export default function POS() {
     
     if (window.electronAPI?.dbQuery) {
       try {
-        const isCredit = paymentMethod === 'credit';
-        const paidAmount = isCredit ? 0 : total;
-        const dueAmount = isCredit ? total : 0;
-        const paymentStatus = isCredit ? 'Credit' : 'Paid';
+        // "Save Bill" always implies a Credit/Unpaid order in this workflow
+        const paidAmount = 0;
+        const dueAmount = total;
+        const paymentStatus = 'Credit';
 
         await window.electronAPI.dbQuery(
           `INSERT INTO orders 
@@ -370,7 +382,7 @@ export default function POS() {
             total,
             paidAmount,
             dueAmount,
-            isCredit ? 'Credit' : 'Pending',
+            paymentStatus,
             JSON.stringify(cart),
             new Date().toISOString(),
             0,
@@ -378,21 +390,11 @@ export default function POS() {
           ]
         );
 
-        // Record Payment if not full credit
-        if (!isCredit) {
+        // Update customer balance for this new debt
+        if (selectedCustomer) {
           await window.electronAPI.dbQuery(
-            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              `PAY-${Date.now()}`,
-              selectedCustomer ? selectedCustomer.id : 'Walk-in',
-              orderId,
-              'SHOP_01',
-              total,
-              paymentMethod.toUpperCase(),
-              'SUCCESS',
-              new Date().toISOString()
-            ]
+            'UPDATE customers SET balance = balance + ? WHERE id = ?',
+            [total, selectedCustomer.id]
           );
         }
 
@@ -408,33 +410,15 @@ export default function POS() {
             branchId: 'BRANCH_01',
             status: 'Payment Pending',
             totalAmount: total,
-            paidAmount: paidAmount,
-            dueAmount: dueAmount,
-            paymentStatus: isCredit ? 'Credit' : 'Pending',
+            paidAmount: 0,
+            dueAmount: total,
+            paymentStatus: 'Credit',
             paymentMethod: paymentMethod.toUpperCase(),
             items: cart,
-            statusHistory: [{ status: isCredit ? 'Credit' : 'Payment Pending', updatedBy: 'POS System', timestamp: new Date().toISOString() }]
+            statusHistory: [{ status: 'Credit', updatedBy: 'POS System', timestamp: new Date().toISOString() }]
           });
         } catch (syncErr) {
           console.warn('Backend sync failed, but local order saved:', syncErr);
-        }
-
-        // Update balance ONLY if paid by credit
-        if (selectedCustomer && paymentMethod === 'credit') {
-          // Check credit limit
-          const currentBalance = selectedCustomer.balance || 0;
-          const limit = selectedCustomer.creditLimit || 0;
-          if (limit > 0 && (currentBalance + total) > limit) {
-             alert(`Payment failed: Credit limit of ${settings.currencySymbol || 'AED'} ${limit.toFixed(2)} exceeded. Current balance: ${settings.currencySymbol || 'AED'} ${currentBalance.toFixed(2)}`);
-             return;
-          }
-
-          await window.electronAPI.dbQuery(
-            'UPDATE customers SET balance = balance + ? WHERE id = ?',
-            [total, selectedCustomer.id]
-          );
-        } else if (selectedCustomer && paymentMethod !== 'credit') {
-           // Maybe record transaction? (Optional, handle separately if needed)
         }
 
         setLastOrderInfo({
@@ -605,7 +589,12 @@ export default function POS() {
         <div style={{ display: 'flex', gap: '1rem', width: '100%' }}>
           <div className={styles.searchBar} style={{ flex: 1 }}>
             <Search size={20} color="#94A3B8" />
-            <input type="text" placeholder="Search orders, customers, or items..." />
+            <input 
+              type="text" 
+              placeholder="Search items..." 
+              value={itemSearch}
+              onChange={(e) => setItemSearch(e.target.value)}
+            />
           </div>
           <button className={styles.manageCustBtn} onClick={() => navigate('/customers')}>
             <User size={18} /> Customers
@@ -614,13 +603,13 @@ export default function POS() {
 
         <div className={styles.categoriesRow}>
           <div className={styles.categoryTabs}>
-            {['Laundry', 'Dry Cleaning', 'Alterations', 'Add-ons'].map(cat => (
+            {categories.map(cat => (
               <button 
-                key={cat} 
-                className={`${styles.categoryTab} ${selectedCategory === cat ? styles.active : ''}`}
-                onClick={() => setSelectedCategory(cat)}
+                key={cat.id} 
+                className={`${styles.categoryTab} ${selectedCategory === cat.name ? styles.active : ''}`}
+                onClick={() => setSelectedCategory(cat.name)}
               >
-                {cat}
+                {cat.name}
               </button>
             ))}
           </div>
@@ -631,7 +620,13 @@ export default function POS() {
         </div>
 
         <div className={styles.itemsGrid}>
-          {services.map((service) => (
+          {services
+            .filter(s => {
+              const matchesSearch = s.name.toLowerCase().includes(itemSearch.toLowerCase());
+              const matchesCategory = s.category === selectedCategory || (!selectedCategory && s.category === 'Laundry');
+              return matchesSearch && (itemSearch ? true : matchesCategory);
+            })
+            .map((service) => (
             <div key={service.id} className={styles.itemCard} onClick={() => handleServiceClick(service)}>
               <div className={styles.itemIcon}>{getIcon(service.icon)}</div>
               <span className={styles.itemName}>{service.name}</span>

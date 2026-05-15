@@ -15,7 +15,7 @@ const OrderSchema = new mongoose.Schema({
   totalAmount: { type: Number, required: true },
   paidAmount: { type: Number, default: 0 },
   dueAmount: { type: Number, default: 0 },
-  paymentStatus: { type: String, default: 'Paid' },
+  paymentStatus: { type: String, default: 'Pending' },
   paymentMethod: { type: String, default: 'CASH' },
   items: { type: Array, required: true },
   qrCode: { type: String },

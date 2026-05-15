@@ -5,8 +5,8 @@ import {
   Mail, Lock, Eye, EyeOff, ArrowRight, Activity, 
   User, Key, ShieldCheck, Fingerprint, ShieldAlert, Cpu
 } from 'lucide-react';
-import { authApi } from '../api';
-import { useSettings } from '../context/SettingsContext';
+import { authApi } from '../services/api';
+import { useSettings } from '../store/SettingsContext';
 import styles from './Login.module.css';
 
 export default function Login({ onLogin }) {

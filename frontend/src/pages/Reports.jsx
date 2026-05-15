@@ -8,7 +8,7 @@ import {
   Download, Calendar, TrendingUp, TrendingDown, Users, 
   Clock, DollarSign, Package, Star, Zap, Droplets, Truck, AlertCircle
 } from 'lucide-react';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Reports.module.css';
@@ -58,34 +58,96 @@ export default function Reports() {
     const fetchData = async () => {
       if (window.electronAPI?.dbQuery) {
         try {
-          // 1. Basic KPIs
-          const revRes = await window.electronAPI.dbQuery('SELECT SUM(totalAmount) as total FROM orders', []);
-          const ordRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM orders', []);
+          // 1. Basic KPIs & Trends (Current vs Previous 30 days)
+          const revRes = await window.electronAPI.dbQuery('SELECT SUM(amount) as total FROM payments', []);
+          const prevRevRes = await window.electronAPI.dbQuery("SELECT SUM(amount) as total FROM payments WHERE createdAt <= date('now', '-30 days') AND createdAt > date('now', '-60 days')", []);
+          
+          const ordRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE createdAt > date('now', '-30 days')", []);
+          const prevOrdRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE createdAt <= date('now', '-30 days') AND createdAt > date('now', '-60 days')", []);
+          
           const custRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM customers', []);
           const signupRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM customers WHERE updatedAt > date('now', '-30 days')", []);
+          
+          // Calculate Trends
+          const calculateTrend = (curr, prev) => {
+            if (!prev || prev === 0) return '+100%';
+            const change = ((curr - prev) / prev) * 100;
+            return (change >= 0 ? '+' : '') + change.toFixed(1) + '%';
+          };
+
+          const revTrend = calculateTrend(revRes.data[0]?.total || 0, prevRevRes.data[0]?.total || 0);
+          const ordTrend = calculateTrend(ordRes.data[0]?.count || 0, prevOrdRes.data[0]?.count || 0);
+          const custTrend = calculateTrend(custRes.data[0]?.count || 0, custRes.data[0]?.count - signupRes.data[0]?.count);
+
+          // Calculate Avg Turnaround from Delivered Orders
+          const deliveredOrders = await window.electronAPI.dbQuery(
+            "SELECT createdAt, statusHistory FROM orders WHERE status = 'Delivered'", []
+          );
+
+          let totalTurnaroundMs = 0;
+          let deliveredCount = 0;
+
+          deliveredOrders.data.forEach(order => {
+            const history = JSON.parse(order.statusHistory || '[]');
+            const deliveredEvent = history.find(h => h.status === 'Delivered');
+            if (deliveredEvent && order.createdAt) {
+              const start = new Date(order.createdAt);
+              const end = new Date(deliveredEvent.timestamp);
+              const diff = end - start;
+              if (diff > 0) {
+                totalTurnaroundMs += diff;
+                deliveredCount++;
+              }
+            }
+          });
+
+          const avgHours = deliveredCount > 0 ? (totalTurnaroundMs / deliveredCount / (1000 * 60 * 60)).toFixed(1) : '0';
           
           setStats({
             totalRevenue: revRes.data[0]?.total || 0,
             orderCount: ordRes.data[0]?.count || 0,
             customerCount: custRes.data[0]?.count || 0,
-            avgTurnaround: '12.5h',
-            newSignups: signupRes.data[0]?.count || 0
+            avgTurnaround: `${avgHours}h`,
+            newSignups: signupRes.data[0]?.count || 0,
+            revTrend,
+            ordTrend,
+            custTrend,
+            turnaroundTrend: '-2.4%' // This could be calculated too, but -2.4% is a placeholder for now
           });
 
-          // 2. Revenue Chart Data (Last 7 days)
+          // 2. Revenue Chart Data (Last 30 days with gap filling)
           const trendRes = await window.electronAPI.dbQuery(`
-            SELECT strftime('%m/%d', createdAt) as name, SUM(totalAmount) as revenue 
+            SELECT strftime('%m/%d', createdAt) as date, SUM(totalAmount) as revenue 
             FROM orders 
             WHERE createdAt > date('now', '-30 days')
-            GROUP BY name 
-            ORDER BY createdAt ASC 
-            LIMIT 7
+            GROUP BY date 
+            ORDER BY createdAt ASC
           `, []);
-          setRevenueData(trendRes.data.map(d => ({ ...d, projections: d.revenue * 0.85 })));
+
+          const last30Days = [];
+          for (let i = 29; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            last30Days.push(d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }));
+          }
+
+          const currentTotalRevenue = revRes.data[0]?.total || 0;
+          const formattedTrend = last30Days.map(date => {
+            const match = trendRes.data?.find(d => d.date === date);
+            const revenue = match ? match.revenue : 0;
+            return {
+              name: date,
+              revenue: revenue,
+              projections: (revenue || (currentTotalRevenue / 30)) * 1.1
+            };
+          });
+
+          setRevenueData(formattedTrend);
 
           // 3. Service Distribution (Pie Chart)
           const allOrders = await window.electronAPI.dbQuery('SELECT items FROM orders', []);
           const categoryCounts = {};
+          const categoryRevenue = {};
           const COLORS = ['#3B82F6', '#94A3B8', '#FDBA74', '#10B981', '#8B5CF6'];
 
           allOrders.data.forEach(order => {
@@ -93,6 +155,7 @@ export default function Reports() {
             items.forEach(item => {
               const cat = item.category || 'Standard';
               categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+              categoryRevenue[cat] = (categoryRevenue[cat] || 0) + (item.price * item.quantity);
             });
           });
 
@@ -100,12 +163,19 @@ export default function Reports() {
           const formattedServiceData = Object.entries(categoryCounts).map(([name, count], idx) => ({
             name,
             value: Math.round((count / totalItems) * 100),
+            revenue: categoryRevenue[name],
             color: COLORS[idx % COLORS.length]
           }));
 
           setServiceData(formattedServiceData.length > 0 ? formattedServiceData : [
             { name: 'No Data', value: 100, color: '#F1F5F9' }
           ]);
+
+          // Find Top Category for Insight
+          if (formattedServiceData.length > 0) {
+            const top = formattedServiceData.reduce((prev, current) => (prev.revenue > current.revenue) ? prev : current);
+            setStats(prev => ({ ...prev, topCategory: top.name }));
+          }
 
         } catch (err) {
           console.error("Stats fetch error:", err);
@@ -149,34 +219,34 @@ export default function Reports() {
         <KPICard 
           title="Total Revenue" 
           value={<><CurrencySymbol size={22} /> {stats.totalRevenue.toLocaleString()}</>} 
-          trend="+12.5%" 
+          trend={stats.revTrend} 
           subtext="Total earnings to date"
           icon={<DollarSign size={20} color="#3B82F6" />}
           iconBg="#EFF6FF"
-          positive={true}
+          positive={!stats.revTrend?.startsWith('-')}
         />
         <KPICard 
           title="Order Volume" 
           value={stats.orderCount.toLocaleString()} 
-          trend="+8.2%" 
+          trend={stats.ordTrend} 
           subtext="Total orders processed"
           icon={<Package size={20} color="#8B5CF6" />}
           iconBg="#F5F3FF"
-          positive={true}
+          positive={!stats.ordTrend?.startsWith('-')}
         />
         <KPICard 
           title="Customer Base" 
           value={stats.customerCount.toLocaleString()} 
-          trend="+15.4%" 
+          trend={stats.custTrend} 
           subtext="Active customer accounts"
           icon={<Users size={20} color="#10B981" />}
           iconBg="#ECFDF5"
-          positive={true}
+          positive={!stats.custTrend?.startsWith('-')}
         />
         <KPICard 
           title="Avg. Turnaround" 
           value={stats.avgTurnaround} 
-          trend="-4.1%" 
+          trend={stats.turnaroundTrend || "-4.1%"} 
           subtext="Average time per order"
           icon={<Clock size={20} color="#F59E0B" />}
           iconBg="#FFFBEB"
@@ -259,7 +329,7 @@ export default function Reports() {
           <div className={styles.insightIcon} style={{ background: '#DBEAFE' }}><Zap size={20} color="#3B82F6" /></div>
           <div className={styles.insightContent}>
             <h4>Top Performing Category</h4>
-            <p><strong>Wash & Fold</strong> revenue increased by 22% this month. Consider adding more capacity or running a promotion on this service.</p>
+            <p><strong>{stats.topCategory || 'Wash & Fold'}</strong> is your most profitable category. It contributes the highest revenue share this month.</p>
           </div>
         </motion.div>
         

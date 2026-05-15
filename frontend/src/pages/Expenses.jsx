@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, MoreHorizontal, ArrowRight,
   TrendingDown, X, Zap, Trash2
 } from 'lucide-react';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Expenses.module.css';
 

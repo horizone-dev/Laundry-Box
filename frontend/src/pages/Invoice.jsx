@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, X, Printer, Send, FileText } from 'lucide-react';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import InvoiceTemplate from '../components/InvoiceTemplate';
 import html2pdf from 'html2pdf.js';
 import styles from './Invoice.module.css';

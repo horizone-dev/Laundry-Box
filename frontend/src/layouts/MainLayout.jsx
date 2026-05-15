@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { 
+import {
   LayoutDashboard, ShoppingCart, Users, ClipboardList, Settings, Layers,
   BarChart3, Zap, Plus, Search, Bell, HelpCircle, LifeBuoy, Wifi, WifiOff, RefreshCw, Activity, LogOut, Wallet,
   DollarSign, X, CheckCircle, CreditCard, ShoppingBag, Trash2, Building2, Hash, FileText,
-  AlertTriangle, ShieldCheck, Clock, Package, Truck
+  AlertTriangle, ShieldCheck, Clock, Package, Truck, MessageCircle, Phone
 } from 'lucide-react';
 import axios from 'axios';
 import { syncData } from '../services/syncService';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import { t } from '../utils/translations';
 import styles from './MainLayout.module.css';
 
 export default function MainLayout() {
-  const { settings } = useSettings();
+  const { settings, updateSettings } = useSettings();
   const [isOnline, setIsOnline] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -21,11 +21,39 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const API_BASE = 'http://localhost:3000/api';
-  
+
   const [showQuickDeliver, setShowQuickDeliver] = useState(false);
+  const [showQuickSettle, setShowQuickSettle] = useState(false);
   const [quickSearch, setQuickSearch] = useState('');
+  const [settleSearch, setSettleSearch] = useState('');
   const [foundOrder, setFoundOrder] = useState(null);
+  const [foundCustomer, setFoundCustomer] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [settleAmount, setSettleAmount] = useState('');
+  const [settleMethod, setSettleMethod] = useState('CASH');
+  const [logoClicks, setLogoClicks] = useState(0);
+
+  // Header Dropdown States
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const notificationRef = useRef(null);
+  const supportRef = useRef(null);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, []);
+
+  const fetchNotifications = async () => {
+    if (window.electronAPI?.dbQuery) {
+      try {
+        const res = await window.electronAPI.dbQuery('SELECT id, status, createdAt FROM orders ORDER BY createdAt DESC LIMIT 5', []);
+        if (res.success) setNotifications(res.data);
+      } catch (err) {
+        console.error("Failed to fetch notifications:", err);
+      }
+    }
+  };
 
   // Scroll to top when route changes
   useEffect(() => {
@@ -49,12 +77,24 @@ export default function MainLayout() {
     const interval = setInterval(checkStatus, 5000);
     const syncInterval = setInterval(() => { if (isOnline) handleSync(); }, 60000);
 
+    // Dedicated Local Auto-Backup Interval (every 60s, independent of internet)
+    const backupInterval = setInterval(async () => {
+      if (settings.autoBackupPath && window.electronAPI?.silentBackup) {
+        console.log('Auto-backing up to USB...');
+        const result = await window.electronAPI.silentBackup(settings.autoBackupPath);
+        if (result.success) {
+          updateSettings({ lastBackupTime: new Date().toLocaleString() });
+        }
+      }
+    }, 60000);
+
     window.addEventListener('online', () => setIsOnline(true));
     window.addEventListener('offline', () => setIsOnline(false));
 
     return () => {
       clearInterval(interval);
       clearInterval(syncInterval);
+      clearInterval(backupInterval);
       window.removeEventListener('online', () => setIsOnline(true));
       window.removeEventListener('offline', () => setIsOnline(false));
     };
@@ -64,8 +104,25 @@ export default function MainLayout() {
     if (!isOnline || isSyncing) return;
     setIsSyncing(true);
     await syncData();
-    setIsSyncing(true); // Wait, should be false
+
+    // Auto-backup to USB/Folder if configured
+    if (settings.autoBackupPath && window.electronAPI?.silentBackup) {
+      console.log('Performing auto-backup to:', settings.autoBackupPath);
+      await window.electronAPI.silentBackup(settings.autoBackupPath);
+    }
+
     setIsSyncing(false);
+  };
+
+  const handleLogoClick = () => {
+    const newCount = logoClicks + 1;
+    setLogoClicks(newCount);
+    if (newCount >= 10) {
+      sessionStorage.clear();
+      window.location.href = '/login';
+    }
+    // Reset counter after 5 seconds of inactivity
+    setTimeout(() => setLogoClicks(0), 5000);
   };
 
 
@@ -100,10 +157,10 @@ export default function MainLayout() {
     }
   };
 
-  const [expandedMenus, setExpandedMenus] = useState(['Services', 'Accounts', 'Customers', 'User & Roles']);
+  const [expandedMenus, setExpandedMenus] = useState(['Services', 'Accounts', 'Customers', 'User & Roles', 'Reports']);
 
   const toggleMenu = (label) => {
-    setExpandedMenus(prev => 
+    setExpandedMenus(prev =>
       prev.includes(label) ? [] : [label]
     );
   };
@@ -115,7 +172,7 @@ export default function MainLayout() {
       if (isProfileOpen && profileRef.current && !profileRef.current.contains(event.target)) {
         setIsProfileOpen(false);
       }
-      
+
       // Close sidebar menus if clicking outside sidebar
       const sidebar = document.querySelector(`.${styles.sidebar}`);
       if (sidebar && !sidebar.contains(event.target) && expandedMenus.length > 0) {
@@ -130,26 +187,26 @@ export default function MainLayout() {
   const navItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard, permissionKey: 'dashboard' },
     { path: '/pos', label: 'POS', icon: ShoppingCart, permissionKey: 'pos' },
-    { 
-      label: 'Orders', 
-      icon: ClipboardList, 
+    {
+      label: 'Orders',
+      icon: ClipboardList,
       permissionKey: 'orders',
       subItems: [
         { path: '/orders', label: 'All Orders' },
         { path: '/orders/pending', label: 'Pending Payments' },
       ]
     },
-    { 
-      label: 'Customers', 
-      icon: Users, 
+    {
+      label: 'Customers',
+      icon: Users,
       permissionKey: 'customers',
       subItems: [
         { path: '/customers', label: 'Customer List' },
       ]
     },
-    { 
-      label: 'Services', 
-      icon: Layers, 
+    {
+      label: 'Services',
+      icon: Layers,
       permissionKey: 'services',
       subItems: [
         { path: '/services', label: 'Overview' },
@@ -158,18 +215,18 @@ export default function MainLayout() {
         { path: '/services/addons', label: 'Add-ons' },
       ]
     },
-    { 
-      label: 'Settle Bill', 
-      icon: DollarSign, 
+    {
+      label: 'Settle Bill',
+      icon: DollarSign,
       permissionKey: 'pos',
       subItems: [
         { path: '/settlement', label: 'Settle Bill' },
         { path: '/outstanding-bills', label: 'Outstanding Bills' },
       ]
     },
-    { 
-      label: 'Reports', 
-      icon: BarChart3, 
+    {
+      label: 'Reports',
+      icon: BarChart3,
       permissionKey: 'reports',
       subItems: [
         { path: '/reports', label: 'Analytics' },
@@ -177,35 +234,34 @@ export default function MainLayout() {
         { path: '/reports/expenses', label: 'Expenses' },
       ]
     },
-    { path: '/expenses', label: 'Expenses', icon: Zap, permissionKey: 'expenses' },
-    { 
-      label: 'Accounts', 
-      icon: Wallet, 
+    {
+      label: 'Accounts',
+      icon: Wallet,
       permissionKey: 'accounts',
       subItems: [
         { path: '/accounts/cash', label: 'Cash Account' },
         { path: '/accounts/bank', label: 'Bank Account' },
       ]
     },
-    { 
-      label: 'User & Roles', 
-      icon: Users, 
+    {
+      label: 'User & Roles',
+      icon: Users,
       roleOnly: ['super_admin', 'manager'],
       subItems: [
         { path: '/users', label: 'Manage Users' },
         { path: '/users?tab=roles', label: 'Permissions', roleOnly: ['super_admin', 'manager'] },
       ]
     },
-    { 
+    {
       path: '/activation',
-      label: 'License Settings', 
-      icon: ShieldCheck, 
+      label: 'License Settings',
+      icon: ShieldCheck,
       roleOnly: 'super_admin'
     },
-    { 
+    {
       path: '/settings',
-      label: 'Settings', 
-      icon: Settings, 
+      label: 'Settings',
+      icon: Settings,
       roleOnly: ['super_admin', 'manager']
     },
   ];
@@ -216,12 +272,12 @@ export default function MainLayout() {
       setFoundOrder(null);
       return;
     }
-    
+
     if (window.electronAPI?.dbQuery) {
       const cleanVal = val.replace('#', '').replace('ORDER:', '').trim();
       const term = `%${cleanVal}%`;
       const rawTerm = `%${val}%`;
-      
+
       const res = await window.electronAPI.dbQuery(
         `SELECT * FROM orders 
          WHERE id LIKE ? OR billNumber LIKE ? 
@@ -237,7 +293,7 @@ export default function MainLayout() {
           const bId = (b.id || '').toString().toLowerCase().replace('#', '');
           const aBill = (a.billNumber || '').toString().toLowerCase().replace('#', '');
           const bBill = (b.billNumber || '').toString().toLowerCase().replace('#', '');
-          
+
           if (aId === cleanSearch || aBill === cleanSearch) return -1;
           if (bId === cleanSearch || bBill === cleanSearch) return 1;
           return 0;
@@ -268,7 +324,7 @@ export default function MainLayout() {
       if (window.electronAPI?.dbQuery) {
         const history = typeof foundOrder.statusHistory === 'string' ? JSON.parse(foundOrder.statusHistory) : (foundOrder.statusHistory || []);
         const newHistory = [...history, { status: 'Delivered', updatedBy: 'Admin Staff', timestamp: new Date().toISOString() }];
-        
+
         await window.electronAPI.dbQuery(
           'UPDATE orders SET status = ?, statusHistory = ?, updatedAt = ? WHERE id = ?',
           ['Delivered', JSON.stringify(newHistory), new Date().toISOString(), foundOrder.id]
@@ -283,19 +339,97 @@ export default function MainLayout() {
         } catch (syncErr) {
           console.warn("Cloud sync failed, will retry later:", syncErr);
         }
-        
+
         alert(`Order #${foundOrder.id} marked as Delivered!`);
         setShowQuickDeliver(false);
         setQuickSearch('');
         setFoundOrder(null);
-        
+
         // Refresh page if on Orders page
         if (location.pathname.includes('/orders')) {
-           window.location.reload();
+          window.location.reload();
         }
       }
     } catch (err) {
       alert("Failed to update status: " + err.message);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+  const handleQuickSettleSearch = async (val) => {
+    setSettleSearch(val);
+    if (!val || val.trim().length < 2) {
+      setFoundCustomer(null);
+      return;
+    }
+
+    if (window.electronAPI?.dbQuery) {
+      const term = `%${val.trim()}%`;
+      const res = await window.electronAPI.dbQuery(
+        `SELECT * FROM customers WHERE name LIKE ? OR phone LIKE ? LIMIT 1`,
+        [term, term]
+      );
+      if (res.success && res.data.length > 0) {
+        setFoundCustomer(res.data[0]);
+      } else {
+        setFoundCustomer(null);
+      }
+    }
+  };
+
+  const processQuickSettle = async () => {
+    if (!foundCustomer || !settleAmount || parseFloat(settleAmount) <= 0) return;
+    
+    setIsUpdating(true);
+    try {
+      const amount = parseFloat(settleAmount);
+      const timestamp = new Date().toISOString();
+      
+      // 1. Update Customer Balance
+      await window.electronAPI.dbQuery(
+        'UPDATE customers SET balance = balance - ?, updatedAt = ? WHERE id = ?',
+        [amount, timestamp, foundCustomer.id]
+      );
+
+      // 2. Record Payment
+      await window.electronAPI.dbQuery(
+        `INSERT INTO payments (id, customerId, shopId, amount, method, status, createdAt) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [`PAY-QUICK-${Date.now()}`, foundCustomer.id, 'SHOP_01', amount, settleMethod, 'SUCCESS', timestamp]
+      );
+
+      // 3. Try to settle orders (simplified FIFO)
+      const billsRes = await window.electronAPI.dbQuery(
+        'SELECT * FROM orders WHERE customerId = ? AND dueAmount > 0 ORDER BY createdAt ASC',
+        [foundCustomer.id]
+      );
+      
+      let remaining = amount;
+      if (billsRes.success && billsRes.data.length > 0) {
+        for (const bill of billsRes.data) {
+          if (remaining <= 0) break;
+          const currentDue = bill.dueAmount;
+          let allocate = Math.min(remaining, currentDue);
+          let newPaid = (bill.paidAmount || 0) + allocate;
+          let newDue = currentDue - allocate;
+          let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+          
+          await window.electronAPI.dbQuery(
+            'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, updatedAt = ? WHERE id = ?',
+            [newPaid, newDue, newStatus, timestamp, bill.id]
+          );
+          remaining -= allocate;
+        }
+      }
+
+      alert(`Successfully settled ${amount} for ${foundCustomer.name}`);
+      setShowQuickSettle(false);
+      setSettleSearch('');
+      setFoundCustomer(null);
+      setSettleAmount('');
+    } catch (err) {
+      console.error("Quick settle error:", err);
+      alert("Failed to process settlement: " + err.message);
     } finally {
       setIsUpdating(false);
     }
@@ -328,7 +462,7 @@ export default function MainLayout() {
     <div className={styles.layout}>
       {/* Sidebar */}
       <aside className={styles.sidebar}>
-        <div className={styles.logo}>
+        <div className={styles.logo} onClick={handleLogoClick}>
           <div className={styles.logoBrand}>
             {settings.logo ? (
               <img src={settings.logo} alt="Logo" className={styles.logoImg} />
@@ -341,7 +475,7 @@ export default function MainLayout() {
             <span className={styles.logoSub}>MANAGEMENT SYSTEM</span>
           )}
         </div>
-        
+
         <nav className={styles.nav}>
           {filteredNavItems.map((item) => {
             const isExpanded = expandedMenus.includes(item.label);
@@ -350,15 +484,15 @@ export default function MainLayout() {
             if (hasSubItems) {
               return (
                 <div key={item.label} className={styles.navGroup}>
-                  <div 
-                    className={`${styles.navItem} ${isExpanded ? styles.expanded : ''}`} 
+                  <div
+                    className={`${styles.navItem} ${isExpanded ? styles.expanded : ''}`}
                     onClick={() => toggleMenu(item.label)}
                   >
                     <item.icon size={20} />
                     <span>{t(item.label.toLowerCase().replace(/ & /g, '').replace(/ /g, ''), settings.language)}</span>
-                    <Plus 
-                      size={14} 
-                      className={`${styles.chevron} ${isExpanded ? styles.rotated : ''}`} 
+                    <Plus
+                      size={14}
+                      className={`${styles.chevron} ${isExpanded ? styles.rotated : ''}`}
                     />
                   </div>
                   {isExpanded && (
@@ -367,7 +501,7 @@ export default function MainLayout() {
                         <NavLink
                           key={sub.path}
                           to={sub.path}
-                          className={({ isActive }) => 
+                          className={({ isActive }) =>
                             isActive ? `${styles.subNavItem} ${styles.activeSub}` : styles.subNavItem
                           }
                         >
@@ -385,7 +519,7 @@ export default function MainLayout() {
               <NavLink
                 key={item.path}
                 to={item.path}
-                className={({ isActive }) => 
+                className={({ isActive }) =>
                   isActive ? `${styles.navItem} ${styles.active}` : styles.navItem
                 }
                 onClick={() => setExpandedMenus([])}
@@ -403,7 +537,7 @@ export default function MainLayout() {
               const today = new Date();
               const diffTime = expiry - today;
               const days = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-              
+
               if (days > 0 && days <= 31) {
                 return (
                   <div className={styles.trialStatusSidebar}>
@@ -412,9 +546,9 @@ export default function MainLayout() {
                       <span>Trial: {days} Days Left</span>
                     </div>
                     <div className={styles.trialBarSidebar}>
-                      <div 
-                        className={styles.trialProgressSidebar} 
-                        style={{ width: `${(days / 31) * 100}%` }} 
+                      <div
+                        className={styles.trialProgressSidebar}
+                        style={{ width: `${(days / 31) * 100}%` }}
                       />
                     </div>
                   </div>
@@ -423,9 +557,9 @@ export default function MainLayout() {
               return null;
             })()
           )}
-          
-          <div 
-            className={styles.navItem} 
+
+          <div
+            className={styles.navItem}
             style={{ marginTop: 'auto', color: '#EF4444', cursor: 'pointer' }}
             onClick={() => {
               sessionStorage.clear();
@@ -451,9 +585,9 @@ export default function MainLayout() {
         <header className={styles.header}>
           <div className={styles.searchBar}>
             <Search size={18} color="#94A3B8" />
-            <input 
-              type="text" 
-              placeholder="Search orders, customers, or services..." 
+            <input
+              type="text"
+              placeholder="Search orders, customers, or services..."
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   navigate(`/orders?search=${e.target.value}`);
@@ -461,34 +595,80 @@ export default function MainLayout() {
               }}
             />
           </div>
-          
+
           <div className={styles.headerRight}>
             <div className={styles.headerIcons}>
-              <button 
-                className={styles.headerDeliverBtn} 
+              <button
+                className={styles.headerDeliverBtn}
                 onClick={() => setShowQuickDeliver(true)}
                 title="Quick Delivery"
               >
                 <Truck size={18} /> Deliver
               </button>
-              <button className={styles.headerSettleBtn} onClick={() => navigate('/settlement')}>
+              <button className={styles.headerSettleBtn} onClick={() => setShowQuickSettle(true)}>
                 <DollarSign size={18} /> Settle Bill
               </button>
-              <div className={styles.iconBtn}>
+              <div
+                ref={notificationRef}
+                className={styles.iconBtn}
+                onClick={() => { setIsNotificationsOpen(!isNotificationsOpen); setIsSupportOpen(false); setIsProfileOpen(false); }}
+              >
                 <Bell size={20} />
-                <span className={styles.badge}></span>
+                {notifications.length > 0 && <span className={styles.badge}></span>}
+
+                {isNotificationsOpen && (
+                  <div className={styles.dropdownMenu}>
+                    <div className={styles.dropdownHeader}>
+                      <strong>Recent Notifications</strong>
+                      <span>You have {notifications.length} recent events</span>
+                    </div>
+                    <div className={styles.dropdownDivider} />
+                    <div className={styles.notificationList}>
+                      {notifications.map(n => (
+                        <div key={n.id} className={styles.notificationItem} onClick={() => navigate('/orders')}>
+                          <div className={styles.notifIcon}><ShoppingBag size={14} /></div>
+                          <div className={styles.notifContent}>
+                            <p>Order <strong>{n.id}</strong> updated to <strong>{n.status}</strong></p>
+                            <span>{new Date(n.createdAt).toLocaleTimeString()}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className={styles.iconBtn} onClick={() => navigate('/help')} style={{ cursor: 'pointer' }}>
+
+              <div
+                ref={supportRef}
+                className={styles.iconBtn}
+                onClick={() => { setIsSupportOpen(!isSupportOpen); setIsNotificationsOpen(false); setIsProfileOpen(false); }}
+              >
                 <HelpCircle size={20} />
-              </div>
-              <div className={styles.iconBtn} onClick={() => navigate('/help')} style={{ cursor: 'pointer' }}>
-                Support
+                <span>Support</span>
+
+                {isSupportOpen && (
+                  <div className={styles.dropdownMenu} style={{ width: '200px' }}>
+                    <div className={styles.dropdownHeader}>
+                      <strong>Need Help?</strong>
+                    </div>
+                    <div className={styles.dropdownDivider} />
+                    <div className={styles.dropdownItem} onClick={() => navigate('/help')}>
+                      <HelpCircle size={16} /> Help Center
+                    </div>
+                    <div className={styles.dropdownItem} onClick={() => window.open('https://wa.me/971588851680', '_blank')}>
+                      <MessageCircle size={16} /> WhatsApp Support
+                    </div>
+                    <div className={styles.dropdownItem} onClick={() => window.location.href = 'tel:+971588851680'}>
+                      <Phone size={16} /> Call Support
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div 
+            <div
               ref={profileRef}
-              className={styles.userProfile} 
+              className={styles.userProfile}
               onClick={() => setIsProfileOpen(!isProfileOpen)}
               style={{ cursor: 'pointer', position: 'relative' }}
             >
@@ -496,12 +676,12 @@ export default function MainLayout() {
                 <span className={styles.userName}>{user.name || 'Staff User'}</span>
                 <span className={styles.userRole}>{(user.role || role).replace('_', ' ')}</span>
               </div>
-              <img 
-                src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || 'User')}&background=2563EB&color=fff`} 
-                alt={user.name} 
+              <img
+                src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || 'User')}&background=2563EB&color=fff`}
+                alt={user.name}
                 className={styles.avatar}
               />
-              
+
               {isProfileOpen && (
                 <div className={styles.profileDropdown}>
                   <div className={styles.dropdownHeader}>
@@ -536,14 +716,14 @@ export default function MainLayout() {
         </div>
 
         {/* Floating Sync Status */}
-        <div 
+        <div
           className={`${styles.syncStatus} ${!isOnline ? styles.offline : ''}`}
           onClick={handleSync}
           title={isOnline ? "Click to sync now" : ""}
         >
           {isOnline ? (
             <>
-              {isSyncing ? <RefreshCw size={14} className="spin" /> : <Wifi size={14} />} 
+              {isSyncing ? <RefreshCw size={14} className="spin" /> : <Wifi size={14} />}
               {isSyncing ? 'Syncing' : 'Online'}
             </>
           ) : (
@@ -567,15 +747,15 @@ export default function MainLayout() {
                 <X size={20} />
               </button>
             </div>
-            
+
             <div className={styles.modalBody}>
               <div className={styles.inputGroup}>
                 <label>Enter Bill No or Order ID</label>
                 <div className={styles.searchWrapper}>
                   <Search size={18} className={styles.searchIcon} />
-                  <input 
-                    type="text" 
-                    placeholder="e.g. #AG-50504" 
+                  <input
+                    type="text"
+                    placeholder="e.g. #AG-50504"
                     value={quickSearch}
                     onChange={(e) => handleQuickDeliverSearch(e.target.value)}
                     autoFocus
@@ -597,15 +777,15 @@ export default function MainLayout() {
                   </div>
                   <div className={styles.resultRow}>
                     <span className={styles.label}>Amount:</span>
-                    <span className={styles.value}>AED {foundOrder.totalAmount?.toFixed(2)}</span>
+                    <span className={styles.value}>{(settings.currencySymbol || 'AED')} {foundOrder.totalAmount?.toFixed(2)}</span>
                   </div>
-                  
+
                   {foundOrder.status === 'Delivered' ? (
                     <div className={styles.alreadyDelivered}>
                       <CheckCircle size={16} /> Already Delivered
                     </div>
                   ) : (
-                    <button 
+                    <button
                       className={styles.confirmDeliverBtn}
                       onClick={processQuickDelivery}
                       disabled={isUpdating}
@@ -616,6 +796,87 @@ export default function MainLayout() {
                 </div>
               ) : quickSearch.length >= 3 ? (
                 <div className={styles.noOrder}>No order found with this ID</div>
+              ) : null}
+            </div>
+          </div>
+          </div>
+        )}
+      {/* Quick Settlement Modal */}
+      {showQuickSettle && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.quickModal}>
+            <div className={styles.modalHeader}>
+              <div className={styles.titleWithIcon}>
+                <DollarSign color="#10B981" size={24} />
+                <h2>Quick Settlement</h2>
+              </div>
+              <button className={styles.closeBtn} onClick={() => { setShowQuickSettle(false); setSettleSearch(''); setFoundCustomer(null); setSettleAmount(''); }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className={styles.modalBody}>
+              <div className={styles.inputGroup}>
+                <label>Search Customer (Name/Phone)</label>
+                <div className={styles.searchWrapper}>
+                  <Search size={18} className={styles.searchIcon} />
+                  <input
+                    type="text"
+                    placeholder="Search customer..."
+                    value={settleSearch}
+                    onChange={(e) => handleQuickSettleSearch(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              {foundCustomer ? (
+                <div className={styles.orderResult}>
+                  <div className={styles.resultHeader}>
+                    <span className={styles.orderId}>{foundCustomer.name}</span>
+                    <span className={`${styles.statusBadge} ${foundCustomer.balance > 0 ? styles.statusPending : styles.statusDone}`}>
+                      {foundCustomer.balance > 0 ? `Due: ${(settings.currencySymbol || 'AED')} ${foundCustomer.balance.toFixed(2)}` : 'No Due'}
+                    </span>
+                  </div>
+                  
+                  <div className={styles.quickSettleForm}>
+                    <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
+                      <label>Amount to Receive</label>
+                      <input 
+                        type="number" 
+                        className={styles.amountInput}
+                        value={settleAmount}
+                        onChange={(e) => setSettleAmount(e.target.value)}
+                        placeholder="0.00"
+                        style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', fontSize: '1.25rem', fontWeight: 700 }}
+                      />
+                    </div>
+                    
+                    <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
+                      <label>Method</label>
+                      <select 
+                        value={settleMethod} 
+                        onChange={(e) => setSettleMethod(e.target.value)}
+                        style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0' }}
+                      >
+                        <option value="CASH">Cash</option>
+                        <option value="BANK">Bank Transfer</option>
+                        <option value="UPI">Digital (UPI)</option>
+                      </select>
+                    </div>
+
+                    <button
+                      className={styles.confirmDeliverBtn}
+                      style={{ background: '#10B981', marginTop: '1.5rem' }}
+                      onClick={processQuickSettle}
+                      disabled={isUpdating || !settleAmount}
+                    >
+                      {isUpdating ? 'Processing...' : 'Confirm Settlement'}
+                    </button>
+                  </div>
+                </div>
+              ) : settleSearch.length >= 3 ? (
+                <div className={styles.noOrder}>No customer found</div>
               ) : null}
             </div>
           </div>

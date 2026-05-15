@@ -669,11 +669,21 @@
 .searchBar {
   display: flex;
   align-items: center;
-  background: #F1F5F9;
-  border-radius: 10px;
-  padding: 0.6rem 1rem;
-  width: 400px;
+  background: #F8FAFC;
+  border-radius: 14px;
+  padding: 0.75rem 1.25rem;
+  width: 450px;
   gap: 0.75rem;
+  border: 1px solid #E2E8F0;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+.searchBar:focus-within {
+  background: #FFFFFF;
+  border-color: #2563EB;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08), 0 0 0 4px rgba(37, 99, 235, 0.04);
+  width: 500px;
 }
 
 .searchBar input {
@@ -681,8 +691,13 @@
   border: none;
   outline: none;
   width: 100%;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  font-weight: 500;
   color: #1E293B;
+}
+
+.searchBar input::placeholder {
+  color: #94A3B8;
 }
 
 .headerRight {
@@ -773,6 +788,64 @@
   display: flex;
   flex-direction: column;
   animation: slideDown 0.2s ease-out;
+}
+
+.dropdownMenu {
+  position: absolute;
+  top: calc(100% + 15px);
+  right: 0;
+  width: 300px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  border: 1px solid #F1F5F9;
+  padding: 0.5rem;
+  z-index: 100;
+  animation: slideDown 0.2s ease-out;
+}
+
+.notificationList {
+  display: flex;
+  flex-direction: column;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.notificationItem {
+  display: flex;
+  gap: 1rem;
+  padding: 0.85rem;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.notificationItem:hover {
+  background: #F8FAFC;
+}
+
+.notifIcon {
+  width: 32px;
+  height: 32px;
+  background: #EFF6FF;
+  color: #2563EB;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.notifContent p {
+  font-size: 0.85rem;
+  color: #1E293B;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.notifContent span {
+  font-size: 0.75rem;
+  color: #94A3B8;
 }
 
 .dropdownHeader {

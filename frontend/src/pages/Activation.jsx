@@ -5,7 +5,7 @@ import {
   Info, AlertTriangle, Clock, Building2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import styles from './Activation.module.css';
 

@@ -7,7 +7,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
 import { useNavigate } from 'react-router-dom';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Dashboard.module.css';
 
@@ -31,39 +31,74 @@ export default function Dashboard() {
   const fetchDashboardData = async () => {
     if (window.electronAPI?.dbQuery) {
       try {
+        // 1. Basic KPIs & Trends (Current vs Previous 30 days)
         const revRes = await window.electronAPI.dbQuery('SELECT SUM(totalAmount) as total FROM orders', []);
-        const ordRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM orders', []);
-        const procRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE status = 'Processing'", []);
-        const custRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM customers', []);
+        const prevRevRes = await window.electronAPI.dbQuery("SELECT SUM(totalAmount) as total FROM orders WHERE createdAt <= date('now', '-30 days') AND createdAt > date('now', '-60 days')", []);
         
+        const ordRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM orders', []);
+        const prevOrdRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE createdAt <= date('now', '-30 days') AND createdAt > date('now', '-60 days')", []);
+        
+        const procRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE status = 'Processing' OR status = 'Confirmed'", []);
+        const custRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM customers', []);
+        const prevCustRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM customers WHERE updatedAt <= date('now', '-30 days')", []);
+
+        // Calculate Trends
+        const calculateTrend = (curr, prev) => {
+          if (!prev || prev === 0) return { val: '+100%', isUp: true };
+          const change = ((curr - prev) / prev) * 100;
+          return {
+            val: (change >= 0 ? '+' : '') + change.toFixed(1) + '%',
+            isUp: change >= 0
+          };
+        };
+
+        const revTrend = calculateTrend(revRes.data?.[0]?.total || 0, prevRevRes.data?.[0]?.total || 0);
+        const ordTrend = calculateTrend(ordRes.data?.[0]?.count || 0, prevOrdRes.data?.[0]?.count || 0);
+        const custTrend = calculateTrend(custRes.data?.[0]?.count || 0, prevCustRes.data?.[0]?.count || 0);
+
         setStats({
           revenue: revRes?.data?.[0]?.total || 0,
           orders: ordRes?.data?.[0]?.count || 0,
           processing: procRes?.data?.[0]?.count || 0,
-          customers: custRes?.data?.[0]?.count || 0
+          customers: custRes?.data?.[0]?.count || 0,
+          revTrend,
+          ordTrend,
+          custTrend
         });
 
         const recentRes = await window.electronAPI.dbQuery('SELECT * FROM orders ORDER BY createdAt DESC LIMIT 5', []);
         if (recentRes.success) {
           setRecentOrders(recentRes.data.map(o => ({
-            id: o.orderId,
-            customer: o.customerName,
+            id: o.id || o.orderId || 'N/A',
+            customer: o.customerName || 'Walk-in',
             amount: (o.totalAmount || 0).toFixed(2),
             status: o.status,
-            statusClass: styles[`status${o.status.replace(/\s+/g, '')}`] || styles.statusProcessing
+            statusClass: styles[`status${(o.status || '').replace(/\s+/g, '')}`] || styles.statusProcessing
           })));
         }
 
-        // Mock chart data for now, but linked to real names
-        setRevenueData([
-          { name: 'Mon', revenue: 2400 },
-          { name: 'Tue', revenue: 1398 },
-          { name: 'Wed', revenue: 9800 },
-          { name: 'Thu', revenue: 3908 },
-          { name: 'Fri', revenue: 4800 },
-          { name: 'Sat', revenue: 3800 },
-          { name: 'Sun', revenue: stats.revenue / 10 }, // Tiny link
-        ]);
+        // 7-day Revenue Chart
+        const chartRes = await window.electronAPI.dbQuery(`
+          SELECT strftime('%m/%d', createdAt) as date, SUM(totalAmount) as revenue 
+          FROM orders 
+          WHERE createdAt > date('now', '-7 days')
+          GROUP BY date 
+          ORDER BY createdAt ASC
+        `, []);
+
+        const last7Days = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          last7Days.push(d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }));
+        }
+
+        const formattedChart = last7Days.map(date => {
+          const match = chartRes.data?.find(d => d.date === date);
+          return { name: date, revenue: match ? match.revenue : 0 };
+        });
+
+        setRevenueData(formattedChart);
 
       } catch (err) {
         console.error("Dashboard fetch error:", err);
@@ -92,10 +127,10 @@ export default function Dashboard() {
       </div>
 
       <div className={styles.statsGrid}>
-        <StatCard title="Total Revenue" value={<><CurrencySymbol size={22} /> {(stats.revenue || 0).toLocaleString()}</>} trend="+12.5%" isUp={true} icon={<DollarSign size={24} />} color="primary" />
-        <StatCard title="Total Orders" value={(stats.orders || 0).toLocaleString()} trend="+5.2%" isUp={true} icon={<ShoppingBag size={24} />} color="success" />
-        <StatCard title="Processing" value={(stats.processing || 0).toLocaleString()} trend="-2.1%" isUp={false} icon={<Clock size={24} />} color="warning" />
-        <StatCard title="Total Customers" value={(stats.customers || 0).toLocaleString()} trend="+8.4%" isUp={true} icon={<Users size={24} />} color="danger" />
+        <StatCard title="Total Revenue" value={<><CurrencySymbol size={22} /> {(stats.revenue || 0).toLocaleString()}</>} trend={stats.revTrend?.val || '0%'} isUp={stats.revTrend?.isUp} icon={<DollarSign size={24} />} color="primary" />
+        <StatCard title="Total Orders" value={(stats.orders || 0).toLocaleString()} trend={stats.ordTrend?.val || '0%'} isUp={stats.ordTrend?.isUp} icon={<ShoppingBag size={24} />} color="success" />
+        <StatCard title="Processing" value={(stats.processing || 0).toLocaleString()} trend="Live" isUp={true} icon={<Clock size={24} />} color="warning" />
+        <StatCard title="Total Customers" value={(stats.customers || 0).toLocaleString()} trend={stats.custTrend?.val || '0%'} isUp={stats.custTrend?.isUp} icon={<Users size={24} />} color="danger" />
       </div>
 
       <div className={styles.bottomRow}>

@@ -12,8 +12,19 @@ exports.syncData = async (req, res) => {
       for (const order of orders) {
         // Use the same 'id' for MongoDB and SQLite
         const { isSynced, ...rest } = order;
+        
+        // Parse JSON strings if necessary
+        const statusHistory = typeof order.statusHistory === 'string' 
+          ? JSON.parse(order.statusHistory) 
+          : order.statusHistory;
+        const items = typeof order.items === 'string' 
+          ? JSON.parse(order.items) 
+          : order.items;
+
         const mongoOrder = { 
           ...rest, 
+          statusHistory,
+          items,
           billNumber: order.billNumber || `BN-${Date.now().toString().slice(-6)}` 
         };
         

@@ -1,4 +1,4 @@
-import api from '../api';
+import api from './api';
 
 export const syncData = async () => {
   if (!window.electronAPI || !window.electronAPI.dbQuery) {
@@ -29,7 +29,8 @@ export const syncData = async () => {
       shopId,
       orders: unsyncedOrders.map(order => ({
         ...order,
-        items: typeof order.items === 'string' ? JSON.parse(order.items) : order.items
+        items: typeof order.items === 'string' ? JSON.parse(order.items) : order.items,
+        statusHistory: typeof order.statusHistory === 'string' ? JSON.parse(order.statusHistory) : (order.statusHistory || [])
       })),
       customers: unsyncedCustomers,
       lastSyncTimestamp
@@ -54,9 +55,21 @@ export const syncData = async () => {
         const itemsJson = typeof order.items === 'string' ? order.items : JSON.stringify(order.items);
         await window.electronAPI.dbQuery(`
           INSERT OR REPLACE INTO orders 
-          (id, shopId, customerId, status, totalAmount, items, createdAt, isSynced, updatedAt) 
-          VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-        `, [order.id, order.shopId, order.customerId, order.status, order.totalAmount, itemsJson, order.createdAt, order.updatedAt || new Date().toISOString()]);
+          (id, shopId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, createdAt, isSynced, updatedAt) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+        `, [
+          order.id, 
+          order.shopId, 
+          order.customerId, 
+          order.status, 
+          order.totalAmount, 
+          order.paidAmount || 0, 
+          order.dueAmount || 0, 
+          order.paymentStatus || 'Pending', 
+          itemsJson, 
+          order.createdAt, 
+          order.updatedAt || new Date().toISOString()
+        ]);
       }
 
       for (const cust of incomingCustomers) {

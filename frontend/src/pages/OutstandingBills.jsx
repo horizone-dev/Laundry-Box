@@ -5,7 +5,7 @@ import {
   CheckCircle, MoreHorizontal, Download, Eye
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './OutstandingBills.module.css';
 import axios from 'axios';

@@ -5,8 +5,8 @@ import {
   Mail, Lock, User, ArrowRight, Activity, 
   Key, ShieldCheck, ShoppingBag
 } from 'lucide-react';
-import { authApi } from '../api';
-import { useSettings } from '../context/SettingsContext';
+import { authApi } from '../services/api';
+import { useSettings } from '../store/SettingsContext';
 import styles from './Login.module.css'; // Reusing some styles from Login
 
 export default function SignUp() {

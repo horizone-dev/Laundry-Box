@@ -36,7 +36,7 @@ router.patch('/:id/status', async (req, res) => {
   const orderId = req.params.id;
   console.log(`Updating status for order: ${orderId}`);
   try {
-    const { status, updatedBy } = req.body;
+    const { status, paymentStatus, paidAmount, dueAmount, updatedBy } = req.body;
     
     // Try matching by multiple fields for robustness
     let order = await Order.findOne({ 
@@ -58,9 +58,13 @@ router.patch('/:id/status', async (req, res) => {
       return res.status(404).json({ message: `Order ${orderId} not found` });
     }
 
-    order.status = status;
+    if (status) order.status = status;
+    if (paymentStatus) order.paymentStatus = paymentStatus;
+    if (paidAmount !== undefined) order.paidAmount = paidAmount;
+    if (dueAmount !== undefined) order.dueAmount = dueAmount;
+
     order.statusHistory.push({
-      status,
+      status: status || order.status,
       updatedBy: updatedBy || 'Staff',
       timestamp: new Date()
     });

@@ -92,7 +92,7 @@ function initDB(appPath) {
       totalAmount REAL,
       paidAmount REAL DEFAULT 0,
       dueAmount REAL DEFAULT 0,
-      paymentStatus TEXT DEFAULT 'Paid', -- 'Paid', 'Credit', 'Partial'
+      paymentStatus TEXT DEFAULT 'Pending', -- 'Paid', 'Credit', 'Partial'
       items JSON,
       statusHistory JSON,
       createdAt TEXT,
@@ -198,7 +198,7 @@ function initDB(appPath) {
     if (!payCols.some(col => col.name === 'shopId')) {
       db.exec("ALTER TABLE payments ADD COLUMN shopId TEXT;");
     }
-
+    const txnCols = db.prepare("PRAGMA table_info(account_transactions)").all();
     if (!txnCols.some(col => col.name === 'icon')) {
       db.exec("ALTER TABLE account_transactions ADD COLUMN icon TEXT DEFAULT 'DollarSign';");
     }
@@ -215,27 +215,61 @@ function initDB(appPath) {
     }
     // Data Healer: Normalize statuses and fix broken financial records
     console.log("Running Data Healer...");
-    // 1. Normalize 'status' column
-    db.exec("UPDATE orders SET status = 'Paid' WHERE status IN ('PAID', 'paid');");
-    db.exec("UPDATE orders SET status = 'Payment Pending' WHERE status IN ('PENDING', 'Pending', 'pending');");
+    // 1. Fix inconsistent paymentStatus (Only if status is clearly Payment Pending but marked Paid)
+    db.exec("UPDATE orders SET paymentStatus = 'Credit' WHERE status = 'Payment Pending' AND (paidAmount = 0 OR paidAmount IS NULL);");
+    db.exec("UPDATE orders SET paymentStatus = 'Paid', status = 'Confirmed' WHERE status = 'Paid';");
     
-    // 2. Fix inconsistent paymentStatus
-    // If status is 'Payment Pending', it should NOT be paymentStatus='Paid'
-    db.exec("UPDATE orders SET paymentStatus = 'Credit' WHERE status = 'Payment Pending' AND paymentStatus = 'Paid';");
-    
-    // 3. Heal dueAmount for Credit/Partial orders where it might be 0 incorrectly
+    // 2. Data Healer: Only fix dueAmount if it's mathematically wrong, but don't overwrite Status unless confirmed
     db.exec(`UPDATE orders 
-            SET dueAmount = totalAmount - IFNULL(paidAmount, 0) 
-            WHERE (paymentStatus = 'Credit' OR paymentStatus = 'Partial') 
-            AND dueAmount = 0 
-            AND totalAmount > 0;`);
+            SET dueAmount = totalAmount - IFNULL(paidAmount, 0)
+            WHERE ABS(dueAmount - (totalAmount - IFNULL(paidAmount, 0))) > 0.01;`);
 
-    // 4. Sync customer balance with orders dueAmount to prevent discrepancies
+    // 3. Smart Advance Application:
+    // If a customer has a negative balance (Advance), try to apply it to their Credit orders
+    console.log("Applying customer advances to credit orders...");
+    const customersWithAdvance = db.prepare("SELECT id, balance FROM customers WHERE balance < 0").all();
+    
+    for (const customer of customersWithAdvance) {
+      let advance = Math.abs(customer.balance);
+      const creditOrders = db.prepare("SELECT id, totalAmount, paidAmount, dueAmount FROM orders WHERE customerId = ? AND (paymentStatus = 'Credit' OR paymentStatus = 'Partial') ORDER BY createdAt ASC").all(customer.id);
+      
+      for (const order of creditOrders) {
+        if (advance <= 0) break;
+        const remainingDue = order.totalAmount - (order.paidAmount || 0);
+        if (remainingDue <= 0) continue;
+
+        let apply = Math.min(advance, remainingDue);
+        let newPaid = (order.paidAmount || 0) + apply;
+        let newDue = order.totalAmount - newPaid;
+        let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+        
+        db.prepare("UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ? WHERE id = ?").run(newPaid, newDue, newStatus, order.id);
+        advance -= apply;
+      }
+    }
+
+    // 4. Final Sync: Ensure customer balance matches the sum of remaining dueAmounts
     db.exec(`UPDATE customers SET balance = (
               SELECT IFNULL(SUM(dueAmount), 0) 
               FROM orders 
               WHERE orders.customerId = customers.id
             );`);
+
+    // 4. Pre-populate Categories if empty
+    const catCheck = db.prepare("SELECT COUNT(*) as count FROM service_categories").get();
+    if (catCheck.count === 0) {
+      console.log("Pre-populating default categories...");
+      const defaultCats = [
+        { id: 'cat-1', name: 'Laundry', icon: 'Shirt' },
+        { id: 'cat-2', name: 'Dry Cleaning', icon: 'Sparkles' },
+        { id: 'cat-3', name: 'Alterations', icon: 'Scissors' },
+        { id: 'cat-4', name: 'Add-ons', icon: 'Zap' }
+      ];
+      const stmt = db.prepare("INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)");
+      defaultCats.forEach(cat => {
+        stmt.run(cat.id, 'SHOP_01', cat.name, cat.icon, new Date().toISOString());
+      });
+    }
 
     console.log("Data Healer completed.");
   } catch (err) {

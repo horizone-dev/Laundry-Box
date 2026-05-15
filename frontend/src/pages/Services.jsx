@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Scissors, Zap, Sparkles, Tag, X, Layout, Shirt, Bed, Wind, Droplet, Heart, Layers } from 'lucide-react';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Services.module.css';
 

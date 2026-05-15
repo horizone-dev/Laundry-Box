@@ -11,6 +11,7 @@ import ServiceList from './pages/services/ServiceList';
 import ServiceType from './pages/services/ServiceType';
 import Addons from './pages/services/Addons';
 import Reports from './pages/Reports';
+import RevenueReport from './pages/RevenueReport';
 import Expenses from './pages/Expenses';
 import Invoice from './pages/Invoice';
 import Login from './pages/Login';
@@ -21,7 +22,7 @@ import OutstandingBills from './pages/OutstandingBills';
 import OverdueStatement from './pages/OverdueStatement';
 import HelpCenter from './pages/HelpCenter';
 import Activation from './pages/Activation';
-import { SettingsProvider } from './context/SettingsContext';
+import { SettingsProvider } from './store/SettingsContext';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = React.useState(
@@ -52,7 +53,11 @@ function App() {
             <Route path="type" element={<ServiceType />} />
             <Route path="addons" element={<Addons />} />
           </Route>
-          <Route path="reports" element={<Reports />} />
+          <Route path="reports">
+            <Route index element={<Reports />} />
+            <Route path="revenue" element={<RevenueReport />} />
+            <Route path="expenses" element={<Expenses />} />
+          </Route>
           <Route path="expenses" element={<Expenses />} />
           <Route path="settings" element={<Settings />} />
           <Route path="users" element={<Users />} />

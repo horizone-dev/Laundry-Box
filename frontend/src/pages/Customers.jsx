@@ -4,7 +4,7 @@ import {
   TrendingUp, Star, Clock, ChevronLeft, ChevronRight, X, Mail, Phone, MapPin, MessageCircle, CreditCard, Wallet, DollarSign, Trash2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Customers.module.css';
 
@@ -554,10 +554,12 @@ export default function Customers() {
                 className={styles.primaryBtn} 
                 onClick={() => {
                   setShowBillsModal(false);
-                  setPaymentData({ ...paymentData, amount: selectedCustomer?.balance });
+                  // Only auto-fill if balance is positive (due), otherwise let them enter amount
+                  const autoAmount = selectedCustomer?.balance > 0 ? selectedCustomer.balance : '';
+                  setPaymentData({ ...paymentData, amount: autoAmount });
                   setShowPaymentModal(true);
                 }}
-                disabled={(selectedCustomer?.balance || 0) <= 0}
+                disabled={!selectedCustomer}
               >
                 Settle Balance
               </button>

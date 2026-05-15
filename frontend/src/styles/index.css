@@ -169,3 +169,74 @@ body {
 .spin {
   animation: spin 1s linear infinite;
 }
+
+@media print {
+  /* Hide all navigation and sidebars */
+  header, 
+  aside, 
+  nav,
+  [class*="sidebar"],
+  [class*="header"],
+  [class*="syncStatus"],
+  [class*="QuickDeliver"],
+  [class*="quickActionRail"],
+  [class*="headerActions"],
+  .btn,
+  button {
+    display: none !important;
+  }
+
+  /* Force main content to be visible */
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Target common layout wrappers */
+  [class*="layout"],
+  [class*="main"],
+  [class*="content"] {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+    position: static !important;
+  }
+
+  /* Ensure the report page itself is visible */
+  [class*="reportsPage"],
+  [class*="tableCard"],
+  [class*="kpiGrid"] {
+    display: block !important;
+    width: 100% !important;
+    background: white !important;
+    margin: 0 !important;
+    padding: 20px !important;
+    page-break-after: auto;
+  }
+
+  /* Prevent KPI cards from breaking mid-card */
+  [class*="kpiCard"] {
+    display: inline-block !important;
+    width: 48% !important;
+    margin: 1% !important;
+    break-inside: avoid;
+    border: 1px solid #ddd !important;
+    background: white !important;
+  }
+
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  th, td {
+    border: 1px solid #eee !important;
+    padding: 8px !important;
+  }
+}

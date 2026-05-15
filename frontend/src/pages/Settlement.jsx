@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   Search, User, DollarSign, Calendar, Clock, CheckCircle, 
   AlertCircle, CreditCard, Wallet, FileText, Send, Printer,
@@ -7,12 +7,13 @@ import {
   Filter, MoreVertical, Plus, Info, Eye, ArrowUpRight, TrendingUp,
   Share2, MessageSquare, FileDown, Layers, ArrowLeft
 } from 'lucide-react';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Settlement.module.css';
 
 export default function Settlement() {
   const location = useLocation();
+  const navigate = useNavigate();
   const queryParams = new URLSearchParams(location.search);
   const initialCustomerId = queryParams.get('customerId');
   
@@ -46,7 +47,7 @@ export default function Settlement() {
 
   useEffect(() => {
     if (selectedCustomer) {
-      fetchCustomerSpecificData(selectedCustomer.id);
+      fetchCustomerSpecificData(selectedCustomer);
     }
   }, [selectedCustomer]);
 
@@ -84,11 +85,11 @@ export default function Settlement() {
     if (window.electronAPI?.dbQuery) {
       try {
         const pendingRes = await window.electronAPI.dbQuery(
-          'SELECT orders.*, customers.name as customerName, customers.phone as customerPhone, customers.balance as customerBalance FROM orders JOIN customers ON orders.customerId = customers.id WHERE (orders.dueAmount > 0 OR orders.paymentStatus NOT IN ("Paid", "Settled")) ORDER BY orders.createdAt DESC LIMIT 8',
+          'SELECT orders.*, customers.name as customerName, customers.phone as customerPhone, customers.balance as customerBalance FROM orders LEFT JOIN customers ON orders.customerId = customers.id WHERE (orders.dueAmount > 0 OR orders.paymentStatus NOT IN ("Paid", "Settled")) ORDER BY orders.createdAt DESC LIMIT 8',
           []
         );
         const historyRes = await window.electronAPI.dbQuery(
-          'SELECT payments.*, customers.name as customerName FROM payments JOIN customers ON payments.customerId = customers.id ORDER BY payments.createdAt DESC LIMIT 8',
+          'SELECT payments.*, customers.name as customerName FROM payments LEFT JOIN customers ON payments.customerId = customers.id ORDER BY payments.createdAt DESC LIMIT 8',
           []
         );
         const advancesRes = await window.electronAPI.dbQuery(
@@ -104,14 +105,16 @@ export default function Settlement() {
 
         const outstandingSum = await window.electronAPI.dbQuery('SELECT SUM(balance) as total FROM customers WHERE balance > 0', []);
         const advanceSum = await window.electronAPI.dbQuery('SELECT SUM(ABS(balance)) as total FROM customers WHERE balance < 0', []);
-        const pendingCount = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM orders WHERE (dueAmount > 0 OR paymentStatus NOT IN ("Paid", "Settled"))', []);
-        
+        const pendingCount = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM orders WHERE dueAmount > 0', []);
+        const settlementsRes = await window.electronAPI.dbQuery("SELECT SUM(amount) as total FROM payments WHERE strftime('%m', createdAt) = strftime('%m', 'now')", []);
+        const overdueRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE dueAmount > 0 AND createdAt < date('now', '-2 days')", []);
+
         setKpis({
-          outstanding: outstandingSum.data[0]?.total || 0,
-          settlements: 126.62,
-          pendingCount: pendingCount.data[0]?.count || 0,
-          overdueCount: 3,
-          advanceCredits: advanceSum.data[0]?.total || 0
+          outstanding: (outstandingSum.success && outstandingSum.data[0]?.total) || 0,
+          settlements: (settlementsRes.success && settlementsRes.data[0]?.total) || 0,
+          pendingCount: (pendingCount.success && pendingCount.data[0]?.count) || 0,
+          overdueCount: (overdueRes.success && overdueRes.data[0]?.count) || 0,
+          advanceCredits: (advanceSum.success && advanceSum.data[0]?.total) || 0
         });
       } catch (err) {
         console.error("Global data fetch failed:", err);
@@ -119,10 +122,14 @@ export default function Settlement() {
     }
   };
 
-  const fetchCustomerSpecificData = async (customerId) => {
+  const fetchCustomerSpecificData = async (customer) => {
+    if (!customer || !customer.id) return;
+    
     if (window.electronAPI?.dbQuery) {
       try {
         setLoading(true);
+        const customerId = customer.id;
+        
         const pendingRes = await window.electronAPI.dbQuery(
           'SELECT * FROM orders WHERE customerId = ? AND (dueAmount > 0 OR paymentStatus NOT IN ("Paid", "Settled")) ORDER BY createdAt DESC',
           [customerId]
@@ -134,8 +141,16 @@ export default function Settlement() {
         
         setGlobalData(prev => ({
           ...prev,
-          pending: pendingRes.success ? pendingRes.data.map(d => ({...d, customerName: selectedCustomer.name})) : [],
-          history: historyRes.success ? historyRes.data.map(d => ({...d, customerName: selectedCustomer.name})) : [],
+          pending: pendingRes.success ? pendingRes.data.map(d => ({
+            ...d, 
+            customerName: customer.name,
+            customerPhone: customer.phone,
+            customerBalance: customer.balance
+          })) : [],
+          history: historyRes.success ? historyRes.data.map(d => ({
+            ...d, 
+            customerName: customer.name
+          })) : [],
         }));
       } catch (err) {
         console.error("Fetch specific failed:", err);
@@ -234,14 +249,6 @@ export default function Settlement() {
 
   return (
     <div className={styles.settlementPage}>
-      {/* Floating Action Rail */}
-      <div className={styles.quickActionRail}>
-        <ActionButton icon={<Plus size={20} />} label="Add Advance" color="#2563eb" onClick={() => setActiveTab('Advance')} />
-        <ActionButton icon={<DollarSign size={20} />} label="Receive Payment" color="#10b981" onClick={() => { if(selectedCustomer) setShowPayModal(true); else alert("Please select a customer first."); }} />
-        <ActionButton icon={<Layers size={20} />} label="Settle Bill" color="#8b5cf6" onClick={() => { if(selectedCustomer) setShowPayModal(true); else alert("Please select a customer first."); }} />
-        <ActionButton icon={<MessageSquare size={20} />} label="Send Reminder" color="#f59e0b" />
-        <ActionButton icon={<FileDown size={20} />} label="Export Report" color="#64748b" />
-      </div>
 
       <div className={styles.mainContent}>
         <div className={styles.stickyHeader}>
@@ -260,11 +267,11 @@ export default function Settlement() {
           </div>
 
           <div className={styles.kpiRow}>
-            <KPICard icon={<DollarSign size={18} />} label={selectedCustomer ? "Current Balance" : "Total Outstanding"} value={selectedCustomer ? Math.abs(selectedCustomer.balance).toFixed(2) : kpis.outstanding.toFixed(2)} subText={selectedCustomer ? (selectedCustomer.balance > 0 ? "Amount Due" : "Advance Credit") : "Across all customers"} color={selectedCustomer ? (selectedCustomer.balance > 0 ? "#ef4444" : "#10b981") : "#2563eb"} bgColor={selectedCustomer ? (selectedCustomer.balance > 0 ? "#fef2f2" : "#f0fdf4") : "#eff6ff"} />
-            <KPICard icon={<CheckCircle size={18} />} label="Settlements (Monthly)" value="126.62" subText="Completed this month" color="#10b981" bgColor="#f0fdf4" />
+            <KPICard icon={<DollarSign size={18} />} label={selectedCustomer ? "Current Balance" : "Total Outstanding"} value={<><CurrencySymbol size={16} /> {selectedCustomer ? Math.abs(selectedCustomer.balance).toFixed(2) : kpis.outstanding.toFixed(2)}</>} subText={selectedCustomer ? (selectedCustomer.balance > 0 ? "Amount Due" : "Advance Credit") : "Across all customers"} color={selectedCustomer ? (selectedCustomer.balance > 0 ? "#ef4444" : "#10b981") : "#2563eb"} bgColor={selectedCustomer ? (selectedCustomer.balance > 0 ? "#fef2f2" : "#f0fdf4") : "#eff6ff"} />
+            <KPICard icon={<CheckCircle size={18} />} label="Settlements (Monthly)" value={<><CurrencySymbol size={16} /> {kpis.settlements.toFixed(2)}</>} subText="Completed this month" color="#10b981" bgColor="#f0fdf4" />
             <KPICard icon={<TrendingUp size={18} />} label="Pending Bills" value={selectedCustomer ? globalData.pending.length : kpis.pendingCount} subText="Require processing" color="#8b5cf6" bgColor="#f5f3ff" />
             <KPICard icon={<AlertCircle size={18} />} label="Overdue Bills" value={kpis.overdueCount} subText="Need attention" color="#f97316" bgColor="#fff7ed" />
-            <KPICard icon={<Wallet size={18} />} label="Advance Credits" value={selectedCustomer ? (selectedCustomer.balance < 0 ? Math.abs(selectedCustomer.balance).toFixed(2) : "0.00") : kpis.advanceCredits.toFixed(2)} subText="Prepaid balances" color="#06b6d4" bgColor="#ecfeff" />
+            <KPICard icon={<Wallet size={18} />} label="Advance Credits" value={<><CurrencySymbol size={16} /> {selectedCustomer ? (selectedCustomer.balance < 0 ? Math.abs(selectedCustomer.balance).toFixed(2) : "0.00") : kpis.advanceCredits.toFixed(2)}</>} subText="Prepaid balances" color="#06b6d4" bgColor="#ecfeff" />
           </div>
         </div>
 
@@ -397,7 +404,7 @@ export default function Settlement() {
                 <History size={18} color="#10b981" />
                 <h3>{selectedCustomer ? `Settlements (${selectedCustomer.name})` : 'Latest Settlements (All)'}</h3>
               </div>
-              <button className={styles.viewLink}>View All <ChevronRight size={14} /></button>
+              <button className={styles.viewLink} onClick={() => navigate('/reports/revenue')}>View All <ChevronRight size={14} /></button>
             </div>
             <div className={styles.internalScroll}>
               {globalData.history.map(item => (
@@ -426,7 +433,7 @@ export default function Settlement() {
                 <ArrowUpRight size={18} color="#8b5cf6" />
                 <h3>{selectedCustomer ? `Advance Details (${selectedCustomer.name})` : 'Advance Payments / Credits'}</h3>
               </div>
-              <button className={styles.viewLink}>View All <ChevronRight size={14} /></button>
+              <button className={styles.viewLink} onClick={() => navigate('/outstanding-bills')}>View All <ChevronRight size={14} /></button>
             </div>
             <div className={styles.internalScroll}>
               <table className={styles.compactTable}>

@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import {
   Upload, CheckCircle, Image as ImageIcon, X, Sliders, Scissors,
   Mail, Phone, Globe, Building2, MapPin, CreditCard, Hash, FileText,
-  Percent, Settings2, Info, Plus, Trash2, Star, DollarSign, Clock
+  Percent, Settings2, Info, Plus, Trash2, Star, DollarSign, Clock, Database, Save, AlertCircle, RefreshCw
 } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 import getCroppedImg from '../utils/cropImage';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import InvoiceTemplate from '../components/InvoiceTemplate';
 import { useNavigate } from 'react-router-dom';
@@ -14,7 +14,7 @@ import styles from './Settings.module.css';
 
 export default function Settings() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('Company Info');
+  const [activeTab, setActiveTab] = useState('General');
   const { settings, updateSettings } = useSettings();
   
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
@@ -30,7 +30,7 @@ export default function Settings() {
 
   if (!isAuthorized) return null;
 
-  const tabs = ['General', 'Company Info', 'Tax Settings', 'Bill Templates', 'Payment Gateways'];
+  const tabs = ['General', 'Company Info', 'Tax Settings', 'Bill Templates', 'Payment Gateways', 'Maintenance'];
 
   // Cropper States
   const [imageToCrop, setImageToCrop] = useState(null);
@@ -136,9 +136,9 @@ export default function Settings() {
                       <input 
                         type="text" 
                         className={styles.inputField}
-                        value={settings.currencySymbol || 'AED'}
+                        value={settings.currencySymbol || ''}
                         onChange={(e) => updateSettings({ currencySymbol: e.target.value })}
-                        placeholder="e.g. د.إ or AED"
+                        placeholder="AED"
                       />
                     </div>
                   </div>
@@ -430,7 +430,8 @@ export default function Settings() {
                       type="text"
                       className={styles.inputField}
                       style={{ width: '120px' }}
-                      value={settings.currencySymbol || 'AED'}
+                      value={settings.currencySymbol || ''}
+                      placeholder="AED"
                       onChange={(e) => updateSettings({ currencySymbol: e.target.value })}
                     />
                     <p style={{ fontSize: '0.75rem', color: '#94A3B8' }}>This symbol will be used across the POS, Reports, and Invoices.</p>
@@ -733,6 +734,111 @@ export default function Settings() {
                   These details will be displayed on your invoices to allow customers to pay via bank transfer. 
                   Please ensure all information is accurate to avoid payment delays.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'Maintenance' && (
+            <div className={styles.profileContainer}>
+              <div className={styles.card}>
+                <div className={styles.cardHeader}>
+                  <div>
+                    <h2 className={styles.cardTitle}>Data Backup & Security</h2>
+                    <p style={{ fontSize: '0.85rem', color: '#64748B' }}>Export a manual copy of your local database to an external drive or cloud folder.</p>
+                  </div>
+                </div>
+
+                <div className={styles.maintenanceContent} style={{ marginTop: '2rem' }}>
+                  <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem' }}>
+                    <div className={styles.backupIcon} style={{ background: '#DBEAFE', padding: '1rem', borderRadius: '12px' }}>
+                      <Database size={32} color="#2563EB" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Manual Database Export</h3>
+                      <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                        This will create a complete copy of your local database (laundry_pos.sqlite). 
+                        You can save this to a USB drive or any folder on your computer.
+                      </p>
+                      <button 
+                        className={styles.saveBtn} 
+                        style={{ background: '#2563EB', padding: '0.75rem 1.5rem' }}
+                        onClick={async () => {
+                          if (window.electronAPI?.backupDatabase) {
+                            const result = await window.electronAPI.backupDatabase();
+                            if (result.success) {
+                              alert('Backup saved successfully to: ' + result.path);
+                            } else if (result.error !== 'Cancelled') {
+                              alert('Backup failed: ' + result.error);
+                            }
+                          }
+                        }}
+                      >
+                        <Save size={18} /> Choose Path & Backup Now
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem', marginTop: '1.5rem' }}>
+                    <div className={styles.backupIcon} style={{ background: '#ECFDF5', padding: '1rem', borderRadius: '12px' }}>
+                      <RefreshCw size={32} color="#10B981" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Automatic USB Backup</h3>
+                      <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                        Set a default folder (e.g., on your USB drive). The system will automatically save a backup there every time you sync or close the app.
+                      </p>
+                      
+                      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                        <button 
+                          className={styles.saveBtn} 
+                          style={{ background: '#10B981', padding: '0.6rem 1.2rem', fontSize: '0.85rem' }}
+                          onClick={async () => {
+                            if (window.electronAPI?.selectFolder) {
+                              const path = await window.electronAPI.selectFolder();
+                              if (path) {
+                                await updateSettings({ autoBackupPath: path });
+                                alert('Auto-backup path set to: ' + path);
+                              }
+                            }
+                          }}
+                        >
+                           {settings.autoBackupPath ? 'Change USB Path' : 'Select USB Path'}
+                        </button>
+                        
+                        {settings.autoBackupPath && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#10B981', fontSize: '0.85rem', fontWeight: 600 }}>
+                              <CheckCircle size={14} />
+                              <span>Path: {settings.autoBackupPath}</span>
+                              <button 
+                                style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', marginLeft: '0.5rem' }}
+                                onClick={() => updateSettings({ autoBackupPath: '', lastBackupTime: '' })}
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                            {settings.lastBackupTime && (
+                              <div style={{ fontSize: '0.75rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <Clock size={12} />
+                                <span>Last successful backup: <strong>{settings.lastBackupTime}</strong></span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={styles.warningBox} style={{ marginTop: '2rem', display: 'flex', gap: '1rem', background: '#FFF7ED', border: '1px solid #FED7AA', padding: '1.5rem', borderRadius: '12px' }}>
+                    <AlertCircle size={24} color="#F97316" />
+                    <div>
+                      <h4 style={{ color: '#9A3412', marginBottom: '0.25rem' }}>Important Note</h4>
+                      <p style={{ color: '#C2410C', fontSize: '0.85rem' }}>
+                        Manual backups are great for extra safety, but remember that the system already performs **automatic cloud syncs** every 60 seconds as long as you are online.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}

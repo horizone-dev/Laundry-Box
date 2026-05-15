@@ -7,7 +7,7 @@ import {
   ShoppingBag, Truck, Zap, Droplets, Star, Trash2
 } from 'lucide-react';
 import CurrencySymbol from '../components/CurrencySymbol';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import styles from './Accounts.module.css';
 
 const ICON_OPTIONS = [

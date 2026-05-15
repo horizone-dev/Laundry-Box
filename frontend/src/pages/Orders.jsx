@@ -7,7 +7,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { QRCodeSVG } from 'qrcode.react';
-import { useSettings } from '../context/SettingsContext';
+import { useSettings } from '../store/SettingsContext';
 import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
 import DressTag from '../components/DressTag';
@@ -75,19 +75,21 @@ export default function Orders({ isPendingView = false }) {
 
   // Financial Calculations for KPIs
   const totalAmount = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+  
   const totalPaid = orders
-    .filter(o => o.status === 'Paid')
+    .filter(o => (o.dueAmount === 0 || o.dueAmount === null) && o.totalAmount > 0)
     .reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+    
   const totalPending = orders
-    .filter(o => o.dueAmount > 0 || o.paymentStatus !== 'Paid')
+    .filter(o => (o.dueAmount > 0))
     .reduce((sum, o) => sum + (o.dueAmount || 0), 0);
   
   const overdueOrdersList = orders.filter(o => isOverdue(o));
-  const overdueAmount = overdueOrdersList.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+  const overdueAmount = overdueOrdersList.reduce((sum, o) => sum + (o.dueAmount || 0), 0);
 
   const counts = {
-    all: orders.filter(o => o.dueAmount > 0 || o.paymentStatus !== 'Paid').length,
-    pending: orders.filter(o => (o.dueAmount > 0 || o.paymentStatus !== 'Paid') && !isOverdue(o)).length,
+    all: orders.filter(o => o.dueAmount > 0).length,
+    pending: orders.filter(o => o.dueAmount > 0 && !isOverdue(o)).length,
     overdue: overdueOrdersList.length
   };
 
@@ -111,14 +113,18 @@ export default function Orders({ isPendingView = false }) {
       
       // Try local DB first if in Electron
       if (window.electronAPI?.dbQuery) {
-        let query = 'SELECT * FROM orders';
+        let query = `
+          SELECT orders.*, customers.name as customerName, customers.phone as customerPhone 
+          FROM orders 
+          LEFT JOIN customers ON orders.customerId = customers.id
+        `;
         let params = [];
         if (searchTerm) {
-          query += ' WHERE id LIKE ? OR billNumber LIKE ? OR customerName LIKE ? OR customerPhone LIKE ?';
+          query += ' WHERE orders.id LIKE ? OR orders.billNumber LIKE ? OR customers.name LIKE ? OR customers.phone LIKE ?';
           const term = `%${searchTerm}%`;
           params = [term, term, term, term];
         }
-        query += ' ORDER BY createdAt DESC';
+        query += ' ORDER BY orders.createdAt DESC';
         const res = await window.electronAPI.dbQuery(query, params);
         if (res.success) {
           setOrders(res.data);
@@ -173,40 +179,47 @@ export default function Orders({ isPendingView = false }) {
     }
 
     try {
-      // 1. Update Backend
-      await axios.patch(`${API_BASE}/orders/${encodeURIComponent(orderToUpdate.id)}/status`, {
-        status: newStatus,
-        updatedBy: 'Admin Staff'
-      });
-
-      // 2. Update Local DB
+      // 1. Update Local DB First (Offline-First approach)
+      let newHistory = [];
       if (window.electronAPI?.dbQuery) {
         const history = typeof orderToUpdate.statusHistory === 'string' ? JSON.parse(orderToUpdate.statusHistory) : (orderToUpdate.statusHistory || []);
-        const newHistory = [...history, { status: newStatus, updatedBy: 'Admin Staff', timestamp: new Date().toISOString() }];
+        newHistory = [...history, { status: newStatus, updatedBy: 'Admin Staff', timestamp: new Date().toISOString() }];
         
         await window.electronAPI.dbQuery(
-          'UPDATE orders SET status = ?, statusHistory = ?, updatedAt = ? WHERE id = ?',
+          'UPDATE orders SET status = ?, statusHistory = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
           [newStatus, JSON.stringify(newHistory), new Date().toISOString(), orderToUpdate.id]
         );
       }
 
-      // 3. Update State
-      setOrders(prev => prev.map(o => o.id === orderToUpdate.id ? { ...o, status: newStatus } : o));
+      // 2. Update State immediately
+      setOrders(prev => prev.map(o => o.id === orderToUpdate.id ? { ...o, status: newStatus, statusHistory: newHistory } : o));
       if (selectedOrder && selectedOrder.id === orderToUpdate.id) {
-        setSelectedOrder(prev => ({ ...prev, status: newStatus }));
+        setSelectedOrder(prev => ({ ...prev, status: newStatus, statusHistory: newHistory }));
       }
-      // alert('Workflow updated successfully!');
+
+      // 3. Attempt Background Sync to Cloud (Don't block UI)
+      axios.patch(`${API_BASE}/orders/${encodeURIComponent(orderToUpdate.id)}/status`, {
+        status: newStatus,
+        updatedBy: 'Admin Staff'
+      }).catch(syncErr => {
+        console.warn('Cloud sync deferred for background:', syncErr.message);
+        // We don't alert the user because isSynced=0 will handle it later
+      });
+
     } catch (err) {
-      console.error('Failed to update status:', err);
-      setOrders(prev => prev.map(o => o.id === orderToUpdate.id ? { ...o, status: newStatus } : o));
-      alert('Workflow updated locally (Cloud sync failed)');
+      console.error('Failed to update status locally:', err);
+      alert('Critical: Failed to save status update to local database.');
     }
   };
+
+  const [originalPayStatus, setOriginalPayStatus] = useState(null);
 
   const handleUpdatePaymentStatus = async (newPayStatus) => {
     if (!selectedOrder) return;
     
     if (newPayStatus === 'Paid') {
+      setOriginalPayStatus(selectedOrder.paymentStatus);
+      setSelectedOrder(prev => ({ ...prev, paymentStatus: 'Paid' }));
       setShowPayModal(true);
       return;
     }
@@ -282,6 +295,9 @@ export default function Orders({ isPendingView = false }) {
       try {
         const res = await axios.patch(`${API_BASE}/orders/${encodeURIComponent(selectedOrder.id)}/status`, {
           status: 'Paid',
+          paymentStatus: 'Paid',
+          paidAmount: selectedOrder.totalAmount,
+          dueAmount: 0,
           updatedBy: 'Admin Staff'
         });
         // Update local state with fresh data from backend
@@ -384,7 +400,7 @@ export default function Orders({ isPendingView = false }) {
             <span className={styles.kpiValue} style={{ color: '#10B981' }}>
               <CurrencySymbol size={18} /> {totalPaid.toFixed(2)}
             </span>
-            <span className={styles.kpiSub}>{orders.filter(o => o.status === 'Paid').length} invoices</span>
+            <span className={styles.kpiSub}>{orders.filter(o => (o.dueAmount === 0 || o.dueAmount === null) && o.totalAmount > 0).length} invoices</span>
           </div>
         </div>
         <div className={`${styles.kpiCard} ${styles.pendingCard}`}>
@@ -394,7 +410,7 @@ export default function Orders({ isPendingView = false }) {
             <span className={styles.kpiValue} style={{ color: '#F97316' }}>
               <CurrencySymbol size={18} /> {totalPending.toFixed(2)}
             </span>
-            <span className={styles.kpiSub}>{orders.filter(o => o.status === 'Credit' || o.status === 'Payment Pending').length} invoices</span>
+            <span className={styles.kpiSub}>{orders.filter(o => o.dueAmount > 0).length} invoices</span>
           </div>
         </div>
         <div className={`${styles.kpiCard} ${styles.overdueCard}`}>
@@ -436,56 +452,62 @@ export default function Orders({ isPendingView = false }) {
       {/* Table Section */}
       <div className={isPendingView ? styles.cardGridContainer : styles.tableCard}>
         {isPendingView ? (
-          <div className={styles.orderCardGrid}>
+          <div className={styles.orderListContainer}>
             {filteredOrders.length > 0 ? (
               filteredOrders.map((order) => (
-                <div key={order.id} className={styles.pendingOrderCard}>
-                  <div className={styles.cardHeader}>
-                    <h3>{order.id}</h3>
-                    {isOverdue(order) && <span className={styles.overdueBadge}>Overdue</span>}
+                <div key={order.id} className={`${styles.premiumListItem} ${isOverdue(order) ? styles.overdueListItem : ''}`}>
+                  <div className={styles.listIdSection}>
+                    <span className={styles.listIdLabel}>ORDER</span>
+                    <h3 className={styles.listIdValue}>{order.id}</h3>
                   </div>
-                  <p className={styles.cardCustomer}>{order.customerName}</p>
-                  
-                  <div className={styles.cardDetails}>
-                    <div className={styles.detailRow}>
-                      <span>Amount Due</span>
-                      <span className={styles.boldAmount}><CurrencySymbol size={14} /> {order.totalAmount?.toFixed(2)}</span>
+
+                  <div className={styles.listCustomerSection}>
+                    <div className={styles.listAvatar}>
+                      {order.customerName ? order.customerName.charAt(0).toUpperCase() : 'W'}
                     </div>
-                    <div className={styles.detailRow}>
-                      <span>Total</span>
-                      <span><CurrencySymbol size={14} /> {order.totalAmount?.toFixed(2)}</span>
-                    </div>
-                    <div className={styles.detailRow}>
-                      <span>Order Date</span>
-                      <span>{new Date(order.createdAt).toLocaleDateString()}</span>
-                    </div>
-                    <div className={styles.detailRow}>
-                      <span>Due Date</span>
-                      <span>{new Date(order.createdAt).toLocaleDateString()}</span>
+                    <div className={styles.listUserInfo}>
+                      <p className={styles.listCustName}>{order.customerName || 'Walk-in Customer'}</p>
+                      <p className={styles.listCustPhone}>{order.customerPhone || order.phone || 'No Phone'}</p>
                     </div>
                   </div>
 
-                  <div className={styles.cardActions}>
+                  <div className={styles.listFinancialSection}>
+                    <div className={styles.listStat}>
+                      <span className={styles.listStatLabel}>Amount Due</span>
+                      <span className={styles.listStatValue}><CurrencySymbol size={14} /> {order.dueAmount || order.totalAmount?.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  <div className={styles.listStatusSection}>
+                    {isOverdue(order) ? (
+                      <span className={styles.listBadgeOverdue}>Overdue</span>
+                    ) : (
+                      <span className={styles.listBadgePending}>Pending</span>
+                    )}
+                    <span className={styles.listDate}>{new Date(order.createdAt).toLocaleDateString()}</span>
+                  </div>
+
+                  <div className={styles.listActionsSection}>
                     <button 
-                      className={styles.collectBtn}
+                      className={styles.listCollectBtn}
                       onClick={() => {
                         setSelectedOrder(order);
                         setShowPayModal(true);
                       }}
                     >
-                      <Wallet size={16} /> Collect Payment
+                      <DollarSign size={16} /> Collect
                     </button>
                     <button 
-                      className={styles.reminderBtn}
+                      className={styles.listReminderBtn}
                       onClick={() => handleWhatsApp(order.customerPhone || order.phone, order.id)}
                     >
-                      <MessageCircle size={16} /> Send Reminder
+                      <MessageCircle size={16} />
                     </button>
                   </div>
                 </div>
               ))
             ) : (
-              <div className={styles.noData}>No orders found matching this filter.</div>
+              <div className={styles.noData}>No pending payments found.</div>
             )}
           </div>
         ) : (
@@ -524,7 +546,9 @@ export default function Orders({ isPendingView = false }) {
                     </td>
                     <td>
                       <div className={styles.custCell}>
-                        <span className={styles.custName}>{order.customerName}</span>
+                        <span className={styles.custName}>
+                          {order.customerName || (order.customerId === 'Walk-in' ? 'Walk-in Customer' : order.customerId)}
+                        </span>
                         <div className={styles.custPhoneRow}>
                           <Phone size={12} color="#2563EB" />
                           <span className={styles.custPhone}>
@@ -532,7 +556,7 @@ export default function Orders({ isPendingView = false }) {
                           </span>
                           <div className={styles.waBadge} onClick={(e) => {
                             e.stopPropagation();
-                            handleWhatsApp(order.customerPhone, order.id);
+                            handleWhatsApp(order.customerPhone || order.phone, order.id);
                           }}>
                             <MessageCircle size={10} color="#FFF" />
                             WA
@@ -555,7 +579,7 @@ export default function Orders({ isPendingView = false }) {
                     <td className={styles.dateText}>{new Date(order.createdAt).toLocaleDateString()}</td>
                     <td>
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        {order.paymentStatus === 'Paid' || order.status === 'Paid' ? (
+                        {order.paymentStatus === 'Paid' ? (
                           <span className={styles.paidActionBadge}>
                             <CheckCircle size={14} /> Paid
                           </span>
@@ -624,12 +648,16 @@ export default function Orders({ isPendingView = false }) {
                     <div className={styles.infoCard}>
                       <User size={16} />
                       <div>
-                        <p className={styles.infoVal}>{selectedOrder.customerName}</p>
+                        <p className={styles.infoVal}>
+                          {selectedOrder.customerName || (selectedOrder.customerId === 'Walk-in' ? 'Walk-in Customer' : selectedOrder.customerId)}
+                        </p>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <p className={styles.infoSub}>{selectedOrder.customerPhone} • {selectedOrder.customerId}</p>
+                          <p className={styles.infoSub}>
+                            {selectedOrder.customerPhone || selectedOrder.phone || 'No Phone'} • {selectedOrder.customerId}
+                          </p>
                           <button 
                             className={styles.waBtnMini}
-                            onClick={() => handleWhatsApp(selectedOrder.customerPhone, selectedOrder.orderId)}
+                            onClick={() => handleWhatsApp(selectedOrder.customerPhone || selectedOrder.phone, selectedOrder.id)}
                           >
                             <MessageCircle size={12} /> WhatsApp
                           </button>
@@ -778,8 +806,19 @@ export default function Orders({ isPendingView = false }) {
               </div>
 
               <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem' }}>
-                <button className={styles.secondaryBtn} style={{ flex: 1 }} onClick={() => setShowPayModal(false)}>Cancel</button>
-                <button className="btn btn-primary" style={{ flex: 1.5 }} onClick={confirmPaidStatus}>Record Payment</button>
+                <button 
+                  className={styles.secondaryBtn} 
+                  style={{ flex: 1 }} 
+                  onClick={() => {
+                    setShowPayModal(false);
+                    if (originalPayStatus) {
+                      setSelectedOrder(prev => ({ ...prev, paymentStatus: originalPayStatus }));
+                    }
+                  }}
+                >
+                  Cancel
+                </button>
+                <button className={styles.printBtn} style={{ flex: 1.5 }} onClick={confirmPaidStatus}>Record Payment</button>
               </div>
             </div>
           </div>
