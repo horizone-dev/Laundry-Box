@@ -1,3 +1,4 @@
+import { DEFAULT_SHOP_ID } from '../constants';
 import api from './api';
 
 export const syncData = async () => {
@@ -8,7 +9,7 @@ export const syncData = async () => {
 
   try {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
-    const shopId = user.shopId || 'SHOP_01';
+    const shopId = user.shopId || DEFAULT_SHOP_ID;
 
     // 1. Fetch unsynced local data
     const resOrders = await window.electronAPI.dbQuery('SELECT * FROM orders WHERE isSynced = 0', []);

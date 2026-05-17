@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
 import styles from './Users.module.css';
 
 const Users = () => {
@@ -41,8 +42,8 @@ const Users = () => {
     pin: ''
   });
 
-  const AUTH_API = 'http://localhost:3000/api/auth';
-  const ROLE_API = 'http://localhost:3000/api/roles';
+  const AUTH_API = `${API_BASE_URL}/auth`;
+  const ROLE_API = `${API_BASE_URL}/roles`;
 
   useEffect(() => {
     fetchData();
@@ -90,10 +91,9 @@ const Users = () => {
       if (editingUser) {
         await axios.put(`${AUTH_API}/users/${editingUser._id}`, payload);
       } else {
-        const user = JSON.parse(sessionStorage.getItem('user') || '{}');
         await axios.post(`${AUTH_API}/register`, {
           ...payload,
-          shopId: user.shopId || 'SHOP_01',
+          shopId: user.shopId || DEFAULT_SHOP_ID,
           userId: `USER_${Date.now()}`
         });
       }

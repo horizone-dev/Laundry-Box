@@ -9,8 +9,11 @@ import {
 import axios from 'axios';
 import { syncData } from '../services/syncService';
 import { useSettings } from '../store/SettingsContext';
+import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
 import { t } from '../utils/translations';
 import styles from './MainLayout.module.css';
+
+const API_BASE = API_BASE_URL;
 
 export default function MainLayout() {
   const { settings, updateSettings } = useSettings();
@@ -20,7 +23,7 @@ export default function MainLayout() {
   const profileRef = useRef(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const API_BASE = 'http://localhost:3000/api';
+
 
   const [showQuickDeliver, setShowQuickDeliver] = useState(false);
   const [showQuickSettle, setShowQuickSettle] = useState(false);
@@ -157,7 +160,7 @@ export default function MainLayout() {
     }
   };
 
-  const [expandedMenus, setExpandedMenus] = useState(['Services', 'Accounts', 'Customers', 'User & Roles', 'Reports']);
+  const [expandedMenus, setExpandedMenus] = useState([]);
 
   const toggleMenu = (label) => {
     setExpandedMenus(prev =>
@@ -165,12 +168,22 @@ export default function MainLayout() {
     );
   };
 
-  // Close profile dropdown and sidebar menus when clicking outside
+  // Close dropdowns and sidebar menus when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       // Close profile
       if (isProfileOpen && profileRef.current && !profileRef.current.contains(event.target)) {
         setIsProfileOpen(false);
+      }
+
+      // Close notifications
+      if (isNotificationsOpen && notificationRef.current && !notificationRef.current.contains(event.target)) {
+        setIsNotificationsOpen(false);
+      }
+
+      // Close support
+      if (isSupportOpen && supportRef.current && !supportRef.current.contains(event.target)) {
+        setIsSupportOpen(false);
       }
 
       // Close sidebar menus if clicking outside sidebar
@@ -182,10 +195,10 @@ export default function MainLayout() {
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isProfileOpen, expandedMenus]);
+  }, [isProfileOpen, isNotificationsOpen, isSupportOpen, expandedMenus]);
 
   const navItems = [
-    { path: '/', label: 'Dashboard', icon: LayoutDashboard, permissionKey: 'dashboard' },
+    { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permissionKey: 'dashboard' },
     { path: '/pos', label: 'POS', icon: ShoppingCart, permissionKey: 'pos' },
     {
       label: 'Orders',
@@ -395,7 +408,7 @@ export default function MainLayout() {
       await window.electronAPI.dbQuery(
         `INSERT INTO payments (id, customerId, shopId, amount, method, status, createdAt) 
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [`PAY-QUICK-${Date.now()}`, foundCustomer.id, 'SHOP_01', amount, settleMethod, 'SUCCESS', timestamp]
+        [`PAY-QUICK-${Date.now()}`, foundCustomer.id, DEFAULT_SHOP_ID, amount, settleMethod, 'SUCCESS', timestamp]
       );
 
       // 3. Try to settle orders (simplified FIFO)
@@ -469,7 +482,7 @@ export default function MainLayout() {
             ) : (
               <Layers color="#2563EB" size={24} />
             )}
-            {settings.companyName.toUpperCase()}
+            <span className={styles.sidebarText}>{settings.companyName.toUpperCase()}</span>
           </div>
           {!settings.companyName.toUpperCase().includes('SYSTEM') && (
             <span className={styles.logoSub}>MANAGEMENT SYSTEM</span>
@@ -489,7 +502,7 @@ export default function MainLayout() {
                     onClick={() => toggleMenu(item.label)}
                   >
                     <item.icon size={20} />
-                    <span>{t(item.label.toLowerCase().replace(/ & /g, '').replace(/ /g, ''), settings.language)}</span>
+                    <span className={styles.sidebarText}>{t(item.label.toLowerCase().replace(/ & /g, '').replace(/ /g, ''), settings.language)}</span>
                     <Plus
                       size={14}
                       className={`${styles.chevron} ${isExpanded ? styles.rotated : ''}`}
@@ -525,57 +538,56 @@ export default function MainLayout() {
                 onClick={() => setExpandedMenus([])}
               >
                 <item.icon size={20} />
-                {t(item.label.toLowerCase().replace(/ /g, ''), settings.language)}
+                <span className={styles.sidebarText}>{t(item.label.toLowerCase().replace(/ /g, ''), settings.language)}</span>
               </NavLink>
             );
           })}
 
-          {/* Trial Countdown for all users */}
-          {settings?.isActivated && (
-            (() => {
-              const expiry = new Date(settings.expiryDate);
-              const today = new Date();
-              const diffTime = expiry - today;
-              const days = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column' }}>
+            {/* Trial Countdown for all users */}
+            {settings?.isActivated && (
+              (() => {
+                const expiry = new Date(settings.expiryDate);
+                const today = new Date();
+                const diffTime = expiry - today;
+                const days = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-              if (days > 0 && days <= 31) {
-                return (
-                  <div className={styles.trialStatusSidebar}>
-                    <div className={styles.trialInfoSidebar}>
-                      <Clock size={14} />
-                      <span>Trial: {days} Days Left</span>
+                if (days > 0 && days <= 31) {
+                  return (
+                    <div className={styles.trialStatusSidebar} style={{ margin: '0 0.5rem 1rem 0.5rem' }}>
+                      <div className={styles.trialInfoSidebar}>
+                        <Clock size={14} />
+                        <span>Trial: {days} Days Left</span>
+                      </div>
+                      <div className={styles.trialBarSidebar}>
+                        <div
+                          className={styles.trialProgressSidebar}
+                          style={{ width: `${(days / 31) * 100}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className={styles.trialBarSidebar}>
-                      <div
-                        className={styles.trialProgressSidebar}
-                        style={{ width: `${(days / 31) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              }
-              return null;
-            })()
-          )}
+                  );
+                }
+                return null;
+              })()
+            )}
 
-          <div
-            className={styles.navItem}
-            style={{ marginTop: 'auto', color: '#EF4444', cursor: 'pointer' }}
-            onClick={() => {
-              sessionStorage.clear();
-              window.location.reload();
-            }}
-          >
-            <LogOut size={20} /> Logout
+            <div
+              className={styles.navItem}
+              style={{ color: '#EF4444', cursor: 'pointer' }}
+              onClick={() => {
+                sessionStorage.clear();
+                window.location.reload();
+              }}
+            >
+              <LogOut size={20} /> <span className={styles.sidebarText}>Logout</span>
+            </div>
           </div>
         </nav>
 
         <div className={styles.sidebarFooter}>
-          <button className={styles.newOrderBtn} onClick={() => navigate('/pos')}>
-            <Plus size={20} /> New Order
-          </button>
           <NavLink to="/help" className={styles.helpLink}>
-            <HelpCircle size={18} /> Help Center
+            <HelpCircle size={18} /> <span className={styles.sidebarText}>Help Center</span>
           </NavLink>
         </div>
       </aside>
@@ -598,6 +610,13 @@ export default function MainLayout() {
 
           <div className={styles.headerRight}>
             <div className={styles.headerIcons}>
+              <button
+                className={styles.headerNewOrderBtn}
+                onClick={() => navigate('/pos')}
+                title="New Order"
+              >
+                <Plus size={18} /> New Order
+              </button>
               <button
                 className={styles.headerDeliverBtn}
                 onClick={() => setShowQuickDeliver(true)}
@@ -670,17 +689,15 @@ export default function MainLayout() {
               ref={profileRef}
               className={styles.userProfile}
               onClick={() => setIsProfileOpen(!isProfileOpen)}
-              style={{ cursor: 'pointer', position: 'relative' }}
+              style={{ cursor: 'pointer', position: 'relative', flexDirection: 'column', gap: '0.25rem', justifyContent: 'center' }}
             >
-              <div className={styles.userInfo}>
-                <span className={styles.userName}>{user.name || 'Staff User'}</span>
-                <span className={styles.userRole}>{(user.role || role).replace('_', ' ')}</span>
-              </div>
               <img
                 src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || 'User')}&background=2563EB&color=fff`}
                 alt={user.name}
                 className={styles.avatar}
+                style={{ width: '36px', height: '36px' }}
               />
+              <span className={styles.userRole} style={{ fontSize: '0.7rem' }}>{(user.role || role).replace('_', ' ')}</span>
 
               {isProfileOpen && (
                 <div className={styles.profileDropdown}>

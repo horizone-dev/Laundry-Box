@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { useSettings } from '../store/SettingsContext';
+import { DEFAULT_SHOP_ID } from '../constants';
 import styles from './Accounts.module.css';
 
 const ICON_OPTIONS = [
@@ -124,7 +125,7 @@ export default function Accounts() {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             id, 
-            'SHOP_01', 
+            DEFAULT_SHOP_ID, 
             type.toUpperCase(), 
             formData.type, 
             formData.category, 

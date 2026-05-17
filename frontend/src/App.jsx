@@ -40,7 +40,8 @@ function App() {
             isAuthenticated ? <MainLayout /> : <Navigate to="/login" replace />
           }
         >
-          <Route index element={<Dashboard />} />
+          <Route index element={<Navigate to="/pos" replace />} />
+          <Route path="dashboard" element={<Dashboard />} />
           <Route path="pos" element={<POS />} />
           <Route path="orders">
             <Route index element={<Orders />} />

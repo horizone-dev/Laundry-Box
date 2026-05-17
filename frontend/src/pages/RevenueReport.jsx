@@ -15,6 +15,7 @@ export default function RevenueReport() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMethod, setFilterMethod] = useState('All');
+  const [filterDate, setFilterDate] = useState('All');
 
   useEffect(() => {
     fetchPayments();
@@ -36,7 +37,30 @@ export default function RevenueReport() {
   const filteredPayments = payments.filter(p => {
     const matchesSearch = p.orderId?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesMethod = filterMethod === 'All' || p.method === filterMethod;
-    return matchesSearch && matchesMethod;
+    
+    let matchesDate = true;
+    if (filterDate !== 'All') {
+      const pDate = new Date(p.createdAt);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (filterDate === 'Today') {
+        matchesDate = pDate >= today;
+      } else if (filterDate === 'Yesterday') {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        matchesDate = pDate >= yesterday && pDate < today;
+      } else if (filterDate === 'This Week') {
+        const startOfWeek = new Date(today);
+        startOfWeek.setDate(today.getDate() - today.getDay());
+        matchesDate = pDate >= startOfWeek;
+      } else if (filterDate === 'This Month') {
+        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        matchesDate = pDate >= startOfMonth;
+      }
+    }
+
+    return matchesSearch && matchesMethod && matchesDate;
   });
 
   const totalRevenue = filteredPayments.reduce((s, p) => s + p.amount, 0);
@@ -126,9 +150,21 @@ export default function RevenueReport() {
           </div>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
              <select 
+               value={filterDate} 
+               onChange={(e) => setFilterDate(e.target.value)}
+               style={{ padding: '0.75rem 1rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', fontWeight: 600, color: '#475569' }}
+             >
+               <option value="All">All Time</option>
+               <option value="Today">Today</option>
+               <option value="Yesterday">Yesterday</option>
+               <option value="This Week">This Week</option>
+               <option value="This Month">This Month</option>
+             </select>
+
+             <select 
                value={filterMethod} 
                onChange={(e) => setFilterMethod(e.target.value)}
-               style={{ padding: '0.75rem 1rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', fontWeight: 600 }}
+               style={{ padding: '0.75rem 1rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', fontWeight: 600, color: '#475569' }}
              >
                <option value="All">All Methods</option>
                <option value="CASH">Cash</option>

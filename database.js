@@ -48,6 +48,7 @@ function initDB(appPath) {
       name TEXT,
       price REAL,
       icon TEXT,
+      image TEXT,
       category TEXT,
       taxRate REAL DEFAULT NULL,
       isSynced INTEGER DEFAULT 0,
@@ -212,6 +213,11 @@ function initDB(appPath) {
     }
     if (!expCols.some(col => col.name === 'taxMethod')) {
       db.exec("ALTER TABLE expenses ADD COLUMN taxMethod TEXT DEFAULT 'inclusive';");
+    }
+
+    const serviceCols = db.prepare("PRAGMA table_info(services)").all();
+    if (!serviceCols.some(col => col.name === 'image')) {
+      db.exec("ALTER TABLE services ADD COLUMN image TEXT;");
     }
     // Data Healer: Normalize statuses and fix broken financial records
     console.log("Running Data Healer...");

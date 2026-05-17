@@ -9,6 +9,7 @@ import {
 import axios from 'axios';
 import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
+import { DEFAULT_SHOP_ID, DEFAULT_BRANCH_ID, API_BASE_URL, CATEGORIES, PAYMENT_STATUS, ORDER_STATUS, PAYMENT_METHODS } from '../constants';
 import styles from './POS.module.css';
 
 
@@ -43,7 +44,7 @@ export default function POS() {
         if (cRes.success) {
           setCategories(cRes.data);
           if (cRes.data.length > 0 && !selectedCategory) {
-            setSelectedCategory(cRes.data[0].name);
+            setSelectedCategory('All');
           }
         }
       } catch (err) {
@@ -127,7 +128,7 @@ export default function POS() {
       try {
         await window.electronAPI.dbQuery(
           'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, 'SHOP_01', customerFormData.name, customerFormData.phone, customerFormData.email, customerFormData.address, customerFormData.creditLimit || settings.defaultCreditLimit || 500, 0, timestamp]
+          [id, DEFAULT_SHOP_ID, customerFormData.name, customerFormData.phone, customerFormData.email, customerFormData.address, customerFormData.creditLimit || settings.defaultCreditLimit || 500, 0, timestamp]
         );
         handleSelectCustomer({ id, ...customerFormData });
         setShowCustomerModal(false);
@@ -142,7 +143,7 @@ export default function POS() {
   };
 
   // POS Features
-  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState('All');
   const [itemSearch, setItemSearch] = useState('');
   const [discount, setDiscount] = useState(0);
 
@@ -281,43 +282,65 @@ export default function POS() {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             orderId,
-            'SHOP_01',
-            'BRANCH_01',
+            DEFAULT_SHOP_ID,
+            DEFAULT_BRANCH_ID,
             selectedCustomer ? selectedCustomer.id : 'Walk-in',
-            paymentMethod === 'credit' ? 'Payment Pending' : 'Paid',
+            paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : PAYMENT_STATUS.PAID,
             total,
             paymentMethod === 'credit' ? 0 : total,
             paymentMethod === 'credit' ? total : 0,
-            paymentMethod === 'credit' ? 'Credit' : 'Paid',
+            paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
             JSON.stringify(cart),
             new Date().toISOString(),
             0,
-            new Date().toISOString()
+            new Date().toISOString(),
+            JSON.stringify([{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : PAYMENT_STATUS.PAID, updatedBy: 'POS System', timestamp: new Date().toISOString() }]),
+            paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI))
           ]
         );
 
         // Sync to MongoDB Backend
         try {
-          await axios.post('http://localhost:3000/api/orders', {
+          await axios.post(`${API_BASE_URL}/orders`, {
             id: orderId,
             billNumber,
             customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
             customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
             customerPhone: selectedCustomer ? selectedCustomer.phone : '',
-            shopId: 'SHOP_01',
-            branchId: 'BRANCH_01',
-            status: paymentMethod === 'credit' ? 'Payment Pending' : 'Paid',
+            shopId: DEFAULT_SHOP_ID,
+            branchId: DEFAULT_BRANCH_ID,
+            status: paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : PAYMENT_STATUS.PAID,
             totalAmount: total,
             paidAmount: paymentMethod === 'credit' ? 0 : total,
             dueAmount: paymentMethod === 'credit' ? total : 0,
-            paymentStatus: paymentMethod === 'credit' ? 'Credit' : 'Paid',
-            paymentMethod: paymentMethod === 'cash' ? 'Cash' : (paymentMethod === 'card' ? 'Card' : (paymentMethod === 'credit' ? 'Credit' : 'UPI / QR Payment')),
+            paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
+            paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI)),
             items: cart,
-            statusHistory: [{ status: paymentMethod === 'credit' ? 'Credit' : 'Paid', updatedBy: 'POS System', timestamp: new Date().toISOString() }]
+            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : PAYMENT_STATUS.PAID, updatedBy: 'POS System', timestamp: new Date().toISOString() }]
           });
         } catch (syncErr) {
           console.warn('Backend sync failed, but local order saved:', syncErr);
         }
+
+        // Also trigger local sync event (for frontend components)
+        window.dispatchEvent(new CustomEvent('order-created', { 
+          detail: { 
+            id: orderId,
+            customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
+            customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+            customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+            shopId: DEFAULT_SHOP_ID,
+            branchId: DEFAULT_BRANCH_ID,
+            status: paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : PAYMENT_STATUS.PAID,
+            totalAmount: total,
+            paidAmount: paymentMethod === 'credit' ? 0 : total,
+            dueAmount: paymentMethod === 'credit' ? total : 0,
+            paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
+            paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI)),
+            items: cart,
+            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : PAYMENT_STATUS.PAID, updatedBy: 'POS System', timestamp: new Date().toISOString() }]
+          } 
+        }));
 
         if (paymentMethod === 'credit' && selectedCustomer) {
           await window.electronAPI.dbQuery(
@@ -337,7 +360,7 @@ export default function POS() {
             `INSERT INTO account_transactions 
              (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [txnId, 'SHOP_01', accountType, 'INCOME', 'Sales', total, desc, txnTimestamp, 0, new Date().toISOString(), 'ShoppingBag', accountType === 'BANK' ? selectedBank : null]
+            [txnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales', total, desc, txnTimestamp, 0, new Date().toISOString(), 'ShoppingBag', accountType === 'BANK' ? selectedBank : null]
           );
         }
 
@@ -364,58 +387,69 @@ export default function POS() {
     
     if (window.electronAPI?.dbQuery) {
       try {
-        // "Save Bill" always implies a Credit/Unpaid order in this workflow
-        const paidAmount = 0;
-        const dueAmount = total;
-        const paymentStatus = 'Credit';
-
         await window.electronAPI.dbQuery(
           `INSERT INTO orders 
-           (id, shopId, branchId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, createdAt, isSynced, updatedAt) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, shopId, branchId, customerId, status, totalAmount, paidAmount, dueAmount, statusHistory, createdAt, updatedAt, paymentStatus) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             orderId,
-            'SHOP_01',
-            'BRANCH_01',
+            DEFAULT_SHOP_ID,
+            DEFAULT_BRANCH_ID,
             selectedCustomer ? selectedCustomer.id : 'Walk-in',
-            'Payment Pending',
+            ORDER_STATUS.PAYMENT_PENDING,
             total,
-            paidAmount,
-            dueAmount,
-            paymentStatus,
-            JSON.stringify(cart),
-            new Date().toISOString(),
             0,
-            new Date().toISOString()
+            total,
+            JSON.stringify([{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: new Date().toISOString() }]),
+            new Date().toISOString(),
+            new Date().toISOString(),
+            PAYMENT_STATUS.CREDIT
           ]
         );
 
-        // Update customer balance for this new debt
+        // Update customer balance in DB
         if (selectedCustomer) {
-          await window.electronAPI.dbQuery(
-            'UPDATE customers SET balance = balance + ? WHERE id = ?',
-            [total, selectedCustomer.id]
-          );
+          await window.electronAPI.dbQuery('UPDATE customers SET balance = balance + ?, updatedAt = ? WHERE id = ?', [total, new Date().toISOString(), selectedCustomer.id]);
         }
+
+        // Trigger local event
+        window.dispatchEvent(new CustomEvent('order-created', { 
+          detail: { 
+            id: orderId,
+            customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
+            customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+            customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+            shopId: DEFAULT_SHOP_ID,
+            branchId: DEFAULT_BRANCH_ID,
+            status: ORDER_STATUS.PAYMENT_PENDING,
+            totalAmount: total,
+            paidAmount: 0,
+            dueAmount: total,
+            paymentStatus: PAYMENT_STATUS.CREDIT,
+            paymentMethod: PAYMENT_METHODS.CREDIT,
+            items: cart,
+            statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: new Date().toISOString() }]
+          } 
+        }));
 
         // Sync to MongoDB Backend
         try {
-          await axios.post('http://localhost:3000/api/orders', {
+          await axios.post(`${API_BASE_URL}/orders`, {
             id: orderId,
             billNumber,
             customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
             customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
             customerPhone: selectedCustomer ? selectedCustomer.phone : '',
-            shopId: 'SHOP_01',
-            branchId: 'BRANCH_01',
-            status: 'Payment Pending',
+            shopId: DEFAULT_SHOP_ID,
+            branchId: DEFAULT_BRANCH_ID,
+            status: ORDER_STATUS.PAYMENT_PENDING,
             totalAmount: total,
             paidAmount: 0,
             dueAmount: total,
-            paymentStatus: 'Credit',
-            paymentMethod: paymentMethod.toUpperCase(),
+            paymentStatus: PAYMENT_STATUS.CREDIT,
+            paymentMethod: PAYMENT_METHODS.CREDIT.toUpperCase(),
             items: cart,
-            statusHistory: [{ status: 'Credit', updatedBy: 'POS System', timestamp: new Date().toISOString() }]
+            statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: new Date().toISOString() }]
           });
         } catch (syncErr) {
           console.warn('Backend sync failed, but local order saved:', syncErr);
@@ -603,6 +637,12 @@ export default function POS() {
 
         <div className={styles.categoriesRow}>
           <div className={styles.categoryTabs}>
+            <button 
+              className={`${styles.categoryTab} ${selectedCategory === 'All' ? styles.active : ''}`}
+              onClick={() => setSelectedCategory('All')}
+            >
+              All Services
+            </button>
             {categories.map(cat => (
               <button 
                 key={cat.id} 
@@ -623,12 +663,16 @@ export default function POS() {
           {services
             .filter(s => {
               const matchesSearch = s.name.toLowerCase().includes(itemSearch.toLowerCase());
-              const matchesCategory = s.category === selectedCategory || (!selectedCategory && s.category === 'Laundry');
+              const matchesCategory = selectedCategory === 'All' || s.category === selectedCategory;
               return matchesSearch && (itemSearch ? true : matchesCategory);
             })
             .map((service) => (
             <div key={service.id} className={styles.itemCard} onClick={() => handleServiceClick(service)}>
-              <div className={styles.itemIcon}>{getIcon(service.icon)}</div>
+              <div className={styles.itemIcon}>
+                {service.image ? (
+                  <img src={service.image} alt={service.name} className={styles.itemImg} />
+                ) : getIcon(service.icon)}
+              </div>
               <span className={styles.itemName}>{service.name}</span>
               <span className={styles.itemPrice}><CurrencySymbol size={16} /> {service.price.toFixed(2)}</span>
             </div>

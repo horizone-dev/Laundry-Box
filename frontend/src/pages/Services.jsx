@@ -1,20 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Scissors, Zap, Sparkles, Tag, X, Layout, Shirt, Bed, Wind, Droplet, Heart, Layers } from 'lucide-react';
+import { Plus, Search, Scissors, Zap, Sparkles, Tag, X, Layout, Shirt, Bed, Wind, Droplet, Heart, Layers, Camera, Image as ImageIcon, Trash2, Edit2 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
+import { DEFAULT_SHOP_ID, CATEGORIES } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Services.module.css';
 
-export default function Services() {
+export default function Services({ activeView = 'overview' }) {
   const { settings } = useSettings();
   const [services, setServices] = useState([]);
   const [types, setTypes] = useState([]);
   const [addons, setAddons] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Modal states
-  const [showModal, setShowModal] = useState(null); // 'service', 'type', 'addon'
+  const [showModal, setShowModal] = useState(null); // 'service', 'type', 'addon', 'category'
   const [formData, setFormData] = useState({});
+  const [editId, setEditId] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -45,15 +48,49 @@ export default function Services() {
 
   const handleOpenModal = (type) => {
     if (type === 'service') {
-      setFormData({ name: '', price: '', category: categories[0]?.name || 'Laundry', icon: 'Shirt', taxRate: '' });
+      setFormData({ name: '', price: '', category: categories[0]?.name || CATEGORIES.LAUNDRY, taxRate: '', image: null });
     } else if (type === 'category') {
-      setFormData({ name: '', icon: 'Tag' });
+      setFormData({ name: '', image: null });
     } else if (type === 'type') {
-      setFormData({ name: '', price: '', icon: 'Zap' });
+      setFormData({ name: '', price: '', image: null });
     } else {
-      setFormData({ name: '', price: '', icon: 'Sparkles' });
+      setFormData({ name: '', price: '', image: null });
     }
+    setEditId(null);
     setShowModal(type);
+  };
+
+  const handleEdit = (item, type) => {
+    setEditId(item.id);
+    setFormData({ ...item });
+    setShowModal(type);
+  };
+
+  const handleDelete = async (id, table) => {
+    if (!window.electronAPI?.dbQuery) return;
+    if (!window.confirm("Are you sure you want to delete this item?")) return;
+
+    try {
+      const res = await window.electronAPI.dbQuery(`DELETE FROM ${table} WHERE id = ?`, [id]);
+      if (res.success) {
+        fetchData();
+      } else {
+        alert("Failed to delete: " + res.error);
+      }
+    } catch (err) {
+      console.error("Delete error:", err);
+    }
+  };
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData(prev => ({ ...prev, image: reader.result }));
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSave = async (e) => {
@@ -61,7 +98,7 @@ export default function Services() {
     if (!window.electronAPI?.dbQuery) return;
 
     const id = Date.now().toString();
-    const shopId = 'SHOP_01';
+    const shopId = DEFAULT_SHOP_ID;
     const timestamp = new Date().toISOString();
 
     try {
@@ -69,17 +106,37 @@ export default function Services() {
       let params = [];
 
       if (showModal === 'service') {
-        query = 'INSERT INTO services (id, shopId, name, price, icon, category, taxRate, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
-        params = [id, shopId, formData.name, parseFloat(formData.price), formData.icon, formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, timestamp];
+        if (editId) {
+          query = 'UPDATE services SET name=?, price=?, image=?, category=?, taxRate=?, updatedAt=? WHERE id=?';
+          params = [formData.name, parseFloat(formData.price || 0), formData.image, formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, timestamp, editId];
+        } else {
+          query = 'INSERT INTO services (id, shopId, name, price, image, category, taxRate, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+          params = [id, shopId, formData.name, parseFloat(formData.price || 0), formData.image, formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, timestamp];
+        }
       } else if (showModal === 'category') {
-        query = 'INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)';
-        params = [id, shopId, formData.name, formData.icon, timestamp];
+        if (editId) {
+          query = 'UPDATE service_categories SET name=?, updatedAt=? WHERE id=?';
+          params = [formData.name, timestamp, editId];
+        } else {
+          query = 'INSERT INTO service_categories (id, shopId, name, updatedAt) VALUES (?, ?, ?, ?)';
+          params = [id, shopId, formData.name, timestamp];
+        }
       } else if (showModal === 'type') {
-        query = 'INSERT INTO service_types (id, shopId, name, price, icon, updatedAt) VALUES (?, ?, ?, ?, ?, ?)';
-        params = [id, shopId, formData.name, parseFloat(formData.price), formData.icon, timestamp];
+        if (editId) {
+          query = 'UPDATE service_types SET name=?, price=?, updatedAt=? WHERE id=?';
+          params = [formData.name, parseFloat(formData.price || 0), timestamp, editId];
+        } else {
+          query = 'INSERT INTO service_types (id, shopId, name, price, updatedAt) VALUES (?, ?, ?, ?, ?)';
+          params = [id, shopId, formData.name, parseFloat(formData.price || 0), timestamp];
+        }
       } else if (showModal === 'addon') {
-        query = 'INSERT INTO addons (id, shopId, name, price, icon, updatedAt) VALUES (?, ?, ?, ?, ?, ?)';
-        params = [id, shopId, formData.name, parseFloat(formData.price), formData.icon, timestamp];
+        if (editId) {
+          query = 'UPDATE addons SET name=?, price=?, updatedAt=? WHERE id=?';
+          params = [formData.name, parseFloat(formData.price || 0), timestamp, editId];
+        } else {
+          query = 'INSERT INTO addons (id, shopId, name, price, updatedAt) VALUES (?, ?, ?, ?, ?)';
+          params = [id, shopId, formData.name, parseFloat(formData.price || 0), timestamp];
+        }
       }
 
       const res = await window.electronAPI.dbQuery(query, params);
@@ -95,19 +152,7 @@ export default function Services() {
   };
 
   const getIcon = (iconName) => {
-    const icons = {
-      'Shirt': '👕',
-      'Bed': '🛌',
-      'Wind': '💨',
-      'Droplet': '💧',
-      'Heart': '❤️',
-      'Layers': '📦',
-      'Zap': '⚡',
-      'Sparkles': '✨',
-      'Scissors': '✂️',
-      'Tag': '🏷️'
-    };
-    return icons[iconName] || '🧺';
+    return '🧺';
   };
 
   return (
@@ -117,8 +162,18 @@ export default function Services() {
           <h1>Service Management</h1>
           <p>Configure your laundry treatments, delivery types, and premium add-ons.</p>
         </div>
-        <div className={styles.headerButtons}>
-          <button className="btn btn-outline" onClick={() => handleOpenModal('category')} style={{ marginRight: '1rem' }}>
+        <div className={styles.headerButtons} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div style={{ position: 'relative', width: '300px' }}>
+            <Search size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
+            <input 
+              type="text" 
+              placeholder="Search services..." 
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              style={{ width: '100%', padding: '0.75rem 1rem 0.75rem 2.5rem', borderRadius: '12px', border: '1px solid #E2E8F0', outline: 'none', background: '#F8FAFC' }}
+            />
+          </div>
+          <button className="btn btn-outline" onClick={() => handleOpenModal('category')}>
             <Tag size={18} /> Add Category
           </button>
           <button className="btn btn-primary" onClick={() => handleOpenModal('service')}>
@@ -127,8 +182,18 @@ export default function Services() {
         </div>
       </div>
 
-      <div className={styles.sectionGrid}>
+      {/* Derived search arrays */}
+      {(() => {
+        const searchLower = (searchTerm || '').toLowerCase();
+        const filteredServices = services.filter(s => (s?.name || '').toLowerCase().includes(searchLower));
+        const filteredTypes = types.filter(t => (t?.name || '').toLowerCase().includes(searchLower));
+        const filteredAddons = addons.filter(a => (a?.name || '').toLowerCase().includes(searchLower));
+        const filteredCategories = categories.filter(c => (c?.name || '').toLowerCase().includes(searchLower));
+        
+        return (
+          <div className={styles.sectionGrid}>
         {/* 1. Service List */}
+        {(activeView === 'overview' || activeView === 'list') && (
         <div className={styles.card}>
           <div className={styles.cardHeader}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -140,24 +205,36 @@ export default function Services() {
           <div className={styles.cardBody}>
             {loading ? <p className={styles.empty}>Loading...</p> : (
               <div className={styles.list}>
-                {services.length > 0 ? services.map(s => (
+                {filteredServices.length > 0 ? filteredServices.map(s => (
                   <div key={s.id} className={styles.listItem}>
                     <div className={styles.itemInfo}>
-                      <div className={styles.iconBox}>{getIcon(s.icon)}</div>
+                      {s.image && (
+                        <div className={styles.iconBox}>
+                          <img src={s.image} alt={s.name} className={styles.serviceImage} />
+                        </div>
+                      )}
                       <div>
                         <div className={styles.itemName}>{s.name}</div>
                         <span className={styles.badge}>{s.category}</span>
                       </div>
                     </div>
-                    <div className={styles.itemPrice}><CurrencySymbol size={14} /> {parseFloat(s.price).toFixed(2)}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <div className={styles.itemPrice}><CurrencySymbol size={14} /> {parseFloat(s.price).toFixed(2)}</div>
+                      <div className={styles.itemActions}>
+                        <button className={styles.actionBtn} onClick={() => handleEdit(s, 'service')}><Edit2 size={16} /></button>
+                        <button className={`${styles.actionBtn} ${styles.deleteBtn}`} onClick={() => handleDelete(s.id, 'services')}><Trash2 size={16} /></button>
+                      </div>
+                    </div>
                   </div>
                 )) : <p className={styles.empty}>No services found.</p>}
               </div>
             )}
           </div>
         </div>
+        )}
 
         {/* 2. Service Type */}
+        {(activeView === 'overview' || activeView === 'type') && (
         <div className={styles.card}>
           <div className={styles.cardHeader}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -169,21 +246,28 @@ export default function Services() {
           <div className={styles.cardBody}>
             {loading ? <p className={styles.empty}>Loading...</p> : (
               <div className={styles.list}>
-                {types.length > 0 ? types.map((t, idx) => (
+                {filteredTypes.length > 0 ? filteredTypes.map((t, idx) => (
                   <div key={idx} className={styles.listItem}>
                     <div className={styles.itemInfo}>
-                      <div className={styles.iconBox} style={{ background: '#FFFBEB' }}>{getIcon(t.icon)}</div>
                       <div className={styles.itemName}>{t.name}</div>
                     </div>
-                    <div className={styles.itemPrice}><CurrencySymbol size={14} /> {parseFloat(t.price).toFixed(2)}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <div className={styles.itemPrice}><CurrencySymbol size={14} /> {parseFloat(t.price).toFixed(2)}</div>
+                      <div className={styles.itemActions}>
+                        <button className={styles.actionBtn} onClick={() => handleEdit(t, 'type')}><Edit2 size={16} /></button>
+                        <button className={`${styles.actionBtn} ${styles.deleteBtn}`} onClick={() => handleDelete(t.id, 'service_types')}><Trash2 size={16} /></button>
+                      </div>
+                    </div>
                   </div>
                 )) : <p className={styles.empty}>No types found.</p>}
               </div>
             )}
           </div>
         </div>
+        )}
 
         {/* 3. Addons */}
+        {(activeView === 'overview' || activeView === 'addons') && (
         <div className={styles.card}>
           <div className={styles.cardHeader}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -195,11 +279,16 @@ export default function Services() {
           <div className={styles.cardBody}>
             {loading ? <p className={styles.empty}>Loading...</p> : (
               <div className={styles.addonList}>
-                {addons.length > 0 ? addons.map((a, idx) => (
+                {filteredAddons.length > 0 ? filteredAddons.map((a, idx) => (
                   <div key={idx} className={styles.addonItem}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span className={styles.addonIcon}>{getIcon(a.icon)}</span>
-                      <span className={styles.addonPrice}>+<CurrencySymbol size={12} /> {parseFloat(a.price).toFixed(2)}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span className={styles.addonPrice}>+<CurrencySymbol size={12} /> {parseFloat(a.price).toFixed(2)}</span>
+                        <div className={styles.itemActions}>
+                          <button className={styles.actionBtn} onClick={() => handleEdit(a, 'addon')}><Edit2 size={14} /></button>
+                          <button className={`${styles.actionBtn} ${styles.deleteBtn}`} onClick={() => handleDelete(a.id, 'addons')}><Trash2 size={14} /></button>
+                        </div>
+                      </div>
                     </div>
                     <div className={styles.addonName}>{a.name}</div>
                   </div>
@@ -208,8 +297,10 @@ export default function Services() {
             )}
           </div>
         </div>
+        )}
 
         {/* 4. Categories */}
+        {(activeView === 'overview' || activeView === 'list') && (
         <div className={styles.card}>
           <div className={styles.cardHeader}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -221,14 +312,19 @@ export default function Services() {
           <div className={styles.cardBody}>
             {loading ? <p className={styles.empty}>Loading...</p> : (
               <div className={styles.list}>
-                {categories.length > 0 ? categories.map(c => (
+                {filteredCategories.length > 0 ? filteredCategories.map(c => (
                   <div key={c.id} className={styles.listItem}>
                     <div className={styles.itemInfo}>
-                      <div className={styles.iconBox} style={{ background: '#FDF2F8' }}>{getIcon(c.icon)}</div>
                       <div className={styles.itemName}>{c.name}</div>
                     </div>
-                    <div className={styles.badge} style={{ background: '#FDF2F8', color: '#EC4899' }}>
-                      {services.filter(s => s.category === c.name).length} Services
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <div className={styles.badge} style={{ background: '#FDF2F8', color: '#EC4899' }}>
+                        {services.filter(s => s.category === c.name).length} Services
+                      </div>
+                      <div className={styles.itemActions}>
+                        <button className={styles.actionBtn} onClick={() => handleEdit(c, 'category')}><Edit2 size={16} /></button>
+                        <button className={`${styles.actionBtn} ${styles.deleteBtn}`} onClick={() => handleDelete(c.id, 'service_categories')}><Trash2 size={16} /></button>
+                      </div>
                     </div>
                   </div>
                 )) : <p className={styles.empty}>No categories found.</p>}
@@ -236,18 +332,38 @@ export default function Services() {
             )}
           </div>
         </div>
+        )}
       </div>
+      );
+      })()}
 
       {/* Modal */}
       {showModal && (
         <div className={styles.modalOverlay}>
           <div className={styles.modal}>
             <div className={styles.modalHeader}>
-              <h2>Add New {showModal.charAt(0).toUpperCase() + showModal.slice(1)}</h2>
+              <h2>{editId ? 'Edit' : 'Add New'} {showModal.charAt(0).toUpperCase() + showModal.slice(1)}</h2>
               <X size={24} className={styles.closeBtn} onClick={() => setShowModal(null)} />
             </div>
             <form onSubmit={handleSave}>
               <div className={styles.modalBody}>
+                <div className={styles.imageUploadSection}>
+                  <div className={styles.imagePreview}>
+                    {formData.image ? (
+                      <img src={formData.image} alt="Preview" />
+                    ) : (
+                      <div className={styles.imagePlaceholder}>
+                        <ImageIcon size={32} />
+                      </div>
+                    )}
+                    <label className={styles.uploadBtn}>
+                      <Camera size={16} />
+                      <input type="file" hidden accept="image/*" onChange={handleImageUpload} />
+                    </label>
+                  </div>
+                  <p className={styles.uploadText}>Click camera to upload service image</p>
+                </div>
+
                 <div className={styles.formGroup}>
                   <label>Name</label>
                   <input 
@@ -294,20 +410,7 @@ export default function Services() {
                     </div>
                   </>
                 )}
-                <div className={styles.formGroup}>
-                  <label>Icon</label>
-                  <div className={styles.iconSelector}>
-                    {['Shirt', 'Bed', 'Wind', 'Droplet', 'Heart', 'Layers', 'Zap', 'Sparkles', 'Scissors', 'Tag'].map(icon => (
-                      <div 
-                        key={icon} 
-                        className={`${styles.iconOption} ${formData.icon === icon ? styles.active : ''}`}
-                        onClick={() => setFormData({...formData, icon})}
-                      >
-                        {getIcon(icon)}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+
               </div>
               <div className={styles.modalFooter}>
                 <button type="button" className={styles.secondaryBtn} onClick={() => setShowModal(null)}>Cancel</button>

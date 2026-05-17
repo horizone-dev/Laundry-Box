@@ -8,6 +8,7 @@ import {
   Share2, MessageSquare, FileDown, Layers, ArrowLeft
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
+import { DEFAULT_SHOP_ID } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Settlement.module.css';
 
@@ -214,7 +215,7 @@ export default function Settlement() {
             await window.electronAPI.dbQuery(
               `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt) 
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-              [`PAY-${Date.now()}-${bill.id}`, selectedCustomer.id, bill.id, 'SHOP_01', allocate, paymentMethod, 'SUCCESS', timestamp]
+              [`PAY-${Date.now()}-${bill.id}`, selectedCustomer.id, bill.id, DEFAULT_SHOP_ID, allocate, paymentMethod, 'SUCCESS', timestamp]
             );
           }
         }

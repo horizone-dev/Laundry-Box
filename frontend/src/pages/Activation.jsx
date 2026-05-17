@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useSettings } from '../store/SettingsContext';
+import { DEFAULT_SHOP_ID } from '../constants';
 import { useNavigate } from 'react-router-dom';
 import styles from './Activation.module.css';
 
@@ -65,7 +66,7 @@ const Activation = () => {
     // Also update local database columns directly for safety
     if (window.electronAPI?.dbQuery) {
       const now = new Date().toISOString();
-      await window.electronAPI.dbQuery('UPDATE shops SET isActivated = 1, activationDate = ? WHERE shopId = ?', [now, 'SHOP_01']);
+      await window.electronAPI.dbQuery('UPDATE shops SET isActivated = 1, activationDate = ? WHERE shopId = ?', [now, DEFAULT_SHOP_ID]);
       // Refresh settings in context
       await updateSettings({ 
         isActivated: true, 
@@ -93,7 +94,7 @@ const Activation = () => {
       });
 
       if (window.electronAPI?.dbQuery) {
-        await window.electronAPI.dbQuery('UPDATE shops SET isActivated = 1, activationDate = ? WHERE shopId = ?', [now, 'SHOP_01']);
+        await window.electronAPI.dbQuery('UPDATE shops SET isActivated = 1, activationDate = ? WHERE shopId = ?', [now, DEFAULT_SHOP_ID]);
       }
       
       setIsActivated(true);

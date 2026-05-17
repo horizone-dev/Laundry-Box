@@ -5,6 +5,7 @@ import {
   TrendingDown, X, Zap, Trash2
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
+import { DEFAULT_SHOP_ID } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Expenses.module.css';
 
@@ -74,7 +75,7 @@ export default function Expenses() {
 
         await window.electronAPI.dbQuery(
           'INSERT INTO expenses (id, shopId, title, amount, taxAmount, isTaxEnabled, taxMethod, category, date, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, 'SHOP_01', formData.title, totalAmount, taxAmount, formData.isTaxEnabled ? 1 : 0, formData.taxMethod, formData.category, formData.date, new Date().toISOString()]
+          [id, DEFAULT_SHOP_ID, formData.title, totalAmount, taxAmount, formData.isTaxEnabled ? 1 : 0, formData.taxMethod, formData.category, formData.date, new Date().toISOString()]
         );
 
         // Also record in Accounts
@@ -84,7 +85,7 @@ export default function Expenses() {
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, 'SHOP_01', formData.paymentSource, 'EXPENSE', formData.category, totalAmount, formData.title, txnTimestamp, 0, new Date().toISOString(), 'Zap']
+          [txnId, DEFAULT_SHOP_ID, formData.paymentSource, 'EXPENSE', formData.category, totalAmount, formData.title, txnTimestamp, 0, new Date().toISOString(), 'Zap']
         );
 
         fetchExpenses();

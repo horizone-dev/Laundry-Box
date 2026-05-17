@@ -8,13 +8,37 @@
 
 /* Sidebar Styling */
 .sidebar {
-  width: var(--sidebar-width);
+  width: 80px;
   background-color: #0F172A; /* Deep Navy/Dark */
   display: flex;
   flex-direction: column;
-  padding: 1.5rem 1.25rem;
+  padding: 1.5rem 0.75rem;
   z-index: 10;
   color: #94A3B8;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease;
+  overflow-x: hidden;
+  white-space: nowrap;
+}
+
+.sidebar:hover {
+  width: var(--sidebar-width);
+  padding: 1.5rem 1.25rem;
+}
+
+.sidebarText, .logoSub, .chevron, .subMenu, .trialStatusSidebar {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.sidebar:hover .sidebarText,
+.sidebar:hover .logoSub,
+.sidebar:hover .chevron,
+.sidebar:hover .subMenu,
+.sidebar:hover .trialStatusSidebar {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.3s ease 0.1s;
 }
 
 .logo {
@@ -41,6 +65,11 @@
   height: 24px;
   object-fit: contain;
   border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.logoBrand svg, .navItem svg, .sidebarFooter svg {
+  flex-shrink: 0;
 }
 
 .logoSub {
@@ -187,7 +216,7 @@
   transform: translateY(-1px);
 }
 
-.headerDeliverBtn, .headerSettleBtn {
+.headerNewOrderBtn, .headerDeliverBtn, .headerSettleBtn {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -198,6 +227,18 @@
   cursor: pointer;
   transition: all 0.2s;
   border: 1px solid #E2E8F0;
+}
+
+.headerNewOrderBtn {
+  background: #2563EB;
+  color: white;
+  border-color: #2563EB;
+}
+
+.headerNewOrderBtn:hover {
+  background: #1D4ED8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
 }
 
 .headerDeliverBtn {

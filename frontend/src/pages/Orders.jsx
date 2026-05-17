@@ -8,12 +8,13 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { QRCodeSVG } from 'qrcode.react';
 import { useSettings } from '../store/SettingsContext';
+import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
 import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
 import DressTag from '../components/DressTag';
 import styles from './Orders.module.css';
 
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = API_BASE_URL;
 
 const STATUS_COLORS = {
   'Payment Pending': styles.statusPending,
@@ -287,7 +288,7 @@ export default function Orders({ isPendingView = false }) {
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, 'SHOP_01', payMethod, 'INCOME', 'Sales Settlement', selectedOrder.totalAmount, `Payment for Order ${selectedOrder.id}`, txnTimestamp, 0, new Date().toISOString(), 'DollarSign']
+          [txnId, DEFAULT_SHOP_ID, payMethod, 'INCOME', 'Sales Settlement', selectedOrder.totalAmount, `Payment for Order ${selectedOrder.id}`, txnTimestamp, 0, new Date().toISOString(), 'DollarSign']
         );
       }
 
@@ -669,15 +670,24 @@ export default function Orders({ isPendingView = false }) {
                   <div className={styles.section}>
                     <h3>Order Items</h3>
                     <div className={styles.itemsList}>
-                      {(typeof selectedOrder.items === 'string' ? JSON.parse(selectedOrder.items) : selectedOrder.items).map((item, i) => (
-                        <div key={i} className={styles.orderItem}>
-                          <span>{item.qty} x {item.name} ({item.type})</span>
-                          <span><CurrencySymbol size={12} /> {(item.price * item.qty).toFixed(2)}</span>
-                        </div>
-                      ))}
+                      {(() => {
+                        let items = [];
+                        try {
+                          items = typeof selectedOrder.items === 'string' 
+                            ? JSON.parse(selectedOrder.items || '[]') 
+                            : (selectedOrder.items || []);
+                        } catch(e) { console.error("Failed to parse items", e); }
+                        
+                        return (Array.isArray(items) ? items : []).map((item, i) => (
+                          <div key={i} className={styles.orderItem}>
+                            <span>{item.qty} x {item.name} {item.type ? `(${item.type})` : ''}</span>
+                            <span><CurrencySymbol size={12} /> {((item.price || 0) * (item.qty || 1)).toFixed(2)}</span>
+                          </div>
+                        ));
+                      })()}
                       <div className={styles.orderTotal}>
                         <span>Total Paid via {selectedOrder.paymentMethod || 'CASH'}</span>
-                        <span><CurrencySymbol size={14} /> {selectedOrder.totalAmount?.toFixed(2)}</span>
+                        <span><CurrencySymbol size={14} /> {(selectedOrder.totalAmount || 0).toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
@@ -685,15 +695,24 @@ export default function Orders({ isPendingView = false }) {
                   <div className={styles.section}>
                     <h3>Status History</h3>
                     <div className={styles.timeline}>
-                      {(typeof selectedOrder.statusHistory === 'string' ? JSON.parse(selectedOrder.statusHistory) : (selectedOrder.statusHistory || [])).map((h, i) => (
-                        <div key={i} className={styles.timelineItem}>
-                          <div className={styles.timelineDot}></div>
-                          <div className={styles.timelineContent}>
-                            <p className={styles.timelineStatus}>{h.status}</p>
-                            <p className={styles.timelineMeta}>{h.updatedBy || 'Staff'} • {new Date(h.timestamp).toLocaleString()}</p>
+                      {(() => {
+                        let history = [];
+                        try {
+                          history = typeof selectedOrder.statusHistory === 'string' 
+                            ? JSON.parse(selectedOrder.statusHistory || '[]') 
+                            : (selectedOrder.statusHistory || []);
+                        } catch(e) { console.error("Failed to parse history", e); }
+                        
+                        return (Array.isArray(history) ? history : []).map((h, i) => (
+                          <div key={i} className={styles.timelineItem}>
+                            <div className={styles.timelineDot}></div>
+                            <div className={styles.timelineContent}>
+                              <p className={styles.timelineStatus}>{h.status || 'Unknown'}</p>
+                              <p className={styles.timelineMeta}>{h.updatedBy || 'Staff'} • {h.timestamp ? new Date(h.timestamp).toLocaleString() : 'Unknown Date'}</p>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ));
+                      })()}
                     </div>
                   </div>
                 </div>

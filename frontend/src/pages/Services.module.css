@@ -174,6 +174,44 @@
   font-style: italic;
 }
 
+.itemActions {
+  display: flex;
+  gap: 0.5rem;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: all 0.2s;
+}
+
+.listItem:hover .itemActions,
+.addonItem:hover .itemActions {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.actionBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.actionBtn:hover {
+  background: var(--background);
+  color: var(--primary);
+}
+
+.actionBtn.deleteBtn:hover {
+  color: var(--danger);
+}
+
 /* Modal Styles */
 .modalOverlay {
   position: fixed;
@@ -193,9 +231,12 @@
   background-color: var(--surface);
   width: 100%;
   max-width: 450px;
+  max-height: 90vh;
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xl);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
   animation: modalIn 0.3s ease-out;
 }
 
@@ -210,6 +251,13 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.modal form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
 }
 
 .modalHeader h2 {
@@ -227,6 +275,8 @@
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  overflow-y: auto;
+  flex: 1;
 }
 
 .formGroup {
@@ -301,3 +351,72 @@
   font-weight: 600;
   cursor: pointer;
 }
+
+.imageUploadSection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.imagePreview {
+  width: 120px;
+  height: 120px;
+  border-radius: var(--radius-lg);
+  border: 2px dashed var(--border);
+  position: relative;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--background);
+}
+
+.imagePreview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.imagePlaceholder {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.uploadBtn {
+  position: absolute;
+  bottom: -10px;
+  right: -10px;
+  width: 36px;
+  height: 36px;
+  background: var(--primary);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  border: 3px solid var(--surface);
+  transition: transform 0.2s;
+}
+
+.uploadBtn:hover {
+  transform: scale(1.1);
+}
+
+.uploadText {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.serviceImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+

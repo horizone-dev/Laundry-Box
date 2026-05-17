@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../store/SettingsContext';
+import { DEFAULT_SHOP_ID } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Customers.module.css';
 
@@ -58,11 +59,7 @@ export default function Customers() {
         setLoading(false);
       }
     } else {
-      // Mock data for web view
-      setCustomers([
-        { id: '1', name: 'Julianne Moore', email: 'j.moore@example.com', phone: '(555) 012-3456', orders: 24, lastDate: 'Oct 12, 2023', tag: 'Premium Member' },
-        { id: '2', name: 'Thomas Hegarty', email: 't.hegarty@cloud.com', phone: '(555) 012-9876', orders: 12, lastDate: 'Oct 10, 2023', tag: 'Standard' },
-      ]);
+      setCustomers([]);
       setLoading(false);
     }
   };
@@ -76,7 +73,7 @@ export default function Customers() {
       try {
         await window.electronAPI.dbQuery(
           'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, 'SHOP_01', formData.name, formData.phone, formData.email, formData.address, parseFloat(formData.creditLimit) || 0, 0, timestamp]
+          [id, DEFAULT_SHOP_ID, formData.name, formData.phone, formData.email, formData.address, parseFloat(formData.creditLimit) || 0, 0, timestamp]
         );
         fetchCustomers();
         setShowModal(false);
@@ -150,7 +147,7 @@ export default function Customers() {
             await window.electronAPI.dbQuery(
               `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt) 
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-              [`PAY-${Date.now()}-${bill.id}`, selectedCustomer.id, bill.id, 'SHOP_01', paymentForThisBill, paymentData.method, 'SUCCESS', timestamp]
+              [`PAY-${Date.now()}-${bill.id}`, selectedCustomer.id, bill.id, DEFAULT_SHOP_ID, paymentForThisBill, paymentData.method, 'SUCCESS', timestamp]
             );
           }
         } else {
@@ -171,7 +168,7 @@ export default function Customers() {
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, 'SHOP_01', paymentData.method, 'INCOME', 'Credit Settlement', totalPaid, `Settlement from ${selectedCustomer.name}`, txnTimestamp, 0, timestamp, 'DollarSign']
+          [txnId, DEFAULT_SHOP_ID, paymentData.method, 'INCOME', 'Credit Settlement', totalPaid, `Settlement from ${selectedCustomer.name}`, txnTimestamp, 0, timestamp, 'DollarSign']
         );
 
         setShowPaymentModal(false);

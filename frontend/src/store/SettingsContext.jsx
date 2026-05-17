@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { DEFAULT_SHOP_ID } from '../constants';
 
 const SettingsContext = createContext();
 
@@ -133,7 +134,7 @@ export function SettingsProvider({ children }) {
 
         await window.electronAPI.dbQuery(
           'UPDATE shops SET name = ?, settings = ?, updatedAt = ? WHERE shopId = ?',
-          [updated.companyName, settingsJson, new Date().toISOString(), 'SHOP_01']
+          [updated.companyName, settingsJson, new Date().toISOString(), DEFAULT_SHOP_ID]
         );
       } catch (err) {
         console.error("Failed to save settings:", err);
