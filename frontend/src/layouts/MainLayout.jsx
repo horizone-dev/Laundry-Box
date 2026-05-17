@@ -392,12 +392,12 @@ export default function MainLayout() {
 
   const processQuickSettle = async () => {
     if (!foundCustomer || !settleAmount || parseFloat(settleAmount) <= 0) return;
-    
+
     setIsUpdating(true);
     try {
       const amount = parseFloat(settleAmount);
       const timestamp = new Date().toISOString();
-      
+
       // 1. Update Customer Balance
       await window.electronAPI.dbQuery(
         'UPDATE customers SET balance = balance - ?, updatedAt = ? WHERE id = ?',
@@ -416,7 +416,7 @@ export default function MainLayout() {
         'SELECT * FROM orders WHERE customerId = ? AND dueAmount > 0 ORDER BY createdAt ASC',
         [foundCustomer.id]
       );
-      
+
       let remaining = amount;
       if (billsRes.success && billsRes.data.length > 0) {
         for (const bill of billsRes.data) {
@@ -426,7 +426,7 @@ export default function MainLayout() {
           let newPaid = (bill.paidAmount || 0) + allocate;
           let newDue = currentDue - allocate;
           let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
-          
+
           await window.electronAPI.dbQuery(
             'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, updatedAt = ? WHERE id = ?',
             [newPaid, newDue, newStatus, timestamp, bill.id]
@@ -816,8 +816,8 @@ export default function MainLayout() {
               ) : null}
             </div>
           </div>
-          </div>
-        )}
+        </div>
+      )}
       {/* Quick Settlement Modal */}
       {showQuickSettle && (
         <div className={styles.modalOverlay}>
@@ -855,12 +855,12 @@ export default function MainLayout() {
                       {foundCustomer.balance > 0 ? `Due: ${(settings.currencySymbol || 'AED')} ${foundCustomer.balance.toFixed(2)}` : 'No Due'}
                     </span>
                   </div>
-                  
+
                   <div className={styles.quickSettleForm}>
                     <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
                       <label>Amount to Receive</label>
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         className={styles.amountInput}
                         value={settleAmount}
                         onChange={(e) => setSettleAmount(e.target.value)}
@@ -868,11 +868,11 @@ export default function MainLayout() {
                         style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', fontSize: '1.25rem', fontWeight: 700 }}
                       />
                     </div>
-                    
+
                     <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
                       <label>Method</label>
-                      <select 
-                        value={settleMethod} 
+                      <select
+                        value={settleMethod}
                         onChange={(e) => setSettleMethod(e.target.value)}
                         style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0' }}
                       >
