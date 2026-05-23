@@ -12,6 +12,7 @@ import ServiceType from './pages/services/ServiceType';
 import Addons from './pages/services/Addons';
 import Reports from './pages/Reports';
 import RevenueReport from './pages/RevenueReport';
+import CustomerStatement from './pages/CustomerStatement';
 import Expenses from './pages/Expenses';
 import Invoice from './pages/Invoice';
 import Login from './pages/Login';
@@ -58,6 +59,7 @@ function App() {
             <Route index element={<Reports />} />
             <Route path="revenue" element={<RevenueReport />} />
             <Route path="expenses" element={<Expenses />} />
+            <Route path="customer-statement" element={<CustomerStatement />} />
           </Route>
           <Route path="expenses" element={<Expenses />} />
           <Route path="settings" element={<Settings />} />

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Search, UserPlus, Download, Calendar, MoreHorizontal, 
-  TrendingUp, Star, Clock, ChevronLeft, ChevronRight, X, Mail, Phone, MapPin, MessageCircle, CreditCard, Wallet, DollarSign, Trash2
+  TrendingUp, Star, Clock, ChevronLeft, ChevronRight, X, Phone, MapPin, MessageCircle, CreditCard, Wallet, DollarSign, Trash2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../store/SettingsContext';
@@ -13,6 +13,7 @@ export default function Customers() {
   const navigate = useNavigate();
   const { settings } = useSettings();
   const [customers, setCustomers] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showBillsModal, setShowBillsModal] = useState(false);
@@ -25,7 +26,6 @@ export default function Customers() {
   const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState({
     name: '',
-    email: '',
     phone: '',
     address: '',
     creditLimit: '0'
@@ -33,6 +33,7 @@ export default function Customers() {
 
   useEffect(() => {
     fetchCustomers();
+    setCurrentPage(1);
   }, [searchTerm]);
 
   const fetchCustomers = async () => {
@@ -42,9 +43,9 @@ export default function Customers() {
         let params = [];
         
         if (searchTerm) {
-          query += ' WHERE name LIKE ? OR phone LIKE ? OR id LIKE ? OR email LIKE ?';
+          query += ' WHERE name LIKE ? OR phone LIKE ? OR id LIKE ?';
           const param = `%${searchTerm}%`;
-          params = [param, param, param, param];
+          params = [param, param, param];
         }
         
         query += ' ORDER BY updatedAt DESC';
@@ -73,11 +74,11 @@ export default function Customers() {
       try {
         await window.electronAPI.dbQuery(
           'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, DEFAULT_SHOP_ID, formData.name, formData.phone, formData.email, formData.address, parseFloat(formData.creditLimit) || 0, 0, timestamp]
+          [id, DEFAULT_SHOP_ID, formData.name, formData.phone, '', formData.address, parseFloat(formData.creditLimit) || 0, 0, timestamp]
         );
         fetchCustomers();
         setShowModal(false);
-        setFormData({ name: '', email: '', phone: '', address: '' });
+        setFormData({ name: '', phone: '', address: '' });
       } catch (err) {
         console.error("Failed to save customer:", err);
       }
@@ -85,7 +86,7 @@ export default function Customers() {
       // Web demo
       setCustomers([{ ...formData, id, orders: 0, lastDate: 'Just now', tag: 'New' }, ...customers]);
       setShowModal(false);
-      setFormData({ name: '', email: '', phone: '', address: '' });
+      setFormData({ name: '', phone: '', address: '' });
     }
   };
 
@@ -103,7 +104,7 @@ export default function Customers() {
 
         // 1. Fetch oldest unpaid/partial bills first (FIFO)
         const billsRes = await window.electronAPI.dbQuery(
-          'SELECT * FROM orders WHERE customerId = ? AND (dueAmount > 0 OR paymentStatus = "Credit" OR paymentStatus = "Partial") ORDER BY createdAt ASC',
+          'SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != "" AND (dueAmount > 0 OR paymentStatus = "Credit" OR paymentStatus = "Partial") ORDER BY createdAt ASC',
           [selectedCustomer.id]
         );
 
@@ -139,8 +140,8 @@ export default function Customers() {
 
             // Update Bill
             await window.electronAPI.dbQuery(
-              'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, updatedAt = ? WHERE id = ?',
-              [newPaid, newDue, newStatus, timestamp, bill.id]
+              'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+              [newPaid, newDue, newStatus, paymentData.method, timestamp, bill.id]
             );
 
             // Record Payment Entry linked to Bill
@@ -154,9 +155,18 @@ export default function Customers() {
           console.log("No specific bills found to settle, applying to general balance.");
         }
 
+        // If there's remaining unapplied payment (excess / advance payment), record it as an unlinked payment
+        if (remainingPayment > 0) {
+          await window.electronAPI.dbQuery(
+            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [`PAY-ADV-${Date.now()}`, selectedCustomer.id, null, DEFAULT_SHOP_ID, remainingPayment, paymentData.method, 'SUCCESS', timestamp]
+          );
+        }
+
         // 2. Update overall customer balance
         await window.electronAPI.dbQuery(
-          'UPDATE customers SET balance = balance - ?, updatedAt = ? WHERE id = ?',
+          'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
           [totalPaid, timestamp, selectedCustomer.id]
         );
 
@@ -199,7 +209,7 @@ export default function Customers() {
     if (window.electronAPI?.dbQuery) {
       try {
         const result = await window.electronAPI.dbQuery(
-          'SELECT * FROM orders WHERE customerId = ? ORDER BY createdAt DESC',
+          'SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != "" ORDER BY createdAt DESC',
           [customerId]
         );
         if (result.success) setCustomerBills(result.data);
@@ -235,6 +245,11 @@ export default function Customers() {
       window.open(url, '_blank');
     }
   };
+
+  const ITEMS_PER_PAGE = 12;
+  const totalPages = Math.ceil(customers.length / ITEMS_PER_PAGE) || 1;
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const paginatedCustomers = customers.slice(startIndex, startIndex + ITEMS_PER_PAGE);
 
   return (
     <div className={styles.customersPage}>
@@ -286,7 +301,7 @@ export default function Customers() {
           <Search size={18} color="#94A3B8" />
           <input 
             type="text" 
-            placeholder="Search by ID, Name, Phone or Email..." 
+            placeholder="Search by ID, Name or Phone..." 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -304,7 +319,6 @@ export default function Customers() {
             <tr>
               <th>ID</th>
               <th>Customer Name</th>
-              <th>Email</th>
               <th>Phone Number</th>
               <th>Balance</th>
               <th>Credit Limit</th>
@@ -313,7 +327,7 @@ export default function Customers() {
             </tr>
           </thead>
           <tbody>
-            {customers.length > 0 ? customers.map((customer, idx) => (
+            {paginatedCustomers.length > 0 ? paginatedCustomers.map((customer, idx) => (
               <tr key={customer.id || idx}>
                 <td style={{ fontWeight: 700, color: '#64748B', fontSize: '0.8rem' }}>
                   {customer.id?.split('-')[1]?.substring(0, 8) || customer.id || idx + 1}
@@ -327,7 +341,7 @@ export default function Customers() {
                     </div>
                   </div>
                 </td>
-                <td>{customer.email}</td>
+
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     {customer.phone}
@@ -390,14 +404,40 @@ export default function Customers() {
         </table>
 
         {/* Pagination */}
-        <div className={styles.pagination}>
-          <span className={styles.paginationInfo}>Showing 1 to {customers.length} of {customers.length} customers</span>
-          <div className={styles.paginationBtns}>
-            <button className={styles.pageBtn}><ChevronLeft size={16} /></button>
-            <button className={`${styles.pageBtn} ${styles.active}`}>1</button>
-            <button className={styles.pageBtn}><ChevronRight size={16} /></button>
+        {customers.length > 0 && (
+          <div className={styles.pagination}>
+            <span className={styles.paginationInfo}>
+              Showing {startIndex + 1} to {Math.min(startIndex + ITEMS_PER_PAGE, customers.length)} of {customers.length} customers
+            </span>
+            <div className={styles.paginationBtns}>
+              <button 
+                className={styles.pageBtn}
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(pageNum => (
+                <button 
+                  key={pageNum}
+                  className={`${styles.pageBtn} ${currentPage === pageNum ? styles.active : ''}`}
+                  onClick={() => setCurrentPage(pageNum)}
+                >
+                  {pageNum}
+                </button>
+              ))}
+              
+              <button 
+                className={styles.pageBtn}
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
 
@@ -429,21 +469,7 @@ export default function Customers() {
                   </div>
                 </div>
 
-                <div className={styles.formGrid}>
-                  <div className={styles.formGroup}>
-                    <label>Email Address (Optional)</label>
-                    <div className={styles.inputWrapper}>
-                      <Mail size={18} />
-                      <input 
-                        type="email" 
-                        placeholder="john@example.com" 
-                        value={formData.email}
-                        onChange={(e) => setFormData({...formData, email: e.target.value})}
-                      />
-                    </div>
-                  </div>
-
-                  <div className={styles.formGroup}>
+                <div className={styles.formGroup}>
                     <label>Phone Number</label>
                     <div className={styles.inputWrapper}>
                       <Phone size={18} />
@@ -456,7 +482,6 @@ export default function Customers() {
                       />
                     </div>
                   </div>
-                </div>
 
                   <div className={styles.formGroup}>
                     <label>Address (Optional)</label>

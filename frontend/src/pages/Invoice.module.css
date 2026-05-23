@@ -237,7 +237,6 @@
   color: #0F172A;
   font-size: 1rem;
 }
-
 .grandTotalValue {
   font-size: 1.75rem;
   font-weight: 800;
@@ -247,7 +246,7 @@
 /* Footer Actions */
 .footerActions {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1rem;
 }
 
@@ -366,6 +365,422 @@
   justify-content: center;
   gap: 0.75rem;
   cursor: pointer;
+}
+
+/* Bilingual Invoice Styles */
+.invoiceHeaderBilingual {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 2rem;
+  width: 100%;
+}
+
+.companySideEn {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  flex: 1;
+}
+
+.companyInfoEn h2 {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #0F172A;
+  margin: 0 0 0.4rem;
+}
+
+.logoPlaceholder {
+  width: 48px;
+  height: 48px;
+  background: #EFF6FF;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #2563EB;
+  flex-shrink: 0;
+}
+
+.companyAddress {
+  font-size: 0.85rem;
+  color: #64748B;
+  line-height: 1.4;
+  margin-bottom: 0.2rem;
+}
+
+.companyContact {
+  font-size: 0.8rem;
+  color: #94A3B8;
+  margin-bottom: 0.1rem;
+}
+
+.companySideAr {
+  flex: 1;
+}
+
+.companySideAr h2 {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #0F172A;
+  margin: 0 0 0.4rem;
+}
+
+.taxInvoiceTitleBlock {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 2rem 0;
+  width: 100%;
+}
+
+.dividerLine {
+  flex: 1;
+  height: 1px;
+  background: #E2E8F0;
+}
+
+.titleTextContainer h1 {
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: #0F172A;
+  letter-spacing: 1px;
+  text-align: center;
+}
+
+.metaDataBlock {
+  background: #F8FAFC;
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  padding: 1rem 1.5rem;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.metaLeftColumn, .metaRightColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex: 1;
+}
+
+.metaRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  border-bottom: 1px dashed #E2E8F0;
+  padding-bottom: 0.4rem;
+}
+
+.metaRow:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.metaLabelEnAr {
+  font-weight: 700;
+  color: #64748B;
+  font-size: 0.78rem;
+}
+
+.metaValue {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.statusValueBadge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.15rem 0.5rem;
+  border-radius: 12px;
+  text-transform: uppercase;
+}
+
+.customerBlockBilingual {
+  background: white;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 1.25rem;
+  width: 100%;
+}
+
+.customerBlockBilingual h3 {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #475569;
+  border-bottom: 1px solid #F1F5F9;
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.85rem;
+  letter-spacing: 0.5px;
+}
+
+.customerGrid {
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.customerItem {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.customerLabelEn {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #64748B;
+}
+
+.customerVal {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #1E293B;
+}
+
+.itemsTableBilingual {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+}
+
+.itemsTableBilingual th {
+  padding: 0.85rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #475569;
+  border-bottom: 2px solid #E2E8F0;
+  text-transform: uppercase;
+}
+
+.thAr {
+  font-size: 0.65rem;
+  color: #94A3B8;
+  margin-top: 0.1rem;
+}
+
+.itemsTableBilingual td {
+  padding: 1rem 0.5rem;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.itemServiceType {
+  font-size: 0.8rem;
+  color: #64748B;
+  background: #F1F5F9;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.bottomBilingualSection {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 2rem;
+  width: 100%;
+}
+
+.trackingAndBankDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.complianceQrBox {
+  background: #F8FAFC;
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  padding: 1rem;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.qrWrapper {
+  background: white;
+  border-radius: 6px;
+  padding: 0.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.qrDetails h4 {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #1E293B;
+  margin-bottom: 0.2rem;
+}
+
+.qrDetails p {
+  font-size: 0.75rem;
+  color: #64748B;
+  line-height: 1.3;
+}
+
+.qrDetails .arText {
+  direction: rtl;
+  text-align: left;
+}
+
+.bankInfoBox {
+  background: #F8FAFC;
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  padding: 1rem;
+}
+
+.bankInfoBox h4 {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #1E293B;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid #E2E8F0;
+  padding-bottom: 0.3rem;
+}
+
+.bankAccountRow {
+  font-size: 0.78rem;
+  color: #475569;
+  line-height: 1.5;
+  margin-bottom: 0.25rem;
+}
+
+.totalsBilingualBox {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.totalsSubCard {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.totalsSubCardHeader {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #475569;
+  border-bottom: 1px solid #E2E8F0;
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.25rem;
+  display: flex;
+  justify-content: space-between;
+}
+
+.totalRowBilingual {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.highlightRow {
+  background: #E2E8F0;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  color: #0F172A;
+  font-weight: 700;
+}
+
+.grandTotalBilingualRow {
+  margin-top: 0.25rem;
+  padding: 0.5rem;
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid #E2E8F0;
+}
+
+.balancePaid {
+  background: #ECFDF5;
+  border-color: #A7F3D0;
+}
+
+.balancePaid .grandVal {
+  color: #10B981;
+}
+
+.balanceOverdue {
+  background: #FEF2F2;
+  border-color: #FCA5A5;
+}
+
+.balanceOverdue .grandVal {
+  color: #EF4444;
+}
+
+.grandLabelCol {
+  display: flex;
+  flex-direction: column;
+}
+
+.grandLabelEn {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #0F172A;
+  text-transform: uppercase;
+}
+
+.grandLabelAr {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #64748B;
+}
+
+.grandVal {
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+/* Compact overrides */
+.template_compact .invoiceHeaderBilingual {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.template_compact .companySideEn {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.template_compact .companyInfoEn h2 {
+  text-align: center;
+}
+
+.template_compact .metaDataBlock {
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.85rem;
+}
+
+.template_compact .customerGrid {
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.template_compact .itemsTableBilingual th div:last-child {
+  display: none;
+}
+
+.template_compact .bottomBilingualSection {
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
 }
 
 @media print {

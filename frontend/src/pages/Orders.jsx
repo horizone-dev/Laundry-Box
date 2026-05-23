@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, Filter, ChevronLeft, ChevronRight, MoreHorizontal, 
   Clock, Package, CheckCircle, AlertCircle, ChevronDown, 
-  X, Printer, CreditCard, Wallet, User, History, QrCode, MessageCircle, Phone, DollarSign
+  X, Printer, CreditCard, Wallet, User, History, QrCode, MessageCircle, Phone, DollarSign, Truck
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
@@ -50,6 +50,24 @@ export default function Orders({ isPendingView = false }) {
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [pendingSubFilter, setPendingSubFilter] = useState('All'); // 'All', 'Pending', 'Overdue'
   const [isPrintingTags, setIsPrintingTags] = useState(false);
+
+  // Translation helpers
+  const translateStatus = (status) => {
+    if (!status) return '';
+    if (['Payment Pending', 'Credit'].includes(status)) {
+      return t('confirmed', settings.language);
+    }
+    // Convert to camelCase (e.g. "Ready to Pick up" -> "readyToPickUp", "Picked Up" -> "pickedUp")
+    const key = status.charAt(0).toLowerCase() + status.slice(1).replace(/\s+(.)/g, (_, c) => c.toUpperCase());
+    return t(key, settings.language);
+  };
+
+  const getPaymentMethodTranslation = (method) => {
+    if (!method) return '';
+    if (method.toUpperCase() === 'CASH') return t('cashaccount', settings.language);
+    if (method.toUpperCase() === 'BANK') return t('bankaccount', settings.language);
+    return method;
+  };
 
   // Helper to determine if an order is overdue
   const isOverdue = (order) => {
@@ -176,14 +194,26 @@ export default function Orders({ isPendingView = false }) {
     if (!orderToUpdate) return;
     
     if (['Cancelled', 'Delivered'].includes(newStatus)) {
-      if (!window.confirm(`Are you sure you want to mark Order #${orderToUpdate.id} as ${newStatus}?`)) return;
+      const statusText = translateStatus(newStatus);
+      const confirmMsg = t('confirmStatusChange', settings.language)
+        .replace('{id}', orderToUpdate.id)
+        .replace('{status}', statusText);
+      if (!window.confirm(confirmMsg)) return;
     }
 
     try {
       // 1. Update Local DB First (Offline-First approach)
       let newHistory = [];
       if (window.electronAPI?.dbQuery) {
-        const history = typeof orderToUpdate.statusHistory === 'string' ? JSON.parse(orderToUpdate.statusHistory) : (orderToUpdate.statusHistory || []);
+        let history = [];
+        try {
+          history = typeof orderToUpdate.statusHistory === 'string' 
+            ? JSON.parse(orderToUpdate.statusHistory || '[]') 
+            : (orderToUpdate.statusHistory || []);
+          if (!Array.isArray(history)) history = [];
+        } catch (e) {
+          history = [];
+        }
         newHistory = [...history, { status: newStatus, updatedBy: 'Admin Staff', timestamp: new Date().toISOString() }];
         
         await window.electronAPI.dbQuery(
@@ -209,7 +239,7 @@ export default function Orders({ isPendingView = false }) {
 
     } catch (err) {
       console.error('Failed to update status locally:', err);
-      alert('Critical: Failed to save status update to local database.');
+      alert(t('failedLocalStatusUpdate', settings.language));
     }
   };
 
@@ -228,25 +258,25 @@ export default function Orders({ isPendingView = false }) {
     try {
       if (window.electronAPI?.dbQuery) {
         await window.electronAPI.dbQuery(
-          'UPDATE orders SET paymentStatus = ?, updatedAt = ? WHERE id = ?',
+          'UPDATE orders SET paymentStatus = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
           [newPayStatus, new Date().toISOString(), selectedOrder.id]
         );
         
         // If changing to Credit, update customer balance
         if (newPayStatus === 'Credit' && selectedOrder.customerId) {
            await window.electronAPI.dbQuery(
-             'UPDATE customers SET balance = balance + ? WHERE id = ?',
-             [selectedOrder.dueAmount || selectedOrder.totalAmount, selectedOrder.customerId]
+             'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+             [selectedOrder.dueAmount ?? selectedOrder.totalAmount, new Date().toISOString(), selectedOrder.customerId]
            );
         }
       }
 
       setOrders(prev => prev.map(o => o.id === selectedOrder.id ? { ...o, paymentStatus: newPayStatus } : o));
       setSelectedOrder(prev => ({ ...prev, paymentStatus: newPayStatus }));
-      alert('Payment status updated!');
+      alert(t('paymentStatusUpdated', settings.language));
     } catch (err) {
       console.error('Failed to update payment status:', err);
-      alert('Update failed: ' + err.message);
+      alert(t('updateFailed', settings.language) + err.message);
     }
   };
 
@@ -265,18 +295,22 @@ export default function Orders({ isPendingView = false }) {
 
   const confirmPaidStatus = async () => {
     try {
+      const nextStatus = ['Payment Pending', 'Credit', 'Paid'].includes(selectedOrder.status)
+        ? 'Confirmed'
+        : selectedOrder.status;
+
       // 1. Local DB Updates (Perform this FIRST)
       if (window.electronAPI?.dbQuery) {
         // Update Local Order
         await window.electronAPI.dbQuery(
-          'UPDATE orders SET status = ?, paymentStatus = ?, paidAmount = ?, dueAmount = ?, updatedAt = ? WHERE id = ?',
-          ['Paid', 'Paid', selectedOrder.totalAmount, 0, new Date().toISOString(), selectedOrder.id]
+          'UPDATE orders SET status = ?, paymentStatus = ?, paidAmount = ?, dueAmount = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+          [nextStatus, 'Paid', selectedOrder.totalAmount, 0, payMethod, new Date().toISOString(), selectedOrder.id]
         );
 
         // Update Customer Balance if it was Credit/Pending
         if (['Credit', 'Payment Pending'].includes(selectedOrder.status) && selectedOrder.customerId) {
           await window.electronAPI.dbQuery(
-            'UPDATE customers SET balance = balance - ?, updatedAt = ? WHERE id = ?',
+            'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
             [selectedOrder.totalAmount, new Date().toISOString(), selectedOrder.customerId]
           );
         }
@@ -292,42 +326,50 @@ export default function Orders({ isPendingView = false }) {
         );
       }
 
-      // 2. Sync to Backend (Perform this SECOND)
-      try {
-        const res = await axios.patch(`${API_BASE}/orders/${encodeURIComponent(selectedOrder.id)}/status`, {
-          status: 'Paid',
-          paymentStatus: 'Paid',
-          paidAmount: selectedOrder.totalAmount,
-          dueAmount: 0,
-          updatedBy: 'Admin Staff'
-        });
-        // Update local state with fresh data from backend
-        setOrders(prev => prev.map(o => o.id === selectedOrder.id ? res.data : o));
-        setSelectedOrder(res.data);
-      } catch (syncErr) {
-        console.warn('Backend sync failed, but local payment recorded:', syncErr);
-        // Manually update local state if sync fails
-        setOrders(prev => prev.map(o => o.id === selectedOrder.id ? { ...o, status: 'Paid' } : o));
-      }
+      // 2. Update Local React State immediately
+      const updatedOrder = {
+        ...selectedOrder,
+        status: nextStatus,
+        paymentStatus: 'Paid',
+        paidAmount: selectedOrder.totalAmount,
+        dueAmount: 0,
+        paymentMethod: payMethod
+      };
+      setOrders(prev => prev.map(o => o.id === selectedOrder.id ? updatedOrder : o));
+      setSelectedOrder(updatedOrder);
+
+      // 3. Sync to Backend (fire-and-forget — DO NOT overwrite React state with backend response
+      //    because the backend may return stale data or a 404 for legacy orders, which would
+      //    visually REVERT the payment in the UI)
+      axios.patch(`${API_BASE}/orders/${encodeURIComponent(selectedOrder.id)}/status`, {
+        status: nextStatus,
+        paymentStatus: 'Paid',
+        paidAmount: selectedOrder.totalAmount,
+        dueAmount: 0,
+        updatedBy: 'Admin Staff'
+      }).catch(syncErr => {
+        console.warn('Backend sync deferred (local payment already recorded):', syncErr.message);
+      });
 
       setShowPayModal(false);
-      alert('Order marked as Paid and transaction recorded locally!');
-      // fetchOrders(); // Removed to avoid flicker, using state update instead
+      alert(t('paymentRecordedLocally', settings.language));
+      // Re-fetch from SQLite to confirm the change persisted in local DB
+      fetchOrders();
     } catch (err) {
       console.error('Failed to update local status:', err);
-      alert('Failed to record payment: ' + err.message);
+      alert(t('failedRecordPayment', settings.language) + err.message);
     }
   };
 
   const handleWhatsApp = (phone, id = null) => {
     if (!phone) {
-      alert("No phone number found for this customer.");
+      alert(t('noPhoneFound', settings.language));
       return;
     }
 
     let cleanPhone = phone.toString().replace(/\D/g, '');
     if (!cleanPhone) {
-      alert("Invalid phone number format.");
+      alert(t('invalidPhoneFormat', settings.language));
       return;
     }
     
@@ -337,9 +379,22 @@ export default function Orders({ isPendingView = false }) {
       cleanPhone = countryCode + cleanPhone;
     }
 
-    let message = `Hello! This is regarding your laundry order.`;
+    let message = t('waGeneralMessage', settings.language);
     if (id) {
-      message = `Hello! This is regarding your laundry order #${id}. Your current status is: ${selectedOrder?.status || 'Processing'}.`;
+      const getStatusTextForMsg = () => {
+        if (selectedOrder) {
+          const isPaid = selectedOrder.paymentStatus === 'Paid' || (selectedOrder.dueAmount !== undefined && selectedOrder.dueAmount <= 0);
+          if (isPaid && ['Confirmed', 'Payment Pending', 'Credit', 'Pending'].includes(selectedOrder.status)) {
+            return t('paid', settings.language);
+          }
+          return translateStatus(selectedOrder.status);
+        }
+        return t('confirmed', settings.language);
+      };
+      const statusText = getStatusTextForMsg();
+      message = t('waStatusMessage', settings.language)
+        .replace('{id}', id)
+        .replace('{status}', statusText);
     }
     
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
@@ -356,11 +411,11 @@ export default function Orders({ isPendingView = false }) {
       {/* Header */}
       <div className={styles.headerRow}>
         <div className={styles.headerTitle}>
-          <h1>{isPendingView ? 'Pending Payments' : 'Order Management'}</h1>
+          <h1>{isPendingView ? t('pendingpayments', settings.language) : t('orderManagement', settings.language)}</h1>
           <p>
             {isPendingView 
-              ? 'View and settle orders with outstanding credit balances.' 
-              : 'Track laundry status, generate QR receipts, and manage deliveries.'}
+              ? t('pendingPaymentsSub', settings.language) 
+              : t('orderManagementSub', settings.language)}
           </p>
         </div>
         <div className={styles.headerActions}>
@@ -368,16 +423,16 @@ export default function Orders({ isPendingView = false }) {
             <Search size={18} color="#94A3B8" />
             <input 
               type="text" 
-              placeholder="Search by ID, QR, Bill, or Name..." 
+              placeholder={t('searchPlaceholder', settings.language)} 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
           <button className={styles.settleBtn} onClick={() => navigate('/settlement')}>
-            <DollarSign size={18} /> Settle Bill
+            <DollarSign size={18} /> {t('settlebill', settings.language)}
           </button>
           <button className="btn btn-primary" onClick={() => navigate('/pos')}>
-            + New Order
+            + {t('neworder', settings.language)}
           </button>
         </div>
       </div>
@@ -387,41 +442,41 @@ export default function Orders({ isPendingView = false }) {
         <div className={`${styles.kpiCard} ${styles.totalCard}`}>
           <div className={styles.kpiIcon} style={{ background: '#F8FAFC' }}><DollarSign size={18} color="#0F172A" /></div>
           <div className={styles.kpiInfo}>
-            <span className={styles.kpiLabel}>Total Amount</span>
+            <span className={styles.kpiLabel}>{t('totalAmount', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#0F172A' }}>
               <CurrencySymbol size={18} /> {totalAmount.toFixed(2)}
             </span>
-            <span className={styles.kpiSub}>{orders.length} invoices</span>
+            <span className={styles.kpiSub}>{orders.length} {t('invoices', settings.language)}</span>
           </div>
         </div>
         <div className={`${styles.kpiCard} ${styles.paidCard}`}>
           <div className={styles.kpiIcon} style={{ background: '#ECFDF5' }}><CheckCircle size={18} color="#10B981" /></div>
           <div className={styles.kpiInfo}>
-            <span className={styles.kpiLabel}>Paid</span>
+            <span className={styles.kpiLabel}>{t('paid', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#10B981' }}>
               <CurrencySymbol size={18} /> {totalPaid.toFixed(2)}
             </span>
-            <span className={styles.kpiSub}>{orders.filter(o => (o.dueAmount === 0 || o.dueAmount === null) && o.totalAmount > 0).length} invoices</span>
+            <span className={styles.kpiSub}>{orders.filter(o => (o.dueAmount === 0 || o.dueAmount === null) && o.totalAmount > 0).length} {t('invoices', settings.language)}</span>
           </div>
         </div>
         <div className={`${styles.kpiCard} ${styles.pendingCard}`}>
           <div className={styles.kpiIcon} style={{ background: '#FFF7ED' }}><Clock size={18} color="#F97316" /></div>
           <div className={styles.kpiInfo}>
-            <span className={styles.kpiLabel}>Pending</span>
+            <span className={styles.kpiLabel}>{t('pending', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#F97316' }}>
               <CurrencySymbol size={18} /> {totalPending.toFixed(2)}
             </span>
-            <span className={styles.kpiSub}>{orders.filter(o => o.dueAmount > 0).length} invoices</span>
+            <span className={styles.kpiSub}>{orders.filter(o => o.dueAmount > 0).length} {t('invoices', settings.language)}</span>
           </div>
         </div>
         <div className={`${styles.kpiCard} ${styles.overdueCard}`}>
           <div className={styles.kpiIcon} style={{ background: '#FEF2F2' }}><AlertCircle size={18} color="#EF4444" /></div>
           <div className={styles.kpiInfo}>
-            <span className={styles.kpiLabel}>Overdue</span>
+            <span className={styles.kpiLabel}>{t('overdue', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#EF4444' }}>
               <CurrencySymbol size={18} /> {overdueAmount.toFixed(2)}
             </span>
-            <span className={styles.kpiSub}>{overdueOrdersList.length} invoices</span>
+            <span className={styles.kpiSub}>{overdueOrdersList.length} {t('invoices', settings.language)}</span>
           </div>
         </div>
       </div>
@@ -458,7 +513,7 @@ export default function Orders({ isPendingView = false }) {
               filteredOrders.map((order) => (
                 <div key={order.id} className={`${styles.premiumListItem} ${isOverdue(order) ? styles.overdueListItem : ''}`}>
                   <div className={styles.listIdSection}>
-                    <span className={styles.listIdLabel}>ORDER</span>
+                    <span className={styles.listIdLabel}>{t('order', settings.language).toUpperCase()}</span>
                     <h3 className={styles.listIdValue}>{order.id}</h3>
                   </div>
 
@@ -467,23 +522,35 @@ export default function Orders({ isPendingView = false }) {
                       {order.customerName ? order.customerName.charAt(0).toUpperCase() : 'W'}
                     </div>
                     <div className={styles.listUserInfo}>
-                      <p className={styles.listCustName}>{order.customerName || 'Walk-in Customer'}</p>
-                      <p className={styles.listCustPhone}>{order.customerPhone || order.phone || 'No Phone'}</p>
+                      <p className={styles.listCustName}>{order.customerName || t('walkInCustomer', settings.language)}</p>
+                      <p className={styles.listCustPhone}>{order.customerPhone || order.phone || t('noPhone', settings.language)}</p>
                     </div>
                   </div>
 
                   <div className={styles.listFinancialSection}>
-                    <div className={styles.listStat}>
-                      <span className={styles.listStatLabel}>Amount Due</span>
-                      <span className={styles.listStatValue}><CurrencySymbol size={14} /> {order.dueAmount || order.totalAmount?.toFixed(2)}</span>
-                    </div>
+                     <div className={styles.listStat}>
+                       <span className={styles.listStatLabel}>{t('dueAmount', settings.language)}</span>
+                       <span className={styles.listStatValue}><CurrencySymbol size={14} /> {(order.dueAmount ?? order.totalAmount ?? 0).toFixed(2)}</span>
+                     </div>
+                     <div className={styles.listStat} style={{ marginLeft: '1.5rem' }}>
+                       <span className={styles.listStatLabel}>{t('paymentMethodLabel', settings.language)}</span>
+                       {order.paymentStatus === 'Paid' ? (
+                         <span className={order.paymentMethod?.toUpperCase() === 'CASH' ? styles.methodCash : styles.methodOther} style={{ marginTop: '2px' }}>
+                           {order.paymentMethod}
+                         </span>
+                       ) : (
+                         <span className={styles.methodCredit} style={{ marginTop: '2px' }}>
+                           {t('notPaid', settings.language)}
+                         </span>
+                       )}
+                     </div>
                   </div>
 
                   <div className={styles.listStatusSection}>
                     {isOverdue(order) ? (
-                      <span className={styles.listBadgeOverdue}>Overdue</span>
+                      <span className={styles.listBadgeOverdue}>{t('overdue', settings.language)}</span>
                     ) : (
-                      <span className={styles.listBadgePending}>Pending</span>
+                      <span className={styles.listBadgePending}>{t('pending', settings.language)}</span>
                     )}
                     <span className={styles.listDate}>{new Date(order.createdAt).toLocaleDateString()}</span>
                   </div>
@@ -496,7 +563,7 @@ export default function Orders({ isPendingView = false }) {
                         setShowPayModal(true);
                       }}
                     >
-                      <DollarSign size={16} /> Collect
+                      <DollarSign size={16} /> {t('collect', settings.language)}
                     </button>
                     <button 
                       className={styles.listReminderBtn}
@@ -508,7 +575,7 @@ export default function Orders({ isPendingView = false }) {
                 </div>
               ))
             ) : (
-              <div className={styles.noData}>No pending payments found.</div>
+              <div className={styles.noData}>{t('noPendingPayments', settings.language)}</div>
             )}
           </div>
         ) : (
@@ -517,17 +584,19 @@ export default function Orders({ isPendingView = false }) {
               <tr>
                 <th>{t('orderId', settings.language)}</th>
                 <th>{t('customer', settings.language)}</th>
+                <th>{t('whatsapp', settings.language)}</th>
                 <th>{t('totalAmount', settings.language)}</th>
+                <th>{t('paymentMethodLabel', settings.language)}</th>
                 <th>{t('status', settings.language)}</th>
                 <th>{t('date', settings.language)}</th>
-                <th>{t('actions', settings.language)}</th>
+                <th className={styles.actionsHeader}>{t('actions', settings.language)}</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>
-                    Loading...
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '2rem' }}>
+                    {t('loading', settings.language)}
                   </td>
                 </tr>
               ) : filteredOrders.length > 0 ? (
@@ -541,66 +610,73 @@ export default function Orders({ isPendingView = false }) {
                         <div className={styles.qrPlaceholder}><QrCode size={18} /></div>
                         <div>
                           <span className={styles.idText}>{order.id}</span>
-                          <span className={styles.billText}>Bill: {order.billNumber || 'N/A'}</span>
+                          <span className={styles.billText}>{t('bill', settings.language)}: {order.billNumber || 'N/A'}</span>
                         </div>
                       </div>
                     </td>
                     <td>
                       <div className={styles.custCell}>
                         <span className={styles.custName}>
-                          {order.customerName || (order.customerId === 'Walk-in' ? 'Walk-in Customer' : order.customerId)}
+                          {order.customerName || (order.customerId === 'Walk-in' ? t('walkInCustomer', settings.language) : order.customerId)}
                         </span>
                         <div className={styles.custPhoneRow}>
                           <Phone size={12} color="#2563EB" />
                           <span className={styles.custPhone}>
-                            {order.customerPhone || order.phone || 'No Phone'}
+                            {order.customerPhone || order.phone || t('noPhone', settings.language)}
                           </span>
-                          <div className={styles.waBadge} onClick={(e) => {
-                            e.stopPropagation();
-                            handleWhatsApp(order.customerPhone || order.phone, order.id);
-                          }}>
-                            <MessageCircle size={10} color="#FFF" />
-                            WA
-                          </div>
                         </div>
                       </div>
                     </td>
-                    <td className={styles.amountText}><CurrencySymbol size={14} /> {order.totalAmount?.toFixed(2)}</td>
                     <td>
-                      {(!['Payment Pending', 'Paid', 'Credit'].includes(order.status)) ? (
-                        <span className={`${styles.statusBadge} ${STATUS_COLORS[order.status]}`}>
-                          {order.status}
-                        </span>
+                      {(order.customerPhone || order.phone) ? (
+                        <button 
+                          className={styles.tableWaBtn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleWhatsApp(order.customerPhone || order.phone, order.id);
+                          }}
+                          title={t('whatsapp', settings.language)}
+                        >
+                          <MessageCircle size={16} />
+                        </button>
                       ) : (
-                        <span className={`${styles.statusBadge} ${styles.statusProcessing}`}>
-                          Confirmed
-                        </span>
+                        <span className={styles.noWaText}>-</span>
                       )}
                     </td>
-                    <td className={styles.dateText}>{new Date(order.createdAt).toLocaleDateString()}</td>
+                    <td className={styles.amountText}><CurrencySymbol size={14} /> {order.totalAmount?.toFixed(2)}</td>
                     <td>
-                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        {order.paymentStatus === 'Paid' ? (
-                          <span className={styles.paidActionBadge}>
-                            <CheckCircle size={14} /> Paid
+                       {order.paymentStatus === 'Paid' ? (
+                         order.paymentMethod ? (
+                           <span className={
+                             order.paymentMethod.toUpperCase() === 'CASH' ? styles.methodCash : 
+                             styles.methodOther
+                           }>
+                             {order.paymentMethod}
+                           </span>
+                         ) : (
+                           <span style={{ color: '#94A3B8' }}>-</span>
+                         )
+                       ) : (
+                         <span className={styles.methodCredit}>
+                           {t('notPaid', settings.language)}
+                         </span>
+                       )}
+                     </td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', alignItems: 'flex-start' }}>
+                        {(order.paymentStatus === 'Paid' || (order.dueAmount !== undefined && order.dueAmount <= 0)) && ['Confirmed', 'Payment Pending', 'Credit', 'Pending'].includes(order.status) ? (
+                          <span className={`${styles.statusBadge} ${STATUS_COLORS['Paid'] || styles.statusDelivered}`}>
+                            {t('paid', settings.language)}
                           </span>
-                        ) : (order.paymentStatus === 'Credit' || order.paymentStatus === 'Partial') ? (
-                          <span className={styles.creditActionBadge}>
-                            <AlertCircle size={14} /> {order.paymentStatus}
+                        ) : (!['Payment Pending', 'Paid', 'Credit'].includes(order.status)) ? (
+                          <span className={`${styles.statusBadge} ${STATUS_COLORS[order.status]}`}>
+                            {translateStatus(order.status)}
                           </span>
-                        ) : order.status !== 'Cancelled' ? (
-                          <button 
-                            className={styles.payBtn}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedOrder(order);
-                              setShowPayModal(true);
-                            }}
-                          >
-                            Pay
-                          </button>
-                        ) : null}
-                         <MoreHorizontal size={18} className={styles.moreBtn} />
+                        ) : (
+                          <span className={`${styles.statusBadge} ${styles.statusProcessing}`}>
+                            {t('confirmed', settings.language)}
+                          </span>
+                        )}
                         {order.status !== 'Delivered' && order.status !== 'Cancelled' && (
                           <button 
                             className={styles.deliverBtn}
@@ -609,17 +685,72 @@ export default function Orders({ isPendingView = false }) {
                               handleUpdateStatus('Delivered', order);
                             }}
                           >
-                            Deliver
+                            <Truck size={12} /> {t('deliver', settings.language)}
                           </button>
                         )}
+                      </div>
+                    </td>
+                    <td className={styles.dateText}>{new Date(order.createdAt).toLocaleDateString()}</td>
+                    <td className={styles.actionsCell}>
+                      <div className={styles.actionCellContainer}>
+                        <div className={styles.paymentCol}>
+                          {order.paymentStatus === 'Paid' ? (
+                            <span className={styles.paidActionBadge}>
+                              <CheckCircle size={14} /> {t('paid', settings.language)}
+                            </span>
+                          ) : (order.paymentStatus === 'Credit' || order.paymentStatus === 'Partial') ? (
+                            <>
+                              <span className={styles.creditActionBadge}>
+                                <AlertCircle size={14} /> {order.paymentStatus ? t(order.paymentStatus.toLowerCase(), settings.language) : ''}
+                              </span>
+                              {order.status !== 'Cancelled' && (
+                                <button 
+                                  className={styles.payBtn}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedOrder(order);
+                                    setShowPayModal(true);
+                                  }}
+                                >
+                                  {t('pay', settings.language)}
+                                </button>
+                              )}
+                            </>
+                          ) : order.status !== 'Cancelled' ? (
+                            <button 
+                              className={styles.payBtn}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedOrder(order);
+                                setShowPayModal(true);
+                              }}
+                            >
+                              {t('pay', settings.language)}
+                            </button>
+                          ) : null}
+                        </div>
+                        
+                        <div className={styles.moreCol}>
+                          <button 
+                            className={styles.moreBtn}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedOrder(order);
+                              setShowStatusModal(true);
+                            }}
+                            title={t('orderDetails', settings.language)}
+                          >
+                            <MoreHorizontal size={18} />
+                          </button>
+                        </div>
                       </div>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>
-                    {isPendingView ? 'No pending payments found.' : 'No orders found.'}
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '2rem' }}>
+                    {isPendingView ? t('noPendingPayments', settings.language) : t('noOrdersFound', settings.language)}
                   </td>
                 </tr>
               )}
@@ -634,8 +765,8 @@ export default function Orders({ isPendingView = false }) {
           <div className={styles.detailsModal}>
             <div className={styles.modalHeader}>
               <div>
-                <h2>Order {selectedOrder.orderId}</h2>
-                <p>Created on {new Date(selectedOrder.createdAt).toLocaleString()}</p>
+                <h2>{t('order', settings.language)} {selectedOrder.orderId || selectedOrder.id}</h2>
+                <p>{t('createdOn', settings.language)} {new Date(selectedOrder.createdAt).toLocaleString()}</p>
               </div>
               <X size={24} className={styles.closeBtn} onClick={() => setSelectedOrder(null)} />
             </div>
@@ -645,22 +776,22 @@ export default function Orders({ isPendingView = false }) {
                 {/* Left: Info */}
                 <div className={styles.infoCol}>
                   <div className={styles.section}>
-                    <h3>Customer Info</h3>
+                    <h3>{t('customerInfo', settings.language)}</h3>
                     <div className={styles.infoCard}>
                       <User size={16} />
                       <div>
                         <p className={styles.infoVal}>
-                          {selectedOrder.customerName || (selectedOrder.customerId === 'Walk-in' ? 'Walk-in Customer' : selectedOrder.customerId)}
+                          {selectedOrder.customerName || (selectedOrder.customerId === 'Walk-in' ? t('walkInCustomer', settings.language) : selectedOrder.customerId)}
                         </p>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <p className={styles.infoSub}>
-                            {selectedOrder.customerPhone || selectedOrder.phone || 'No Phone'} • {selectedOrder.customerId}
+                            {selectedOrder.customerPhone || selectedOrder.phone || t('noPhone', settings.language)} • {selectedOrder.customerId}
                           </p>
                           <button 
                             className={styles.waBtnMini}
                             onClick={() => handleWhatsApp(selectedOrder.customerPhone || selectedOrder.phone, selectedOrder.id)}
                           >
-                            <MessageCircle size={12} /> WhatsApp
+                            <MessageCircle size={12} /> {t('whatsapp', settings.language)}
                           </button>
                         </div>
                       </div>
@@ -668,7 +799,7 @@ export default function Orders({ isPendingView = false }) {
                   </div>
 
                   <div className={styles.section}>
-                    <h3>Order Items</h3>
+                    <h3>{t('orderItems', settings.language)}</h3>
                     <div className={styles.itemsList}>
                       {(() => {
                         let items = [];
@@ -680,20 +811,20 @@ export default function Orders({ isPendingView = false }) {
                         
                         return (Array.isArray(items) ? items : []).map((item, i) => (
                           <div key={i} className={styles.orderItem}>
-                            <span>{item.qty} x {item.name} {item.type ? `(${item.type})` : ''}</span>
+                            <span>{item.qty} x {item.name} {item.type ? `(${t(item.type.toLowerCase(), settings.language)})` : ''}</span>
                             <span><CurrencySymbol size={12} /> {((item.price || 0) * (item.qty || 1)).toFixed(2)}</span>
                           </div>
                         ));
                       })()}
                       <div className={styles.orderTotal}>
-                        <span>Total Paid via {selectedOrder.paymentMethod || 'CASH'}</span>
+                        <span>{selectedOrder.paymentStatus === 'Paid' ? `${t('totalPaidVia', settings.language)} ${getPaymentMethodTranslation(selectedOrder.paymentMethod || 'CASH')}` : `${t('paymentStatus', settings.language)}: ${t('notPaid', settings.language)}`}</span>
                         <span><CurrencySymbol size={14} /> {(selectedOrder.totalAmount || 0).toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
 
                   <div className={styles.section}>
-                    <h3>Status History</h3>
+                    <h3>{t('statusHistory', settings.language)}</h3>
                     <div className={styles.timeline}>
                       {(() => {
                         let history = [];
@@ -707,8 +838,10 @@ export default function Orders({ isPendingView = false }) {
                           <div key={i} className={styles.timelineItem}>
                             <div className={styles.timelineDot}></div>
                             <div className={styles.timelineContent}>
-                              <p className={styles.timelineStatus}>{h.status || 'Unknown'}</p>
-                              <p className={styles.timelineMeta}>{h.updatedBy || 'Staff'} • {h.timestamp ? new Date(h.timestamp).toLocaleString() : 'Unknown Date'}</p>
+                              <p className={styles.timelineStatus}>{translateStatus(h.status) || t('unknown', settings.language)}</p>
+                              <p className={styles.timelineMeta}>
+                                {h.updatedBy === 'Admin Staff' ? t('adminStaff', settings.language) : h.updatedBy === 'Staff' ? t('staff', settings.language) : (h.updatedBy || t('staff', settings.language))} • {h.timestamp ? new Date(h.timestamp).toLocaleString() : t('unknown', settings.language)}
+                              </p>
                             </div>
                           </div>
                         ));
@@ -721,34 +854,34 @@ export default function Orders({ isPendingView = false }) {
                 <div className={styles.actionCol}>
                   <div className={styles.qrCard}>
                     <QRCodeSVG value={`ORDER:${selectedOrder.id}`} size={120} />
-                    <p>Scan to verify order</p>
+                    <p>{t('scanToVerify', settings.language)}</p>
                   </div>
 
                   <div className={styles.statusAction}>
-                    <label>WORKFLOW STATUS</label>
+                    <label>{t('workflowStatus', settings.language)}</label>
                     <div className={styles.statusSelectWrapper}>
                       <select 
-                        value={selectedOrder.status} 
+                        value={['Payment Pending', 'Credit', 'Pending'].includes(selectedOrder.status) ? 'Confirmed' : selectedOrder.status} 
                         onChange={(e) => handleUpdateStatus(e.target.value)}
                         className={styles.statusSelect}
                       >
-                        <option>Confirmed</option>
-                        <option>Picked Up</option>
-                        <option>Washing</option>
-                        <option>Drying</option>
-                        <option>Ironing</option>
-                        <option>Ready</option>
-                        <option>Ready to Pick up</option>
-                        <option>Out for Delivery</option>
-                        <option>Delivered</option>
-                        <option>Cancelled</option>
+                        <option value="Confirmed">{translateStatus('Confirmed')}</option>
+                        <option value="Picked Up">{translateStatus('Picked Up')}</option>
+                        <option value="Washing">{translateStatus('Washing')}</option>
+                        <option value="Drying">{translateStatus('Drying')}</option>
+                        <option value="Ironing">{translateStatus('Ironing')}</option>
+                        <option value="Ready">{translateStatus('Ready')}</option>
+                        <option value="Ready to Pick up">{translateStatus('Ready to Pick up')}</option>
+                        <option value="Out for Delivery">{translateStatus('Out for Delivery')}</option>
+                        <option value="Delivered">{translateStatus('Delivered')}</option>
+                        <option value="Cancelled">{translateStatus('Cancelled')}</option>
                       </select>
                       <ChevronDown size={18} />
                     </div>
                   </div>
 
                   <div className={styles.statusAction} style={{ marginTop: '1rem' }}>
-                    <label>PAYMENT STATUS</label>
+                    <label>{t('paymentStatus', settings.language)}</label>
                     <div className={styles.statusSelectWrapper}>
                       <select 
                         value={selectedOrder.paymentStatus || 'Pending'} 
@@ -756,10 +889,10 @@ export default function Orders({ isPendingView = false }) {
                         className={styles.statusSelect}
                         style={{ borderLeftColor: selectedOrder.paymentStatus === 'Paid' ? '#10B981' : '#F59E0B' }}
                       >
-                        <option value="Pending">Pending</option>
-                        <option value="Paid">Paid</option>
-                        <option value="Credit">Credit</option>
-                        <option value="Partial">Partial</option>
+                        <option value="Pending">{t('pending', settings.language)}</option>
+                        <option value="Paid">{t('paid', settings.language)}</option>
+                        <option value="Credit">{t('credit', settings.language)}</option>
+                        <option value="Partial">{t('partial', settings.language)}</option>
                       </select>
                       <ChevronDown size={18} />
                     </div>
@@ -770,13 +903,13 @@ export default function Orders({ isPendingView = false }) {
                       className={styles.printBtn}
                       onClick={() => handlePrint(selectedOrder.id)}
                     >
-                      <Printer size={18} /> Print Receipt
+                      <Printer size={18} /> {t('printReceipt', settings.language)}
                     </button>
                     <button 
                       className={styles.tagBtn}
                       onClick={handlePrintTags}
                     >
-                      <QrCode size={18} /> Print Garment Tags
+                      <QrCode size={18} /> {t('printGarmentTags', settings.language)}
                     </button>
                    </div>
                 </div>
@@ -798,13 +931,25 @@ export default function Orders({ isPendingView = false }) {
         <div className={styles.modalOverlay}>
           <div className={styles.statusModal} style={{ maxWidth: '400px' }}>
             <div className={styles.modalHeader}>
-              <h2>Confirm Payment</h2>
+              <h2>{t('confirmPayment', settings.language)}</h2>
               <X size={24} className={styles.closeBtn} onClick={() => setShowPayModal(false)} />
             </div>
             <div className={styles.modalBody}>
               <p style={{ marginBottom: '1.5rem', color: '#64748B' }}>
-                You are marking Order <strong>{selectedOrder?.id}</strong> as <strong>Paid</strong>. 
-                Please select where the payment should be recorded:
+                {(() => {
+                  const msg = t('confirmPaymentMsg', settings.language);
+                  const parts = msg.split('{id}');
+                  if (parts.length === 2) {
+                    return (
+                      <>
+                        {parts[0]}
+                        <strong>{selectedOrder?.orderId || selectedOrder?.id}</strong>
+                        {parts[1]}
+                      </>
+                    );
+                  }
+                  return msg;
+                })()}
               </p>
               
               <div className={styles.payOptionGrid}>
@@ -813,14 +958,14 @@ export default function Orders({ isPendingView = false }) {
                   onClick={() => setPayMethod('CASH')}
                 >
                   <Wallet size={24} />
-                  <span>Cash Account</span>
+                  <span>{t('cashaccount', settings.language)}</span>
                 </div>
                 <div 
                   className={`${styles.payOption} ${payMethod === 'BANK' ? styles.payOptionActive : ''}`}
                   onClick={() => setPayMethod('BANK')}
                 >
                   <CreditCard size={24} />
-                  <span>Bank Account</span>
+                  <span>{t('bankaccount', settings.language)}</span>
                 </div>
               </div>
 
@@ -835,9 +980,11 @@ export default function Orders({ isPendingView = false }) {
                     }
                   }}
                 >
-                  Cancel
+                  {t('cancel', settings.language)}
                 </button>
-                <button className={styles.printBtn} style={{ flex: 1.5 }} onClick={confirmPaidStatus}>Record Payment</button>
+                <button className={styles.printBtn} style={{ flex: 1.5 }} onClick={confirmPaidStatus}>
+                  {t('recordPayment', settings.language)}
+                </button>
               </div>
             </div>
           </div>

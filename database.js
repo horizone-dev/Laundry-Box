@@ -87,6 +87,7 @@ function initDB(appPath) {
     CREATE TABLE IF NOT EXISTS orders (
       id TEXT PRIMARY KEY,
       shopId TEXT,
+      billNumber TEXT,
       branchId TEXT,
       customerId TEXT,
       status TEXT,
@@ -98,7 +99,8 @@ function initDB(appPath) {
       statusHistory JSON,
       createdAt TEXT,
       isSynced INTEGER DEFAULT 0,
-      updatedAt TEXT
+      updatedAt TEXT,
+      paymentMethod TEXT DEFAULT 'CASH'
     );
 
     CREATE TABLE IF NOT EXISTS payments (
@@ -188,6 +190,12 @@ function initDB(appPath) {
     if (!orderCols.some(col => col.name === 'statusHistory')) {
       db.exec("ALTER TABLE orders ADD COLUMN statusHistory JSON;");
     }
+    if (!orderCols.some(col => col.name === 'billNumber')) {
+      db.exec("ALTER TABLE orders ADD COLUMN billNumber TEXT;");
+    }
+    if (!orderCols.some(col => col.name === 'paymentMethod')) {
+      db.exec("ALTER TABLE orders ADD COLUMN paymentMethod TEXT DEFAULT 'CASH';");
+    }
 
     const payCols = db.prepare("PRAGMA table_info(payments)").all();
     if (!payCols.some(col => col.name === 'customerId')) {
@@ -221,13 +229,28 @@ function initDB(appPath) {
     }
     // Data Healer: Normalize statuses and fix broken financial records
     console.log("Running Data Healer...");
-    // 1. Fix inconsistent paymentStatus (Only if status is clearly Payment Pending but marked Paid)
-    db.exec("UPDATE orders SET paymentStatus = 'Credit' WHERE status = 'Payment Pending' AND (paidAmount = 0 OR paidAmount IS NULL);");
-    db.exec("UPDATE orders SET paymentStatus = 'Paid', status = 'Confirmed' WHERE status = 'Paid';");
+    const timestamp = new Date().toISOString();
     
+    // 0. Delete corrupted orders (where id is null or empty)
+    db.exec("DELETE FROM orders WHERE id IS NULL OR id = '';");
+
+    // Fix legacy shopId = 'SHOP_1' to 'SHOP_01'
+    db.exec(`UPDATE orders SET shopId = 'SHOP_01', isSynced = 0, updatedAt = '${timestamp}' WHERE shopId = 'SHOP_1';`);
+
+    // Fix orders with dueAmount > 0 but paymentStatus = 'Paid' (correcting to Partial or Credit)
+    db.exec(`UPDATE orders SET paymentStatus = CASE WHEN IFNULL(paidAmount, 0) > 0 THEN 'Partial' ELSE 'Credit' END, isSynced = 0, updatedAt = '${timestamp}' WHERE dueAmount > 0 AND paymentStatus = 'Paid';`);
+
+    // 1. Fix inconsistent paymentStatus (Only if status is clearly Payment Pending but marked Paid)
+    db.exec(`UPDATE orders SET paymentStatus = 'Credit', isSynced = 0, updatedAt = '${timestamp}' WHERE status = 'Payment Pending' AND (paidAmount = 0 OR paidAmount IS NULL) AND paymentStatus != 'Credit';`);
+    db.exec(`UPDATE orders SET paymentStatus = 'Paid', status = 'Confirmed', isSynced = 0, updatedAt = '${timestamp}' WHERE status = 'Paid' AND (paymentStatus != 'Paid' OR status != 'Confirmed');`);
+    
+    // Fix orders that are mathematically paid but have incorrect status/paymentStatus fields
+    db.exec(`UPDATE orders SET paymentStatus = 'Paid', isSynced = 0, updatedAt = '${timestamp}' WHERE dueAmount <= 0 AND paymentStatus != 'Paid';`);
+    db.exec(`UPDATE orders SET status = 'Confirmed', isSynced = 0, updatedAt = '${timestamp}' WHERE dueAmount <= 0 AND status = 'Payment Pending';`);
+
     // 2. Data Healer: Only fix dueAmount if it's mathematically wrong, but don't overwrite Status unless confirmed
     db.exec(`UPDATE orders 
-            SET dueAmount = totalAmount - IFNULL(paidAmount, 0)
+            SET dueAmount = totalAmount - IFNULL(paidAmount, 0), isSynced = 0, updatedAt = '${timestamp}'
             WHERE ABS(dueAmount - (totalAmount - IFNULL(paidAmount, 0))) > 0.01;`);
 
     // 3. Smart Advance Application:
@@ -249,17 +272,86 @@ function initDB(appPath) {
         let newDue = order.totalAmount - newPaid;
         let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
         
-        db.prepare("UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ? WHERE id = ?").run(newPaid, newDue, newStatus, order.id);
+        db.prepare("UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, isSynced = 0, updatedAt = ? WHERE id = ?").run(newPaid, newDue, newStatus, timestamp, order.id);
         advance -= apply;
       }
     }
 
-    // 4. Final Sync: Ensure customer balance matches the sum of remaining dueAmounts
+    // 3.5. Smart Unapplied Payments Application:
+    // If a customer has paid more than what the individual orders reflect (ledger balance < sum(dueAmount)),
+    // apply the difference to settle their oldest outstanding credit/partial orders.
+    console.log("Applying customer unapplied payments to credit orders...");
+    const allCustomers = db.prepare("SELECT id, balance FROM customers").all();
+    for (const customer of allCustomers) {
+      const ordersDue = db.prepare("SELECT SUM(dueAmount) as totalDue FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND status != 'Cancelled'").get(customer.id);
+      const totalDue = ordersDue ? (ordersDue.totalDue || 0) : 0;
+      
+      if (customer.balance < totalDue) {
+        let unapplied = totalDue - customer.balance;
+        const dueOrders = db.prepare("SELECT id, totalAmount, paidAmount, dueAmount, status FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND (dueAmount > 0 OR paymentStatus = 'Credit' OR paymentStatus = 'Partial') AND status != 'Cancelled' ORDER BY createdAt ASC").all(customer.id);
+        
+        for (const order of dueOrders) {
+          if (unapplied <= 0) break;
+          const currentDue = order.dueAmount > 0 ? order.dueAmount : (order.totalAmount - (order.paidAmount || 0));
+          if (currentDue <= 0) continue;
+          
+          let apply = Math.min(unapplied, currentDue);
+          let newPaid = (order.paidAmount || 0) + apply;
+          let newDue = order.totalAmount - newPaid;
+          let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+          
+          // Also update workflow status to Confirmed when fully paid
+          const newWorkflowStatus = newDue <= 0 ? 'Confirmed' : order.status;
+          
+          db.prepare("UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, isSynced = 0, updatedAt = ? WHERE id = ?").run(newPaid, newDue, newStatus, newWorkflowStatus, timestamp, order.id);
+          
+          // Reconcile payments table: split and link the unapplied payments
+          let remainingToLink = apply;
+          const unlinkedPayments = db.prepare("SELECT id, amount, method, shopId, createdAt FROM payments WHERE customerId = ? AND (orderId IS NULL OR orderId = '') ORDER BY createdAt ASC").all(customer.id);
+          
+          for (const payment of unlinkedPayments) {
+            if (remainingToLink <= 0) break;
+            
+            if (payment.amount <= remainingToLink) {
+              db.prepare("UPDATE payments SET orderId = ?, isSynced = 0 WHERE id = ?").run(order.id, payment.id);
+              remainingToLink -= payment.amount;
+            } else {
+              const newUnlinkedAmount = payment.amount - remainingToLink;
+              db.prepare("UPDATE payments SET amount = ?, isSynced = 0 WHERE id = ?").run(newUnlinkedAmount, payment.id);
+              
+              db.prepare(`INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced) 
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+                .run(`PAY-SPLIT-${Date.now()}-${order.id}`, customer.id, order.id, payment.shopId || 'SHOP_01', remainingToLink, payment.method || 'CASH', 'SUCCESS', payment.createdAt);
+              
+              remainingToLink = 0;
+            }
+          }
+          
+          unapplied -= apply;
+        }
+      }
+    }
+
+    // 4. Final Sync: Ensure customer balance matches the sum of remaining dueAmounts minus any remaining unlinked payments
+    // Only update and mark isSynced = 0 if the balance has actually changed
     db.exec(`UPDATE customers SET balance = (
               SELECT IFNULL(SUM(dueAmount), 0) 
               FROM orders 
-              WHERE orders.customerId = customers.id
-            );`);
+              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+            ) - IFNULL((
+              SELECT SUM(amount) 
+              FROM payments 
+              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+            ), 0), isSynced = 0, updatedAt = '${timestamp}'
+            WHERE balance != (
+              SELECT IFNULL(SUM(dueAmount), 0) 
+              FROM orders 
+              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+            ) - IFNULL((
+              SELECT SUM(amount) 
+              FROM payments 
+              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+            ), 0);`);
 
     // 4. Pre-populate Categories if empty
     const catCheck = db.prepare("SELECT COUNT(*) as count FROM service_categories").get();

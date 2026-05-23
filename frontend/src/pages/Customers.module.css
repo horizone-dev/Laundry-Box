@@ -537,3 +537,10 @@
   font-weight: 800;
   color: #2563EB;
 }
+
+.pageBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #F8FAFC;
+  border-color: #E2E8F0;
+}

@@ -4,7 +4,7 @@ import {
   Search, Plus, Minus, ShoppingBag, Trash2, CheckCircle, 
   X, ChevronDown, Shirt, Bed, Wind, Layers, 
   Droplet, Zap, Heart, Sparkles, User, CreditCard, Wallet, 
-  Gift, Printer, Receipt, Edit3, UserPlus, Phone, Mail, MapPin, MessageCircle, Landmark
+  Gift, Printer, Receipt, Edit3, UserPlus, Phone, MapPin, MessageCircle, Landmark
 } from 'lucide-react';
 import axios from 'axios';
 import { useSettings } from '../store/SettingsContext';
@@ -87,7 +87,7 @@ export default function POS() {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastOrderInfo, setLastOrderInfo] = useState(null);
-  const [customerFormData, setCustomerFormData] = useState({ name: '', phone: '', email: '', address: '' });
+  const [customerFormData, setCustomerFormData] = useState({ name: '', phone: '', address: '' });
 
   useEffect(() => {
     if (customerSearch.length > 0 && !selectedCustomer) {
@@ -128,11 +128,11 @@ export default function POS() {
       try {
         await window.electronAPI.dbQuery(
           'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, DEFAULT_SHOP_ID, customerFormData.name, customerFormData.phone, customerFormData.email, customerFormData.address, customerFormData.creditLimit || settings.defaultCreditLimit || 500, 0, timestamp]
+          [id, DEFAULT_SHOP_ID, customerFormData.name, customerFormData.phone, '', customerFormData.address, customerFormData.creditLimit || settings.defaultCreditLimit || 500, 0, timestamp]
         );
         handleSelectCustomer({ id, ...customerFormData });
         setShowCustomerModal(false);
-        setCustomerFormData({ name: '', phone: '', email: '', address: '' });
+        setCustomerFormData({ name: '', phone: '', address: '' });
       } catch (err) {
         console.error("Failed to save customer:", err);
       }
@@ -278,23 +278,23 @@ export default function POS() {
     if (window.electronAPI?.dbQuery) {
       try {
         await window.electronAPI.dbQuery(
-          `INSERT INTO orders (id, shopId, branchId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, createdAt, isSynced, updatedAt) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO orders (id, shopId, branchId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, statusHistory, createdAt, isSynced, updatedAt, paymentMethod) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             orderId,
             DEFAULT_SHOP_ID,
             DEFAULT_BRANCH_ID,
             selectedCustomer ? selectedCustomer.id : 'Walk-in',
-            paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : PAYMENT_STATUS.PAID,
+            paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : ORDER_STATUS.CONFIRMED,
             total,
             paymentMethod === 'credit' ? 0 : total,
             paymentMethod === 'credit' ? total : 0,
             paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
             JSON.stringify(cart),
+            JSON.stringify([{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: new Date().toISOString() }]),
             new Date().toISOString(),
             0,
             new Date().toISOString(),
-            JSON.stringify([{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : PAYMENT_STATUS.PAID, updatedBy: 'POS System', timestamp: new Date().toISOString() }]),
             paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI))
           ]
         );
@@ -309,14 +309,14 @@ export default function POS() {
             customerPhone: selectedCustomer ? selectedCustomer.phone : '',
             shopId: DEFAULT_SHOP_ID,
             branchId: DEFAULT_BRANCH_ID,
-            status: paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : PAYMENT_STATUS.PAID,
+            status: paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : ORDER_STATUS.CONFIRMED,
             totalAmount: total,
             paidAmount: paymentMethod === 'credit' ? 0 : total,
             dueAmount: paymentMethod === 'credit' ? total : 0,
             paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
             paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI)),
             items: cart,
-            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : PAYMENT_STATUS.PAID, updatedBy: 'POS System', timestamp: new Date().toISOString() }]
+            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: new Date().toISOString() }]
           });
         } catch (syncErr) {
           console.warn('Backend sync failed, but local order saved:', syncErr);
@@ -331,21 +331,21 @@ export default function POS() {
             customerPhone: selectedCustomer ? selectedCustomer.phone : '',
             shopId: DEFAULT_SHOP_ID,
             branchId: DEFAULT_BRANCH_ID,
-            status: paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : PAYMENT_STATUS.PAID,
+            status: paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : ORDER_STATUS.CONFIRMED,
             totalAmount: total,
             paidAmount: paymentMethod === 'credit' ? 0 : total,
             dueAmount: paymentMethod === 'credit' ? total : 0,
             paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
             paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI)),
             items: cart,
-            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : PAYMENT_STATUS.PAID, updatedBy: 'POS System', timestamp: new Date().toISOString() }]
+            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: new Date().toISOString() }]
           } 
         }));
 
         if (paymentMethod === 'credit' && selectedCustomer) {
           await window.electronAPI.dbQuery(
-            'UPDATE customers SET balance = balance + ? WHERE id = ?',
-            [total, selectedCustomer.id]
+            'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+            [total, new Date().toISOString(), selectedCustomer.id]
           );
         }
 
@@ -364,7 +364,7 @@ export default function POS() {
           );
         }
 
-        navigate(`/invoice/${orderId.replace('#', '')}`);
+        navigate(`/invoice/${orderId.replace('#', '')}?print=true`);
       } catch (err) {
         console.error("Failed to save order:", err);
         alert("CRITICAL ERROR: Failed to save order to local database. Please check logs.");
@@ -389,8 +389,8 @@ export default function POS() {
       try {
         await window.electronAPI.dbQuery(
           `INSERT INTO orders 
-           (id, shopId, branchId, customerId, status, totalAmount, paidAmount, dueAmount, statusHistory, createdAt, updatedAt, paymentStatus) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, shopId, branchId, customerId, status, totalAmount, paidAmount, dueAmount, statusHistory, createdAt, updatedAt, paymentStatus, isSynced, paymentMethod) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             orderId,
             DEFAULT_SHOP_ID,
@@ -403,13 +403,15 @@ export default function POS() {
             JSON.stringify([{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: new Date().toISOString() }]),
             new Date().toISOString(),
             new Date().toISOString(),
-            PAYMENT_STATUS.CREDIT
+            PAYMENT_STATUS.CREDIT,
+            0,
+            PAYMENT_METHODS.CREDIT
           ]
         );
 
         // Update customer balance in DB
         if (selectedCustomer) {
-          await window.electronAPI.dbQuery('UPDATE customers SET balance = balance + ?, updatedAt = ? WHERE id = ?', [total, new Date().toISOString(), selectedCustomer.id]);
+          await window.electronAPI.dbQuery('UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?', [total, new Date().toISOString(), selectedCustomer.id]);
         }
 
         // Trigger local event
@@ -595,7 +597,6 @@ export default function POS() {
                   <Printer size={28} />
                   Complete Payment & {printReceipt ? 'Print' : 'Finalize'} Receipt
                 </div>
-                {selectedCustomer?.email && <p>Send digital receipt to {selectedCustomer.email}</p>}
               </button>
 
               {selectedCustomer && (
@@ -935,30 +936,16 @@ export default function POS() {
                     />
                   </div>
                 </div>
-                <div className={styles.formGrid}>
-                  <div className={styles.formGroup}>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>EMAIL (OPTIONAL)</label>
-                    <div className={styles.posInputWrapper}>
-                      <Mail size={18} />
-                      <input 
-                        type="email" 
-                        placeholder="Email address"
-                        value={customerFormData.email}
-                        onChange={(e) => setCustomerFormData({...customerFormData, email: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                  <div className={styles.formGroup}>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>CREDIT LIMIT (OPTIONAL)</label>
-                    <div className={styles.posInputWrapper}>
-                      <CreditCard size={18} />
-                      <input 
-                        type="number" 
-                        placeholder="Limit (e.g. 100)"
-                        value={customerFormData.creditLimit || ''}
-                        onChange={(e) => setCustomerFormData({...customerFormData, creditLimit: e.target.value})}
-                      />
-                    </div>
+                <div className={styles.formGroup}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>CREDIT LIMIT (OPTIONAL)</label>
+                  <div className={styles.posInputWrapper}>
+                    <CreditCard size={18} />
+                    <input 
+                      type="number" 
+                      placeholder="Limit (e.g. 100)"
+                      value={customerFormData.creditLimit || ''}
+                      onChange={(e) => setCustomerFormData({...customerFormData, creditLimit: e.target.value})}
+                    />
                   </div>
                 </div>
                 <div className={styles.formGroup}>
@@ -1016,6 +1003,14 @@ export default function POS() {
                   }}
                 >
                   <MessageCircle size={20} /> Send via WhatsApp
+                </button>
+                <button 
+                  className={styles.printSuccessBtn}
+                  onClick={() => {
+                    navigate(`/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=true`);
+                  }}
+                >
+                  <Printer size={20} /> Print Receipt
                 </button>
                 <button 
                   className={styles.doneBtn}

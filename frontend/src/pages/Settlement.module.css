@@ -380,6 +380,7 @@
 
 .statusDue { color: #f97316; }
 .statusAdv { color: #10b981; }
+.statusPaid { color: #64748b; }
 
 /* Right Side Tables */
 .tableWrapper {

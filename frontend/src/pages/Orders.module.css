@@ -189,17 +189,20 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  line-height: 1;
 }
 
 .custPhone {
   font-size: 0.85rem;
   font-weight: 700;
   color: #334155;
+  line-height: 1;
 }
 
 .waBadge {
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.25rem;
   background: #25D366;
   color: white;
@@ -209,6 +212,9 @@
   font-weight: 800;
   cursor: pointer;
   transition: transform 0.2s;
+  line-height: 1;
+  height: 18px;
+  box-sizing: border-box;
 }
 
 .waBadge:hover {
@@ -231,6 +237,7 @@
 .paidActionBadge {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.25rem;
   padding: 0.25rem 0.5rem;
   background: #DCFCE7;
@@ -238,11 +245,13 @@
   border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 800;
+  width: 100%;
 }
 
 .creditActionBadge {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.25rem;
   padding: 0.25rem 0.5rem;
   background: #FEE2E2;
@@ -250,6 +259,7 @@
   border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 800;
+  width: 100%;
 }
 
 .statusPending { background: #FEF3C7; color: #92400E; } /* Yellow */
@@ -529,8 +539,9 @@
 }
 
 .waBtnMini {
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.4rem;
   background: #25D366;
   color: white;
@@ -541,13 +552,14 @@
   font-weight: 700;
   cursor: pointer;
   transition: background 0.2s;
+  line-height: 1;
 }
 
 .waBtnMini:hover {
   background: #128C7E;
 }
 
-.payBtn, .deliverBtn {
+.payBtn {
   padding: 0.35rem 0.85rem;
   border-radius: 6px;
   border: none;
@@ -555,9 +567,10 @@
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s;
-}
-
-.payBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
   background: #10B981;
   color: white;
 }
@@ -567,16 +580,110 @@
   transform: translateY(-1px);
   box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2);
 }
-
 .deliverBtn {
-  background: #2563EB;
+  background: #1E40AF;
   color: white;
+  border: 1px solid #1E40AF;
+  padding: 0.35rem 0.8rem;
+  border-radius: 100px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  line-height: 1;
+  width: max-content;
+  white-space: nowrap;
+  margin-top: 0.2rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .deliverBtn:hover {
   background: #1D4ED8;
+  color: white;
+  border-color: #1D4ED8;
   transform: translateY(-1px);
-  box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+  box-shadow: 0 4px 6px rgba(30, 64, 175, 0.25);
+}
+
+/* Actions Column Layout Styles */
+.actionsHeader {
+  min-width: 160px;
+  width: 160px;
+}
+
+.actionsCell {
+  min-width: 160px;
+  width: 160px;
+  vertical-align: middle;
+}
+
+.actionCellContainer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.paymentCol {
+  width: 95px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.moreCol {
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.moreBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid #E2E8F0;
+  background: white;
+  color: #64748B;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.moreBtn:hover {
+  background: #F1F5F9;
+  color: var(--primary);
+  border-color: #CBD5E1;
+}
+
+.deliverCol {
+  width: 85px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.deliveredActionBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.5rem;
+  background: #ECFDF5;
+  color: #059669;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  width: 100%;
+  text-align: center;
 }
 
 .settleBtn {
@@ -1000,4 +1107,62 @@
   background: var(--background);
   border-color: var(--primary);
   color: var(--primary);
+}
+
+.tableWaBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #E8F9EE;
+  color: #25D366;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tableWaBtn:hover {
+  background: #25D366;
+  color: white;
+  transform: scale(1.05);
+}
+
+.noWaText {
+  color: #94A3B8;
+  font-weight: 500;
+}
+
+.methodCash {
+  background: #E2FBE9;
+  color: #107C41;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  display: inline-block;
+  letter-spacing: 0.5px;
+}
+
+.methodCredit {
+  background: #FEE2E2;
+  color: #991B1B;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  display: inline-block;
+  letter-spacing: 0.5px;
+}
+
+.methodOther {
+  background: #EFF6FF;
+  color: #1E40AF;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  display: inline-block;
+  letter-spacing: 0.5px;
 }

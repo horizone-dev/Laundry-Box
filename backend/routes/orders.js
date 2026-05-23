@@ -63,6 +63,9 @@ router.patch('/:id/status', async (req, res) => {
     if (paidAmount !== undefined) order.paidAmount = paidAmount;
     if (dueAmount !== undefined) order.dueAmount = dueAmount;
 
+    if (!order.statusHistory || !Array.isArray(order.statusHistory)) {
+      order.statusHistory = [];
+    }
     order.statusHistory.push({
       status: status || order.status,
       updatedBy: updatedBy || 'Staff',

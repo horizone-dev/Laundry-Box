@@ -30,7 +30,9 @@ export default function MainLayout() {
   const [quickSearch, setQuickSearch] = useState('');
   const [settleSearch, setSettleSearch] = useState('');
   const [foundOrder, setFoundOrder] = useState(null);
-  const [foundCustomer, setFoundCustomer] = useState(null);
+  const [foundCustomer, setFoundCustomer] = useState(null); // Keep for compatibility if any other code refers to it, but define new ones:
+  const [selectedSettleTarget, setSelectedSettleTarget] = useState(null);
+  const [quickSettleResults, setQuickSettleResults] = useState([]);
   const [isUpdating, setIsUpdating] = useState(false);
   const [settleAmount, setSettleAmount] = useState('');
   const [settleMethod, setSettleMethod] = useState('CASH');
@@ -245,6 +247,7 @@ export default function MainLayout() {
         { path: '/reports', label: 'Analytics' },
         { path: '/reports/revenue', label: 'Revenue' },
         { path: '/reports/expenses', label: 'Expenses' },
+        { path: '/reports/customer-statement', label: 'Customer Statement' },
       ]
     },
     {
@@ -335,11 +338,19 @@ export default function MainLayout() {
     setIsUpdating(true);
     try {
       if (window.electronAPI?.dbQuery) {
-        const history = typeof foundOrder.statusHistory === 'string' ? JSON.parse(foundOrder.statusHistory) : (foundOrder.statusHistory || []);
+        let history = [];
+        try {
+          history = typeof foundOrder.statusHistory === 'string' 
+            ? JSON.parse(foundOrder.statusHistory || '[]') 
+            : (foundOrder.statusHistory || []);
+          if (!Array.isArray(history)) history = [];
+        } catch (e) {
+          history = [];
+        }
         const newHistory = [...history, { status: 'Delivered', updatedBy: 'Admin Staff', timestamp: new Date().toISOString() }];
 
         await window.electronAPI.dbQuery(
-          'UPDATE orders SET status = ?, statusHistory = ?, updatedAt = ? WHERE id = ?',
+          'UPDATE orders SET status = ?, statusHistory = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
           ['Delivered', JSON.stringify(newHistory), new Date().toISOString(), foundOrder.id]
         );
 
@@ -371,75 +382,139 @@ export default function MainLayout() {
   };
   const handleQuickSettleSearch = async (val) => {
     setSettleSearch(val);
+    setSelectedSettleTarget(null);
     if (!val || val.trim().length < 2) {
-      setFoundCustomer(null);
+      setQuickSettleResults([]);
       return;
     }
 
     if (window.electronAPI?.dbQuery) {
       const term = `%${val.trim()}%`;
-      const res = await window.electronAPI.dbQuery(
-        `SELECT * FROM customers WHERE name LIKE ? OR phone LIKE ? LIMIT 1`,
+      const custRes = await window.electronAPI.dbQuery(
+        `SELECT * FROM customers WHERE name LIKE ? OR phone LIKE ? LIMIT 5`,
         [term, term]
       );
-      if (res.success && res.data.length > 0) {
-        setFoundCustomer(res.data[0]);
-      } else {
-        setFoundCustomer(null);
+
+      const ordersRes = await window.electronAPI.dbQuery(
+        `SELECT o.*, c.name as customerName, c.phone as customerPhone 
+         FROM orders o 
+         LEFT JOIN customers c ON o.customerId = c.id 
+         WHERE (o.id LIKE ? OR o.billNumber LIKE ? OR c.name LIKE ? OR c.phone LIKE ?) 
+           AND o.dueAmount > 0 
+           AND o.status != 'Cancelled' 
+         LIMIT 5`,
+        [term, term, term, term]
+      );
+
+      const results = [];
+      if (custRes.success && custRes.data.length > 0) {
+        custRes.data.forEach(cust => {
+          results.push({ type: 'customer', data: cust });
+        });
       }
+      if (ordersRes.success && ordersRes.data.length > 0) {
+        ordersRes.data.forEach(order => {
+          results.push({ type: 'bill', data: order });
+        });
+      }
+      setQuickSettleResults(results);
     }
   };
 
   const processQuickSettle = async () => {
-    if (!foundCustomer || !settleAmount || parseFloat(settleAmount) <= 0) return;
+    if (!selectedSettleTarget || !settleAmount || parseFloat(settleAmount) <= 0) return;
 
     setIsUpdating(true);
     try {
       const amount = parseFloat(settleAmount);
       const timestamp = new Date().toISOString();
 
-      // 1. Update Customer Balance
-      await window.electronAPI.dbQuery(
-        'UPDATE customers SET balance = balance - ?, updatedAt = ? WHERE id = ?',
-        [amount, timestamp, foundCustomer.id]
-      );
+      if (selectedSettleTarget.type === 'customer') {
+        const customer = selectedSettleTarget.data;
+        
+        // 1. Update Customer Balance
+        await window.electronAPI.dbQuery(
+          'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+          [amount, timestamp, customer.id]
+        );
 
-      // 2. Record Payment
-      await window.electronAPI.dbQuery(
-        `INSERT INTO payments (id, customerId, shopId, amount, method, status, createdAt) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [`PAY-QUICK-${Date.now()}`, foundCustomer.id, DEFAULT_SHOP_ID, amount, settleMethod, 'SUCCESS', timestamp]
-      );
+        // 2. Record Payment
+        await window.electronAPI.dbQuery(
+          `INSERT INTO payments (id, customerId, shopId, amount, method, status, createdAt) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [`PAY-QUICK-${Date.now()}`, customer.id, DEFAULT_SHOP_ID, amount, settleMethod, 'SUCCESS', timestamp]
+        );
 
-      // 3. Try to settle orders (simplified FIFO)
-      const billsRes = await window.electronAPI.dbQuery(
-        'SELECT * FROM orders WHERE customerId = ? AND dueAmount > 0 ORDER BY createdAt ASC',
-        [foundCustomer.id]
-      );
+        // 3. Try to settle orders (simplified FIFO)
+        const billsRes = await window.electronAPI.dbQuery(
+          'SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != "" AND dueAmount > 0 ORDER BY createdAt ASC',
+          [customer.id]
+        );
 
-      let remaining = amount;
-      if (billsRes.success && billsRes.data.length > 0) {
-        for (const bill of billsRes.data) {
-          if (remaining <= 0) break;
-          const currentDue = bill.dueAmount;
-          let allocate = Math.min(remaining, currentDue);
-          let newPaid = (bill.paidAmount || 0) + allocate;
-          let newDue = currentDue - allocate;
-          let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+        let remaining = amount;
+        if (billsRes.success && billsRes.data.length > 0) {
+          for (const bill of billsRes.data) {
+            if (remaining <= 0) break;
+            const currentDue = bill.dueAmount;
+            let allocate = Math.min(remaining, currentDue);
+            let newPaid = (bill.paidAmount || 0) + allocate;
+            let newDue = currentDue - allocate;
+            let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
 
-          await window.electronAPI.dbQuery(
-            'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, updatedAt = ? WHERE id = ?',
-            [newPaid, newDue, newStatus, timestamp, bill.id]
-          );
-          remaining -= allocate;
+            let updatedOrderStatus = bill.status;
+            if (newDue <= 0 && bill.status === 'Payment Pending') {
+              updatedOrderStatus = 'Confirmed';
+            }
+
+            await window.electronAPI.dbQuery(
+              'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+              [newPaid, newDue, newStatus, updatedOrderStatus, settleMethod, timestamp, bill.id]
+            );
+            remaining -= allocate;
+          }
         }
+
+        alert(`Successfully settled ${amount} for ${customer.name}`);
+      } else if (selectedSettleTarget.type === 'bill') {
+        const bill = selectedSettleTarget.data;
+        const currentDue = bill.dueAmount;
+        let allocate = Math.min(amount, currentDue);
+        let newPaid = (bill.paidAmount || 0) + allocate;
+        let newDue = currentDue - allocate;
+        let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+
+        let updatedOrderStatus = bill.status;
+        if (newDue <= 0 && bill.status === 'Payment Pending') {
+          updatedOrderStatus = 'Confirmed';
+        }
+
+        // 1. Update the order
+        await window.electronAPI.dbQuery(
+          'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+          [newPaid, newDue, newStatus, updatedOrderStatus, settleMethod, timestamp, bill.id]
+        );
+
+        // 2. Record Payment linked to specific order
+        await window.electronAPI.dbQuery(
+          `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [`PAY-QUICK-${Date.now()}-${bill.id}`, bill.customerId, bill.id, DEFAULT_SHOP_ID, amount, settleMethod, 'SUCCESS', timestamp]
+        );
+
+        // 3. Update Customer Balance
+        await window.electronAPI.dbQuery(
+          'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+          [amount, timestamp, bill.customerId]
+        );
+
+        alert(`Successfully settled ${amount} for Bill #${bill.billNumber || bill.id}`);
       }
 
-      alert(`Successfully settled ${amount} for ${foundCustomer.name}`);
       setShowQuickSettle(false);
       setSettleSearch('');
-      setFoundCustomer(null);
+      setSelectedSettleTarget(null);
       setSettleAmount('');
+      setQuickSettleResults([]);
     } catch (err) {
       console.error("Quick settle error:", err);
       alert("Failed to process settlement: " + err.message);
@@ -827,19 +902,19 @@ export default function MainLayout() {
                 <DollarSign color="#10B981" size={24} />
                 <h2>Quick Settlement</h2>
               </div>
-              <button className={styles.closeBtn} onClick={() => { setShowQuickSettle(false); setSettleSearch(''); setFoundCustomer(null); setSettleAmount(''); }}>
+              <button className={styles.closeBtn} onClick={() => { setShowQuickSettle(false); setSettleSearch(''); setSelectedSettleTarget(null); setSettleAmount(''); setQuickSettleResults([]); }}>
                 <X size={20} />
               </button>
             </div>
 
             <div className={styles.modalBody}>
               <div className={styles.inputGroup}>
-                <label>Search Customer (Name/Phone)</label>
+                <label>Search Customer (Name/Phone) or Bill No</label>
                 <div className={styles.searchWrapper}>
                   <Search size={18} className={styles.searchIcon} />
                   <input
                     type="text"
-                    placeholder="Search customer..."
+                    placeholder="Search name, phone, or bill number..."
                     value={settleSearch}
                     onChange={(e) => handleQuickSettleSearch(e.target.value)}
                     autoFocus
@@ -847,14 +922,79 @@ export default function MainLayout() {
                 </div>
               </div>
 
-              {foundCustomer ? (
+              {!selectedSettleTarget && quickSettleResults.length > 0 && (
+                <div className={styles.quickSettleResults}>
+                  {quickSettleResults.map((result, idx) => (
+                    <div 
+                      key={idx} 
+                      className={styles.quickSettleResultItem}
+                      onClick={() => {
+                        setSelectedSettleTarget(result);
+                        setQuickSettleResults([]);
+                        if (result.type === 'customer') {
+                          setSettleSearch(result.data.name);
+                          setSettleAmount('');
+                        } else {
+                          setSettleSearch(result.data.billNumber || result.data.id);
+                          setSettleAmount(result.data.dueAmount.toString());
+                        }
+                      }}
+                    >
+                      <div className={styles.resultItemLeft}>
+                        <div className={`${styles.resultItemIcon} ${result.type === 'customer' ? styles.customer : styles.bill}`}>
+                          {result.type === 'customer' ? <Users size={16} /> : <FileText size={16} />}
+                        </div>
+                        <div className={styles.resultItemText}>
+                          <span className={styles.resultItemTitle}>
+                            {result.type === 'customer' ? result.data.name : `Bill #${result.data.billNumber || result.data.id}`}
+                          </span>
+                          <span className={styles.resultItemSub}>
+                            {result.type === 'customer' 
+                              ? (result.data.phone ? `Phone: ${result.data.phone}` : 'No Phone Number') 
+                              : `Cust: ${result.data.customerName || 'Walk-in'} ${result.data.customerPhone ? `(${result.data.customerPhone})` : ''}`}
+                          </span>
+                        </div>
+                      </div>
+                      <div className={styles.resultItemRight}>
+                        <span className={styles.resultItemPrice}>
+                          {(settings.currencySymbol || 'AED')} {(result.type === 'customer' ? result.data.balance : result.data.dueAmount).toFixed(2)}
+                        </span>
+                        <span className={`${styles.resultTypeBadge} ${result.type === 'customer' ? styles.customer : styles.bill}`}>
+                          {result.type === 'customer' ? 'Customer' : 'Bill'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {selectedSettleTarget ? (
                 <div className={styles.orderResult}>
                   <div className={styles.resultHeader}>
-                    <span className={styles.orderId}>{foundCustomer.name}</span>
-                    <span className={`${styles.statusBadge} ${foundCustomer.balance > 0 ? styles.statusPending : styles.statusDone}`}>
-                      {foundCustomer.balance > 0 ? `Due: ${(settings.currencySymbol || 'AED')} ${foundCustomer.balance.toFixed(2)}` : 'No Due'}
+                    <span className={styles.orderId}>
+                      {selectedSettleTarget.type === 'customer' 
+                        ? selectedSettleTarget.data.name 
+                        : `Bill #${selectedSettleTarget.data.billNumber || selectedSettleTarget.data.id}`}
+                    </span>
+                    <span className={`${styles.statusBadge} ${styles.statusPending}`}>
+                      Due: {(settings.currencySymbol || 'AED')} {(selectedSettleTarget.type === 'customer' ? selectedSettleTarget.data.balance : selectedSettleTarget.data.dueAmount).toFixed(2)}
                     </span>
                   </div>
+
+                  {selectedSettleTarget.type === 'bill' && (
+                    <div style={{ marginBottom: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #E2E8F0' }}>
+                      <div className={styles.resultRow} style={{ marginBottom: '0.25rem' }}>
+                        <span className={styles.label}>Customer Name:</span>
+                        <span className={styles.value}>{selectedSettleTarget.data.customerName || 'Walk-in'}</span>
+                      </div>
+                      {selectedSettleTarget.data.customerPhone && (
+                        <div className={styles.resultRow}>
+                          <span className={styles.label}>Customer Phone:</span>
+                          <span className={styles.value}>{selectedSettleTarget.data.customerPhone}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className={styles.quickSettleForm}>
                     <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
@@ -892,8 +1032,8 @@ export default function MainLayout() {
                     </button>
                   </div>
                 </div>
-              ) : settleSearch.length >= 3 ? (
-                <div className={styles.noOrder}>No customer found</div>
+              ) : settleSearch.length >= 2 && quickSettleResults.length === 0 ? (
+                <div className={styles.noOrder}>No matching customer or bill found</div>
               ) : null}
             </div>
           </div>

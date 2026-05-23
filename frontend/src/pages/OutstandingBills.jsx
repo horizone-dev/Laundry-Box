@@ -33,8 +33,7 @@ export default function OutstandingBills() {
           SELECT o.*, c.name as customerName, c.phone as customerPhone, c.balance as customerBalance 
           FROM orders o 
           LEFT JOIN customers c ON o.customerId = c.id
-          WHERE (o.dueAmount > 0 OR o.paymentStatus NOT IN ('Paid', 'Settled'))
-          AND o.status != 'Cancelled'
+          WHERE o.id IS NOT NULL AND o.id != '' AND o.dueAmount > 0 AND o.status != 'Cancelled'
           ORDER BY o.createdAt DESC
         `;
         const res = await window.electronAPI.dbQuery(query, []);
@@ -56,7 +55,7 @@ export default function OutstandingBills() {
   };
 
   const isOverdue = (order) => {
-    const overdueDays = settings?.overduePeriod || 7;
+    const overdueDays = settings?.overdueDays || 7;
     const diffTime = Math.abs(new Date() - new Date(order.createdAt));
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return diffDays > overdueDays;
@@ -177,7 +176,7 @@ export default function OutstandingBills() {
                   </span>
                 </td>
                 <td className={styles.amount}><CurrencySymbol size={12} /> {(bill.totalAmount || 0).toFixed(2)}</td>
-                <td className={styles.dueAmount}><CurrencySymbol size={12} /> {(bill.dueAmount || bill.totalAmount || 0).toFixed(2)}</td>
+                <td className={styles.dueAmount}><CurrencySymbol size={12} /> {(bill.dueAmount ?? bill.totalAmount ?? 0).toFixed(2)}</td>
                 <td>
                   <div className={styles.actionGroup}>
                     <button 
@@ -186,7 +185,7 @@ export default function OutstandingBills() {
                     >
                       Settle
                     </button>
-                    <button className={styles.iconBtn} onClick={() => navigate(`/invoice/${bill.id}`)}>
+                    <button className={styles.iconBtn} onClick={() => navigate(`/invoice/${encodeURIComponent(bill.id)}`)}>
                       <Eye size={16} />
                     </button>
                   </div>

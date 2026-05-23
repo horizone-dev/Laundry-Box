@@ -53,14 +53,32 @@ export const syncData = async () => {
       const incomingCustomers = response.data.data?.customers || [];
 
       for (const order of incomingOrders) {
+        // LOCAL-WINS: If the local order was updated more recently than the incoming MongoDB data,
+        // skip the overwrite. This prevents the 60-second sync from reverting a just-collected payment.
+        const localRes = await window.electronAPI.dbQuery(
+          'SELECT updatedAt, isSynced FROM orders WHERE id = ?', [order.id]
+        );
+        if (localRes.success && localRes.data[0]) {
+          const localUpdatedAt = new Date(localRes.data[0].updatedAt).getTime();
+          const remoteUpdatedAt = new Date(order.updatedAt).getTime();
+          // If local has pending changes (isSynced=0) or local is newer, skip backend overwrite
+          if (localRes.data[0].isSynced === 0 || localUpdatedAt > remoteUpdatedAt) {
+            console.log(`Sync: Preserving local data for order ${order.id} (local is newer or has pending changes)`);
+            continue;
+          }
+        }
+
         const itemsJson = typeof order.items === 'string' ? order.items : JSON.stringify(order.items);
+        const statusHistoryJson = typeof order.statusHistory === 'string' ? order.statusHistory : JSON.stringify(order.statusHistory || []);
         await window.electronAPI.dbQuery(`
           INSERT OR REPLACE INTO orders 
-          (id, shopId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, createdAt, isSynced, updatedAt) 
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+          (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, statusHistory, createdAt, isSynced, updatedAt, paymentMethod) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
         `, [
           order.id, 
           order.shopId, 
+          order.billNumber || `BN-${Date.now().toString().slice(-6)}`,
+          order.branchId || 'BRANCH_01',
           order.customerId, 
           order.status, 
           order.totalAmount, 
@@ -68,8 +86,10 @@ export const syncData = async () => {
           order.dueAmount || 0, 
           order.paymentStatus || 'Pending', 
           itemsJson, 
+          statusHistoryJson,
           order.createdAt, 
-          order.updatedAt || new Date().toISOString()
+          order.updatedAt || new Date().toISOString(),
+          order.paymentMethod || 'CASH'
         ]);
       }
 

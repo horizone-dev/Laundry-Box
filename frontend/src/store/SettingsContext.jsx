@@ -6,6 +6,7 @@ const SettingsContext = createContext();
 export function SettingsProvider({ children }) {
   const [settings, setSettings] = useState({
     companyName: 'Laundry Management System',
+    companyNameAr: '',
     shopName: 'Laundry Management System',
     logo: null,
     email: '',
@@ -13,6 +14,7 @@ export function SettingsProvider({ children }) {
     alternatePhone: '',
     website: '',
     address: '',
+    addressAr: '',
     city: '',
     emirate: 'Dubai',
     taxId: '',
@@ -40,7 +42,14 @@ export function SettingsProvider({ children }) {
     bankAccounts: [],
     defaultBankId: '',
     autoBackupPath: '',
-    lastBackupTime: ''
+    lastBackupTime: '',
+    language: 'English',
+    dateFormat: 'DD/MM/YYYY',
+    timeFormat: '12h',
+    autoPrint: false,
+    defaultPaymentMethod: 'CASH',
+    overdueDays: 7,
+    defaultCreditLimit: 500
   });
 
   useEffect(() => {
@@ -56,12 +65,14 @@ export function SettingsProvider({ children }) {
           const shopSettings = typeof shop.settings === 'string' ? JSON.parse(shop.settings) : shop.settings;
           setSettings({
             companyName: shop.name || 'Laundry Management System',
+            companyNameAr: shopSettings?.companyNameAr || '',
             logo: shopSettings?.logo || null,
             email: shopSettings?.email || '',
             phone: shopSettings?.phone || '',
             alternatePhone: shopSettings?.alternatePhone || '',
             website: shopSettings?.website || '',
             address: shopSettings?.address || '',
+            addressAr: shopSettings?.addressAr || '',
             city: shopSettings?.city || '',
             emirate: shopSettings?.emirate || 'Dubai',
             taxId: shopSettings?.taxId || '',
@@ -89,7 +100,14 @@ export function SettingsProvider({ children }) {
             bankAccounts: shopSettings?.bankAccounts || [],
             defaultBankId: shopSettings?.defaultBankId || '',
             autoBackupPath: shopSettings?.autoBackupPath || '',
-            lastBackupTime: shopSettings?.lastBackupTime || ''
+            lastBackupTime: shopSettings?.lastBackupTime || '',
+            language: shopSettings?.language || 'English',
+            dateFormat: shopSettings?.dateFormat || 'DD/MM/YYYY',
+            timeFormat: shopSettings?.timeFormat || '12h',
+            autoPrint: shopSettings?.autoPrint ?? false,
+            defaultPaymentMethod: shopSettings?.defaultPaymentMethod || 'CASH',
+            overdueDays: shopSettings?.overdueDays ?? 7,
+            defaultCreditLimit: shopSettings?.defaultCreditLimit ?? 500
           });
         }
       } catch (err) {
@@ -105,12 +123,14 @@ export function SettingsProvider({ children }) {
     if (window.electronAPI?.dbQuery) {
       try {
         const settingsJson = JSON.stringify({
+          companyNameAr: updated.companyNameAr,
           logo: updated.logo,
           email: updated.email,
           phone: updated.phone,
           alternatePhone: updated.alternatePhone,
           website: updated.website,
           address: updated.address,
+          addressAr: updated.addressAr,
           city: updated.city,
           emirate: updated.emirate,
           taxId: updated.taxId,
@@ -129,7 +149,14 @@ export function SettingsProvider({ children }) {
           bankAccounts: updated.bankAccounts,
           defaultBankId: updated.defaultBankId,
           autoBackupPath: updated.autoBackupPath,
-          lastBackupTime: updated.lastBackupTime
+          lastBackupTime: updated.lastBackupTime,
+          language: updated.language,
+          dateFormat: updated.dateFormat,
+          timeFormat: updated.timeFormat,
+          autoPrint: updated.autoPrint,
+          defaultPaymentMethod: updated.defaultPaymentMethod,
+          overdueDays: updated.overdueDays,
+          defaultCreditLimit: updated.defaultCreditLimit
         });
 
         await window.electronAPI.dbQuery(

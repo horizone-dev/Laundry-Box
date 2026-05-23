@@ -258,16 +258,32 @@ export default function Settings() {
                   </div>
                 </div>
 
-                <div className={styles.formGroup} style={{ marginTop: '1.5rem' }}>
-                  <label>Legal Business Name</label>
-                  <div className={styles.inputWrapper}>
-                    <Building2 size={18} color="#94A3B8" />
-                    <input
-                      type="text"
-                      className={styles.inputField}
-                      value={settings.companyName}
-                      onChange={(e) => updateSettings({ companyName: e.target.value })}
-                    />
+                <div className={styles.formGrid} style={{ marginTop: '1.5rem' }}>
+                  <div className={styles.formGroup}>
+                    <label>Legal Business Name (English)</label>
+                    <div className={styles.inputWrapper}>
+                      <Building2 size={18} color="#94A3B8" />
+                      <input
+                        type="text"
+                        className={styles.inputField}
+                        value={settings.companyName}
+                        onChange={(e) => updateSettings({ companyName: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>Legal Business Name (Arabic / عربي)</label>
+                    <div className={styles.inputWrapper} style={{ direction: 'rtl' }}>
+                      <input
+                        type="text"
+                        className={styles.inputField}
+                        style={{ textAlign: 'right' }}
+                        placeholder="الاسم التجاري باللغة العربية"
+                        value={settings.companyNameAr || ''}
+                        onChange={(e) => updateSettings({ companyNameAr: e.target.value })}
+                      />
+                      <Building2 size={18} color="#94A3B8" style={{ marginLeft: '0.75rem' }} />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -382,17 +398,33 @@ export default function Settings() {
               {/* Section 4: Location & Address */}
               <div className={styles.card}>
                 <h2 className={styles.cardTitle}>Address & Location</h2>
-                <div className={styles.formGroup}>
-                  <label>Street Address / Building</label>
-                  <div className={styles.inputWrapper}>
-                    <MapPin size={18} color="#94A3B8" />
-                    <input
-                      type="text"
-                      className={styles.inputField}
-                      placeholder="e.g. Shop 12, Business Bay, Marasi Dr"
-                      value={settings.address}
-                      onChange={(e) => updateSettings({ address: e.target.value })}
-                    />
+                <div className={styles.formGrid}>
+                  <div className={styles.formGroup}>
+                    <label>Street Address (English)</label>
+                    <div className={styles.inputWrapper}>
+                      <MapPin size={18} color="#94A3B8" />
+                      <input
+                        type="text"
+                        className={styles.inputField}
+                        placeholder="e.g. Shop 12, Business Bay, Marasi Dr"
+                        value={settings.address}
+                        onChange={(e) => updateSettings({ address: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>Street Address (Arabic / عربي)</label>
+                    <div className={styles.inputWrapper} style={{ direction: 'rtl' }}>
+                      <input
+                        type="text"
+                        className={styles.inputField}
+                        style={{ textAlign: 'right' }}
+                        placeholder="العنوان باللغة العربية"
+                        value={settings.addressAr || ''}
+                        onChange={(e) => updateSettings({ addressAr: e.target.value })}
+                      />
+                      <MapPin size={18} color="#94A3B8" style={{ marginLeft: '0.75rem' }} />
+                    </div>
                   </div>
                 </div>
                 <div className={styles.formGrid}>

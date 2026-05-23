@@ -86,7 +86,7 @@ export default function Settlement() {
     if (window.electronAPI?.dbQuery) {
       try {
         const pendingRes = await window.electronAPI.dbQuery(
-          'SELECT orders.*, customers.name as customerName, customers.phone as customerPhone, customers.balance as customerBalance FROM orders LEFT JOIN customers ON orders.customerId = customers.id WHERE (orders.dueAmount > 0 OR orders.paymentStatus NOT IN ("Paid", "Settled")) ORDER BY orders.createdAt DESC LIMIT 8',
+          'SELECT orders.*, customers.name as customerName, customers.phone as customerPhone, customers.balance as customerBalance FROM orders LEFT JOIN customers ON orders.customerId = customers.id WHERE orders.id IS NOT NULL AND orders.id != "" AND orders.dueAmount > 0 AND orders.status != "Cancelled" ORDER BY orders.createdAt DESC LIMIT 8',
           []
         );
         const historyRes = await window.electronAPI.dbQuery(
@@ -106,9 +106,13 @@ export default function Settlement() {
 
         const outstandingSum = await window.electronAPI.dbQuery('SELECT SUM(balance) as total FROM customers WHERE balance > 0', []);
         const advanceSum = await window.electronAPI.dbQuery('SELECT SUM(ABS(balance)) as total FROM customers WHERE balance < 0', []);
-        const pendingCount = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM orders WHERE dueAmount > 0', []);
+        const pendingCount = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM orders WHERE id IS NOT NULL AND id != "" AND dueAmount > 0 AND status != "Cancelled"', []);
         const settlementsRes = await window.electronAPI.dbQuery("SELECT SUM(amount) as total FROM payments WHERE strftime('%m', createdAt) = strftime('%m', 'now')", []);
-        const overdueRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE dueAmount > 0 AND createdAt < date('now', '-2 days')", []);
+        const overdueDays = settings?.overdueDays || 7;
+        const overdueRes = await window.electronAPI.dbQuery(
+          "SELECT COUNT(*) as count FROM orders WHERE id IS NOT NULL AND id != '' AND dueAmount > 0 AND status != 'Cancelled' AND createdAt < date('now', ?)",
+          [`-${overdueDays} days`]
+        );
 
         setKpis({
           outstanding: (outstandingSum.success && outstandingSum.data[0]?.total) || 0,
@@ -132,7 +136,7 @@ export default function Settlement() {
         const customerId = customer.id;
         
         const pendingRes = await window.electronAPI.dbQuery(
-          'SELECT * FROM orders WHERE customerId = ? AND (dueAmount > 0 OR paymentStatus NOT IN ("Paid", "Settled")) ORDER BY createdAt DESC',
+          'SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != "" AND dueAmount > 0 AND status != "Cancelled" ORDER BY createdAt DESC',
           [customerId]
         );
         const historyRes = await window.electronAPI.dbQuery(
@@ -177,7 +181,7 @@ export default function Settlement() {
         
         // Fetch fresh pending bills just for the settlement logic to be safe
         const billsRes = await window.electronAPI.dbQuery(
-          'SELECT * FROM orders WHERE customerId = ? AND (dueAmount > 0 OR paymentStatus != "Paid") ORDER BY createdAt ASC',
+          'SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != "" AND dueAmount > 0 AND status != "Cancelled" ORDER BY createdAt ASC',
           [selectedCustomer.id]
         );
         const bills = billsRes.success ? billsRes.data : [];
@@ -207,9 +211,11 @@ export default function Settlement() {
               newStatus = 'Partial';
             }
 
+            // Also update workflow status to 'Confirmed' when fully paid so it's removed from pending view
+            const newWorkflowStatus = newDue <= 0 ? 'Confirmed' : bill.status;
             await window.electronAPI.dbQuery(
-              'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, updatedAt = ? WHERE id = ?',
-              [newPaid, newDue, newStatus, timestamp, bill.id]
+              'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+              [newPaid, newDue, newStatus, newWorkflowStatus, paymentMethod, timestamp, bill.id]
             );
 
             await window.electronAPI.dbQuery(
@@ -220,19 +226,29 @@ export default function Settlement() {
           }
         }
 
+        // If there's remaining unapplied payment (excess / advance payment), record it as an unlinked payment
+        if (remaining > 0) {
+          await window.electronAPI.dbQuery(
+            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [`PAY-ADV-${Date.now()}`, selectedCustomer.id, null, DEFAULT_SHOP_ID, remaining, paymentMethod, 'SUCCESS', timestamp]
+          );
+        }
+
         await window.electronAPI.dbQuery(
-          'UPDATE customers SET balance = balance - ?, updatedAt = ? WHERE id = ?',
+          'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
           [amount, timestamp, selectedCustomer.id]
         );
 
         alert("Settlement completed successfully!");
         setPaymentAmount('');
         setShowPayModal(false);
-        // Refresh data
-        fetchCustomerSpecificData(selectedCustomer.id);
-        // We need to refresh the customer object itself to get updated balance
+        // Refresh the customer object first to get updated balance, then refresh bills
         const updatedCust = await window.electronAPI.dbQuery('SELECT * FROM customers WHERE id = ?', [selectedCustomer.id]);
-        if (updatedCust.success) setSelectedCustomer(updatedCust.data[0]);
+        const refreshedCustomer = updatedCust.success ? updatedCust.data[0] : selectedCustomer;
+        if (updatedCust.success) setSelectedCustomer(refreshedCustomer);
+        // Pass the full customer object (not just the ID) so fetchCustomerSpecificData works
+        fetchCustomerSpecificData(refreshedCustomer);
         
         fetchGlobalData();
         fetchCustomers();
@@ -326,8 +342,8 @@ export default function Settlement() {
                       </div>
                       <div className={styles.rowRight}>
                         <span className={styles.rowAmount}><CurrencySymbol size={10} /> {Math.abs(customer.balance).toFixed(2)}</span>
-                        <span className={`${styles.rowStatus} ${customer.balance > 0 ? styles.statusDue : styles.statusAdv}`}>
-                          {customer.balance > 0 ? 'Outstanding' : 'Advance'}
+                        <span className={`${styles.rowStatus} ${customer.balance > 0 ? styles.statusDue : customer.balance < 0 ? styles.statusAdv : styles.statusPaid}`}>
+                          {customer.balance > 0 ? 'Outstanding' : customer.balance < 0 ? 'Advance' : 'Settled'}
                         </span>
                         <ChevronRight size={14} color="#94a3b8" />
                       </div>

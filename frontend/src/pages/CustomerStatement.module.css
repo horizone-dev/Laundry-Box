@@ -1,0 +1,668 @@
+/* ═══════════════════════════════════════════════
+   CustomerStatement.module.css
+   ═══════════════════════════════════════════════ */
+
+/* ── Page Layout ────────────────────────────────── */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.25rem;
+  min-height: 100%;
+  background: #F8FAFC;
+}
+
+/* ── Header ─────────────────────────────────────── */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.breadcrumb {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #94A3B8;
+  letter-spacing: 0.4px;
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+}
+
+.header h1 {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: #0F172A;
+  margin: 0 0 0.25rem;
+}
+
+.subtext {
+  font-size: 0.9rem;
+  color: #64748B;
+  margin: 0;
+}
+
+.headerActions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.btnPrimary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.6rem 1.25rem;
+  background: #2563EB;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.18s, transform 0.18s;
+}
+.btnPrimary:hover { background: #1D4ED8; transform: translateY(-1px); }
+
+.btnSecondary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.6rem 1.25rem;
+  background: white;
+  color: #475569;
+  border: 1.5px solid #E2E8F0;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s, transform 0.18s;
+}
+.btnSecondary:hover { border-color: #2563EB; color: #2563EB; transform: translateY(-1px); }
+
+/* ── Filter Bar ─────────────────────────────────── */
+.filterBar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+  background: white;
+  padding: 1rem 1.25rem;
+  border-radius: 16px;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+/* Customer Selector */
+.customerSelector {
+  position: relative;
+  flex: 1;
+  min-width: 260px;
+}
+
+.selectorInput {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem;
+  border: 1.5px solid #E2E8F0;
+  border-radius: 10px;
+  background: #F8FAFC;
+  cursor: text;
+  transition: border-color 0.18s;
+  position: relative;
+}
+.selectorInput:focus-within { border-color: #2563EB; background: white; }
+
+.selectedName {
+  font-weight: 700;
+  color: #0F172A;
+  font-size: 0.9rem;
+  flex: 1;
+}
+
+.searchInput {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0;
+  font-size: 0.88rem;
+  color: #0F172A;
+  width: 100%;
+}
+.searchInput::placeholder {
+  color: #94A3B8;
+}
+
+.selectorInput:not(:focus-within) .selectedName + .searchInput {
+  display: none;
+}
+
+.selectorInput:focus-within .selectedName {
+  display: none;
+}
+
+/* Dropdown */
+.dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.12);
+  z-index: 999;
+  overflow: hidden;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.dropdownItem {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid #F8FAFC;
+}
+.dropdownItem:hover { background: #F8FAFC; }
+.dropdownItem:last-child { border-bottom: none; }
+
+.dropdownAvatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+  color: white;
+  font-weight: 800;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.dropdownName {
+  font-weight: 700;
+  color: #0F172A;
+  font-size: 0.88rem;
+}
+
+.dropdownPhone {
+  font-size: 0.78rem;
+  color: #64748B;
+  margin-top: 1px;
+}
+
+.balanceDue {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #EF4444;
+  background: #FEF2F2;
+  padding: 0.15rem 0.5rem;
+  border-radius: 100px;
+  white-space: nowrap;
+}
+
+.balanceOk {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #10B981;
+  background: #F0FDF4;
+  padding: 0.15rem 0.5rem;
+  border-radius: 100px;
+}
+
+/* Date Filters */
+.dateFilters {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dateField {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.85rem;
+  border: 1.5px solid #E2E8F0;
+  border-radius: 10px;
+  background: #F8FAFC;
+}
+.dateField:focus-within { border-color: #2563EB; background: white; }
+
+.dateInput {
+  border: none;
+  background: transparent;
+  font-size: 0.85rem;
+  color: #0F172A;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+}
+
+.dateSep {
+  font-size: 0.8rem;
+  color: #94A3B8;
+  font-weight: 600;
+}
+
+.clearBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.85rem;
+  border: 1.5px solid #FBBF24;
+  border-radius: 10px;
+  background: #FFFBEB;
+  color: #D97706;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.clearBtn:hover { background: #FEF3C7; }
+
+/* Type Filter Tabs */
+.typeFilter {
+  display: flex;
+  gap: 0.25rem;
+  background: #F1F5F9;
+  padding: 0.25rem;
+  border-radius: 10px;
+}
+
+.typeBtn {
+  padding: 0.45rem 0.9rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.83rem;
+  font-weight: 700;
+  color: #64748B;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+}
+
+.typeBtnActive {
+  background: white;
+  color: #2563EB;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+/* ── Empty State ────────────────────────────────── */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 5rem 2rem;
+  background: white;
+  border-radius: 20px;
+  border: 2px dashed #E2E8F0;
+  text-align: center;
+  gap: 0.75rem;
+}
+
+.emptyIcon {
+  margin-bottom: 0.5rem;
+}
+
+.emptyState h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #0F172A;
+  margin: 0;
+}
+
+.emptyState p {
+  color: #94A3B8;
+  font-size: 0.9rem;
+  max-width: 360px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ── KPI Row ────────────────────────────────────── */
+.kpiRow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+.kpiCard {
+  background: white;
+  border-radius: 16px;
+  padding: 1.25rem;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.kpiCard:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.08); }
+
+.kpiIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kpiContent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.kpiLabel {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #94A3B8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kpiValue {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #0F172A;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.kpiSub {
+  font-size: 0.75rem;
+  color: #94A3B8;
+}
+
+/* ── Customer Banner ────────────────────────────── */
+.customerBanner {
+  background: linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%);
+  border-radius: 18px;
+  padding: 1.5rem 2rem;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  color: white;
+  flex-wrap: wrap;
+}
+
+.bannerAvatar {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: white;
+  flex-shrink: 0;
+  border: 2px solid rgba(255,255,255,0.35);
+}
+
+.bannerInfo {
+  flex: 1;
+}
+
+.bannerInfo h2 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  margin: 0 0 0.25rem;
+}
+
+.bannerInfo p {
+  font-size: 0.85rem;
+  opacity: 0.8;
+  margin: 0;
+}
+
+.bannerMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: right;
+}
+
+.metaLabel {
+  font-size: 0.7rem;
+  font-weight: 700;
+  opacity: 0.65;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.metaValue {
+  font-size: 0.85rem;
+  font-weight: 700;
+  opacity: 0.95;
+}
+
+/* ── Ledger Table ───────────────────────────────── */
+.tableCard {
+  background: white;
+  border-radius: 18px;
+  border: 1px solid #E2E8F0;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+.ledgerTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ledgerTable thead tr {
+  background: #F8FAFC;
+  border-bottom: 2px solid #E2E8F0;
+}
+
+.ledgerTable th {
+  padding: 0.9rem 1rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #64748B;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.numCol {
+  text-align: right !important;
+}
+
+.ledgerRow {
+  border-bottom: 1px solid #F1F5F9;
+  transition: background 0.15s;
+}
+.ledgerRow:hover { background: #F8FAFC; }
+.ledgerRow:last-child { border-bottom: none; }
+
+.paymentRow { background: rgba(16, 185, 129, 0.02); }
+.orderRow   { background: white; }
+
+.ledgerTable td {
+  padding: 1rem 1rem;
+  font-size: 0.88rem;
+  vertical-align: middle;
+}
+
+.dateCell {
+  white-space: nowrap;
+}
+
+.timeText {
+  font-size: 0.72rem;
+  color: #94A3B8;
+  margin-top: 2px;
+}
+
+.refCell {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.refText {
+  font-weight: 700;
+  color: #0F172A;
+  font-size: 0.82rem;
+}
+
+.descCell {
+  color: #475569;
+  font-size: 0.85rem;
+}
+
+.debitCell {
+  font-weight: 700;
+  color: #DC2626;
+}
+
+.creditCell {
+  font-weight: 700;
+  color: #059669;
+}
+
+.balanceDueNum {
+  font-weight: 800;
+  color: #EF4444;
+}
+
+.balanceAdvNum {
+  font-weight: 800;
+  color: #8B5CF6;
+}
+
+.balanceZero {
+  font-weight: 800;
+  color: #10B981;
+}
+
+.advTag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #8B5CF6;
+}
+
+.dash {
+  color: #CBD5E1;
+  font-weight: 400;
+}
+
+/* Totals Row */
+.totalsRow {
+  background: #F8FAFC;
+  border-top: 2px solid #E2E8F0;
+}
+
+.totalsLabel {
+  padding: 1.1rem 1rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.totalsNum {
+  font-size: 0.95rem;
+  font-weight: 800;
+  padding: 1.1rem 1rem;
+}
+
+/* Loading */
+.loadingRow {
+  padding: 3rem;
+  text-align: center;
+  color: #94A3B8;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+/* ── Print Footer ───────────────────────────────── */
+.printFooter {
+  display: none;
+  text-align: center;
+  color: #94A3B8;
+  font-size: 0.78rem;
+  padding: 1rem;
+}
+
+/* ── Print Styles ───────────────────────────────── */
+@media print {
+  .page {
+    background: white;
+    padding: 0;
+    gap: 1rem;
+  }
+
+  .filterBar,
+  .headerActions {
+    display: none !important;
+  }
+
+  .header {
+    border-bottom: 2px solid #E2E8F0;
+    padding-bottom: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .kpiRow {
+    grid-template-columns: repeat(4, 1fr);
+    break-inside: avoid;
+  }
+
+  .kpiCard,
+  .tableCard,
+  .customerBanner {
+    box-shadow: none;
+    border: 1px solid #E2E8F0;
+    break-inside: avoid;
+  }
+
+  .customerBanner {
+    background: #1E3A5F !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .ledgerTable thead tr {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .printFooter {
+    display: block;
+    margin-top: 2rem;
+    border-top: 1px solid #E2E8F0;
+    padding-top: 1rem;
+  }
+}
+
+/* ── Responsive ─────────────────────────────────── */
+@media (max-width: 1200px) {
+  .kpiRow { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .kpiRow { grid-template-columns: 1fr 1fr; }
+  .filterBar { flex-direction: column; align-items: stretch; }
+  .customerBanner { flex-direction: column; text-align: center; }
+  .bannerMeta { text-align: center; }
+  .headerActions { flex-wrap: wrap; }
+}

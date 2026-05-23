@@ -29,7 +29,7 @@ exports.syncData = async (req, res) => {
         };
         
         await Order.findOneAndUpdate(
-          { id: mongoOrder.id, shopId },
+          { id: mongoOrder.id },
           { ...mongoOrder, shopId, updatedAt: new Date() },
           { upsert: true, new: true }
         );
@@ -41,7 +41,7 @@ exports.syncData = async (req, res) => {
       for (const cust of customers) {
         const { isSynced, ...rest } = cust;
         await Customer.findOneAndUpdate(
-          { id: cust.id, shopId },
+          { id: cust.id },
           { ...rest, shopId, updatedAt: new Date() },
           { upsert: true, new: true }
         );

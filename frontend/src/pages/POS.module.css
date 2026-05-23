@@ -1224,6 +1224,26 @@
   transform: translateY(-1px);
 }
 
+.printSuccessBtn {
+  background: #2563EB;
+  color: white;
+  border: none;
+  padding: 1rem;
+  border-radius: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.printSuccessBtn:hover {
+  background: #1D4ED8;
+  transform: translateY(-1px);
+}
+
 .doneBtn {
   background: #F1F5F9;
   color: #475569;

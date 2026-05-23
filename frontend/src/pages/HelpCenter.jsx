@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { 
-  Search, HelpCircle, Book, MessageCircle, 
-  Settings, ShoppingCart, Users, ChevronDown, ChevronUp 
+import {
+  Search, HelpCircle, Book, MessageCircle,
+  Settings, ShoppingCart, Users, ChevronDown, ChevronUp
 } from 'lucide-react';
 import styles from './HelpCenter.module.css';
 
@@ -35,7 +35,7 @@ export default function HelpCenter() {
   const [search, setSearch] = useState('');
   const [openFaq, setOpenFaq] = useState(null);
 
-  const filteredFaqs = initialFaqs.filter(faq => 
+  const filteredFaqs = initialFaqs.filter(faq =>
     faq.question.toLowerCase().includes(search.toLowerCase()) ||
     faq.answer.toLowerCase().includes(search.toLowerCase())
   );
@@ -47,9 +47,9 @@ export default function HelpCenter() {
         <p>Search our knowledge base or browse categories below to find answers to your questions.</p>
         <div className={styles.searchContainer}>
           <Search className={styles.searchIcon} size={20} />
-          <input 
-            type="text" 
-            placeholder="Search for articles..." 
+          <input
+            type="text"
+            placeholder="Search for articles..."
             className={styles.searchInput}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -74,8 +74,8 @@ export default function HelpCenter() {
         <div className={styles.faqList}>
           {filteredFaqs.length > 0 ? filteredFaqs.map((faq, idx) => (
             <div key={idx} className={styles.faqItem}>
-              <div 
-                className={styles.faqQuestion} 
+              <div
+                className={styles.faqQuestion}
                 onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
               >
                 <span>{faq.question}</span>
