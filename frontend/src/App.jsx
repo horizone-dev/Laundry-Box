@@ -60,6 +60,7 @@ function App() {
             <Route path="revenue" element={<RevenueReport />} />
             <Route path="expenses" element={<Expenses />} />
             <Route path="customer-statement" element={<CustomerStatement />} />
+            <Route path="customer-statement/:customerId" element={<CustomerStatement />} />
           </Route>
           <Route path="expenses" element={<Expenses />} />
           <Route path="settings" element={<Settings />} />

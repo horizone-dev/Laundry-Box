@@ -227,7 +227,15 @@ function initDB(appPath) {
     if (!serviceCols.some(col => col.name === 'image')) {
       db.exec("ALTER TABLE services ADD COLUMN image TEXT;");
     }
-    // Data Healer: Normalize statuses and fix broken financial records
+    // Data Healer: Run on init
+    runDataHealer(db);
+  } catch (err) {
+    console.error("Migrations failed:", err);
+  }
+}
+
+function runDataHealer(db) {
+  try {
     console.log("Running Data Healer...");
     const timestamp = new Date().toISOString();
     
@@ -271,8 +279,9 @@ function initDB(appPath) {
         let newPaid = (order.paidAmount || 0) + apply;
         let newDue = order.totalAmount - newPaid;
         let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+        let newPaymentMethod = newDue <= 0 ? 'CASH' : (order.paymentMethod || 'Credit');
         
-        db.prepare("UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, isSynced = 0, updatedAt = ? WHERE id = ?").run(newPaid, newDue, newStatus, timestamp, order.id);
+        db.prepare("UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?").run(newPaid, newDue, newStatus, newPaymentMethod, timestamp, order.id);
         advance -= apply;
       }
     }
@@ -300,20 +309,23 @@ function initDB(appPath) {
           let newDue = order.totalAmount - newPaid;
           let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
           
-          // Also update workflow status to Confirmed when fully paid
           const newWorkflowStatus = newDue <= 0 ? 'Confirmed' : order.status;
-          
-          db.prepare("UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, isSynced = 0, updatedAt = ? WHERE id = ?").run(newPaid, newDue, newStatus, newWorkflowStatus, timestamp, order.id);
           
           // Reconcile payments table: split and link the unapplied payments
           let remainingToLink = apply;
           const unlinkedPayments = db.prepare("SELECT id, amount, method, shopId, createdAt FROM payments WHERE customerId = ? AND (orderId IS NULL OR orderId = '') ORDER BY createdAt ASC").all(customer.id);
           
+          const firstPayment = unlinkedPayments[0];
+          const finalPayMethod = (firstPayment && firstPayment.method && firstPayment.method.toUpperCase() !== 'CREDIT') ? firstPayment.method : 'CASH';
+          
+          db.prepare("UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?").run(newPaid, newDue, newStatus, newWorkflowStatus, finalPayMethod, timestamp, order.id);
+          
           for (const payment of unlinkedPayments) {
             if (remainingToLink <= 0) break;
             
+            const splitPayMethod = (payment.method && payment.method.toUpperCase() !== 'CREDIT') ? payment.method : 'CASH';
             if (payment.amount <= remainingToLink) {
-              db.prepare("UPDATE payments SET orderId = ?, isSynced = 0 WHERE id = ?").run(order.id, payment.id);
+              db.prepare("UPDATE payments SET orderId = ?, method = ?, isSynced = 0 WHERE id = ?").run(order.id, splitPayMethod, payment.id);
               remainingToLink -= payment.amount;
             } else {
               const newUnlinkedAmount = payment.amount - remainingToLink;
@@ -321,7 +333,7 @@ function initDB(appPath) {
               
               db.prepare(`INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced) 
                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`)
-                .run(`PAY-SPLIT-${Date.now()}-${order.id}`, customer.id, order.id, payment.shopId || 'SHOP_01', remainingToLink, payment.method || 'CASH', 'SUCCESS', payment.createdAt);
+                .run(`PAY-SPLIT-${Date.now()}-${order.id}`, customer.id, order.id, payment.shopId || 'SHOP_01', remainingToLink, splitPayMethod, 'SUCCESS', payment.createdAt);
               
               remainingToLink = 0;
             }
@@ -371,7 +383,7 @@ function initDB(appPath) {
 
     console.log("Data Healer completed.");
   } catch (err) {
-    console.error("Migrations/Data Healer failed:", err);
+    console.error("Data Healer failed:", err);
   }
 }
 
@@ -382,4 +394,4 @@ function getDB() {
   return db;
 }
 
-module.exports = { initDB, getDB };
+module.exports = { initDB, getDB, runDataHealer };

@@ -453,7 +453,7 @@
   background: white;
   border: 1px solid #f59e0b;
   color: #b45309;
-  padding: 0.5rem 1rem;
+  padding: 1rem;
   border-radius: 10px;
   font-size: 0.8rem;
   font-weight: 700;
@@ -495,7 +495,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  padding: 1rem;
   background: #f0fdf4;
   color: #16a34a;
   border-radius: 99px;
@@ -514,7 +514,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  padding: 1rem;
   background: #fef2f2;
   color: #ef4444;
   border-radius: 99px;

@@ -217,6 +217,7 @@ export default function MainLayout() {
       permissionKey: 'customers',
       subItems: [
         { path: '/customers', label: 'Customer List' },
+        { path: '/reports/customer-statement', label: 'Customer Statement' },
       ]
     },
     {
@@ -247,7 +248,6 @@ export default function MainLayout() {
         { path: '/reports', label: 'Analytics' },
         { path: '/reports/revenue', label: 'Revenue' },
         { path: '/reports/expenses', label: 'Expenses' },
-        { path: '/reports/customer-statement', label: 'Customer Statement' },
       ]
     },
     {
@@ -447,7 +447,7 @@ export default function MainLayout() {
 
         // 3. Try to settle orders (simplified FIFO)
         const billsRes = await window.electronAPI.dbQuery(
-          'SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != "" AND dueAmount > 0 ORDER BY createdAt ASC',
+          "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 ORDER BY createdAt ASC",
           [customer.id]
         );
 

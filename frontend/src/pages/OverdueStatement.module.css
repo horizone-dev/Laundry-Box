@@ -1,5 +1,5 @@
 .container {
-  padding: 2rem;
+  padding: 0 2rem 2rem 2rem;
   max-width: 1000px;
   margin: 0 auto;
   font-family: 'Inter', -apple-system, sans-serif;
@@ -218,7 +218,7 @@
 }
 
 .table td {
-  padding: 1.25rem 1rem;
+  padding: 1rem;
   font-size: 0.95rem;
   border-bottom: 1px solid #F1F5F9;
 }

@@ -26,7 +26,7 @@ export default function OverdueStatement() {
         }
 
         const bRes = await window.electronAPI.dbQuery(
-          'SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != "" AND (dueAmount > 0 OR paymentStatus != "Paid") ORDER BY createdAt ASC',
+          "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND (dueAmount > 0 OR paymentStatus != 'Paid') ORDER BY createdAt ASC",
           [customerId]
         );
         if (bRes.success) {

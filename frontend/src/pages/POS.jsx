@@ -414,6 +414,10 @@ export default function POS() {
           await window.electronAPI.dbQuery('UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?', [total, new Date().toISOString(), selectedCustomer.id]);
         }
 
+        if (window.electronAPI?.runDataHealer) {
+          await window.electronAPI.runDataHealer();
+        }
+
         // Trigger local event
         window.dispatchEvent(new CustomEvent('order-created', { 
           detail: { 
@@ -457,12 +461,20 @@ export default function POS() {
           console.warn('Backend sync failed, but local order saved:', syncErr);
         }
 
+        let freshBalance = (selectedCustomer?.balance || 0) + total;
+        if (selectedCustomer) {
+          const res = await window.electronAPI.dbQuery('SELECT balance FROM customers WHERE id = ?', [selectedCustomer.id]);
+          if (res.success && res.data.length > 0) {
+            freshBalance = res.data[0].balance;
+          }
+        }
+
         setLastOrderInfo({
           orderId,
           total,
           customerName: selectedCustomer.name,
           customerPhone: selectedCustomer.phone,
-          newBalance: (selectedCustomer.balance || 0) + total
+          newBalance: freshBalance
         });
         
         setShowSuccessModal(true);
@@ -988,9 +1000,30 @@ export default function POS() {
                 <span className={styles.summaryValue}><CurrencySymbol size={14} /> {lastOrderInfo.total.toFixed(2)}</span>
               </div>
               <div className={styles.summaryRow}>
-                <span>Customer Balance</span>
-                <span className={styles.summaryValue} style={{ color: '#EF4444' }}>
-                  <CurrencySymbol size={14} /> {lastOrderInfo.newBalance.toFixed(2)}
+                <span>
+                  {lastOrderInfo.newBalance > 0 
+                    ? 'Customer Balance (Due)' 
+                    : lastOrderInfo.newBalance < 0 
+                      ? 'Customer Balance (Advance)' 
+                      : 'Customer Balance'}
+                </span>
+                <span 
+                  className={styles.summaryValue} 
+                  style={{ 
+                    color: lastOrderInfo.newBalance > 0 
+                      ? '#EF4444' 
+                      : lastOrderInfo.newBalance < 0 
+                        ? '#10B981' 
+                        : '#64748B' 
+                  }}
+                >
+                  {lastOrderInfo.newBalance !== 0 ? (
+                    <>
+                      <CurrencySymbol size={14} /> {Math.abs(lastOrderInfo.newBalance).toFixed(2)}
+                    </>
+                  ) : (
+                    'Settled'
+                  )}
                 </span>
               </div>
 
@@ -998,7 +1031,12 @@ export default function POS() {
                 <button 
                   className={styles.waSuccessBtn}
                   onClick={() => {
-                    const msg = `Hello ${lastOrderInfo.customerName}! Your laundry bill for ${lastOrderInfo.orderId} of ${formatCurrency(lastOrderInfo.total)} has been saved. Your total outstanding balance is ${formatCurrency(lastOrderInfo.newBalance)}. Thank you!`;
+                    const balMsg = lastOrderInfo.newBalance > 0 
+                      ? `Your outstanding due is ${formatCurrency(lastOrderInfo.newBalance)}` 
+                      : lastOrderInfo.newBalance < 0 
+                        ? `Your prepaid advance is ${formatCurrency(Math.abs(lastOrderInfo.newBalance))}` 
+                        : `Your balance is settled`;
+                    const msg = `Hello ${lastOrderInfo.customerName}! Your laundry bill for ${lastOrderInfo.orderId} of ${formatCurrency(lastOrderInfo.total)} has been saved. ${balMsg}. Thank you!`;
                     handleWhatsApp(lastOrderInfo.customerPhone, msg);
                   }}
                 >

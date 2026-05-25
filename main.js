@@ -163,6 +163,17 @@ ipcMain.handle('check-connection', () => {
 });
 
 // DB IPC Handlers
+ipcMain.handle('run-data-healer', () => {
+  try {
+    const { runDataHealer, getDB } = require('./database');
+    runDataHealer(getDB());
+    return { success: true };
+  } catch (err) {
+    console.error('Failed to run healer:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('db-query', (event, { query, params }) => {
   try {
     const db = getDB();

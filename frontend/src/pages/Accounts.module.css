@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   gap: 2rem;
-  padding: 1rem;
+  padding: 0 1rem 1rem 1rem;
 }
 
 .header {
@@ -131,7 +131,7 @@
   align-items: center;
   gap: 0.5rem;
   background: #F8FAFC;
-  padding: 0.5rem 1rem;
+  padding: 1rem;
   border-radius: 10px;
   border: 1px solid #E2E8F0;
   width: 260px;
@@ -148,7 +148,7 @@
 .filterBtn {
   background: white;
   border: 1px solid #E2E8F0;
-  padding: 0.5rem 1rem;
+  padding: 1rem;
   border-radius: 10px;
   font-size: 0.85rem;
   font-weight: 600;
@@ -166,7 +166,7 @@
 
 .table th {
   background: #F8FAFC;
-  padding: 1rem 1.5rem;
+  padding: 1rem;
   text-align: left;
   font-size: 0.75rem;
   font-weight: 800;
@@ -176,7 +176,7 @@
 }
 
 .table td {
-  padding: 1.25rem 1.5rem;
+  padding: 1rem;
   border-bottom: 1px solid #F1F5F9;
   font-size: 0.9rem;
   color: #475569;
@@ -439,7 +439,7 @@
   border: none;
   color: #94A3B8;
   cursor: pointer;
-  padding: 0.5rem;
+  padding: 1rem;
   border-radius: 8px;
   transition: all 0.2s;
   display: flex;

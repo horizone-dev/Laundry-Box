@@ -49,6 +49,7 @@ export default function Orders({ isPendingView = false }) {
   const [payMethod, setPayMethod] = useState('CASH');
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [pendingSubFilter, setPendingSubFilter] = useState('All'); // 'All', 'Pending', 'Overdue'
+  const [workflowFilter, setWorkflowFilter] = useState('All'); // 'All', 'Confirmed', 'Processing', 'Ready', 'Delivered', 'Cancelled'
   const [isPrintingTags, setIsPrintingTags] = useState(false);
 
   // Translation helpers
@@ -90,6 +91,18 @@ export default function Orders({ isPendingView = false }) {
     } else if (pendingSubFilter === 'Overdue') {
       filteredOrders = filteredOrders.filter(o => isOverdue(o));
     }
+  } else {
+    if (workflowFilter === 'Confirmed') {
+      filteredOrders = filteredOrders.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status));
+    } else if (workflowFilter === 'Processing') {
+      filteredOrders = filteredOrders.filter(o => ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status));
+    } else if (workflowFilter === 'Ready') {
+      filteredOrders = filteredOrders.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status));
+    } else if (workflowFilter === 'Delivered') {
+      filteredOrders = filteredOrders.filter(o => o.status === 'Delivered');
+    } else if (workflowFilter === 'Cancelled') {
+      filteredOrders = filteredOrders.filter(o => o.status === 'Cancelled');
+    }
   }
 
   // Financial Calculations for KPIs
@@ -110,6 +123,15 @@ export default function Orders({ isPendingView = false }) {
     all: orders.filter(o => o.dueAmount > 0).length,
     pending: orders.filter(o => o.dueAmount > 0 && !isOverdue(o)).length,
     overdue: overdueOrdersList.length
+  };
+
+  const workflowCounts = {
+    All: orders.length,
+    Confirmed: orders.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status)).length,
+    Processing: orders.filter(o => ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status)).length,
+    Ready: orders.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status)).length,
+    Delivered: orders.filter(o => o.status === 'Delivered').length,
+    Cancelled: orders.filter(o => o.status === 'Cancelled').length
   };
 
   const dueSoonOrders = orders.filter(o => {
@@ -481,7 +503,7 @@ export default function Orders({ isPendingView = false }) {
         </div>
       </div>
 
-      {isPendingView && (
+      {isPendingView ? (
         <div className={styles.subFilterRow}>
           <Filter size={16} color="#64748B" />
           <button 
@@ -501,6 +523,46 @@ export default function Orders({ isPendingView = false }) {
             onClick={() => setPendingSubFilter('Overdue')}
           >
             {t('overdue', settings.language)} ({counts.overdue})
+          </button>
+        </div>
+      ) : (
+        <div className={styles.subFilterRow}>
+          <Filter size={16} color="#64748B" />
+          <button 
+            className={`${styles.filterTab} ${workflowFilter === 'All' ? styles.filterTabActive : ''}`}
+            onClick={() => setWorkflowFilter('All')}
+          >
+            {t('all', settings.language)} ({workflowCounts.All})
+          </button>
+          <button 
+            className={`${styles.filterTab} ${workflowFilter === 'Confirmed' ? styles.filterTabActive : ''}`}
+            onClick={() => setWorkflowFilter('Confirmed')}
+          >
+            {t('confirmed', settings.language)} ({workflowCounts.Confirmed})
+          </button>
+          <button 
+            className={`${styles.filterTab} ${workflowFilter === 'Processing' ? styles.filterTabActive : ''}`}
+            onClick={() => setWorkflowFilter('Processing')}
+          >
+            {t('processing', settings.language)} ({workflowCounts.Processing})
+          </button>
+          <button 
+            className={`${styles.filterTab} ${workflowFilter === 'Ready' ? styles.filterTabActive : ''}`}
+            onClick={() => setWorkflowFilter('Ready')}
+          >
+            {t('ready', settings.language)} ({workflowCounts.Ready})
+          </button>
+          <button 
+            className={`${styles.filterTab} ${workflowFilter === 'Delivered' ? styles.filterTabActive : ''}`}
+            onClick={() => setWorkflowFilter('Delivered')}
+          >
+            {t('delivered', settings.language)} ({workflowCounts.Delivered})
+          </button>
+          <button 
+            className={`${styles.filterTab} ${workflowFilter === 'Cancelled' ? styles.filterTabActiveOverdue : ''}`}
+            onClick={() => setWorkflowFilter('Cancelled')}
+          >
+            {t('cancelled', settings.language)} ({workflowCounts.Cancelled})
           </button>
         </div>
       )}
@@ -589,7 +651,7 @@ export default function Orders({ isPendingView = false }) {
                 <th>{t('paymentMethodLabel', settings.language)}</th>
                 <th>{t('status', settings.language)}</th>
                 <th>{t('date', settings.language)}</th>
-                <th className={styles.actionsHeader}>{t('actions', settings.language)}</th>
+                <th className={styles.actionsHeader}>{t('paymentStatus', settings.language)}</th>
               </tr>
             </thead>
             <tbody>
@@ -664,11 +726,7 @@ export default function Orders({ isPendingView = false }) {
                      </td>
                     <td>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', alignItems: 'flex-start' }}>
-                        {(order.paymentStatus === 'Paid' || (order.dueAmount !== undefined && order.dueAmount <= 0)) && ['Confirmed', 'Payment Pending', 'Credit', 'Pending'].includes(order.status) ? (
-                          <span className={`${styles.statusBadge} ${STATUS_COLORS['Paid'] || styles.statusDelivered}`}>
-                            {t('paid', settings.language)}
-                          </span>
-                        ) : (!['Payment Pending', 'Paid', 'Credit'].includes(order.status)) ? (
+                        {!['Payment Pending', 'Paid', 'Credit'].includes(order.status) ? (
                           <span className={`${styles.statusBadge} ${STATUS_COLORS[order.status]}`}>
                             {translateStatus(order.status)}
                           </span>

@@ -152,6 +152,9 @@ export default function Settings() {
                       <option value="DD/MM/YYYY">DD/MM/YYYY</option>
                       <option value="MM/DD/YYYY">MM/DD/YYYY</option>
                       <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+                      <option value="DD-MM-YYYY">DD-MM-YYYY</option>
+                      <option value="DD MMM YYYY">DD MMM YYYY (e.g. 25 May 2026)</option>
+                      <option value="MMM DD, YYYY">MMM DD, YYYY (e.g. May 25, 2026)</option>
                     </select>
                   </div>
                   <div className={styles.formGroup}>

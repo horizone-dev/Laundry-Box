@@ -103,7 +103,7 @@
 }
 
 .filterTab {
-  padding: 0.5rem 1rem;
+  padding: 1rem;
   border-radius: 8px;
   font-size: 0.85rem;
   font-weight: 700;
@@ -121,7 +121,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  padding: 1rem;
   border: 1px solid #E2E8F0;
   border-radius: 8px;
   font-size: 0.85rem;
@@ -138,7 +138,7 @@
 
 .expensesTable th {
   text-align: left;
-  padding: 1.25rem 1.5rem;
+  padding: 1rem;
   font-size: 0.75rem;
   font-weight: 800;
   color: #94A3B8;
@@ -147,7 +147,7 @@
 }
 
 .expensesTable td {
-  padding: 1.5rem;
+  padding: 1rem;
   font-size: 0.95rem;
   border-bottom: 1px solid #F1F5F9;
 }

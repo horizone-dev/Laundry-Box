@@ -94,11 +94,35 @@ export const syncData = async () => {
       }
 
       for (const cust of incomingCustomers) {
+        // LOCAL-WINS: If the local customer was updated more recently or has pending changes (isSynced=0),
+        // skip the cloud overwrite. This protects local balance updates from sync race conditions.
+        const localRes = await window.electronAPI.dbQuery(
+          'SELECT updatedAt, isSynced FROM customers WHERE id = ?', [cust.id]
+        );
+        if (localRes.success && localRes.data[0]) {
+          const localUpdatedAt = new Date(localRes.data[0].updatedAt).getTime();
+          const remoteUpdatedAt = new Date(cust.updatedAt).getTime();
+          if (localRes.data[0].isSynced === 0 || localUpdatedAt > remoteUpdatedAt) {
+            console.log(`Sync: Preserving local data for customer ${cust.id} (local is newer or has pending changes)`);
+            continue;
+          }
+        }
+
         await window.electronAPI.dbQuery(`
           INSERT OR REPLACE INTO customers 
           (id, shopId, name, phone, email, address, creditLimit, balance, isSynced, updatedAt) 
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-        `, [cust.id, cust.shopId, cust.name, cust.phone, cust.email, cust.address, cust.creditLimit || 0, cust.balance || 0, cust.updatedAt || new Date().toISOString()]);
+        `, [
+          cust.id, 
+          cust.shopId, 
+          cust.name, 
+          cust.phone || '', 
+          cust.email || '', 
+          cust.address || '', 
+          cust.creditLimit || 0, 
+          cust.balance || 0, 
+          cust.updatedAt || new Date().toISOString()
+        ]);
       }
 
       // Update last sync time

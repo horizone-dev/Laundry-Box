@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import {
   Search, User, Download, Printer, FileText, Calendar,
   ChevronDown, ChevronRight, ArrowUpRight, ArrowDownRight,
@@ -10,7 +11,8 @@ import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './CustomerStatement.module.css';
 
 export default function CustomerStatement() {
-  const { settings } = useSettings();
+  const { customerId } = useParams();
+  const { settings, formatDate } = useSettings();
   const printRef = useRef(null);
 
   /* ─── State ──────────────────────────────────────── */
@@ -22,6 +24,7 @@ export default function CustomerStatement() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [filterType, setFilterType] = useState('All'); // All | Orders | Payments
+  const [sortOrder, setSortOrder] = useState('desc'); // asc | desc
 
   const [orders, setOrders] = useState([]);
   const [payments, setPayments] = useState([]);
@@ -40,6 +43,27 @@ export default function CustomerStatement() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  /* ─── Load customer from URL parameter if present ── */
+  useEffect(() => {
+    if (customerId && window.electronAPI?.dbQuery) {
+      const loadCustomer = async () => {
+        try {
+          const res = await window.electronAPI.dbQuery(
+            'SELECT * FROM customers WHERE id = ?',
+            [customerId]
+          );
+          if (res.success && res.data.length > 0) {
+            setSelectedCustomer(res.data[0]);
+            setSearchTerm(res.data[0].name);
+          }
+        } catch (err) {
+          console.error("Failed to load customer from URL parameter:", err);
+        }
+      };
+      loadCustomer();
+    }
+  }, [customerId]);
 
   /* ─── Search customers ────────────────────────────── */
   useEffect(() => {
@@ -104,33 +128,91 @@ export default function CustomerStatement() {
     const rows = [];
 
     if (filterType !== 'Payments') {
-      orders.forEach(o => rows.push({
-        date: o.createdAt,
-        type: 'order',
-        ref: o.id,
-        description: `Order #${o.id}`,
-        debit: o.totalAmount,
-        credit: o.paidAmount || 0,
-        status: o.paymentStatus,
-        dueAmount: o.dueAmount,
-        rawOrder: o
-      }));
+      orders.forEach(o => {
+        const cleanRef = o.id.startsWith('#') ? o.id : `#${o.id}`;
+        const displayDesc = o.id.startsWith('#') ? `Order ${o.id}` : `Order #${o.id}`;
+        
+        let itemSummary = '';
+        try {
+          const itemsList = typeof o.items === 'string' ? JSON.parse(o.items || '[]') : (o.items || []);
+          if (Array.isArray(itemsList) && itemsList.length > 0) {
+            itemSummary = itemsList.map(item => `${item.qty || item.quantity || 1}x ${item.name}`).join(', ');
+          }
+        } catch (e) {
+          console.error("Failed to parse items for ledger row", e);
+        }
+
+        rows.push({
+          date: o.createdAt,
+          type: 'order',
+          ref: cleanRef,
+          description: displayDesc,
+          itemsSummary: itemSummary,
+          debit: o.totalAmount,
+          credit: 0,
+          status: o.paymentStatus,
+          dueAmount: o.dueAmount,
+          rawOrder: o
+        });
+      });
     }
 
-    if (filterType !== 'Orders') {
-      payments.forEach(p => rows.push({
+    // Map table payments and group by order ID to prevent double counting
+    const paymentsFromTable = payments.map(p => {
+      const cleanOrderRef = p.orderId ? (p.orderId.startsWith('#') ? p.orderId : `#${p.orderId}`) : '';
+      return {
         date: p.createdAt,
         type: 'payment',
         ref: p.id,
-        description: `Payment – ${p.method || 'CASH'}${p.orderId ? ` (Order ${p.orderId})` : ''}`,
+        description: `Payment – ${p.method || 'CASH'}`,
+        itemsSummary: p.orderId ? `Linked to Order ${cleanOrderRef}` : 'Advance Deposit',
         debit: 0,
         credit: p.amount,
         status: 'SUCCESS',
-        dueAmount: 0
-      }));
+        dueAmount: 0,
+        orderId: p.orderId
+      };
+    });
+
+    const tablePaymentsByOrder = {};
+    paymentsFromTable.forEach(p => {
+      if (p.orderId) {
+        tablePaymentsByOrder[p.orderId] = (tablePaymentsByOrder[p.orderId] || 0) + p.credit;
+      }
+    });
+
+    // Capture initial payments made at order creation time that aren't in the payments table
+    const initialPaymentsFromOrders = [];
+    if (filterType !== 'Orders') {
+      orders.forEach(o => {
+        const tablePaySum = tablePaymentsByOrder[o.id] || 0;
+        const initialPay = (o.paidAmount || 0) - tablePaySum;
+        if (initialPay > 0.01) {
+          const cleanRef = o.id.startsWith('#') ? o.id : `#${o.id}`;
+          initialPaymentsFromOrders.push({
+            date: o.createdAt,
+            type: 'payment',
+            ref: cleanRef,
+            description: `Payment – ${o.paymentMethod || 'CASH'}`,
+            itemsSummary: `Linked to Order ${cleanRef}`,
+            debit: 0,
+            credit: initialPay,
+            status: 'SUCCESS',
+            dueAmount: 0
+          });
+        }
+      });
     }
 
-    /* Sort chronologically */
+    const allPayments = [];
+    if (filterType !== 'Orders') {
+      paymentsFromTable.forEach(p => allPayments.push(p));
+      initialPaymentsFromOrders.forEach(p => allPayments.push(p));
+    }
+
+    allPayments.forEach(p => rows.push(p));
+
+    /* Sort chronologically (ascending) first to calculate running balance */
     rows.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     /* Running balance */
@@ -144,8 +226,13 @@ export default function CustomerStatement() {
       row.runningBalance = balance;
     });
 
+    /* Sort according to user preference */
+    if (sortOrder === 'desc') {
+      rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+    }
+
     return rows;
-  }, [orders, payments, filterType]);
+  }, [orders, payments, filterType, sortOrder]);
 
   /* ─── KPIs ────────────────────────────────────────── */
   const totalBilled    = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
@@ -156,15 +243,14 @@ export default function CustomerStatement() {
 
   /* ─── Export CSV ──────────────────────────────────── */
   const exportCSV = () => {
-    const headers = ['Date', 'Reference', 'Description', 'Debit (Charged)', 'Credit (Paid)', 'Running Balance', 'Status'];
+    const headers = ['Date', 'Reference', 'Description', 'Debit (Charged)', 'Credit (Paid)', 'Running Balance'];
     const rows = ledgerRows.map(r => [
-      new Date(r.date).toLocaleDateString(),
+      formatDate(r.date),
       r.ref,
-      `"${r.description}"`,
+      `"${r.description}${r.itemsSummary ? ` (${r.itemsSummary})` : ''}"`,
       r.debit.toFixed(2),
       r.credit.toFixed(2),
-      r.runningBalance.toFixed(2),
-      r.status
+      r.runningBalance.toFixed(2)
     ]);
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -175,21 +261,7 @@ export default function CustomerStatement() {
   };
 
   /* ─── Status badge helper ─────────────────────────── */
-  const StatusBadge = ({ status }) => {
-    const map = {
-      'Paid':    { bg: '#DCFCE7', color: '#166534', label: 'Paid' },
-      'Partial': { bg: '#FEF3C7', color: '#92400E', label: 'Partial' },
-      'Credit':  { bg: '#FEE2E2', color: '#991B1B', label: 'Credit' },
-      'SUCCESS': { bg: '#DCFCE7', color: '#166534', label: 'Paid' },
-      'Pending': { bg: '#FEF3C7', color: '#92400E', label: 'Pending' },
-    };
-    const s = map[status] || { bg: '#F1F5F9', color: '#64748B', label: status };
-    return (
-      <span style={{ padding: '0.2rem 0.6rem', borderRadius: 100, fontSize: '0.72rem', fontWeight: 700, background: s.bg, color: s.color }}>
-        {s.label}
-      </span>
-    );
-  };
+  // StatusBadge was removed since Status column was removed.
 
   /* ─── Render ──────────────────────────────────────── */
   return (
@@ -299,6 +371,22 @@ export default function CustomerStatement() {
             </button>
           ))}
         </div>
+
+        {/* Sort Order filter */}
+        <div className={styles.typeFilter}>
+          <button
+            className={`${styles.typeBtn} ${sortOrder === 'asc' ? styles.typeBtnActive : ''}`}
+            onClick={() => setSortOrder('asc')}
+          >
+            Oldest First
+          </button>
+          <button
+            className={`${styles.typeBtn} ${sortOrder === 'desc' ? styles.typeBtnActive : ''}`}
+            onClick={() => setSortOrder('desc')}
+          >
+            Newest First
+          </button>
+        </div>
       </div>
 
       {/* ── Empty State ─────────────────────────────── */}
@@ -350,26 +438,6 @@ export default function CustomerStatement() {
             />
           </div>
 
-          {/* Customer Info Banner */}
-          <div className={styles.customerBanner}>
-            <div className={styles.bannerAvatar}>{selectedCustomer.name.charAt(0).toUpperCase()}</div>
-            <div className={styles.bannerInfo}>
-              <h2>{selectedCustomer.name}</h2>
-              <p>{selectedCustomer.phone}</p>
-            </div>
-            <div className={styles.bannerMeta}>
-              <span className={styles.metaLabel}>Statement Period</span>
-              <span className={styles.metaValue}>
-                {dateFrom ? new Date(dateFrom).toLocaleDateString() : 'All Time'} —{' '}
-                {dateTo   ? new Date(dateTo).toLocaleDateString()   : 'Today'}
-              </span>
-            </div>
-            <div className={styles.bannerMeta}>
-              <span className={styles.metaLabel}>Generated</span>
-              <span className={styles.metaValue}>{new Date().toLocaleDateString()}</span>
-            </div>
-          </div>
-
           {/* Ledger Table */}
           <div className={styles.tableCard}>
             {loading ? (
@@ -386,14 +454,13 @@ export default function CustomerStatement() {
                     <th className={styles.numCol}>CHARGED</th>
                     <th className={styles.numCol}>PAID</th>
                     <th className={styles.numCol}>BALANCE</th>
-                    <th>STATUS</th>
                   </tr>
                 </thead>
                 <tbody>
                   {ledgerRows.map((row, idx) => (
                     <tr key={idx} className={`${styles.ledgerRow} ${row.type === 'payment' ? styles.paymentRow : styles.orderRow}`}>
                       <td className={styles.dateCell}>
-                        <div>{new Date(row.date).toLocaleDateString()}</div>
+                        <div>{formatDate(row.date)}</div>
                         <div className={styles.timeText}>{new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                       </td>
                       <td>
@@ -405,7 +472,12 @@ export default function CustomerStatement() {
                           <span className={styles.refText}>{row.ref}</span>
                         </div>
                       </td>
-                      <td className={styles.descCell}>{row.description}</td>
+                      <td className={styles.descCell}>
+                        <div className={styles.descMain}>{row.description}</div>
+                        {row.itemsSummary && (
+                          <div className={styles.descSub}>{row.itemsSummary}</div>
+                        )}
+                      </td>
                       <td className={`${styles.numCol} ${styles.debitCell}`}>
                         {row.debit > 0 ? <><CurrencySymbol size={11} /> {row.debit.toFixed(2)}</> : <span className={styles.dash}>—</span>}
                       </td>
@@ -416,7 +488,6 @@ export default function CustomerStatement() {
                         <CurrencySymbol size={11} /> {Math.abs(row.runningBalance).toFixed(2)}
                         {row.runningBalance < 0 && <span className={styles.advTag}> Adv</span>}
                       </td>
-                      <td><StatusBadge status={row.status} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -432,7 +503,6 @@ export default function CustomerStatement() {
                     <td className={`${styles.numCol} ${styles.totalsNum} ${outstanding > 0 ? styles.balanceDueNum : styles.balanceZero}`}>
                       <CurrencySymbol size={12} /> {outstanding.toFixed(2)}
                     </td>
-                    <td />
                   </tr>
                 </tfoot>
               </table>

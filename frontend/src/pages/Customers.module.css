@@ -106,7 +106,7 @@
 
 .customersTable th {
   text-align: left;
-  padding: 1.25rem 1.5rem;
+  padding: 1rem;
   font-size: 0.75rem;
   font-weight: 700;
   color: #64748B;
@@ -115,7 +115,7 @@
 }
 
 .customersTable td {
-  padding: 1.25rem 1.5rem;
+  padding: 1rem;
   font-size: 0.95rem;
   color: #1E293B;
   border-bottom: 1px solid #F1F5F9;

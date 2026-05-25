@@ -1,7 +1,7 @@
 .posContainer {
   display: grid;
   grid-template-columns: 1fr 400px;
-  height: calc(100vh - 80px - 4rem);
+  height: calc(100vh - 64px - 1.5rem);
   gap: 1.5rem;
 }
 
@@ -68,7 +68,7 @@
   color: #64748B;
   text-transform: uppercase;
   background: #F1F5F9;
-  padding: 0.5rem 1rem;
+  padding: 1rem;
   border-radius: 8px;
 }
 
@@ -592,7 +592,7 @@
   align-items: center;
   gap: 1.5rem;
   background: white;
-  padding: 0.5rem;
+  padding: 1rem;
   border-radius: 10px;
   border: 1px solid #E2E8F0;
 }
@@ -636,7 +636,7 @@
 .checkoutContainer {
   display: grid;
   grid-template-columns: 450px 1fr;
-  height: calc(100vh - 80px - 4rem);
+  height: calc(100vh - 64px - 1.5rem);
   gap: 2rem;
 }
 

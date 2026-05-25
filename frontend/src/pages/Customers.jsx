@@ -104,7 +104,7 @@ export default function Customers() {
 
         // 1. Fetch oldest unpaid/partial bills first (FIFO)
         const billsRes = await window.electronAPI.dbQuery(
-          'SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != "" AND (dueAmount > 0 OR paymentStatus = "Credit" OR paymentStatus = "Partial") ORDER BY createdAt ASC',
+          "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND (dueAmount > 0 OR paymentStatus = 'Credit' OR paymentStatus = 'Partial') ORDER BY createdAt ASC",
           [selectedCustomer.id]
         );
 
@@ -209,7 +209,7 @@ export default function Customers() {
     if (window.electronAPI?.dbQuery) {
       try {
         const result = await window.electronAPI.dbQuery(
-          'SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != "" ORDER BY createdAt DESC',
+          "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' ORDER BY createdAt DESC",
           [customerId]
         );
         if (result.success) setCustomerBills(result.data);
@@ -528,7 +528,22 @@ export default function Customers() {
             <div className={styles.modalHeader}>
               <div>
                 <h2>Billing History - {selectedCustomer?.name}</h2>
-                <p>Outstanding Balance: <strong style={{ color: (selectedCustomer?.balance || 0) > 0 ? '#EF4444' : '#10B981' }}><CurrencySymbol size={16} /> {(selectedCustomer?.balance || 0).toFixed(2)}</strong></p>
+                <p>
+                  {selectedCustomer?.balance > 0 
+                    ? 'Outstanding Due: ' 
+                    : selectedCustomer?.balance < 0 
+                      ? 'Prepaid Advance: ' 
+                      : 'Customer Balance: '}
+                  <strong style={{ color: (selectedCustomer?.balance || 0) > 0 ? '#EF4444' : (selectedCustomer?.balance || 0) < 0 ? '#10B981' : '#64748B' }}>
+                    {selectedCustomer?.balance !== 0 ? (
+                      <>
+                        <CurrencySymbol size={16} /> {Math.abs(selectedCustomer?.balance || 0).toFixed(2)}
+                      </>
+                    ) : (
+                      'Settled'
+                    )}
+                  </strong>
+                </p>
               </div>
               <X size={24} className={styles.closeBtn} onClick={() => setShowBillsModal(false)} />
             </div>
@@ -628,7 +643,22 @@ export default function Customers() {
                   </div>
                   <div>
                     <h4 style={{ margin: 0, fontSize: '1rem', color: '#1E293B' }}>{selectedCustomer?.name}</h4>
-                    <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748B' }}>Total Balance: <strong style={{ color: (selectedCustomer?.balance || 0) > 0 ? '#EF4444' : '#10B981' }}><CurrencySymbol size={14} /> {(selectedCustomer?.balance || 0).toFixed(2)}</strong></p>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748B' }}>
+                      {selectedCustomer?.balance > 0 
+                        ? 'Outstanding Due: ' 
+                        : selectedCustomer?.balance < 0 
+                          ? 'Prepaid Advance: ' 
+                          : 'Customer Balance: '}
+                      <strong style={{ color: (selectedCustomer?.balance || 0) > 0 ? '#EF4444' : (selectedCustomer?.balance || 0) < 0 ? '#10B981' : '#64748B' }}>
+                        {selectedCustomer?.balance !== 0 ? (
+                          <>
+                            <CurrencySymbol size={14} /> {Math.abs(selectedCustomer?.balance || 0).toFixed(2)}
+                          </>
+                        ) : (
+                          'Settled'
+                        )}
+                      </strong>
+                    </p>
                   </div>
                 </div>
 

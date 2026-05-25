@@ -7,6 +7,8 @@ const customerSchema = new mongoose.Schema({
   phone: { type: String },
   email: { type: String },
   address: { type: String },
+  creditLimit: { type: Number, default: 0 },
+  balance: { type: Number, default: 0 },
   updatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 

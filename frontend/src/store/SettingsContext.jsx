@@ -169,8 +169,28 @@ export function SettingsProvider({ children }) {
     }
   };
 
+  const formatDate = (dateVal) => {
+    if (!dateVal) return 'N/A';
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return 'Invalid Date';
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const mShort = monthsShort[d.getMonth()];
+    switch (settings.dateFormat) {
+      case 'MM/DD/YYYY': return `${month}/${day}/${year}`;
+      case 'YYYY-MM-DD': return `${year}-${month}-${day}`;
+      case 'DD-MM-YYYY': return `${day}-${month}-${year}`;
+      case 'DD MMM YYYY': return `${day} ${mShort} ${year}`;
+      case 'MMM DD, YYYY': return `${mShort} ${day}, ${year}`;
+      case 'DD/MM/YYYY':
+      default: return `${day}/${month}/${year}`;
+    }
+  };
+
   return (
-    <SettingsContext.Provider value={{ settings, updateSettings, fetchSettings }}>
+    <SettingsContext.Provider value={{ settings, updateSettings, fetchSettings, formatDate }}>
       {children}
     </SettingsContext.Provider>
   );

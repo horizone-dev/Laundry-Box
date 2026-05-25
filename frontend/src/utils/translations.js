@@ -63,6 +63,7 @@ const translations = {
     total: "Total",
     unpaid: "Unpaid",
     partial: "Partial",
+    processing: "Processing",
     washing: "Washing",
     drying: "Drying",
     ironing: "Ironing",
@@ -74,6 +75,7 @@ const translations = {
     printReceipt: "Print Receipt",
     printTags: "Print Tags",
     settleNow: "Settle Now",
+    customerstatement: "Customer Statement",
     // New translations keys
     orderManagement: "Order Management",
     orderManagementSub: "Track laundry status, generate QR receipts, and manage deliveries.",
@@ -187,6 +189,7 @@ const translations = {
     total: "الإجمالي",
     unpaid: "غير مدفوع",
     partial: "جزئي",
+    processing: "قيد المعالجة",
     washing: "غسيل",
     drying: "تجفيف",
     ironing: "كوي",
@@ -198,6 +201,7 @@ const translations = {
     printReceipt: "طباعة الإيصال",
     printTags: "طباعة التاغ",
     settleNow: "تسوية الآن",
+    customerstatement: "كشف حساب العميل",
     // New translations keys
     orderManagement: "إدارة الطلبات",
     orderManagementSub: "تتبع حالة الغسيل، وتوليد إيصالات الاستجابة السريعة، وإدارة عمليات التسليم.",
@@ -311,6 +315,7 @@ const translations = {
     total: "कुल",
     unpaid: "अवैतनिक",
     partial: "आंशिक",
+    processing: "प्रसंस्करण",
     washing: "धुलाई",
     drying: "सुखाना",
     ironing: "इस्त्री",
@@ -322,6 +327,7 @@ const translations = {
     printReceipt: "रसीद प्रिंट करें",
     printTags: "टैग प्रिंट करें",
     settleNow: "अभी निपटान करें",
+    customerstatement: "ग्राहक विवरण",
     // New translations keys
     orderManagement: "आदेश प्रबंधन",
     orderManagementSub: "कपड़े धोने की स्थिति को ट्रैक करें, क्यूआर रसीदें जनरेट करें, और डिलीवरी प्रबंधित करें।",

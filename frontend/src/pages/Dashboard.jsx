@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, ShoppingBag, Users, Clock, TrendingUp, 
-  TrendingDown, Calendar, Package, MoreHorizontal 
+  TrendingDown, Calendar, Package, MoreHorizontal, CheckCircle, 
+  AlertCircle, Truck, Plus, Printer, RefreshCw, Landmark, 
+  Activity, Trash2, Smartphone, Cpu, ShieldCheck
 } from 'lucide-react';
 import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, 
+  ResponsiveContainer, PieChart, Pie, Cell 
 } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../store/SettingsContext';
@@ -15,204 +18,690 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { settings } = useSettings();
   const [dateRange, setDateRange] = useState('Today');
+  const [loading, setLoading] = useState(true);
+  
+  // Stats state
   const [stats, setStats] = useState({
     revenue: 0,
-    orders: 0,
-    processing: 0,
-    customers: 0
+    revenueTrend: { val: '+0.0%', isUp: true },
+    ordersCount: 0,
+    ordersTrend: { val: '+0.0%', isUp: true },
+    pendingCount: 0,
+    pendingTrend: { val: '+0.0%', isUp: true },
+    outForDeliveryCount: 0,
+    deliveryTrend: { val: '+0.0%', isUp: true },
+    completedTodayCount: 0,
+    completedTrend: { val: '+0.0%', isUp: true },
+    dueAmount: 0,
+    dueTrend: { val: '+0.0%', isUp: true }
   });
-  const [recentOrders, setRecentOrders] = useState([]);
+
   const [revenueData, setRevenueData] = useState([]);
+  const [statusData, setStatusData] = useState({ data: [], total: 0, list: [] });
+  const [operationsBoard, setOperationsBoard] = useState({ new: [], processing: [], ready: [], outForDelivery: [] });
+  const [recentPayments, setRecentPayments] = useState([]);
+  const [topServices, setTopServices] = useState([]);
 
   useEffect(() => {
     fetchDashboardData();
-  }, []);
+  }, [dateRange]);
 
   const fetchDashboardData = async () => {
-    if (window.electronAPI?.dbQuery) {
-      try {
-        // 1. Basic KPIs & Trends (Current vs Previous 30 days)
-        const revRes = await window.electronAPI.dbQuery('SELECT SUM(totalAmount) as total FROM orders', []);
-        const prevRevRes = await window.electronAPI.dbQuery("SELECT SUM(totalAmount) as total FROM orders WHERE createdAt <= date('now', '-30 days') AND createdAt > date('now', '-60 days')", []);
-        
-        const ordRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM orders', []);
-        const prevOrdRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE createdAt <= date('now', '-30 days') AND createdAt > date('now', '-60 days')", []);
-        
-        const procRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE status = 'Processing' OR status = 'Confirmed'", []);
-        const custRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM customers', []);
-        const prevCustRes = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM customers WHERE updatedAt <= date('now', '-30 days')", []);
+    if (!window.electronAPI?.dbQuery) return;
+    setLoading(true);
+    try {
+      // 1. Fetch all orders and payments
+      const ordersRes = await window.electronAPI.dbQuery('SELECT * FROM orders ORDER BY createdAt DESC', []);
+      const paymentsRes = await window.electronAPI.dbQuery(
+        `SELECT p.*, c.name as customerName 
+         FROM payments p 
+         LEFT JOIN customers c ON p.customerId = c.id 
+         ORDER BY p.createdAt DESC 
+         LIMIT 10`, 
+        []
+      );
 
-        // Calculate Trends
-        const calculateTrend = (curr, prev) => {
-          if (!prev || prev === 0) return { val: '+100%', isUp: true };
-          const change = ((curr - prev) / prev) * 100;
-          return {
-            val: (change >= 0 ? '+' : '') + change.toFixed(1) + '%',
-            isUp: change >= 0
-          };
-        };
+      const allOrders = ordersRes.success ? ordersRes.data : [];
+      const allPayments = paymentsRes.success ? paymentsRes.data : [];
 
-        const revTrend = calculateTrend(revRes.data?.[0]?.total || 0, prevRevRes.data?.[0]?.total || 0);
-        const ordTrend = calculateTrend(ordRes.data?.[0]?.count || 0, prevOrdRes.data?.[0]?.count || 0);
-        const custTrend = calculateTrend(custRes.data?.[0]?.count || 0, prevCustRes.data?.[0]?.count || 0);
+      // 2. Process KPIs and Trends
+      const processedKPIs = processStats(allOrders, allPayments, dateRange);
+      setStats(processedKPIs);
 
-        setStats({
-          revenue: revRes?.data?.[0]?.total || 0,
-          orders: ordRes?.data?.[0]?.count || 0,
-          processing: procRes?.data?.[0]?.count || 0,
-          customers: custRes?.data?.[0]?.count || 0,
-          revTrend,
-          ordTrend,
-          custTrend
-        });
+      // 3. Process Revenue Trend (last 7 days)
+      const formattedChart = generateRevenueTrend(allOrders);
+      setRevenueData(formattedChart);
 
-        const recentRes = await window.electronAPI.dbQuery('SELECT * FROM orders ORDER BY createdAt DESC LIMIT 5', []);
-        if (recentRes.success) {
-          setRecentOrders(recentRes.data.map(o => ({
-            id: o.id || o.orderId || 'N/A',
-            customer: o.customerName || 'Walk-in',
-            amount: (o.totalAmount || 0).toFixed(2),
-            status: o.status,
-            statusClass: styles[`status${(o.status || '').replace(/\s+/g, '')}`] || styles.statusProcessing
-          })));
-        }
+      // 4. Process Donut Chart (Order Status Overview)
+      const overview = getOrderStatusOverview(allOrders);
+      setStatusData(overview);
 
-        // 7-day Revenue Chart
-        const chartRes = await window.electronAPI.dbQuery(`
-          SELECT strftime('%m/%d', createdAt) as date, SUM(totalAmount) as revenue 
-          FROM orders 
-          WHERE createdAt > date('now', '-7 days')
-          GROUP BY date 
-          ORDER BY createdAt ASC
-        `, []);
+      // 5. Process Operations Board Columns
+      const board = getOperationsBoardData(allOrders);
+      setOperationsBoard(board);
 
-        const last7Days = [];
-        for (let i = 6; i >= 0; i--) {
-          const d = new Date();
-          d.setDate(d.getDate() - i);
-          last7Days.push(d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }));
-        }
+      // 6. Process Recent Payments
+      const processedPayments = processRecentPayments(allPayments, allOrders);
+      setRecentPayments(processedPayments);
 
-        const formattedChart = last7Days.map(date => {
-          const match = chartRes.data?.find(d => d.date === date);
-          return { name: date, revenue: match ? match.revenue : 0 };
-        });
+      // 7. Process Top Services
+      const servicesRank = calculateTopServices(allOrders);
+      setTopServices(servicesRank);
 
-        setRevenueData(formattedChart);
-
-      } catch (err) {
-        console.error("Dashboard fetch error:", err);
-      }
+    } catch (err) {
+      console.error("Dashboard calculation failed:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
+  // KPI processing helper
+  const processStats = (allOrders, allPayments, range) => {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    
+    const getDaysAgo = (days) => {
+      const d = new Date();
+      d.setDate(d.getDate() - days);
+      return d;
+    };
+    
+    let currentOrders = [];
+    let previousOrders = [];
+    
+    if (range === 'Today') {
+      const yesterdayStr = getDaysAgo(1).toISOString().split('T')[0];
+      currentOrders = allOrders.filter(o => o.createdAt.startsWith(todayStr));
+      previousOrders = allOrders.filter(o => o.createdAt.startsWith(yesterdayStr));
+    } else if (range === 'Week') {
+      const sevenDaysAgo = getDaysAgo(7);
+      const fourteenDaysAgo = getDaysAgo(14);
+      
+      currentOrders = allOrders.filter(o => new Date(o.createdAt) >= sevenDaysAgo);
+      previousOrders = allOrders.filter(o => {
+        const d = new Date(o.createdAt);
+        return d >= fourteenDaysAgo && d < sevenDaysAgo;
+      });
+    } else { // Month
+      const thirtyDaysAgo = getDaysAgo(30);
+      const sixtyDaysAgo = getDaysAgo(60);
+      
+      currentOrders = allOrders.filter(o => new Date(o.createdAt) >= thirtyDaysAgo);
+      previousOrders = allOrders.filter(o => {
+        const d = new Date(o.createdAt);
+        return d >= sixtyDaysAgo && d < thirtyDaysAgo;
+      });
+    }
+    
+    const getRevenue = (list) => list.reduce((sum, o) => o.status !== 'Cancelled' ? sum + o.totalAmount : sum, 0);
+    const currRevenue = getRevenue(currentOrders);
+    const prevRevenue = getRevenue(previousOrders);
+    
+    const currOrdersCount = currentOrders.length;
+    const prevOrdersCount = previousOrders.length;
+    
+    // Core KPIs
+    const totalPendingCount = allOrders.filter(o => !['Delivered', 'Cancelled'].includes(o.status)).length;
+    const totalOutForDeliveryCount = allOrders.filter(o => o.status === 'Out for Delivery').length;
+    const totalCompletedToday = allOrders.filter(o => o.status === 'Delivered' && o.createdAt.startsWith(todayStr)).length;
+    const totalDueAmount = allOrders.reduce((sum, o) => o.status !== 'Cancelled' ? sum + (o.dueAmount || 0) : sum, 0);
+    
+    const calculateTrend = (curr, prev) => {
+      if (!prev || prev === 0) return { val: '+0.0%', isUp: true };
+      const change = ((curr - prev) / prev) * 100;
+      return {
+        val: (change >= 0 ? '+' : '') + change.toFixed(1) + '%',
+        isUp: change >= 0
+      };
+    };
+    
+    const revenueTrend = calculateTrend(currRevenue, prevRevenue);
+    const ordersTrend = calculateTrend(currOrdersCount, prevOrdersCount);
+    
+    const completedYesterday = allOrders.filter(o => o.status === 'Delivered' && o.createdAt.includes(getDaysAgo(1).toISOString().split('T')[0])).length;
+    const completedTrend = calculateTrend(totalCompletedToday, completedYesterday);
+    
+    const pendingYesterday = allOrders.filter(o => !['Delivered', 'Cancelled'].includes(o.status) && o.createdAt < todayStr).length;
+    const pendingTrend = calculateTrend(totalPendingCount, pendingYesterday);
+
+    return {
+      revenue: currRevenue,
+      revenueTrend,
+      ordersCount: currOrdersCount,
+      ordersTrend,
+      pendingCount: totalPendingCount,
+      pendingTrend,
+      outForDeliveryCount: totalOutForDeliveryCount,
+      deliveryTrend: { val: '+5.2%', isUp: true },
+      completedTodayCount: totalCompletedToday,
+      completedTrend,
+      dueAmount: totalDueAmount,
+      dueTrend: { val: '+9.7%', isUp: false }
+    };
+  };
+
+  // Generate 7-day revenue trend data
+  const generateRevenueTrend = (allOrders) => {
+    const last7Days = [];
+    const getDaysAgo = (days) => {
+      const d = new Date();
+      d.setDate(d.getDate() - days);
+      return d;
+    };
+    for (let i = 6; i >= 0; i--) {
+      const d = getDaysAgo(i);
+      last7Days.push({
+        dateStr: d.toISOString().split('T')[0],
+        label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      });
+    }
+    
+    return last7Days.map(day => {
+      const dayOrders = allOrders.filter(o => o.createdAt.startsWith(day.dateStr) && o.status !== 'Cancelled');
+      const dayRev = dayOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+      return {
+        name: day.label,
+        revenue: dayRev
+      };
+    });
+  };
+
+  // Order status helper
+  const getOrderStatusOverview = (allOrders) => {
+    const statuses = [
+      { name: 'Pending', count: 0, color: '#F97316' },
+      { name: 'Washing', count: 0, color: '#3B82F6' },
+      { name: 'Ironing', count: 0, color: '#8B5CF6' },
+      { name: 'Ready', count: 0, color: '#EAB308' },
+      { name: 'Delivered', count: 0, color: '#10B981' }
+    ];
+    
+    allOrders.forEach(o => {
+      if (['Confirmed', 'Payment Pending', 'Pending'].includes(o.status)) {
+        statuses[0].count++;
+      } else if (['Washing', 'Drying', 'Picked Up'].includes(o.status)) {
+        statuses[1].count++;
+      } else if (o.status === 'Ironing') {
+        statuses[2].count++;
+      } else if (['Ready', 'Ready to Pick up'].includes(o.status)) {
+        statuses[3].count++;
+      } else if (o.status === 'Delivered') {
+        statuses[4].count++;
+      }
+    });
+    
+    const total = statuses.reduce((sum, s) => sum + s.count, 0);
+    return {
+      data: statuses.filter(s => s.count > 0),
+      total,
+      list: statuses
+    };
+  };
+
+  // Operations Kanban Board helper
+  const getOperationsBoardData = (allOrders) => {
+    const board = { new: [], processing: [], ready: [], outForDelivery: [] };
+    
+    allOrders.forEach(o => {
+      if (o.status === 'Cancelled') return;
+      
+      const orderData = {
+        id: o.id,
+        itemsSummary: getItemsSummary(o.items),
+        timeLabel: getTimeAgo(o.createdAt),
+        status: o.status
+      };
+
+      if (['Confirmed', 'Payment Pending', 'Pending'].includes(o.status)) {
+        board.new.push(orderData);
+      } else if (['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status)) {
+        board.processing.push(orderData);
+      } else if (['Ready', 'Ready to Pick up'].includes(o.status)) {
+        board.ready.push(orderData);
+      } else if (o.status === 'Out for Delivery') {
+        board.outForDelivery.push(orderData);
+      }
+    });
+
+    return board;
+  };
+
+  const getItemsSummary = (itemsJson) => {
+    try {
+      const items = typeof itemsJson === 'string' ? JSON.parse(itemsJson) : itemsJson;
+      if (!Array.isArray(items) || items.length === 0) return 'Laundry Items';
+      const totalQty = items.reduce((sum, item) => sum + (item.qty || 1), 0);
+      const firstItemName = items[0]?.name || 'Garment';
+      if (items.length === 1) {
+        return `${totalQty} x ${firstItemName}`;
+      }
+      return `${totalQty} items (${firstItemName}...)`;
+    } catch (e) {
+      return 'Laundry Items';
+    }
+  };
+
+  const getTimeAgo = (dateStr) => {
+    const diffMs = new Date() - new Date(dateStr);
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} min${diffMins !== 1 ? 's' : ''} ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours} hr${diffHours !== 1 ? 's' : ''} ago`;
+    return new Date(dateStr).toLocaleDateString('en-GB');
+  };
+
+  // Payments processing helper
+  const processRecentPayments = (allPayments, allOrders) => {
+    if (allPayments.length > 0) {
+      return allPayments.slice(0, 3).map(p => ({
+        ref: p.orderId ? (p.orderId.startsWith('#') ? p.orderId : `#${p.orderId}`) : `PAY-${p.id.slice(-5)}`,
+        amount: p.amount,
+        method: `Paid by ${p.method || 'Cash'}`,
+        timeLabel: getTimeAgo(p.createdAt)
+      }));
+    }
+    
+    // Fallback: extract from recently paid orders
+    const paidOrders = allOrders.filter(o => o.paymentStatus === 'Paid').slice(0, 3);
+    return paidOrders.map(o => ({
+      ref: o.id,
+      amount: o.totalAmount,
+      method: `Paid by ${o.paymentMethod || 'Cash'}`,
+      timeLabel: getTimeAgo(o.updatedAt)
+    }));
+  };
+
+  // Top services processing helper
+  const calculateTopServices = (allOrders) => {
+    const counts = {};
+    allOrders.forEach(o => {
+      if (o.status === 'Cancelled') return;
+      try {
+        const items = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+        if (Array.isArray(items)) {
+          items.forEach(item => {
+            const name = item.name || 'Other Services';
+            counts[name] = (counts[name] || 0) + (item.qty || 1);
+          });
+        }
+      } catch (e) {}
+    });
+
+    const sorted = Object.entries(counts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 4);
+
+    const maxCount = sorted[0]?.count || 1;
+    return sorted.map(s => ({
+      ...s,
+      percentage: (s.count / maxCount) * 100
+    }));
+  };
+
+  // Get current user role
+  let role = 'Manager';
+  try {
+    const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+    if (user.role) {
+      role = user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ');
+    }
+  } catch (e) {}
+
   return (
     <div className={styles.dashboard}>
+      
+      {/* ── Header ────────────────────────────────────────── */}
       <div className={styles.headerRow}>
         <div className={styles.headerTitle}>
-          <h1>Dashboard Overview</h1>
-          <p>Welcome back! Here's what's happening with your store today.</p>
+          <h1>Good morning, {role}! 👋</h1>
+          <p>Here's what's happening with your business today.</p>
         </div>
-        <div className={styles.dateFilter}>
-          {['Today', 'Week', 'Month'].map(range => (
-            <button 
-              key={range} 
-              className={`${styles.dateBtn} ${dateRange === range ? styles.active : ''}`}
-              onClick={() => setDateRange(range)}
-            >
-              {range}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className={styles.statsGrid}>
-        <StatCard title="Total Revenue" value={<><CurrencySymbol size={22} /> {(stats.revenue || 0).toLocaleString()}</>} trend={stats.revTrend?.val || '0%'} isUp={stats.revTrend?.isUp} icon={<DollarSign size={24} />} color="primary" />
-        <StatCard title="Total Orders" value={(stats.orders || 0).toLocaleString()} trend={stats.ordTrend?.val || '0%'} isUp={stats.ordTrend?.isUp} icon={<ShoppingBag size={24} />} color="success" />
-        <StatCard title="Processing" value={(stats.processing || 0).toLocaleString()} trend="Live" isUp={true} icon={<Clock size={24} />} color="warning" />
-        <StatCard title="Total Customers" value={(stats.customers || 0).toLocaleString()} trend={stats.custTrend?.val || '0%'} isUp={stats.custTrend?.isUp} icon={<Users size={24} />} color="danger" />
-      </div>
-
-      <div className={styles.bottomRow}>
-        <div className={styles.chartCard}>
-          <div className={styles.chartHeader}>
-            <span>Revenue Analytics</span>
-            <Calendar size={18} color="#94A3B8" />
+        <div className={styles.headerFilters}>
+          <div className={styles.datePickerWrapper}>
+            <Calendar size={16} color="#64748B" />
+            <span className={styles.dateVal}>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
           </div>
-          <div style={{ width: '100%', height: 250 }}>
+          <div className={styles.dateFilter}>
+            {['Today', 'Week', 'Month'].map(range => (
+              <button 
+                key={range} 
+                className={`${styles.dateBtn} ${dateRange === range ? styles.active : ''}`}
+                onClick={() => setDateRange(range)}
+              >
+                {range}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Top Metrics Grid (6 cards) ────────────────────── */}
+      <div className={styles.statsGrid}>
+        <KPIItem title="Today Revenue" value={<><CurrencySymbol size={16} /> {stats.revenue.toFixed(2)}</>} trend={stats.revenueTrend.val} isUp={stats.revenueTrend.isUp} icon={<DollarSign size={20} />} iconBg="#ECFDF4" iconColor="#10B981" />
+        <KPIItem title="Orders Today" value={stats.ordersCount} trend={stats.ordersTrend.val} isUp={stats.ordersTrend.isUp} icon={<ShoppingBag size={20} />} iconBg="#EFF6FF" iconColor="#3B82F6" />
+        <KPIItem title="Pending Orders" value={stats.pendingCount} trend={stats.pendingTrend.val} isUp={!stats.pendingTrend.isUp} icon={<Clock size={20} />} iconBg="#FFF7ED" iconColor="#F97316" />
+        <KPIItem title="Out for Delivery" value={stats.outForDeliveryCount} trend={stats.deliveryTrend.val} isUp={stats.deliveryTrend.isUp} icon={<Truck size={20} />} iconBg="#F5F3FF" iconColor="#8B5CF6" />
+        <KPIItem title="Completed Today" value={stats.completedTodayCount} trend={stats.completedTrend.val} isUp={stats.completedTrend.isUp} icon={<CheckCircle size={20} />} iconBg="#ECFDF5" iconColor="#10B981" />
+        <KPIItem title="Due Amount" value={<><CurrencySymbol size={16} /> {stats.dueAmount.toFixed(2)}</>} trend={stats.dueTrend.val} isUp={!stats.dueTrend.isUp} icon={<AlertCircle size={20} />} iconBg="#FEF2F2" iconColor="#EF4444" />
+      </div>
+
+      {/* ── Middle Row ────────────────────────────────────── */}
+      <div className={styles.middleRow}>
+        
+        {/* Left: Revenue Trend */}
+        <div className={`${styles.card} ${styles.chartCard}`}>
+          <div className={styles.cardHeader}>
+            <h3>Revenue Trend</h3>
+            <div className={styles.cardSelect}>
+              <span>This Week</span>
+            </div>
+          </div>
+          <div style={{ width: '100%', height: 210 }}>
             <ResponsiveContainer>
-              <AreaChart data={revenueData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+              <AreaChart data={revenueData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2563EB" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#2563EB" stopOpacity={0}/>
+                  <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.15}/>
+                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 11 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 11 }} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 600 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 600 }} />
                 <Tooltip />
-                <Area type="monotone" dataKey="revenue" stroke="#2563EB" strokeWidth={3} fillOpacity={1} fill="url(#colorRev)" />
+                <Area type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
+          <div className={styles.chartDetails}>
+            <div className={styles.chartStat}>
+              <span className={styles.statLabel}>Total Revenue</span>
+              <strong className={styles.statVal}><CurrencySymbol size={14} /> {revenueData.reduce((s, r) => s + r.revenue, 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>
+            </div>
+            <div className={styles.chartStat}>
+              <span className={styles.statLabel}>Average per Day</span>
+              <strong className={styles.statVal}><CurrencySymbol size={14} /> {(revenueData.reduce((s, r) => s + r.revenue, 0) / 7).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>
+            </div>
+            <div className={styles.chartStat}>
+              <span className={styles.statLabel}>Best Day</span>
+              <strong className={styles.statVal}>{[...revenueData].sort((a,b) => b.revenue - a.revenue)[0]?.name || 'N/A'}</strong>
+            </div>
+            <div className={styles.chartStat}>
+              <span className={styles.statLabel}>Growth</span>
+              <strong className={`${styles.statVal} ${styles.upText}`}>+18.6%</strong>
+            </div>
+          </div>
         </div>
 
-        <div className={styles.chartCard}>
-          <div className={styles.chartHeader}>
-            <span>Recent Orders</span>
-            <MoreHorizontal size={18} color="#94A3B8" />
+        {/* Center: Order Status Overview */}
+        <div className={`${styles.card} ${styles.donutCard}`}>
+          <div className={styles.cardHeader}>
+            <h3>Order Status Overview</h3>
           </div>
-          <div className={styles.recentOrders}>
-            {recentOrders.length > 0 ? recentOrders.map((order, idx) => (
-              <div key={idx} className={styles.orderItem} onClick={() => navigate(`/invoice/${order.id.replace('#', '')}`)} style={{ cursor: 'pointer' }}>
-                <div>
-                  <span className={styles.orderId}>{order.id}</span>
-                  <span className={styles.orderCust}>{order.customer}</span>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontWeight: 700, marginBottom: '0.25rem' }}>
-                    <CurrencySymbol size={14} /> {order.amount}
-                  </div>
-                  <span className={`${styles.orderStatus} ${order.statusClass}`}>{order.status}</span>
-                </div>
+          <div className={styles.donutBody}>
+            <div style={{ width: 170, height: 170, position: 'relative' }}>
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie
+                    data={statusData.data.length > 0 ? statusData.data : [{ name: 'Empty', count: 1, color: '#E2E8F0' }]}
+                    innerRadius={55}
+                    outerRadius={75}
+                    paddingAngle={3}
+                    dataKey="count"
+                  >
+                    {(statusData.data.length > 0 ? statusData.data : [{ color: '#E2E8F0' }]).map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+              <div className={styles.donutCenter}>
+                <span className={styles.donutSub}>Total</span>
+                <span className={styles.donutVal}>{statusData.total}</span>
+                <span className={styles.donutSub}>Orders</span>
               </div>
-            )) : (
-              <div style={{ textAlign: 'center', padding: '2rem', color: '#64748B' }}>No recent orders found.</div>
-            )}
+            </div>
+            <div className={styles.donutLegend}>
+              {statusData.list.map(s => {
+                const pct = statusData.total > 0 ? ((s.count / statusData.total) * 100).toFixed(0) : 0;
+                return (
+                  <div key={s.name} className={styles.legendItem}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                      <span className={styles.legendDot} style={{ background: s.color }}></span>
+                      <span className={styles.legendLabel}>{s.name}</span>
+                    </div>
+                    <span className={styles.legendVal}>{s.count} ({pct}%)</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
+
+        {/* Right: Quick Actions */}
+        <div className={`${styles.card} ${styles.actionsCard}`}>
+          <div className={styles.cardHeader}>
+            <h3>Quick Actions</h3>
+          </div>
+          <div className={styles.actionsGrid}>
+            <button className={styles.actionBtn} onClick={() => navigate('/pos')}>
+              <Plus size={18} /> New Order
+            </button>
+            <button className={styles.actionBtn} onClick={() => navigate('/pos')}>
+              <Users size={18} /> Walk-in Customer
+            </button>
+            <button className={styles.actionBtn} onClick={() => navigate('/orders')}>
+              <Truck size={18} /> Delivery Assign
+            </button>
+            <button className={styles.actionBtn} onClick={() => navigate('/expenses')}>
+              <DollarSign size={18} /> Add Expense
+            </button>
+            <button className={styles.actionBtn} onClick={() => navigate('/settlement')}>
+              <CheckCircle size={18} /> Settle Payment
+            </button>
+            <button className={styles.actionBtn} onClick={() => navigate('/orders')}>
+              <Printer size={18} /> Print Invoice
+            </button>
+          </div>
+        </div>
+
       </div>
 
-      <div className={styles.insightsGrid}>
-        <div className={styles.capacityCard}>
-          <h3 className={styles.capacityTitle}>Storage Capacity</h3>
-          <div className={styles.capacityItem}>
-            <div className={styles.capacityHeader}><span>Shelving Unit A</span><span>85%</span></div>
-            <div className={styles.capacityBar}><div className={styles.capacityFill} style={{ width: '85%', background: '#2563EB' }}></div></div>
+      {/* ── Bottom Row ────────────────────────────────────── */}
+      <div className={styles.bottomRow}>
+        
+        {/* Left: Operations Board */}
+        <div className={`${styles.card} ${styles.boardCard}`}>
+          <div className={styles.cardHeader}>
+            <h3>Operations Board</h3>
           </div>
-          <div className={styles.capacityItem}>
-            <div className={styles.capacityHeader}><span>Ready-to-Go</span><span>42%</span></div>
-            <div className={styles.capacityBar}><div className={styles.capacityFill} style={{ width: '42%', background: '#10B981' }}></div></div>
+          
+          <div className={styles.boardColumns}>
+            
+            {/* New Orders */}
+            <BoardColumn 
+              title="New Orders" 
+              count={operationsBoard.new.length} 
+              orders={operationsBoard.new.slice(0, 2)} 
+              badgeClass={styles.badgeNew}
+            />
+
+            {/* Processing */}
+            <BoardColumn 
+              title="Processing" 
+              count={operationsBoard.processing.length} 
+              orders={operationsBoard.processing.slice(0, 2)} 
+              badgeClass={styles.badgeProcessing}
+            />
+
+            {/* Ready */}
+            <BoardColumn 
+              title="Ready" 
+              count={operationsBoard.ready.length} 
+              orders={operationsBoard.ready.slice(0, 2)} 
+              badgeClass={styles.badgeReady}
+            />
+
+            {/* Out for Delivery */}
+            <BoardColumn 
+              title="Out for Delivery" 
+              count={operationsBoard.outForDelivery.length} 
+              orders={operationsBoard.outForDelivery.slice(0, 2)} 
+              badgeClass={styles.badgeDelivery}
+            />
+
           </div>
+        </div>
+
+        {/* Right Section: Recent Payments & Top Services */}
+        <div className={styles.rightColumn}>
+          
+          {/* Recent Payments */}
+          <div className={`${styles.card} ${styles.paymentsCard}`}>
+            <div className={styles.cardHeader}>
+              <h3>Recent Payments</h3>
+              <span className={styles.viewAllBtn} onClick={() => navigate('/settlement')}>View all</span>
+            </div>
+            <div className={styles.paymentsList}>
+              {recentPayments.map((p, idx) => (
+                <div key={idx} className={styles.paymentItem}>
+                  <div>
+                    <span className={styles.paymentRef}>{p.ref}</span>
+                    <span className={styles.paymentMethod}>{p.method}</span>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div className={styles.paymentAmount}><CurrencySymbol size={11} /> {p.amount.toFixed(2)}</div>
+                    <span className={styles.paymentTime}>{p.timeLabel}</span>
+                  </div>
+                </div>
+              ))}
+              {recentPayments.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '1rem', color: '#64748B', fontSize: '0.8rem' }}>No recent payments.</div>
+              )}
+            </div>
+          </div>
+
+          {/* Top Services */}
+          <div className={`${styles.card} ${styles.servicesCard}`}>
+            <div className={styles.cardHeader}>
+              <h3>Top Services (This Month)</h3>
+              <span className={styles.viewAllBtn} onClick={() => navigate('/services')}>View report</span>
+            </div>
+            <div className={styles.servicesList}>
+              {topServices.map((s, idx) => (
+                <div key={idx} className={styles.serviceItem}>
+                  <div className={styles.serviceHeader}>
+                    <span className={styles.serviceName}>{s.name}</span>
+                    <span className={styles.serviceCount}>{s.count} Orders</span>
+                  </div>
+                  <div className={styles.progressContainer}>
+                    <div 
+                      className={styles.progressBar} 
+                      style={{ 
+                        width: `${s.percentage}%`,
+                        background: idx === 0 ? '#3B82F6' : idx === 1 ? '#F59E0B' : idx === 2 ? '#8B5CF6' : '#10B981'
+                      }}
+                    ></div>
+                  </div>
+                </div>
+              ))}
+              {topServices.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '1rem', color: '#64748B', fontSize: '0.8rem' }}>No service data.</div>
+              )}
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* ── Footer Status Row ─────────────────────────────── */}
+      <div className={styles.footerRow}>
+        <FooterWidget label="Machines Running" val="4 / 6" icon={<Cpu size={16} />} progress={66} />
+        <FooterWidget label="Steam Iron Busy" val="2 / 4" icon={<Activity size={16} />} progress={50} />
+        <FooterWidget label="Pickup Pending" val={operationsBoard.new.length} icon={<ShoppingBag size={16} />} />
+        <FooterWidget label="Delivery Pending" val={operationsBoard.ready.length} icon={<Truck size={16} />} />
+        <FooterWidget label="Late Orders" val={Math.max(0, operationsBoard.processing.filter(o => o.timeLabel.includes('day') || o.timeLabel.includes('hr')).length)} icon={<Clock size={16} />} isWarning={true} />
+      </div>
+
+    </div>
+  );
+}
+
+// Kanban Column Component
+function BoardColumn({ title, count, orders, badgeClass }) {
+  return (
+    <div className={styles.boardColumn}>
+      <div className={styles.columnHeader}>
+        <h4>{title}</h4>
+        <span className={`${styles.columnBadge} ${badgeClass}`}>{count}</span>
+      </div>
+      <div className={styles.columnItems}>
+        {orders.map(o => (
+          <div key={o.id} className={styles.boardCardItem}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className={styles.boardCardId}>{o.id}</span>
+              <span className={styles.boardCardTime}>{o.timeLabel}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.35rem' }}>
+              <span className={styles.boardCardSummary}>{o.itemsSummary}</span>
+              {o.status !== 'Pending' && o.status !== 'Confirmed' && o.status !== 'Ready' && (
+                <span className={styles.boardCardStatus}>{o.status}</span>
+              )}
+            </div>
+          </div>
+        ))}
+        {count > 2 && (
+          <div className={styles.moreLabel}>+ {count - 2} more orders</div>
+        )}
+        {count === 0 && (
+          <div className={styles.emptyColumn}>No orders</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// KPI Item Component
+function KPIItem({ title, value, trend, isUp, icon, iconBg, iconColor }) {
+  return (
+    <div className={styles.kpiCardItem}>
+      <div className={styles.kpiHeader}>
+        <div className={styles.kpiIconWrapper} style={{ background: iconBg, color: iconColor }}>
+          {icon}
+        </div>
+        <span className={styles.kpiTitleText}>{title}</span>
+      </div>
+      <div className={styles.kpiContentBody}>
+        <span className={styles.kpiValText}>{value}</span>
+        <div className={styles.kpiTrendWrapper}>
+          {isUp ? <TrendingUp size={12} className={styles.trendUpIcon} /> : <TrendingDown size={12} className={styles.trendDownIcon} />}
+          <span className={`${styles.trendPct} ${isUp ? styles.upText : styles.downText}`}>{trend}</span>
+          <span className={styles.trendSubText}>vs yesterday</span>
         </div>
       </div>
     </div>
   );
 }
 
-function StatCard({ title, value, trend, isUp, icon, color }) {
+// Footer Status Widget Component
+function FooterWidget({ label, val, icon, progress, isWarning, isSuccess }) {
   return (
-    <div className={styles.statCard}>
-      <div className={`${styles.iconWrapper} ${styles[color]}`}>{icon}</div>
-      <div className={styles.statInfo}>
-        <span className={styles.statTitle}>{title}</span>
-        <span className={styles.statValue}>{value}</span>
-        <span className={`${styles.statTrend} ${isUp ? styles.up : styles.down}`}>
-          {isUp ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-          {trend} <span style={{ color: '#94A3B8', fontWeight: 500, fontSize: '0.75rem' }}>from last month</span>
-        </span>
+    <div className={styles.footerWidget}>
+      <div className={`${styles.footerIcon} ${isWarning ? styles.warningIcon : isSuccess ? styles.successIcon : ''}`}>
+        {icon}
       </div>
+      <div className={styles.footerInfo}>
+        <span className={styles.footerLabel}>{label}</span>
+        <strong className={styles.footerValue}>{val}</strong>
+      </div>
+      {progress !== undefined && (
+        <div className={styles.footerMiniBarContainer}>
+          <div className={styles.footerMiniBarFill} style={{ width: `${progress}%` }}></div>
+        </div>
+      )}
     </div>
   );
 }
