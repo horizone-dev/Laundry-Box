@@ -50,30 +50,94 @@ export default function TaxReport() {
   
 
 
-  useEffect(() => {
-    if (isAuthorized) {
-      fetchTaxData();
+  const getDateBounds = (range, startStr, endStr) => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    let startLocal, endLocal;
+
+    if (range === 'Today') {
+      startLocal = new Date(today);
+      endLocal = new Date(today);
+      endLocal.setHours(23, 59, 59, 999);
+    } else if (range === 'This Week') {
+      startLocal = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay());
+      endLocal = new Date(startLocal);
+      endLocal.setDate(startLocal.getDate() + 6);
+      endLocal.setHours(23, 59, 59, 999);
+    } else if (range === 'This Month') {
+      startLocal = new Date(today.getFullYear(), today.getMonth(), 1);
+      endLocal = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+    } else if (range === 'This Year') {
+      startLocal = new Date(today.getFullYear(), 0, 1);
+      endLocal = new Date(today.getFullYear(), 11, 31, 23, 59, 59, 999);
+    } else if (range === 'Custom') {
+      if (!startStr || !endStr) {
+        return null;
+      }
+      startLocal = parseDateSafe(startStr);
+      startLocal.setHours(0, 0, 0, 0);
+      endLocal = parseDateSafe(endStr);
+      endLocal.setHours(23, 59, 59, 999);
+    } else {
+      return null;
     }
-  }, [isAuthorized]);
+
+    const orderStart = startLocal.toISOString();
+    const orderEnd = endLocal.toISOString();
+
+    const formatDateObj = (d) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    const expenseStart = formatDateObj(startLocal);
+    const expenseEnd = formatDateObj(endLocal);
+
+    return {
+      orderStart,
+      orderEnd,
+      expenseStart,
+      expenseEnd
+    };
+  };
 
   const fetchTaxData = async () => {
     if (window.electronAPI?.dbQuery) {
       try {
         setLoading(true);
-        // 1. Fetch non-cancelled orders
-        const ordersRes = await window.electronAPI.dbQuery(
-          `SELECT orders.id, orders.billNumber, orders.totalAmount, orders.items, orders.createdAt, customers.name as customerName 
-           FROM orders 
-           LEFT JOIN customers ON orders.customerId = customers.id 
-           WHERE orders.status != 'Cancelled'`, 
-          []
-        );
+        const bounds = getDateBounds(dateRange, customStartDate, customEndDate);
         
-        // 2. Fetch expenses
-        const expensesRes = await window.electronAPI.dbQuery(
-          `SELECT id, title, amount, taxAmount, isTaxEnabled, date FROM expenses`, 
-          []
-        );
+        let ordersQuery = `
+          SELECT orders.id, orders.billNumber, orders.totalAmount, orders.items, orders.createdAt, customers.name as customerName 
+          FROM orders 
+          LEFT JOIN customers ON orders.customerId = customers.id 
+          WHERE orders.status != 'Cancelled'
+        `;
+        let ordersParams = [];
+
+        let expensesQuery = `
+          SELECT id, title, amount, taxAmount, isTaxEnabled, date 
+          FROM expenses
+        `;
+        let expensesParams = [];
+
+        if (bounds) {
+          ordersQuery += ` AND orders.createdAt >= ? AND orders.createdAt <= ?`;
+          ordersParams = [bounds.orderStart, bounds.orderEnd];
+
+          expensesQuery += ` WHERE date >= ? AND date <= ?`;
+          expensesParams = [bounds.expenseStart, bounds.expenseEnd];
+        } else if (dateRange === 'Custom') {
+          setOrders([]);
+          setExpenses([]);
+          setLoading(false);
+          return;
+        }
+
+        const ordersRes = await window.electronAPI.dbQuery(ordersQuery, ordersParams);
+        const expensesRes = await window.electronAPI.dbQuery(expensesQuery, expensesParams);
 
         if (ordersRes.success) setOrders(ordersRes.data);
         if (expensesRes.success) setExpenses(expensesRes.data);
@@ -86,6 +150,12 @@ export default function TaxReport() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (isAuthorized) {
+      fetchTaxData();
+    }
+  }, [isAuthorized, dateRange, customStartDate, customEndDate]);
 
   // Helper to calculate exact order tax based on items or settings
   const calculateOrderTax = (order, settingsObj) => {
@@ -192,41 +262,6 @@ export default function TaxReport() {
     return new Date(dateStr);
   };
 
-  // Date Range Checker
-  const isWithinDateRange = (dateStr, range, start, end) => {
-    const txDate = parseDateSafe(dateStr);
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    if (range === 'Today') {
-      return txDate.getFullYear() === today.getFullYear() &&
-             txDate.getMonth() === today.getMonth() &&
-             txDate.getDate() === today.getDate();
-    }
-    if (range === 'This Week') {
-      const startOfWeek = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay());
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(startOfWeek.getDate() + 7);
-      return txDate >= startOfWeek && txDate < endOfWeek;
-    }
-    if (range === 'This Month') {
-      return txDate.getFullYear() === today.getFullYear() &&
-             txDate.getMonth() === today.getMonth();
-    }
-    if (range === 'This Year') {
-      return txDate.getFullYear() === today.getFullYear();
-    }
-    if (range === 'Custom') {
-      if (!start || !end) return false;
-      const startDate = parseDateSafe(start);
-      startDate.setHours(0, 0, 0, 0);
-      const endDate = parseDateSafe(end);
-      endDate.setHours(23, 59, 59, 999);
-      return txDate >= startDate && txDate <= endDate;
-    }
-    return true;
-  };
-
   // Filtered List
   const filteredTransactions = useMemo(() => {
     return transactions.filter(tx => {
@@ -237,11 +272,9 @@ export default function TaxReport() {
                           (taxTypeFilter === 'Sales' && tx.type === 'Sale') || 
                           (taxTypeFilter === 'Expenses' && tx.type === 'Expense');
       
-      const matchesDate = isWithinDateRange(tx.date, dateRange, customStartDate, customEndDate);
-
-      return matchesSearch && matchesType && matchesDate;
+      return matchesSearch && matchesType;
     });
-  }, [transactions, searchTerm, taxTypeFilter, dateRange, customStartDate, customEndDate]);
+  }, [transactions, searchTerm, taxTypeFilter]);
 
   // Aggregate stats
   const totalSalesTax = useMemo(() => {

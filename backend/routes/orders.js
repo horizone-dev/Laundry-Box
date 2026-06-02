@@ -1,6 +1,19 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
+const Customer = require('../models/Customer');
+const Payment = require('../models/Payment');
+const DeletedOrder = require('../models/DeletedOrder');
+
+// GET /api/orders/deleted - Fetch all deleted orders
+router.get('/deleted', async (req, res) => {
+  try {
+    const deletedOrders = await DeletedOrder.find({}).sort({ deletedAt: -1 });
+    res.json(deletedOrders);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 
 // GET /api/orders/search - Search orders
 router.get('/search', async (req, res) => {
@@ -88,6 +101,81 @@ router.post('/', async (req, res) => {
     res.status(201).json(order);
   } catch (err) {
     res.status(400).json({ message: err.message });
+  }
+});
+
+// DELETE /api/orders/:id - Delete order
+router.delete('/:id', async (req, res) => {
+  const orderId = req.params.id;
+  const { deletedBy } = req.body;
+  const finalDeletedBy = deletedBy || req.query.deletedBy || 'Manager';
+  try {
+    let order = await Order.findOne({
+      $or: [
+        { id: orderId },
+        { id: orderId.replace('#', '') },
+        { id: '#' + orderId.replace('#', '') },
+        { billNumber: orderId }
+      ]
+    });
+
+    if (!order && orderId.match(/^[0-9a-fA-F]{24}$/)) {
+      order = await Order.findById(orderId);
+    }
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    // 0. Save to DeletedOrder audit log collection in MongoDB
+    const deletedRecord = new DeletedOrder({
+      id: order.id,
+      shopId: order.shopId,
+      billNumber: order.billNumber,
+      customerId: order.customerId,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      totalAmount: order.totalAmount,
+      items: order.items,
+      deletedBy: finalDeletedBy,
+      deletedAt: new Date()
+    });
+    await deletedRecord.save();
+
+    // 1. Delete associated payments in MongoDB
+    await Payment.deleteMany({ orderId: order.id, shopId: order.shopId });
+
+    // 2. Delete the order
+    await Order.deleteOne({ _id: order._id });
+
+    // 3. Recalculate and update customer balance in MongoDB
+    if (order.customerId) {
+      const customerId = order.customerId;
+      const shopId = order.shopId;
+
+      // Get all non-cancelled orders for this customer
+      const activeOrders = await Order.find({ customerId, shopId, status: { $ne: 'Cancelled' } });
+      const totalDue = activeOrders.reduce((sum, o) => sum + (o.dueAmount ?? 0), 0);
+
+      // Get all unlinked payments for this customer (where orderId is null or empty)
+      const unlinkedPayments = await Payment.find({
+        customerId,
+        shopId,
+        $or: [{ orderId: { $exists: false } }, { orderId: null }, { orderId: '' }]
+      });
+      const totalPayments = unlinkedPayments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
+
+      const newBalance = totalDue - totalPayments;
+
+      await Customer.findOneAndUpdate(
+        { id: customerId, shopId },
+        { balance: newBalance, updatedAt: new Date() }
+      );
+    }
+
+    res.json({ message: 'Order deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 

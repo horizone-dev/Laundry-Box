@@ -211,6 +211,7 @@ export default function MainLayout() {
       subItems: [
         { path: '/orders', label: 'All Orders' },
         { path: '/orders/pending', label: 'Pending Payments' },
+        { path: '/orders/deleted', label: 'Deleted Orders', roleOnly: ['manager', 'super_admin'] },
       ]
     },
     {

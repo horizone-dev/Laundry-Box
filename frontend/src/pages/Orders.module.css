@@ -1,8 +1,8 @@
 .ordersPage {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 0 1rem 1rem 1rem;
+  gap: 1.25rem;
+  padding: 0 1.5rem 1.5rem 1.5rem;
 }
 
 .headerRow {
@@ -12,7 +12,7 @@
 }
 
 .headerTitle h1 {
-  font-size: 1.8rem;
+  font-size: 2.1rem;
   font-weight: 900;
   color: var(--text-primary);
   letter-spacing: -0.5px;
@@ -20,7 +20,7 @@
 
 .headerTitle p {
   color: var(--text-secondary);
-  font-size: 0.95rem;
+  font-size: 1rem;
 }
 
 .headerActions {
@@ -35,9 +35,9 @@
   gap: 0.75rem;
   background: white;
   border: 1px solid var(--border);
-  padding: 0.6rem 1rem;
-  border-radius: 12px;
-  width: 320px;
+  padding: 0.8rem 1.25rem;
+  border-radius: 14px;
+  width: 380px;
   box-shadow: var(--shadow-sm);
 }
 
@@ -45,7 +45,7 @@
   border: none;
   outline: none;
   width: 100%;
-  font-size: 0.9rem;
+  font-size: 1rem;
   font-weight: 500;
 }
 
@@ -58,32 +58,34 @@
 
 .kpiCard {
   background: white;
-  padding: 1.5rem;
-  border-radius: 12px;
+  padding: 1.75rem 2rem;
+  border-radius: 16px;
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: 1.5rem;
   border: 1px solid #E2E8F0;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  transition: transform 0.2s;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+  transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .kpiCard:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.08);
 }
 
-.totalCard { border-left: 4px solid #0F172A; }
-.paidCard { border-left: 4px solid #10B981; }
-.pendingCard { border-left: 4px solid #F97316; }
-.overdueCard { border-left: 4px solid #EF4444; }
+.totalCard { border-left: 5px solid #0F172A; }
+.paidCard { border-left: 5px solid #10B981; }
+.pendingCard { border-left: 5px solid #F97316; }
+.overdueCard { border-left: 5px solid #EF4444; }
 
 .kpiIcon {
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .kpiInfo {
@@ -92,17 +94,18 @@
 }
 
 .kpiLabel {
-  font-size: 0.85rem;
-  font-weight: 700;
+  font-size: 0.8rem;
+  font-weight: 800;
   color: var(--text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
 }
 
 .kpiValue {
-  font-size: 1.5rem;
+  font-size: 1.85rem;
   font-weight: 900;
   color: var(--text-primary);
+  line-height: 1.1;
 }
 
 /* Table */
@@ -121,13 +124,14 @@
 
 .ordersTable th {
   text-align: left;
-  padding: 1rem;
+  padding: 1.1rem 1.25rem;
   background: #F8FAFC;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   font-weight: 800;
   color: var(--text-secondary);
   text-transform: uppercase;
-  border-bottom: 1px solid var(--border);
+  letter-spacing: 0.5px;
+  border-bottom: 2px solid var(--border);
 }
 
 .orderRow {
@@ -141,8 +145,8 @@
 }
 
 .ordersTable td {
-  padding: 1rem;
-  font-size: 0.9rem;
+  padding: 1.1rem 1.25rem;
+  font-size: 1rem;
 }
 
 .orderIdCell {
@@ -153,13 +157,15 @@
 .idText {
   display: block;
   font-weight: 800;
+  font-size: 1rem;
   color: var(--primary);
 }
 
 .billText {
   display: block;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
+  margin-top: 2px;
 }
 
 .qrPlaceholder {
@@ -180,9 +186,10 @@
 
 .custName {
   display: block;
-  font-weight: 700;
+  font-weight: 800;
+  font-size: 1rem;
   color: #1E293B;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.3rem;
 }
 
 .custPhoneRow {
@@ -193,7 +200,7 @@
 }
 
 .custPhone {
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: #334155;
   line-height: 1;
@@ -222,14 +229,15 @@
 }
 
 .amountText {
-  font-weight: 800;
+  font-weight: 900;
+  font-size: 1.05rem;
   color: var(--text-primary);
 }
 
 .statusBadge {
-  padding: 0.35rem 0.75rem;
+  padding: 0.45rem 1rem;
   border-radius: 100px;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   font-weight: 800;
   display: inline-block;
 }
@@ -1013,9 +1021,10 @@
 }
 
 .kpiSub {
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   color: #94A3B8;
-  margin-top: 0.25rem;
+  margin-top: 0.3rem;
+  font-weight: 600;
 }
 
 
@@ -1137,3 +1146,86 @@
   display: inline-block;
   letter-spacing: 0.5px;
 }
+
+/* Custom statusModal and PIN modal styling */
+.statusModal {
+  background: white;
+  width: 100%;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow: var(--shadow-xl);
+  animation: modalScale 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.modalBody {
+  padding: 2rem;
+}
+
+@keyframes modalScale {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.deleteBtn {
+  background-color: #EF4444 !important;
+  color: white !important;
+  border-color: #EF4444 !important;
+}
+
+.deleteBtn:hover {
+  background-color: #DC2626 !important;
+  border-color: #DC2626 !important;
+}
+
+.deleteConfirmBtn {
+  background-color: #EF4444;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 0.75rem 1.5rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.deleteConfirmBtn:hover:not(:disabled) {
+  background-color: #DC2626;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+}
+
+.deleteConfirmBtn:disabled {
+  background-color: #F3F4F6;
+  color: #9CA3AF;
+  cursor: not-allowed;
+}
+
+.pinInput {
+  width: 100%;
+  padding: 0.75rem;
+  font-size: 1.5rem;
+  text-align: center;
+  letter-spacing: 0.5rem;
+  border: 1.5px solid #E2E8F0;
+  border-radius: 8px;
+  outline: none;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.pinInput:focus {
+  border-color: #3B82F6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15), inset 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.pinInputError {
+  border-color: #EF4444 !important;
+}
+
+.pinInputError:focus {
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15) !important;
+}
+

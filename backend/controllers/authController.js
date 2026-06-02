@@ -112,3 +112,25 @@ exports.deleteUser = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.verifyManagerPin = async (req, res) => {
+  try {
+    const { pin } = req.body;
+    if (!pin) {
+      return res.status(400).json({ valid: false, message: 'PIN is required' });
+    }
+    
+    // Find all users (staff) with manager or super_admin roles
+    const allUsers = await User.find({ role: { $in: ['manager', 'super_admin'] } });
+    for (const u of allUsers) {
+      if (await u.comparePin(pin)) {
+        return res.json({ valid: true, managerName: u.name });
+      }
+    }
+    
+    return res.status(401).json({ valid: false, message: 'Invalid Manager PIN' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+

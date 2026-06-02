@@ -18,6 +18,7 @@ export default function Services({ activeView = 'overview' }) {
   const [showModal, setShowModal] = useState(null); // 'service', 'type', 'addon', 'category'
   const [formData, setFormData] = useState({});
   const [editId, setEditId] = useState(null);
+  const [dragActive, setDragActive] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -82,15 +83,74 @@ export default function Services({ activeView = 'overview' }) {
     }
   };
 
+  const processImage = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload an image file (PNG, JPG, or WEBP).');
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 300;
+        const MAX_HEIGHT = 300;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        setFormData(prev => ({ ...prev, image: dataUrl }));
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, image: reader.result }));
-      };
-      reader.readAsDataURL(file);
+    if (file) processImage(file);
+  };
+
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
     }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processImage(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setFormData(prev => ({ ...prev, image: null }));
   };
 
   const handleSave = async (e) => {
@@ -348,20 +408,35 @@ export default function Services({ activeView = 'overview' }) {
             <form onSubmit={handleSave}>
               <div className={styles.modalBody}>
                 <div className={styles.imageUploadSection}>
-                  <div className={styles.imagePreview}>
+                  <div 
+                    className={`${styles.imagePreview} ${dragActive ? styles.dragActive : ''} ${formData.image ? styles.hasImage : ''}`}
+                    onDragEnter={handleDrag}
+                    onDragOver={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDrop={handleDrop}
+                  >
                     {formData.image ? (
-                      <img src={formData.image} alt="Preview" />
+                      <>
+                        <img src={formData.image} alt="Preview" />
+                        <div className={styles.imageOverlay}>
+                          <button type="button" className={styles.removeImageBtn} onClick={handleRemoveImage} title="Remove image">
+                            <Trash2 size={18} />
+                          </button>
+                          <label className={styles.changeImageLabel} title="Change image">
+                            <Edit2 size={18} />
+                            <input type="file" hidden accept="image/*" onChange={handleImageUpload} />
+                          </label>
+                        </div>
+                      </>
                     ) : (
-                      <div className={styles.imagePlaceholder}>
-                        <ImageIcon size={32} />
-                      </div>
+                      <label className={styles.dropZoneLabel}>
+                        <ImageIcon size={36} className={styles.dropZoneIcon} />
+                        <span className={styles.dropZoneText}>Drag & drop image here or <strong>browse</strong></span>
+                        <span className={styles.dropZoneSubtext}>Optimized PNG, JPG, or WEBP</span>
+                        <input type="file" hidden accept="image/*" onChange={handleImageUpload} />
+                      </label>
                     )}
-                    <label className={styles.uploadBtn}>
-                      <Camera size={16} />
-                      <input type="file" hidden accept="image/*" onChange={handleImageUpload} />
-                    </label>
                   </div>
-                  <p className={styles.uploadText}>Click camera to upload service image</p>
                 </div>
 
                 <div className={styles.formGroup}>

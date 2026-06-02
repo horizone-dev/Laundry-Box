@@ -150,6 +150,38 @@ function initDB(appPath) {
       lastSyncTimestamp TEXT,
       updatedAt TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS deleted_orders (
+      id TEXT PRIMARY KEY,
+      shopId TEXT,
+      billNumber TEXT,
+      customerId TEXT,
+      customerName TEXT,
+      customerPhone TEXT,
+      totalAmount REAL,
+      items JSON,
+      deletedAt TEXT,
+      deletedBy TEXT
+    );
+  `);
+
+  // Create indexes for search, filters, sorting, and synchronization performance
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customerId);
+    CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(createdAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_orders_bill ON orders(billNumber);
+    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+    CREATE INDEX IF NOT EXISTS idx_orders_synced ON orders(isSynced);
+    
+    CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
+    CREATE INDEX IF NOT EXISTS idx_customers_synced ON customers(isSynced);
+    
+    CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(orderId);
+    CREATE INDEX IF NOT EXISTS idx_payments_created ON payments(createdAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_payments_synced ON payments(isSynced);
+    
+    CREATE INDEX IF NOT EXISTS idx_account_txn_date ON account_transactions(date);
+    CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
   `);
 
   try {

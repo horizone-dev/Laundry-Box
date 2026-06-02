@@ -40,23 +40,78 @@ export default function CancelledOrdersReport() {
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
 
-  useEffect(() => {
-    if (isAuthorized) fetchData();
-  }, [isAuthorized]);
+  /* ── Date range filter helper ─────────────────────── */
+  const getDateBounds = () => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    const parseLocal = (str) => {
+      if (!str) return new Date();
+      const parts = str.split('-');
+      return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    };
+
+    if (dateRange === 'Today') {
+      const start = new Date(today);
+      const end = new Date(today);
+      end.setHours(23, 59, 59, 999);
+      return { from: start, to: end };
+    }
+    if (dateRange === 'This Week') {
+      const day = today.getDay();
+      const start = new Date(today); start.setDate(today.getDate() - day);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start); end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+      return { from: start, to: end };
+    }
+    if (dateRange === 'This Month') {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      return { from: start, to: end };
+    }
+    if (dateRange === 'This Year') {
+      const start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+      return { from: start, to: end };
+    }
+    if (dateRange === 'Custom' && customStart && customEnd) {
+      const start = parseLocal(customStart);
+      start.setHours(0, 0, 0, 0);
+      const end = parseLocal(customEnd);
+      end.setHours(23, 59, 59, 999);
+      return { from: start, to: end };
+    }
+    return null; // All time
+  };
 
   const fetchData = async () => {
     if (!window.electronAPI?.dbQuery) return;
     try {
       setLoading(true);
-      const res = await window.electronAPI.dbQuery(
-        `SELECT o.id, o.billNumber, o.totalAmount, o.items, o.createdAt, o.statusHistory,
-                c.name as customerName, c.phone as customerPhone
-         FROM orders o
-         LEFT JOIN customers c ON o.customerId = c.id
-         WHERE o.status = 'Cancelled'
-         ORDER BY o.createdAt DESC`,
-        []
-      );
+      const bounds = getDateBounds();
+      
+      let query = `
+        SELECT o.id, o.billNumber, o.totalAmount, o.items, o.createdAt, o.statusHistory,
+               c.name as customerName, c.phone as customerPhone
+        FROM orders o
+        LEFT JOIN customers c ON o.customerId = c.id
+        WHERE o.status = 'Cancelled'
+      `;
+      let params = [];
+
+      if (bounds) {
+        query += ` AND o.createdAt >= ? AND o.createdAt <= ?`;
+        params = [bounds.from.toISOString(), bounds.to.toISOString()];
+      } else if (dateRange === 'Custom') {
+        setOrders([]);
+        setLoading(false);
+        return;
+      }
+
+      query += ` ORDER BY o.createdAt DESC`;
+
+      const res = await window.electronAPI.dbQuery(query, params);
       setOrders(res.success ? res.data : []);
     } catch (err) {
       console.error('Cancelled orders fetch error:', err);
@@ -65,39 +120,12 @@ export default function CancelledOrdersReport() {
     }
   };
 
-  /* ── Date range filter helper ─────────────────────── */
-  const getDateBounds = () => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    if (dateRange === 'Today') {
-      return { from: today, to: new Date(today.getTime() + 86400000 - 1) };
-    }
-    if (dateRange === 'This Week') {
-      const day = today.getDay();
-      const start = new Date(today); start.setDate(today.getDate() - day);
-      const end = new Date(start); end.setDate(start.getDate() + 6);
-      return { from: start, to: end };
-    }
-    if (dateRange === 'This Month') {
-      return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59) };
-    }
-    if (dateRange === 'This Year') {
-      return { from: new Date(now.getFullYear(), 0, 1), to: new Date(now.getFullYear(), 11, 31, 23, 59, 59) };
-    }
-    if (dateRange === 'Custom' && customStart && customEnd) {
-      return { from: new Date(customStart), to: new Date(customEnd + 'T23:59:59') };
-    }
-    return null; // All time
-  };
+  useEffect(() => {
+    if (isAuthorized) fetchData();
+  }, [isAuthorized, dateRange, customStart, customEnd]);
 
   const filteredOrders = useMemo(() => {
-    if (dateRange === 'Custom' && (!customStart || !customEnd)) {
-      return [];
-    }
-    const bounds = getDateBounds();
     return orders.filter(o => {
-      const created = new Date(o.createdAt);
-      if (bounds && (created < bounds.from || created > bounds.to)) return false;
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
         const ref = (o.billNumber || o.id || '').toLowerCase();
@@ -107,7 +135,7 @@ export default function CancelledOrdersReport() {
       }
       return true;
     });
-  }, [orders, searchTerm, dateRange, customStart, customEnd]);
+  }, [orders, searchTerm]);
 
   /* ── KPIs ─────────────────────────────────────────── */
   const totalCancelled = filteredOrders.length;

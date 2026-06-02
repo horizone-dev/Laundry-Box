@@ -16,6 +16,7 @@ import CustomerStatement from './pages/CustomerStatement';
 import Expenses from './pages/Expenses';
 import TaxReport from './pages/TaxReport';
 import CancelledOrdersReport from './pages/CancelledOrdersReport';
+import DeletedOrders from './pages/DeletedOrders';
 import Invoice from './pages/Invoice';
 import Login from './pages/Login';
 import Users from './pages/Users';
@@ -49,6 +50,7 @@ function App() {
           <Route path="orders">
             <Route index element={<Orders />} />
             <Route path="pending" element={<Orders isPendingView={true} />} />
+            <Route path="deleted" element={<DeletedOrders />} />
           </Route>
           <Route path="customers" element={<Customers />} />
           <Route path="services">

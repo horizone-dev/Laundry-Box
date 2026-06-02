@@ -145,7 +145,7 @@ export default function Reports() {
           setRevenueData(formattedTrend);
 
           // 3. Service Distribution (Pie Chart)
-          const allOrders = await window.electronAPI.dbQuery('SELECT items FROM orders', []);
+          const allOrders = await window.electronAPI.dbQuery("SELECT items FROM orders WHERE createdAt > date('now', '-30 days')", []);
           const categoryCounts = {};
           const categoryRevenue = {};
           const COLORS = ['#3B82F6', '#94A3B8', '#FDBA74', '#10B981', '#8B5CF6'];

@@ -26,6 +26,7 @@ export default function POS() {
   const [cart, setCart] = useState([]);
   const [selectedService, setSelectedService] = useState(null);
   const [serviceConfig, setServiceConfig] = useState({ types: ['wf'], addons: [], qty: 1, customPrice: null, description: '' });
+  const [editingCartIdx, setEditingCartIdx] = useState(null); // index of cart item being edited
 
   const activeServiceTypes = selectedService ? serviceTypes.filter(t => serviceConfig.types.includes(t.id)) : [];
   const activeSelectedAddons = selectedService ? addons.filter(a => serviceConfig.addons.includes(a.id)) : [];
@@ -242,18 +243,26 @@ export default function POS() {
       : activeCalculatedPrice;
     
     const newItem = {
-      id: Date.now().toString(),
+      id: editingCartIdx !== null ? cart[editingCartIdx].id : Date.now().toString(),
       serviceId: selectedService.id,
       name: selectedService.name.trim(),
       price: unitPrice,
       type: selectedService.isTemporary ? 'Custom' : activeServiceTypes.map(t => t.name).join(', '),
       addons: selectedService.isTemporary ? [] : activeSelectedAddons.map(a => a.name),
       qty: serviceConfig.qty,
-      taxRate: selectedService.taxRate || settings.taxRate || 0, // Store product-wise rate
+      taxRate: selectedService.taxRate || settings.taxRate || 0,
       description: serviceConfig.description || ''
     };
     
-    setCart([...cart, newItem]);
+    if (editingCartIdx !== null) {
+      // Replace the existing cart item
+      const newCart = [...cart];
+      newCart[editingCartIdx] = newItem;
+      setCart(newCart);
+      setEditingCartIdx(null);
+    } else {
+      setCart([...cart, newItem]);
+    }
     setSelectedService(null);
     setItemSearch('');
   };
@@ -273,6 +282,36 @@ export default function POS() {
 
   const removeCartItem = (idx) => {
     setCart(cart.filter((_, i) => i !== idx));
+  };
+
+  const handleEditCartItem = (idx) => {
+    const item = cart[idx];
+    // Find the matching service object
+    const svc = services.find(s => s.name === item.name) || {
+      id: item.serviceId || 'temp',
+      name: item.name,
+      price: item.price,
+      icon: 'Package',
+      isTemporary: !services.find(s => s.name === item.name)
+    };
+    // Resolve type IDs from names
+    const typeNames = item.type ? item.type.split(', ') : [];
+    const resolvedTypeIds = serviceTypes
+      .filter(t => typeNames.includes(t.name))
+      .map(t => t.id);
+    // Resolve addon IDs from names
+    const resolvedAddonIds = addons
+      .filter(a => (item.addons || []).includes(a.name))
+      .map(a => a.id);
+    setEditingCartIdx(idx);
+    setSelectedService(svc);
+    setServiceConfig({
+      types: resolvedTypeIds.length > 0 ? resolvedTypeIds : [serviceTypes[0]?.id || 'wf'],
+      addons: resolvedAddonIds,
+      qty: item.qty,
+      customPrice: item.price,
+      description: item.description || ''
+    });
   };
 
   const updateCartQty = (idx, delta) => {
@@ -890,8 +929,11 @@ export default function POS() {
                 </div>
                 <div className={styles.cartItemRight}>
                   <span className={styles.cartItemPrice}><CurrencySymbol size={12} /> {(item.price * item.qty).toFixed(2)}</span>
+                  <button className={styles.cartItemEditBtn} onClick={() => handleEditCartItem(idx)} title="Edit item">
+                    <Edit3 size={13} />
+                  </button>
                   <button className={styles.cartItemDeleteBtn} onClick={() => removeCartItem(idx)} title="Remove item">
-                    <Trash2 size={14} />
+                    <Trash2 size={13} />
                   </button>
                 </div>
               </div>
@@ -911,6 +953,8 @@ export default function POS() {
           <div className={`${styles.cartRow} ${styles.totalRow}`}><span>Total</span><span className={styles.totalValue}><CurrencySymbol size={16} /> {total.toFixed(2)}</span></div>
           
           <div className={styles.cartActions}>
+
+
             <button className={styles.secondaryBtn} onClick={handleDiscount}><Receipt size={18} /> Discount</button>
             {selectedCustomer && selectedCustomer.balance > 0 && (
               <button 
@@ -943,6 +987,8 @@ export default function POS() {
         </div>
       </aside>
 
+
+
       {/* Service Modal */}
       {selectedService && (
         <div className={styles.modalOverlay}>
@@ -957,7 +1003,7 @@ export default function POS() {
                   <p>{selectedService.isTemporary ? 'Enter name, price, and options' : selectedService.category || 'Configure Service Options'}</p>
                 </div>
               </div>
-              <button className={styles.modalCloseBtn} onClick={() => setSelectedService(null)} aria-label="Close modal">
+              <button className={styles.modalCloseBtn} onClick={() => { setSelectedService(null); setEditingCartIdx(null); }} aria-label="Close modal">
                 <X size={20} />
               </button>
             </div>
@@ -1109,7 +1155,7 @@ export default function POS() {
             </div>
 
             <div className={styles.modalFooterRedesign}>
-              <button className={styles.modalCancelBtn} onClick={() => setSelectedService(null)}>
+              <button className={styles.modalCancelBtn} onClick={() => { setSelectedService(null); setEditingCartIdx(null); }}>
                 Cancel
               </button>
               <button className={styles.modalSubmitBtn} onClick={addToCart}>

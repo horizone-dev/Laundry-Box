@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, Filter, ChevronLeft, ChevronRight, Calendar,
   Clock, Package, CheckCircle, AlertCircle, ChevronDown, 
-  X, Printer, CreditCard, Wallet, User, History, QrCode, MessageCircle, Phone, DollarSign, Truck
+  X, Printer, CreditCard, Wallet, User, History, QrCode, MessageCircle, Phone, DollarSign, Truck, Trash2
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
@@ -54,6 +54,13 @@ export default function Orders({ isPendingView = false }) {
   const [dateRange, setDateRange] = useState('All');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
+
+  // Delete Order & PIN Verification State
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinValue, setPinValue] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [orderToDelete, setOrderToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Translation helpers
   const translateStatus = (status) => {
@@ -306,6 +313,96 @@ export default function Orders({ isPendingView = false }) {
     }
   };
 
+  const handleDeleteOrder = async () => {
+    if (!orderToDelete) return;
+    setPinError('');
+    setIsDeleting(true);
+    try {
+      let pinOwner = null;
+
+      // 1. Verify locally against Shop Settings Order Deletion PIN
+      const configuredPin = settings.orderDeletePin || '0000';
+      if (pinValue === configuredPin) {
+        pinOwner = 'Shop Settings PIN';
+      } else {
+        // Fallback to checking active manager PINs on the backend
+        try {
+          const verifyRes = await axios.post(`${API_BASE}/auth/verify-manager-pin`, { pin: pinValue });
+          if (verifyRes.data.valid) {
+            pinOwner = `Manager ${verifyRes.data.managerName}`;
+          }
+        } catch (apiErr) {
+          console.warn('Backend PIN check failed or offline:', apiErr.message);
+          // If offline and check fails, and it didn't match the local settings PIN, reject
+          setPinError('Invalid Manager PIN / Offline');
+          setIsDeleting(false);
+          return;
+        }
+      }
+
+      if (!pinOwner) {
+        setPinError('Invalid Manager PIN');
+        setIsDeleting(false);
+        return;
+      }
+      
+      // PIN is valid! Delete the order.
+      // A. Delete locally from SQLite (if electron app)
+      if (window.electronAPI?.dbQuery) {
+        // 0. Insert into deleted_orders audit log
+        await window.electronAPI.dbQuery(
+          `INSERT INTO deleted_orders (id, shopId, billNumber, customerId, customerName, customerPhone, totalAmount, items, deletedAt, deletedBy) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            orderToDelete.id,
+            orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
+            orderToDelete.billNumber || '',
+            orderToDelete.customerId || '',
+            orderToDelete.customerName || '',
+            orderToDelete.customerPhone || orderToDelete.phone || '',
+            orderToDelete.totalAmount || 0,
+            typeof orderToDelete.items === 'string' ? orderToDelete.items : JSON.stringify(orderToDelete.items || []),
+            new Date().toISOString(),
+            pinOwner
+          ]
+        );
+
+        // 1. Delete associated payments
+        await window.electronAPI.dbQuery('DELETE FROM payments WHERE orderId = ?', [orderToDelete.id]);
+        
+        // 2. Delete associated account transactions
+        await window.electronAPI.dbQuery('DELETE FROM account_transactions WHERE referenceId = ?', [orderToDelete.id]);
+        
+        // 3. Delete the order itself
+        await window.electronAPI.dbQuery('DELETE FROM orders WHERE id = ?', [orderToDelete.id]);
+        
+        // 4. Run data healer to automatically heal customer balances and ledgers
+        await window.electronAPI.runDataHealer();
+      }
+      
+      // B. Delete remotely from Cloud
+      try {
+        await axios.delete(`${API_BASE}/orders/${encodeURIComponent(orderToDelete.id)}`, {
+          data: { deletedBy: pinOwner }
+        });
+      } catch (remoteErr) {
+        console.warn('Could not delete from cloud (offline):', remoteErr.message);
+      }
+      
+      // C. Update State
+      setOrders(prev => prev.filter(o => o.id !== orderToDelete.id));
+      setSelectedOrder(null);
+      setShowPinModal(false);
+      setPinValue('');
+      alert(`Order ${orderToDelete.id} and all its associated payments/transactions deleted successfully (authorized by ${pinOwner}).`);
+    } catch (err) {
+      console.error('Failed to delete order:', err);
+      setPinError('An error occurred during deletion');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const [originalPayStatus, setOriginalPayStatus] = useState(null);
 
   const handleUpdatePaymentStatus = async (newPayStatus) => {
@@ -552,7 +649,7 @@ export default function Orders({ isPendingView = false }) {
       {/* KPI Grid */}
       <div className={styles.kpiGrid}>
         <div className={`${styles.kpiCard} ${styles.totalCard}`}>
-          <div className={styles.kpiIcon} style={{ background: '#F8FAFC' }}><DollarSign size={18} color="#0F172A" /></div>
+          <div className={styles.kpiIcon} style={{ background: '#F8FAFC' }}><DollarSign size={22} color="#0F172A" /></div>
           <div className={styles.kpiInfo}>
             <span className={styles.kpiLabel}>{t('totalAmount', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#0F172A' }}>
@@ -562,7 +659,7 @@ export default function Orders({ isPendingView = false }) {
           </div>
         </div>
         <div className={`${styles.kpiCard} ${styles.paidCard}`}>
-          <div className={styles.kpiIcon} style={{ background: '#ECFDF5' }}><CheckCircle size={18} color="#10B981" /></div>
+          <div className={styles.kpiIcon} style={{ background: '#ECFDF5' }}><CheckCircle size={22} color="#10B981" /></div>
           <div className={styles.kpiInfo}>
             <span className={styles.kpiLabel}>{t('paid', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#10B981' }}>
@@ -572,7 +669,7 @@ export default function Orders({ isPendingView = false }) {
           </div>
         </div>
         <div className={`${styles.kpiCard} ${styles.pendingCard}`}>
-          <div className={styles.kpiIcon} style={{ background: '#FFF7ED' }}><Clock size={18} color="#F97316" /></div>
+          <div className={styles.kpiIcon} style={{ background: '#FFF7ED' }}><Clock size={22} color="#F97316" /></div>
           <div className={styles.kpiInfo}>
             <span className={styles.kpiLabel}>{t('pending', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#F97316' }}>
@@ -582,7 +679,7 @@ export default function Orders({ isPendingView = false }) {
           </div>
         </div>
         <div className={`${styles.kpiCard} ${styles.overdueCard}`}>
-          <div className={styles.kpiIcon} style={{ background: '#FEF2F2' }}><AlertCircle size={18} color="#EF4444" /></div>
+          <div className={styles.kpiIcon} style={{ background: '#FEF2F2' }}><AlertCircle size={22} color="#EF4444" /></div>
           <div className={styles.kpiInfo}>
             <span className={styles.kpiLabel}>{t('overdue', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#EF4444' }}>
@@ -1110,6 +1207,15 @@ export default function Orders({ isPendingView = false }) {
                     >
                       <QrCode size={18} /> {t('printGarmentTags', settings.language)}
                     </button>
+                    <button 
+                      className={`${styles.tagBtn} ${styles.deleteBtn}`}
+                      onClick={() => {
+                        setOrderToDelete(selectedOrder);
+                        setShowPinModal(true);
+                      }}
+                    >
+                      <Trash2 size={18} /> Delete Order
+                    </button>
                    </div>
                 </div>
               </div>
@@ -1183,6 +1289,69 @@ export default function Orders({ isPendingView = false }) {
                 </button>
                 <button className={styles.printBtn} style={{ flex: 1.5 }} onClick={confirmPaidStatus}>
                   {t('recordPayment', settings.language)}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* PIN Verification Modal */}
+      {showPinModal && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.statusModal} style={{ maxWidth: '400px' }}>
+            <div className={styles.modalHeader} style={{ backgroundColor: '#EF4444' }}>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'white', margin: 0 }}>
+                <Trash2 size={20} /> Confirm Deletion
+              </h2>
+              <X size={24} className={styles.closeBtn} onClick={() => { setShowPinModal(false); setPinValue(''); setPinError(''); }} />
+            </div>
+            <div className={styles.modalBody}>
+              <p style={{ marginBottom: '1.2rem', color: '#64748B', fontSize: '0.9rem', lineHeight: '1.4' }}>
+                You are deleting order <strong>{orderToDelete?.id}</strong>. This action is permanent and cannot be undone.
+              </p>
+              
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '0.5rem' }}>
+                Enter Manager/Admin Access PIN
+              </label>
+              <input 
+                type="password"
+                maxLength={4}
+                value={pinValue}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, ''); // only digits
+                  setPinValue(val);
+                }}
+                placeholder="••••"
+                className={`${styles.pinInput} ${pinError ? styles.pinInputError : ''}`}
+                autoFocus
+              />
+              
+              {pinError && (
+                <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 500, textAlign: 'center' }}>
+                  {pinError}
+                </p>
+              )}
+
+              <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem' }}>
+                <button 
+                  className={styles.secondaryBtn} 
+                  style={{ flex: 1 }} 
+                  onClick={() => {
+                    setShowPinModal(false);
+                    setPinValue('');
+                    setPinError('');
+                  }}
+                  disabled={isDeleting}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className={styles.deleteConfirmBtn} 
+                  style={{ flex: 1.5 }} 
+                  onClick={handleDeleteOrder}
+                  disabled={isDeleting || pinValue.length < 4}
+                >
+                  {isDeleting ? 'Deleting...' : 'Authorize & Delete'}
                 </button>
               </div>
             </div>

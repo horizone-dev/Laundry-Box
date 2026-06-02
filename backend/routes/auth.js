@@ -7,5 +7,6 @@ router.post('/login', authController.login);
 router.get('/users', authController.getUsers);
 router.put('/users/:id', authController.updateUser);
 router.delete('/users/:id', authController.deleteUser);
+router.post('/verify-manager-pin', authController.verifyManagerPin);
 
 module.exports = router;

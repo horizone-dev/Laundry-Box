@@ -523,6 +523,27 @@ export default function Settings() {
                     <p style={{ fontSize: '0.75rem', color: '#94A3B8' }}>Used for sending automated billing messages.</p>
                   </div>
                 </div>
+
+                <div className={styles.formGroup} style={{ marginTop: '1rem' }}>
+                  <label>Order Deletion PIN</label>
+                  <div className={styles.inputWrapper} style={{ maxWidth: '200px' }}>
+                    <Lock size={18} color="#94A3B8" />
+                    <input
+                      type="password"
+                      maxLength={4}
+                      className={styles.inputField}
+                      placeholder="••••"
+                      value={settings.orderDeletePin || ''}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, ''); // only digits
+                        updateSettings({ orderDeletePin: val });
+                      }}
+                    />
+                  </div>
+                  <p style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '0.25rem' }}>
+                    A 4-digit PIN required to confirm order deletions in Order Management.
+                  </p>
+                </div>
               </div>
 
               {/* Section 3: UAE Compliance */}
