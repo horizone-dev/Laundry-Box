@@ -84,6 +84,8 @@ export default function POS() {
 
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(getTomorrowDateString());
   const [specialInstructions, setSpecialInstructions] = useState('');
+  const [showSpecialPresets, setShowSpecialPresets] = useState(false);
+  const [showItemPresets, setShowItemPresets] = useState(false);
 
   // Checkout states
   const [paymentMethod, setPaymentMethod] = useState(settings.defaultPaymentMethod?.toLowerCase() || 'cash');
@@ -265,6 +267,7 @@ export default function POS() {
     }
     setSelectedService(null);
     setItemSearch('');
+    setShowItemPresets(false);
   };
 
   const getModalPrice = () => {
@@ -887,10 +890,19 @@ export default function POS() {
             />
           </div>
           <div className={styles.metadataRow}>
-            <label className={styles.metadataLabel}>
-              <FileText size={13} style={{ marginRight: '4px' }} />
-              ⚠️ Special Instructions
-            </label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label className={styles.metadataLabel}>
+                <FileText size={13} style={{ marginRight: '4px' }} />
+                ⚠️ Special Instructions
+              </label>
+              <button 
+                type="button" 
+                className={styles.togglePresetsBtn}
+                onClick={() => setShowSpecialPresets(!showSpecialPresets)}
+              >
+                {showSpecialPresets ? 'Hide Presets' : 'Show Presets'}
+              </button>
+            </div>
             <input 
               type="text" 
               className={styles.metadataInput}
@@ -898,6 +910,30 @@ export default function POS() {
               value={specialInstructions}
               onChange={(e) => setSpecialInstructions(e.target.value)}
             />
+            {showSpecialPresets && (
+              <div className={styles.presetNotesContainer} style={{ marginTop: '0.4rem' }}>
+                {(settings.presetDamageNotes || []).map((note, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className={styles.presetNoteChip}
+                    style={{ padding: '0.2rem 0.5rem', fontSize: '0.72rem' }}
+                    onClick={() => {
+                      const current = (specialInstructions || '').trim();
+                      if (!current) {
+                        setSpecialInstructions(note);
+                        return;
+                      }
+                      const parts = current.split(',').map(p => p.trim());
+                      if (parts.includes(note)) return;
+                      setSpecialInstructions(`${current}, ${note}`);
+                    }}
+                  >
+                    {note}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1003,7 +1039,7 @@ export default function POS() {
                   <p>{selectedService.isTemporary ? 'Enter name, price, and options' : selectedService.category || 'Configure Service Options'}</p>
                 </div>
               </div>
-              <button className={styles.modalCloseBtn} onClick={() => { setSelectedService(null); setEditingCartIdx(null); }} aria-label="Close modal">
+              <button className={styles.modalCloseBtn} onClick={() => { setSelectedService(null); setEditingCartIdx(null); setShowItemPresets(false); }} aria-label="Close modal">
                 <X size={20} />
               </button>
             </div>
@@ -1140,10 +1176,19 @@ export default function POS() {
               </div>
 
               <div className={styles.modalSection}>
-                <label className={styles.fieldLabel} htmlFor="damageRemarks">
-                  <span>Damage Remarks / Fabric Notes</span>
-                  <span className={styles.fieldSub}>Describe stains, tears, fading, or special requirements</span>
-                </label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label className={styles.fieldLabel} htmlFor="damageRemarks">
+                    <span>Damage Remarks / Fabric Notes</span>
+                  </label>
+                  <button 
+                    type="button" 
+                    className={styles.togglePresetsBtn}
+                    onClick={() => setShowItemPresets(!showItemPresets)}
+                  >
+                    {showItemPresets ? 'Hide Presets' : 'Show Presets'}
+                  </button>
+                </div>
+                <span className={styles.fieldSub}>Describe stains, tears, fading, or special requirements</span>
                 <textarea 
                   id="damageRemarks"
                   placeholder="e.g., Small yellow stain on collar, missing middle button, handle with care..." 
@@ -1151,11 +1196,35 @@ export default function POS() {
                   onChange={(e) => setServiceConfig(prev => ({ ...prev, description: e.target.value }))}
                   className={styles.remarksTextarea}
                 />
+                {showItemPresets && (
+                  <div className={styles.presetNotesContainer}>
+                    {(settings.presetDamageNotes || []).map((note, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        className={styles.presetNoteChip}
+                        onClick={() => {
+                          setServiceConfig(prev => {
+                            const current = (prev.description || '').trim();
+                            if (!current) {
+                              return { ...prev, description: note };
+                            }
+                            const parts = current.split(',').map(p => p.trim());
+                            if (parts.includes(note)) return prev;
+                            return { ...prev, description: `${current}, ${note}` };
+                          });
+                        }}
+                      >
+                        {note}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
             <div className={styles.modalFooterRedesign}>
-              <button className={styles.modalCancelBtn} onClick={() => { setSelectedService(null); setEditingCartIdx(null); }}>
+              <button className={styles.modalCancelBtn} onClick={() => { setSelectedService(null); setEditingCartIdx(null); setShowItemPresets(false); }}>
                 Cancel
               </button>
               <button className={styles.modalSubmitBtn} onClick={addToCart}>

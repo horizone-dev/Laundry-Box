@@ -30,7 +30,7 @@ export default function Settings() {
 
   if (!isAuthorized) return null;
 
-  const tabs = ['General', 'Order Workflow', 'Company Info', 'Tax Settings', 'Bill Templates', 'Payment Gateways', 'Maintenance', 'Software Update'];
+  const tabs = ['General', 'Order Workflow', 'Company Info', 'Tax Settings', 'Bill Templates', 'Payment Gateways', 'Damage Notes', 'Maintenance', 'Software Update'];
 
   // Software Update States
   const [updateStatus, setUpdateStatus] = useState({ type: 'idle' });
@@ -65,6 +65,11 @@ export default function Settings() {
   const [newStatusInput, setNewStatusInput] = useState('');
   const [editingStatusIdx, setEditingStatusIdx] = useState(-1);
   const [editingStatusVal, setEditingStatusVal] = useState('');
+
+  // Damage Notes States
+  const [newDamageNoteInput, setNewDamageNoteInput] = useState('');
+  const [editingDamageNoteIdx, setEditingDamageNoteIdx] = useState(-1);
+  const [editingDamageNoteVal, setEditingDamageNoteVal] = useState('');
 
   const onCropComplete = (croppedArea, croppedAreaPixels) => {
     setCroppedAreaPixels(croppedAreaPixels);
@@ -136,6 +141,42 @@ export default function Settings() {
     if (confirm(`Are you sure you want to delete the status "${statusToDelete}"?`)) {
       const updatedList = currentList.filter((_, idx) => idx !== index);
       updateSettings({ workflowStatuses: updatedList });
+    }
+  };
+
+  const handleAddDamageNote = () => {
+    if (!newDamageNoteInput.trim()) return;
+    const trimmed = newDamageNoteInput.trim();
+    const currentList = settings.presetDamageNotes || [];
+    if (currentList.includes(trimmed)) {
+      alert('Preset note already exists!');
+      return;
+    }
+    const updatedList = [...currentList, trimmed];
+    updateSettings({ presetDamageNotes: updatedList });
+    setNewDamageNoteInput('');
+  };
+
+  const handleEditDamageNote = (index) => {
+    const trimmed = editingDamageNoteVal.trim();
+    if (!trimmed) return;
+    const currentList = settings.presetDamageNotes || [];
+    if (currentList[index] === trimmed) {
+      setEditingDamageNoteIdx(-1);
+      return;
+    }
+    const updatedList = [...currentList];
+    updatedList[index] = trimmed;
+    updateSettings({ presetDamageNotes: updatedList });
+    setEditingDamageNoteIdx(-1);
+  };
+
+  const handleDeleteDamageNote = (index) => {
+    const currentList = settings.presetDamageNotes || [];
+    const noteToDelete = currentList[index];
+    if (confirm(`Are you sure you want to delete the preset note "${noteToDelete}"?`)) {
+      const updatedList = currentList.filter((_, idx) => idx !== index);
+      updateSettings({ presetDamageNotes: updatedList });
     }
   };
 
@@ -388,6 +429,74 @@ export default function Settings() {
                       onChange={(e) => setNewStatusInput(e.target.value)}
                     />
                     <button className={styles.saveChangesBtn} style={{ whiteSpace: 'nowrap' }} onClick={handleAddWorkflowStatus}>Add Stage</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'Damage Notes' && (
+            <div className={styles.profileContainer}>
+              <div className={styles.card}>
+                <h2 className={styles.cardTitle}>Preset Damage Notes & Fabric Remarks</h2>
+                <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1rem' }}>
+                  Configure preset damage tags and remarks to speed up order creation at the POS.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.5rem' }}>
+                  {(settings.presetDamageNotes || []).map((note, idx) => {
+                    const isEditing = editingDamageNoteIdx === idx;
+                    return (
+                      <div key={idx} style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '0.75rem 1rem',
+                        background: '#F8FAFC',
+                        borderRadius: '10px',
+                        border: '1px solid #E2E8F0'
+                      }}>
+                        {isEditing ? (
+                          <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
+                            <input 
+                              type="text" 
+                              className={styles.inputField} 
+                              style={{ flex: 1, padding: '0.4rem 0.75rem', fontSize: '0.9rem' }}
+                              value={editingDamageNoteVal}
+                              onChange={(e) => setEditingDamageNoteVal(e.target.value)}
+                            />
+                            <button className={styles.saveChangesBtn} style={{ padding: '0.4rem 1rem', fontSize: '0.85rem' }} onClick={() => handleEditDamageNote(idx)}>Save</button>
+                            <button className={styles.discardBtn} style={{ padding: '0.4rem 1rem', fontSize: '0.85rem' }} onClick={() => setEditingDamageNoteIdx(-1)}>Cancel</button>
+                          </div>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>{note}</span>
+                            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                              <span className={styles.editBtn} style={{ fontSize: '0.825rem' }} onClick={() => {
+                                setEditingDamageNoteIdx(idx);
+                                setEditingDamageNoteVal(note);
+                              }}>Rename</span>
+                              <button style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }} onClick={() => handleDeleteDamageNote(idx)}>
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ borderTop: '1px solid #F1F5F9', paddingTop: '1.25rem' }}>
+                  <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#1E293B', marginBottom: '0.5rem' }}>Add New Preset Note</h4>
+                  <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <input 
+                      type="text" 
+                      className={styles.inputField} 
+                      placeholder="e.g. Colour Bleeding, Loose Threads, Torn Lining..."
+                      value={newDamageNoteInput}
+                      onChange={(e) => setNewDamageNoteInput(e.target.value)}
+                    />
+                    <button className={styles.saveChangesBtn} style={{ whiteSpace: 'nowrap' }} onClick={handleAddDamageNote}>Add Note</button>
                   </div>
                 </div>
               </div>
