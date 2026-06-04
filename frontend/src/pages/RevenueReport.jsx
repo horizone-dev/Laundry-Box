@@ -102,7 +102,6 @@ export default function RevenueReport() {
     <div className={styles.reportsPage}>
       <div className={styles.headerRow}>
         <div className={styles.headerInfo}>
-          <p style={{ color: '#64748B', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.5rem' }}>Finance {'>'} Revenue</p>
           <h1>Revenue Statement</h1>
         </div>
         <div className={styles.headerActions}>

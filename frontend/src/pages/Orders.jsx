@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, Filter, ChevronLeft, ChevronRight, Calendar,
   Clock, Package, CheckCircle, AlertCircle, ChevronDown, 
-  X, Printer, CreditCard, Wallet, User, History, QrCode, MessageCircle, Phone, DollarSign, Truck, Trash2
+  X, Printer, CreditCard, Wallet, User, History, QrCode, MessageCircle, Phone, DollarSign, Truck, Trash2, AlertTriangle, Info, Lock
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
@@ -61,6 +61,135 @@ export default function Orders({ isPendingView = false }) {
   const [pinError, setPinError] = useState('');
   const [orderToDelete, setOrderToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Credit Limit Protection states
+  const [showCreditWarning, setShowCreditWarning] = useState(false);
+  const [showManagerPinModal, setShowManagerPinModal] = useState(false);
+  const [creditWarningDetails, setCreditWarningDetails] = useState(null);
+  const [managerPinValue, setManagerPinValue] = useState('');
+  const [managerPinError, setManagerPinError] = useState('');
+  const [pendingPayStatus, setPendingPayStatus] = useState(null);
+
+  const checkCreditLimitBeforeUpdate = async (newPayStatus) => {
+    if (!selectedOrder || !selectedOrder.customerId || selectedOrder.customerId === 'Walk-in') return false;
+    if (!settings.enableCreditLimitProtection) return false;
+
+    let updatedPaidAmount = selectedOrder.paidAmount || 0;
+    let updatedDueAmount = selectedOrder.dueAmount ?? selectedOrder.totalAmount;
+
+    if (newPayStatus === 'Credit' || newPayStatus === 'Pending') {
+      updatedDueAmount = selectedOrder.totalAmount;
+    } else if (newPayStatus === 'Partial') {
+      if (updatedPaidAmount >= selectedOrder.totalAmount) {
+        updatedPaidAmount = selectedOrder.totalAmount / 2;
+      }
+      updatedDueAmount = selectedOrder.totalAmount - updatedPaidAmount;
+    } else {
+      updatedDueAmount = 0; // Paid
+    }
+
+    const oldDueAmount = selectedOrder.dueAmount || 0;
+    const netIncrease = updatedDueAmount - oldDueAmount;
+
+    if (netIncrease > 0) {
+      const custRes = await window.electronAPI.dbQuery(
+        'SELECT balance, creditLimit, name FROM customers WHERE id = ?',
+        [selectedOrder.customerId]
+      );
+
+      if (custRes.success && custRes.data.length > 0) {
+        const customer = custRes.data[0];
+        const currentOutstanding = customer.balance || 0;
+        const creditLimit = customer.creditLimit !== undefined && customer.creditLimit !== null && customer.creditLimit !== 0
+          ? customer.creditLimit 
+          : (settings.defaultCreditLimit ?? 500);
+        
+        const newOutstanding = currentOutstanding + netIncrease;
+
+        // Block if ALREADY at/over limit OR if the change would exceed limit
+        if (currentOutstanding >= creditLimit || newOutstanding > creditLimit) {
+          const exceededAmount = Math.max(0, newOutstanding - creditLimit);
+          const overrideAllowed = true;
+
+          setCreditWarningDetails({
+            customerName: customer.name,
+            creditLimit,
+            currentOutstanding,
+            orderAmount: netIncrease,
+            newOutstanding,
+            exceededAmount,
+            overrideAllowed
+          });
+          setPendingPayStatus(newPayStatus);
+          setShowCreditWarning(true);
+          return true; // blocked
+        }
+      }
+    }
+    return false; // allowed
+  };
+
+  const handleVerifyManagerPin = async (e) => {
+    e.preventDefault();
+    setManagerPinError('');
+    const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+    const userId = userSession.userId || userSession._id || 'Orders';
+
+    try {
+      const res = await window.electronAPI.verifyManagerPin({
+        pin: managerPinValue,
+        customerId: selectedOrder.customerId,
+        customerName: creditWarningDetails.customerName,
+        orderId: selectedOrder.id,
+        creditLimit: creditWarningDetails.creditLimit,
+        outstandingBalance: creditWarningDetails.currentOutstanding,
+        orderAmount: creditWarningDetails.orderAmount,
+        exceededAmount: creditWarningDetails.exceededAmount,
+        userId
+      });
+
+      if (res.success) {
+        setShowManagerPinModal(false);
+        setShowCreditWarning(false);
+        setManagerPinValue('');
+        
+        const status = pendingPayStatus;
+        setTimeout(() => {
+          handleUpdatePaymentStatus(status, true);
+        }, 50);
+      } else {
+        setManagerPinError(res.error || "Incorrect PIN! Access Denied.");
+      }
+    } catch (err) {
+      setManagerPinError("An error occurred during verification");
+    }
+  };
+
+  const handleCancelOverride = async () => {
+    const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+    const userId = userSession.userId || userSession._id || 'Orders';
+
+    try {
+      await window.electronAPI.logOverrideRejection({
+        customerId: selectedOrder.customerId,
+        customerName: creditWarningDetails.customerName,
+        orderId: selectedOrder.id,
+        creditLimit: creditWarningDetails.creditLimit,
+        outstandingBalance: creditWarningDetails.currentOutstanding,
+        orderAmount: creditWarningDetails.orderAmount,
+        exceededAmount: creditWarningDetails.exceededAmount,
+        userId,
+        actionType: 'REJECTED'
+      });
+    } catch (err) {
+      console.error("Failed to log override rejection:", err);
+    }
+    
+    setShowCreditWarning(false);
+    setShowManagerPinModal(false);
+    setManagerPinValue('');
+    setManagerPinError('');
+  };
 
   // Translation helpers
   const translateStatus = (status) => {
@@ -405,7 +534,7 @@ export default function Orders({ isPendingView = false }) {
 
   const [originalPayStatus, setOriginalPayStatus] = useState(null);
 
-  const handleUpdatePaymentStatus = async (newPayStatus) => {
+  const handleUpdatePaymentStatus = async (newPayStatus, isOverridden = false) => {
     if (!selectedOrder) return;
     
     if (newPayStatus === 'Paid') {
@@ -413,6 +542,11 @@ export default function Orders({ isPendingView = false }) {
       setSelectedOrder(prev => ({ ...prev, paymentStatus: 'Paid' }));
       setShowPayModal(true);
       return;
+    }
+
+    if (!isOverridden) {
+      const blocked = await checkCreditLimitBeforeUpdate(newPayStatus);
+      if (blocked) return;
     }
 
     try {
@@ -1364,6 +1498,141 @@ export default function Orders({ isPendingView = false }) {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credit Limit Warning Modal */}
+      {showCreditWarning && creditWarningDetails && (
+        <div className={styles.modalOverlay}>
+          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '500px' }}>
+            <div className={styles.modalHeader} style={{ background: '#FEF2F2', borderBottom: '1px solid #FEE2E2' }}>
+              <div className={styles.modalTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <AlertTriangle size={24} color="#EF4444" />
+                <div>
+                  <h2 style={{ color: '#991B1B', margin: 0 }}>Credit Limit Exceeded</h2>
+                  <p style={{ color: '#B91C1C', margin: 0, fontSize: '0.8rem' }}>This customer has exceeded their credit threshold.</p>
+                </div>
+              </div>
+            </div>
+            <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
+              <div style={{ background: '#F8FAFC', borderRadius: '12px', padding: '1rem', border: '1px solid #E2E8F0', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Customer Name:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{creditWarningDetails.customerName}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Limit:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.creditLimit.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Outstanding Balance:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.currentOutstanding.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Balance Increase:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.orderAmount.toFixed(2)}</span>
+                </div>
+                <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.5rem 0' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>New Outstanding Balance:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.newOutstanding.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
+                  <span>Exceeded Amount:</span>
+                  <span>{settings.currencySymbol} {creditWarningDetails.exceededAmount.toFixed(2)}</span>
+                </div>
+              </div>
+
+              {settings.enableManagerOverride ? (
+                <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '12px', padding: '0.75rem 1rem', color: '#1E40AF', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                  <Info size={18} />
+                  <span>This update can be authorized using the secure PIN.</span>
+                </div>
+              ) : (
+                <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: '12px', padding: '0.75rem 1rem', color: '#C53030', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                  <AlertCircle size={18} />
+                  <span>Credit Limit Protection is active and Manager Override is disabled.</span>
+                </div>
+              )}
+            </div>
+            <div className={styles.modalFooter} style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem' }}>
+              <button 
+                type="button" 
+                className={styles.secondaryBtn} 
+                onClick={handleCancelOverride}
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+              {creditWarningDetails.overrideAllowed && settings.enableManagerOverride && (
+                <button 
+                  type="button" 
+                  className={styles.saveBtn} 
+                  onClick={() => setShowManagerPinModal(true)}
+                  style={{ flex: 1, background: '#D97706', color: 'white' }}
+                >
+                  Manager Override
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manager PIN Modal */}
+      {showManagerPinModal && (
+        <div className={styles.modalOverlay}>
+          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '400px' }}>
+            <div className={styles.modalHeader}>
+              <div className={styles.modalTitle}>
+                <h2>Manager Verification</h2>
+                <p>Enter the PIN to approve this credit</p>
+              </div>
+            </div>
+            <form onSubmit={handleVerifyManagerPin}>
+              <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
+                <div className={styles.formGroup}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>SECURE PIN</label>
+                  <div className={styles.posInputWrapper}>
+                    <Lock size={18} />
+                    <input 
+                      type="password" 
+                      required 
+                      maxLength={4}
+                      placeholder="Enter 4-Digit PIN"
+                      value={managerPinValue}
+                      onChange={(e) => setManagerPinValue(e.target.value.replace(/\D/g, ''))}
+                      style={{ fontSize: '1.25rem', letterSpacing: '0.25rem' }}
+                    />
+                  </div>
+                  {managerPinError && (
+                    <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 600 }}>{managerPinError}</p>
+                  )}
+                </div>
+              </div>
+              <div className={styles.modalFooter} style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem' }}>
+                <button 
+                  type="button" 
+                  className={styles.secondaryBtn} 
+                  onClick={() => {
+                    setShowManagerPinModal(false);
+                    setManagerPinValue('');
+                    setManagerPinError('');
+                  }}
+                  style={{ flex: 1 }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className={styles.saveBtn}
+                  style={{ flex: 1 }}
+                >
+                  Verify
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

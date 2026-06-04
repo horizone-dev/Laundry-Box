@@ -163,6 +163,21 @@ function initDB(appPath) {
       deletedAt TEXT,
       deletedBy TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS credit_override_logs (
+      id TEXT PRIMARY KEY,
+      customerId TEXT,
+      customerName TEXT,
+      orderId TEXT,
+      userId TEXT,
+      managerId TEXT,
+      creditLimit REAL,
+      outstandingBalance REAL,
+      orderAmount REAL,
+      exceededAmount REAL,
+      actionType TEXT,
+      timestamp TEXT
+    );
   `);
 
   // Create indexes for search, filters, sorting, and synchronization performance

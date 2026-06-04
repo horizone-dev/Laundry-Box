@@ -343,9 +343,6 @@ export default function DailyTaxReport() {
       {/* Header Info */}
       <div className={styles.headerRow}>
         <div className={styles.headerInfo}>
-          <p style={{ color: '#64748B', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.5rem' }}>
-            {t('reports', settings.language)} &gt; {t('dailytaxreport', settings.language)}
-          </p>
           <h1>{t('dailytaxreport', settings.language)}</h1>
           <p>Daily consolidated summary of Output Tax (Sales) vs Input Tax (Expenses).</p>
         </div>

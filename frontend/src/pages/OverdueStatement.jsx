@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Printer, ChevronLeft, MessageCircle, Landmark } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
+import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './OverdueStatement.module.css';
 
@@ -102,7 +103,7 @@ export default function OverdueStatement() {
                 <strong>{pendingBills.length}</strong>
              </div>
              <div className={styles.summaryRow}>
-                <span>Total Overdue Amount</span>
+                <span>Total {t('overdue', settings.language)} Amount</span>
                 <strong className={styles.totalDueValue}><CurrencySymbol size={18} /> {totalOverdue.toFixed(2)}</strong>
              </div>
           </div>

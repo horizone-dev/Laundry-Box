@@ -175,9 +175,247 @@ ipcMain.handle('run-data-healer', () => {
   }
 });
 
+const activeOverrides = {}; // key: customerId, value: { timestamp: number, amount: number }
+
+function logOverrideEvent(db, { customerId, customerName, orderId, userId, managerId, creditLimit, outstandingBalance, orderAmount, exceededAmount, actionType }) {
+  const logId = `AUDIT-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const timestamp = new Date().toISOString();
+  try {
+    db.prepare(`
+      INSERT INTO credit_override_logs 
+      (id, customerId, customerName, orderId, userId, managerId, creditLimit, outstandingBalance, orderAmount, exceededAmount, actionType, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(logId, customerId, customerName, orderId || null, userId, managerId || null, creditLimit, outstandingBalance, orderAmount, exceededAmount, actionType, timestamp);
+    console.log(`Credit override logged: ${actionType} for customer ${customerId}`);
+  } catch (err) {
+    console.error('Failed to write audit log:', err);
+  }
+}
+
+function getParamValue(setClause, paramName, params) {
+  const parts = setClause.split(',').map(p => p.trim());
+  let paramIndex = 0;
+  for (const part of parts) {
+    const match = part.match(/^([a-zA-Z0-9_]+)\s*=\s*(.+)$/);
+    if (match) {
+      const colName = match[1].toLowerCase();
+      const valExpr = match[2];
+      const isPlaceholder = valExpr.includes('?');
+      if (colName === paramName.toLowerCase()) {
+        if (isPlaceholder) {
+          return params[paramIndex];
+        } else {
+          return parseFloat(valExpr) || valExpr;
+        }
+      }
+      if (isPlaceholder) {
+        paramIndex++;
+      }
+    }
+  }
+  return null;
+}
+
+function checkCustomerCreditLimitRules(db, customerId, amountToAdd) {
+  const shopResult = db.prepare('SELECT settings FROM shops LIMIT 1').get();
+  const settings = shopResult && shopResult.settings ? JSON.parse(shopResult.settings) : {};
+
+  const enableCreditLimitProtection = settings.enableCreditLimitProtection ?? true;
+  const enableManagerOverride = settings.enableManagerOverride ?? true;
+
+  if (!enableCreditLimitProtection) {
+    return null;
+  }
+
+  const customer = db.prepare('SELECT name, balance, creditLimit FROM customers WHERE id = ?').get(customerId);
+  if (!customer) {
+    return null;
+  }
+
+  const currentOutstanding = customer.balance || 0;
+  const creditLimit = customer.creditLimit !== undefined && customer.creditLimit !== null && customer.creditLimit !== 0
+    ? customer.creditLimit 
+    : (settings.defaultCreditLimit ?? 500);
+  const newOutstanding = currentOutstanding + amountToAdd;
+
+  // Block if ALREADY at/over limit OR if new order would exceed limit
+  if (currentOutstanding >= creditLimit || newOutstanding > creditLimit) {
+    if (enableManagerOverride) {
+      const override = activeOverrides[customerId];
+      if (override && (Date.now() - override.timestamp < 1000 * 15) && Math.abs(override.amount - amountToAdd) < 0.05) {
+        return null; // Allowed!
+      } else {
+        return 'CREDIT_LIMIT_EXCEEDED';
+      }
+    } else {
+      return `Credit limit exceeded. Credit limit protection is enabled. Transaction blocked.`;
+    }
+  }
+
+  return null;
+}
+
+function validateQueryCreditLimit(db, query, params) {
+  const cleanQuery = query.replace(/\s+/g, ' ').trim();
+  const queryUpper = cleanQuery.toUpperCase();
+
+  if (queryUpper.startsWith('INSERT INTO ORDERS')) {
+    const columnsMatch = cleanQuery.match(/\(([^)]+)\)\s+VALUES/i);
+    if (columnsMatch) {
+      const columns = columnsMatch[1].split(',').map(c => c.trim().toLowerCase());
+      const customerIdIdx = columns.indexOf('customerid');
+      const dueAmountIdx = columns.indexOf('dueamount');
+
+      if (customerIdIdx !== -1 && dueAmountIdx !== -1) {
+        const customerId = params[customerIdIdx];
+        const dueAmount = parseFloat(params[dueAmountIdx]) || 0;
+
+        if (customerId && customerId !== 'Walk-in' && dueAmount > 0) {
+          const ruleErr = checkCustomerCreditLimitRules(db, customerId, dueAmount);
+          if (ruleErr) {
+            throw new Error(ruleErr);
+          }
+        }
+      }
+    }
+  }
+  else if (queryUpper.startsWith('UPDATE ORDERS')) {
+    const setMatch = cleanQuery.match(/UPDATE\s+orders\s+SET\s+(.+?)(?:\s+WHERE|$)/i);
+    if (setMatch) {
+      const setClause = setMatch[1];
+      const dueAmount = getParamValue(setClause, 'dueAmount', params);
+      
+      if (dueAmount !== null) {
+        const whereMatch = cleanQuery.match(/WHERE\s+id\s*=\s*(.+)$/i);
+        let orderId = null;
+        if (whereMatch) {
+          const expr = whereMatch[1].trim();
+          if (expr === '?') {
+            orderId = params[params.length - 1];
+          } else {
+            orderId = expr.replace(/['"]/g, '');
+          }
+        }
+
+        if (orderId) {
+          const order = db.prepare('SELECT customerId, dueAmount FROM orders WHERE id = ?').get(orderId);
+          if (order && order.customerId && order.customerId !== 'Walk-in') {
+            const oldDueAmount = order.dueAmount || 0;
+            const netIncrease = dueAmount - oldDueAmount;
+            if (netIncrease > 0) {
+              const ruleErr = checkCustomerCreditLimitRules(db, order.customerId, netIncrease);
+              if (ruleErr) {
+                throw new Error(ruleErr);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  else if (queryUpper.startsWith('UPDATE CUSTOMERS') && queryUpper.includes('SET BALANCE')) {
+    const whereMatch = cleanQuery.match(/WHERE\s+id\s*=\s*(.+)$/i);
+    let customerId = null;
+    if (whereMatch) {
+      const expr = whereMatch[1].trim();
+      if (expr === '?') {
+        customerId = params[params.length - 1];
+      } else {
+        customerId = expr.replace(/['"]/g, '');
+      }
+    }
+
+    if (customerId && customerId !== 'Walk-in') {
+      const isSubtraction = cleanQuery.toLowerCase().includes('balance -');
+      const netIncrease = isSubtraction ? -parseFloat(params[0]) : parseFloat(params[0]) || 0;
+      if (netIncrease > 0) {
+        const ruleErr = checkCustomerCreditLimitRules(db, customerId, netIncrease);
+        if (ruleErr) {
+          throw new Error(ruleErr);
+        }
+      }
+    }
+  }
+}
+
+ipcMain.handle('verify-manager-pin', (event, { pin, customerId, customerName, orderId, creditLimit, outstandingBalance, orderAmount, exceededAmount, userId }) => {
+  try {
+    const db = getDB();
+    const shopResult = db.prepare('SELECT settings FROM shops LIMIT 1').get();
+    const settings = shopResult && shopResult.settings ? JSON.parse(shopResult.settings) : {};
+    
+    const correctPin = settings.orderDeletePin || '0000';
+    if (String(pin) === String(correctPin)) {
+      activeOverrides[customerId] = {
+        timestamp: Date.now(),
+        amount: orderAmount
+      };
+      
+      logOverrideEvent(db, {
+        customerId,
+        customerName,
+        orderId,
+        userId,
+        managerId: 'orderDeletePinOwner',
+        creditLimit,
+        outstandingBalance,
+        orderAmount,
+        exceededAmount,
+        actionType: 'APPROVED'
+      });
+      
+      return { success: true, message: 'Manager Override Approved' };
+    } else {
+      logOverrideEvent(db, {
+        customerId,
+        customerName,
+        orderId,
+        userId,
+        managerId: null,
+        creditLimit,
+        outstandingBalance,
+        orderAmount,
+        exceededAmount,
+        actionType: 'FAILED_PIN'
+      });
+      
+      return { success: false, error: 'Incorrect PIN! Access Denied.' };
+    }
+  } catch (err) {
+    console.error('verify-manager-pin error:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('log-override-rejection', (event, { customerId, customerName, orderId, creditLimit, outstandingBalance, orderAmount, exceededAmount, userId, actionType }) => {
+  try {
+    const db = getDB();
+    logOverrideEvent(db, {
+      customerId,
+      customerName,
+      orderId,
+      userId,
+      managerId: null,
+      creditLimit,
+      outstandingBalance,
+      orderAmount,
+      exceededAmount,
+      actionType: actionType || 'REJECTED'
+    });
+    return { success: true };
+  } catch (err) {
+    console.error('log-override-rejection error:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('db-query', (event, { query, params }) => {
   try {
     const db = getDB();
+    
+    // Check credit limit rules
+    validateQueryCreditLimit(db, query, params || []);
+
     const stmt = db.prepare(query);
     if (query.trim().toUpperCase().startsWith('SELECT')) {
       return { success: true, data: stmt.all(params || []) };

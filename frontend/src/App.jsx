@@ -14,7 +14,9 @@ import Expenses from './pages/Expenses';
 import TaxReport from './pages/TaxReport';
 import DailyTaxReport from './pages/DailyTaxReport';
 import CancelledOrdersReport from './pages/CancelledOrdersReport';
+import CreditOverridesReport from './pages/CreditOverridesReport';
 import DeletedOrders from './pages/DeletedOrders';
+import ExpectedDeliveries from './pages/ExpectedDeliveries';
 import Invoice from './pages/Invoice';
 import Login from './pages/Login';
 import Users from './pages/Users';
@@ -48,7 +50,9 @@ function App() {
           <Route path="orders">
             <Route index element={<Orders />} />
             <Route path="pending" element={<Orders isPendingView={true} />} />
+            <Route path="expected-delivery" element={<ExpectedDeliveries />} />
             <Route path="deleted" element={<DeletedOrders />} />
+            <Route path="cancelled" element={<CancelledOrdersReport />} />
           </Route>
           <Route path="customers" element={<Customers />} />
           <Route path="services">
@@ -66,6 +70,7 @@ function App() {
             <Route path="tax" element={<TaxReport />} />
             <Route path="daily-tax" element={<DailyTaxReport />} />
             <Route path="cancelled" element={<CancelledOrdersReport />} />
+            <Route path="credit-overrides" element={<CreditOverridesReport />} />
           </Route>
           <Route path="expenses" element={<Expenses />} />
           <Route path="settings" element={<Settings />} />

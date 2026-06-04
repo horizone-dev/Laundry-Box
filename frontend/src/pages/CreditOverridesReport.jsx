@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
-  XCircle, Calendar, Download, Printer, Search,
-  Users, DollarSign, RotateCcw
+  ShieldAlert, Calendar, Download, Printer, Search,
+  UserCheck, ShieldClose, RotateCcw, ShieldAlert as WarningIcon
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
-import styles from './CancelledOrdersReport.module.css';
+import styles from './CreditOverridesReport.module.css';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -19,8 +19,7 @@ const itemVariants = {
   visible: { y: 0, opacity: 1 }
 };
 
-
-export default function CancelledOrdersReport() {
+export default function CreditOverridesReport() {
   const { settings, formatDate } = useSettings();
   const navigate = useNavigate();
 
@@ -31,16 +30,16 @@ export default function CancelledOrdersReport() {
     if (!isAuthorized) navigate('/');
   }, [isAuthorized, navigate]);
 
-  const [orders, setOrders] = useState([]);
+  const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [dateRange, setDateRange] = useState('Today');
+  const [actionFilter, setActionFilter] = useState('All');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
 
-  /* ── Date range filter helper ─────────────────────── */
   const getDateBounds = () => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -82,7 +81,7 @@ export default function CancelledOrdersReport() {
       end.setHours(23, 59, 59, 999);
       return { from: start, to: end };
     }
-    return null; // All time
+    return null;
   };
 
   const fetchData = async () => {
@@ -91,30 +90,34 @@ export default function CancelledOrdersReport() {
       setLoading(true);
       const bounds = getDateBounds();
       
-      let query = `
-        SELECT o.id, o.billNumber, o.totalAmount, o.items, o.createdAt, o.statusHistory,
-               c.name as customerName, c.phone as customerPhone
-        FROM orders o
-        LEFT JOIN customers c ON o.customerId = c.id
-        WHERE o.status = 'Cancelled'
-      `;
+      let query = `SELECT * FROM credit_override_logs`;
       let params = [];
+      const whereClauses = [];
 
       if (bounds) {
-        query += ` AND o.createdAt >= ? AND o.createdAt <= ?`;
-        params = [bounds.from.toISOString(), bounds.to.toISOString()];
+        whereClauses.push(`timestamp >= ? AND timestamp <= ?`);
+        params.push(bounds.from.toISOString(), bounds.to.toISOString());
       } else if (dateRange === 'Custom') {
-        setOrders([]);
+        setLogs([]);
         setLoading(false);
         return;
       }
 
-      query += ` ORDER BY o.createdAt DESC`;
+      if (actionFilter !== 'All') {
+        whereClauses.push(`actionType = ?`);
+        params.push(actionFilter);
+      }
+
+      if (whereClauses.length > 0) {
+        query += ` WHERE ` + whereClauses.join(' AND ');
+      }
+
+      query += ` ORDER BY timestamp DESC`;
 
       const res = await window.electronAPI.dbQuery(query, params);
-      setOrders(res.success ? res.data : []);
+      setLogs(res.success ? res.data : []);
     } catch (err) {
-      console.error('Cancelled orders fetch error:', err);
+      console.error('Credit override logs fetch error:', err);
     } finally {
       setLoading(false);
     }
@@ -122,60 +125,47 @@ export default function CancelledOrdersReport() {
 
   useEffect(() => {
     if (isAuthorized) fetchData();
-  }, [isAuthorized, dateRange, customStart, customEnd]);
+  }, [isAuthorized, dateRange, actionFilter, customStart, customEnd]);
 
-  const filteredOrders = useMemo(() => {
-    return orders.filter(o => {
+  const filteredLogs = useMemo(() => {
+    return logs.filter(log => {
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
-        const ref = (o.billNumber || o.id || '').toLowerCase();
-        const name = (o.customerName || '').toLowerCase();
-        const phone = (o.customerPhone || '').toLowerCase();
-        if (!ref.includes(q) && !name.includes(q) && !phone.includes(q)) return false;
+        const name = (log.customerName || '').toLowerCase();
+        const customerId = (log.customerId || '').toLowerCase();
+        const orderId = (log.orderId || '').toLowerCase();
+        const approvedBy = (log.managerId || '').toLowerCase();
+        if (!name.includes(q) && !customerId.includes(q) && !orderId.includes(q) && !approvedBy.includes(q)) {
+          return false;
+        }
       }
       return true;
     });
-  }, [orders, searchTerm]);
+  }, [logs, searchTerm]);
 
-  /* ── KPIs ─────────────────────────────────────────── */
-  const totalCancelled = filteredOrders.length;
-  const totalLostRevenue = filteredOrders.reduce((s, o) => s + (o.totalAmount || 0), 0);
-  const uniqueCustomers = new Set(filteredOrders.map(o => o.customerPhone || o.customerName)).size;
+  // KPIs
+  const totalApproved = logs.filter(l => l.actionType === 'APPROVED').length;
+  const totalFailed = logs.filter(l => l.actionType === 'FAILED_PIN').length;
+  const totalRejected = logs.filter(l => l.actionType === 'REJECTED').length;
 
-  /* ── Pagination ───────────────────────────────────── */
-  const paginated = filteredOrders;
-
-  /* ── CSV export ───────────────────────────────────── */
   const exportCSV = () => {
-    const headers = ['Date', 'Bill No.', 'Customer', 'Phone', 'Items', 'Amount', 'Cancelled At'];
-    const rows = filteredOrders.map(o => {
-      let items = '';
-      try {
-        const parsed = JSON.parse(o.items || '[]');
-        items = parsed.map(i => `${i.qty || i.quantity || 1}x ${i.name}`).join('; ');
-      } catch (_) {}
-      const cancelledAt = (() => {
-        try {
-          const hist = JSON.parse(o.statusHistory || '[]');
-          const ev = hist.find(h => h.status === 'Cancelled');
-          return ev ? formatDate(ev.timestamp) : '';
-        } catch (_) { return ''; }
-      })();
-      return [
-        formatDate(o.createdAt),
-        `"${o.billNumber || o.id}"`,
-        `"${o.customerName || 'Walk-in'}"`,
-        o.customerPhone || '',
-        `"${items}"`,
-        (o.totalAmount || 0).toFixed(2),
-        cancelledAt
-      ];
-    });
+    const headers = ['Date', 'Customer Name', 'Customer ID', 'Order ID', 'Order Amount', 'Credit Limit', 'Balance Before', 'Exceeded Amount', 'Action'];
+    const rows = filteredLogs.map(log => [
+      formatDate(log.timestamp),
+      `"${log.customerName || ''}"`,
+      `"${log.customerId || ''}"`,
+      `"${log.orderId || 'N/A'}"`,
+      (log.orderAmount || 0).toFixed(2),
+      (log.creditLimit || 0).toFixed(2),
+      (log.outstandingBalance || 0).toFixed(2),
+      (log.exceededAmount || 0).toFixed(2),
+      log.actionType
+    ]);
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `cancelled_orders_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `credit_overrides_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
   };
 
@@ -183,12 +173,12 @@ export default function CancelledOrdersReport() {
 
   return (
     <motion.div className={styles.page} variants={containerVariants} initial="hidden" animate="visible">
-
-      {/* ── Header ──────────────────────────────────── */}
+      {/* Header */}
       <motion.div className={styles.headerRow} variants={itemVariants}>
         <div className={styles.headerInfo}>
-          <h1>Cancelled Orders Report</h1>
-          <p className={styles.subtext}>Review all cancelled orders and the revenue impact for your laundry business.</p>
+          <p className={styles.breadcrumb}>Reports › Credit Overrides</p>
+          <h1>Credit Override Audit Log</h1>
+          <p className={styles.subtext}>Monitor all customer credit limit overrides, manager approvals, and failed attempts.</p>
         </div>
         <div className={styles.headerActions}>
           <button className="btn btn-secondary" onClick={exportCSV}>
@@ -200,37 +190,33 @@ export default function CancelledOrdersReport() {
         </div>
       </motion.div>
 
-      {/* ── KPI Cards ────────────────────────────────── */}
+      {/* KPI Cards */}
       <motion.div className={styles.kpiGrid} variants={itemVariants}>
         <KPICard
-          icon={<XCircle size={20} color="#EF4444" />}
+          icon={<UserCheck size={20} color="#10B981" />}
+          bg="#ECFDF5"
+          label="Approved Overrides"
+          value={totalApproved.toLocaleString()}
+          subtext="Successfully overridden by PIN"
+        />
+        <KPICard
+          icon={<ShieldClose size={20} color="#EF4444" />}
           bg="#FEF2F2"
-          label="Total Cancelled"
-          value={totalCancelled.toLocaleString()}
-          isCurrency={false}
-          subtext="Orders cancelled in period"
+          label="Failed PIN Entries"
+          value={totalFailed.toLocaleString()}
+          subtext="Attempts with incorrect PIN"
         />
         <KPICard
-          icon={<DollarSign size={20} color="#F59E0B" />}
+          icon={<ShieldAlert size={20} color="#F59E0B" />}
           bg="#FFFBEB"
-          label="Lost Revenue"
-          value={totalLostRevenue}
-          isCurrency={true}
-          subtext="Potential earnings missed"
-        />
-        <KPICard
-          icon={<Users size={20} color="#8B5CF6" />}
-          bg="#F5F3FF"
-          label="Affected Customers"
-          value={uniqueCustomers.toLocaleString()}
-          isCurrency={false}
-          subtext="Unique customers with cancellations"
+          label="Rejections & Blocks"
+          value={totalRejected.toLocaleString()}
+          subtext="Cancellations or hard blocks"
         />
       </motion.div>
 
-      {/* ── Table Card ───────────────────────────────── */}
+      {/* Table Card */}
       <motion.div className={styles.tableCard} variants={itemVariants}>
-
         {/* Toolbar */}
         <div className={styles.toolbar}>
           <div className={styles.searchBox}>
@@ -238,7 +224,7 @@ export default function CancelledOrdersReport() {
             <input
               type="text"
               className={styles.searchInput}
-              placeholder="Search by bill no., customer name or phone…"
+              placeholder="Search customer, order ID, or approver..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
             />
@@ -263,6 +249,18 @@ export default function CancelledOrdersReport() {
                 <input type="date" className={styles.dateInput} value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
               </div>
             )}
+
+            <select
+              className={styles.filterSelect}
+              value={actionFilter}
+              onChange={e => setActionFilter(e.target.value)}
+            >
+              <option value="All">All Actions</option>
+              <option value="APPROVED">Approved</option>
+              <option value="FAILED_PIN">Failed PIN</option>
+              <option value="REJECTED">Rejected/Blocked</option>
+            </select>
+
             {searchTerm && (
               <button className={styles.clearBtn} onClick={() => setSearchTerm('')}>
                 <RotateCcw size={14} /> Clear
@@ -273,11 +271,11 @@ export default function CancelledOrdersReport() {
 
         {/* Table */}
         {loading ? (
-          <div className={styles.emptyRow}>Loading cancelled orders…</div>
-        ) : filteredOrders.length === 0 ? (
+          <div className={styles.emptyRow}>Loading credit override logs…</div>
+        ) : filteredLogs.length === 0 ? (
           <div className={styles.emptyRow}>
-            <XCircle size={40} color="#CBD5E1" />
-            <p>No cancelled orders found for the selected period.</p>
+            <WarningIcon size={40} color="#CBD5E1" />
+            <p>No credit overrides found for the selection.</p>
           </div>
         ) : (
           <>
@@ -285,70 +283,54 @@ export default function CancelledOrdersReport() {
               <thead>
                 <tr>
                   <th>DATE</th>
-                  <th>BILL NO.</th>
                   <th>CUSTOMER</th>
-                  <th>ITEMS</th>
-                  <th className={styles.numCol}>AMOUNT</th>
-                  <th>CANCELLED AT</th>
+                  <th>ORDER ID</th>
+                  <th className={styles.numCol}>ORDER AMOUNT</th>
+                  <th className={styles.numCol}>LIMIT</th>
+                  <th className={styles.numCol}>EXCEEDED</th>
+                  <th style={{ textAlign: 'center' }}>ACTION</th>
                 </tr>
               </thead>
               <tbody>
-                {paginated.map((o, idx) => {
-                  let items = '';
-                  try {
-                    const parsed = JSON.parse(o.items || '[]');
-                    items = parsed.map(i => `${i.qty || i.quantity || 1}x ${i.name}`).join(', ');
-                  } catch (_) {}
-
-                  let cancelledAt = '—';
-                  try {
-                    const hist = JSON.parse(o.statusHistory || '[]');
-                    const ev = hist.find(h => h.status === 'Cancelled');
-                    if (ev) cancelledAt = formatDate(ev.timestamp);
-                  } catch (_) {}
+                {filteredLogs.map((log, idx) => {
+                  let actionBadgeClass = styles.badgeRejected;
+                  if (log.actionType === 'APPROVED') actionBadgeClass = styles.badgeApproved;
+                  if (log.actionType === 'FAILED_PIN') actionBadgeClass = styles.badgeFailed;
 
                   return (
-                    <tr key={idx} className={styles.tableRow}>
+                    <tr key={log.id || idx} className={styles.tableRow}>
                       <td className={styles.dateCell}>
-                        <div>{formatDate(o.createdAt)}</div>
+                        <div>{formatDate(log.timestamp)}</div>
                         <div className={styles.timeText}>
-                          {new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
                       </td>
                       <td>
-                        <span className={styles.billRef}>{o.billNumber || o.id || '—'}</span>
+                        <div className={styles.customerName}>{log.customerName || 'Walk-in'}</div>
+                        <div className={styles.customerId}>{log.customerId}</div>
                       </td>
                       <td>
-                        <div className={styles.customerName}>{o.customerName || 'Walk-in'}</div>
-                        {o.customerPhone && <div className={styles.customerPhone}>{o.customerPhone}</div>}
-                      </td>
-                      <td className={styles.itemsCell}>
-                        {items || <span className={styles.dash}>—</span>}
+                        <span className={styles.billRef}>{log.orderId || '—'}</span>
                       </td>
                       <td className={`${styles.numCol} ${styles.amountCell}`}>
-                        <CurrencySymbol size={11} /> {(o.totalAmount || 0).toFixed(2)}
+                        <CurrencySymbol size={11} /> {(log.orderAmount || 0).toFixed(2)}
                       </td>
-                      <td className={styles.cancelledAtCell}>{cancelledAt}</td>
+                      <td className={`${styles.numCol} ${styles.amountCell}`}>
+                        <CurrencySymbol size={11} /> {(log.creditLimit || 0).toFixed(2)}
+                      </td>
+                      <td className={`${styles.numCol} ${styles.exceededCell}`}>
+                        <CurrencySymbol size={11} /> {(log.exceededAmount || 0).toFixed(2)}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <span className={`${styles.actionBadge} ${actionBadgeClass}`}>
+                          {log.actionType}
+                        </span>
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
-              <tfoot>
-                <tr className={styles.totalsRow}>
-                  <td colSpan="4" className={styles.totalsLabel}>TOTAL ({filteredOrders.length} orders)</td>
-                  <td className={`${styles.numCol} ${styles.totalsNum}`}>
-                    <CurrencySymbol size={12} /> {totalLostRevenue.toFixed(2)}
-                  </td>
-                  <td />
-                </tr>
-              </tfoot>
             </table>
-
-            {filteredOrders.length > 0 && (
-              <div className={styles.pagination}>
-                <span className={styles.paginationInfo}>Showing all {filteredOrders.length} orders</span>
-              </div>
-            )}
           </>
         )}
       </motion.div>
@@ -356,16 +338,14 @@ export default function CancelledOrdersReport() {
   );
 }
 
-function KPICard({ icon, bg, label, value, isCurrency, subtext }) {
+function KPICard({ icon, bg, label, value, subtext }) {
   return (
     <div className={styles.kpiCard}>
       <div className={styles.cardHeader}>
         <div className={styles.iconBox} style={{ background: bg }}>{icon}</div>
       </div>
       <div className={styles.kpiLabel}>{label}</div>
-      <div className={styles.kpiValue}>
-        {isCurrency ? <><CurrencySymbol size={18} /> {Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</> : value}
-      </div>
+      <div className={styles.kpiValue}>{value}</div>
       <div className={styles.kpiSubtext}>{subtext}</div>
     </div>
   );

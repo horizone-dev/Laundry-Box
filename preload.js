@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateStatus: (callback) => ipcRenderer.on('update-status', callback),
   offUpdateStatus: (callback) => ipcRenderer.off('update-status', callback),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  verifyManagerPin: (options) => ipcRenderer.invoke('verify-manager-pin', options),
+  logOverrideRejection: (options) => ipcRenderer.invoke('log-override-rejection', options),
 });

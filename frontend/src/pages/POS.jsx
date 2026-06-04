@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Search, Plus, Minus, ShoppingBag, Trash2, CheckCircle, 
-  X, ChevronDown, Shirt, Bed, Wind, Layers, Package, 
-  Droplet, Zap, Heart, Sparkles, User, CreditCard, Wallet, 
+import {
+  Search, Plus, Minus, ShoppingBag, Trash2, CheckCircle,
+  X, ChevronDown, Shirt, Bed, Wind, Layers, Package,
+  Droplet, Zap, Heart, Sparkles, User, CreditCard, Wallet,
   Gift, Printer, Receipt, Edit3, UserPlus, Phone, MapPin, MessageCircle, Landmark,
-  Calendar, FileText
+  Calendar, FileText, AlertTriangle, AlertCircle, Info, Lock
 } from 'lucide-react';
 import axios from 'axios';
 import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { DEFAULT_SHOP_ID, DEFAULT_BRANCH_ID, API_BASE_URL, CATEGORIES, PAYMENT_STATUS, ORDER_STATUS, PAYMENT_METHODS } from '../constants';
+import { t } from '../utils/translations';
 import styles from './POS.module.css';
 
 
@@ -21,7 +22,7 @@ export default function POS() {
   const [serviceTypes, setServiceTypes] = useState([]);
   const [addons, setAddons] = useState([]);
   const [categories, setCategories] = useState([]);
-  
+
   const [step, setStep] = useState('pos'); // pos, checkout
   const [cart, setCart] = useState([]);
   const [selectedService, setSelectedService] = useState(null);
@@ -63,7 +64,7 @@ export default function POS() {
   const activeCalculatedPrice = selectedService?.isTemporary
     ? (selectedService.price || 0)
     : (selectedTypePrice + activeAddonPrice);
-  
+
   useEffect(() => {
     fetchPOSData();
   }, []);
@@ -75,7 +76,7 @@ export default function POS() {
         const tRes = await window.electronAPI.dbQuery('SELECT * FROM service_types', []);
         const aRes = await window.electronAPI.dbQuery('SELECT * FROM addons', []);
         const cRes = await window.electronAPI.dbQuery('SELECT * FROM service_categories', []);
-        
+
         if (sRes.success) setServices(sRes.data);
         if (tRes.success) setServiceTypes(tRes.data);
         if (aRes.success) setAddons(aRes.data);
@@ -139,6 +140,124 @@ export default function POS() {
   const [lastOrderInfo, setLastOrderInfo] = useState(null);
   const [customerFormData, setCustomerFormData] = useState({ name: '', phone: '', address: '' });
 
+  // Credit Limit Protection states
+  const [showCreditWarning, setShowCreditWarning] = useState(false);
+  const [showManagerPinModal, setShowManagerPinModal] = useState(false);
+  const [creditWarningDetails, setCreditWarningDetails] = useState(null);
+  const [managerPinValue, setManagerPinValue] = useState('');
+  const [managerPinError, setManagerPinError] = useState('');
+  const [pendingOrderAction, setPendingOrderAction] = useState(null); // 'completePayment' or 'saveOrder'
+  const [pendingOrderId, setPendingOrderId] = useState(null);
+
+  const checkCreditLimitBeforeAction = (actionType) => {
+    if (!selectedCustomer || selectedCustomer.id === 'Walk-in') return false;
+    if (!settings.enableCreditLimitProtection) return false;
+
+    if (actionType === 'saveOrder' || (actionType === 'completePayment' && paymentMethod === 'credit')) {
+      const currentOutstanding = selectedCustomer.balance || 0;
+      const creditLimit = selectedCustomer.creditLimit !== undefined && selectedCustomer.creditLimit !== null && selectedCustomer.creditLimit !== 0
+        ? selectedCustomer.creditLimit
+        : (settings.defaultCreditLimit ?? 500);
+      const orderAmount = total;
+      const newOutstanding = currentOutstanding + orderAmount;
+
+      // Block if ALREADY at/over limit OR if new order would exceed limit
+      if (currentOutstanding >= creditLimit || newOutstanding > creditLimit) {
+        const exceededAmount = newOutstanding > creditLimit
+          ? newOutstanding - creditLimit
+          : currentOutstanding - creditLimit + orderAmount;
+        const overrideAllowed = true;
+
+        // Pre-generate orderId if not already generated
+        const generatedId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
+        setPendingOrderId(generatedId);
+
+        setCreditWarningDetails({
+          orderId: generatedId,
+          customerName: selectedCustomer.name,
+          creditLimit,
+          currentOutstanding,
+          orderAmount,
+          newOutstanding,
+          exceededAmount: Math.max(0, exceededAmount),
+          overrideAllowed
+        });
+        setPendingOrderAction(actionType);
+        setShowCreditWarning(true);
+        return true; // blocked
+      }
+    }
+    return false; // allowed
+  };
+
+  const handleVerifyManagerPin = async (e) => {
+    e.preventDefault();
+    setManagerPinError('');
+    const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+    const userId = userSession.userId || userSession._id || 'POS';
+
+    try {
+      const res = await window.electronAPI.verifyManagerPin({
+        pin: managerPinValue,
+        customerId: selectedCustomer.id,
+        customerName: selectedCustomer.name,
+        orderId: creditWarningDetails?.orderId || pendingOrderId,
+        creditLimit: creditWarningDetails.creditLimit,
+        outstandingBalance: creditWarningDetails.currentOutstanding,
+        orderAmount: creditWarningDetails.orderAmount,
+        exceededAmount: creditWarningDetails.exceededAmount,
+        userId
+      });
+
+      if (res.success) {
+        // Close all modals first, then execute the action after React re-renders
+        setShowManagerPinModal(false);
+        setShowCreditWarning(false);
+        setManagerPinValue('');
+
+        const action = pendingOrderAction;
+        setTimeout(() => {
+          if (action === 'completePayment') {
+            handleCompletePayment(true);
+          } else if (action === 'saveOrder') {
+            handleSaveOrder(true);
+          }
+        }, 50);
+      } else {
+        setManagerPinError(res.error || "Incorrect PIN! Access Denied.");
+      }
+    } catch (err) {
+      setManagerPinError("An error occurred during verification");
+    }
+  };
+
+  const handleCancelOverride = async () => {
+    const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+    const userId = userSession.userId || userSession._id || 'POS';
+
+    try {
+      await window.electronAPI.logOverrideRejection({
+        customerId: selectedCustomer.id,
+        customerName: selectedCustomer.name,
+        orderId: creditWarningDetails?.orderId || pendingOrderId,
+        creditLimit: creditWarningDetails.creditLimit,
+        outstandingBalance: creditWarningDetails.currentOutstanding,
+        orderAmount: creditWarningDetails.orderAmount,
+        exceededAmount: creditWarningDetails.exceededAmount,
+        userId,
+        actionType: 'REJECTED'
+      });
+    } catch (err) {
+      console.error("Failed to log override rejection:", err);
+    }
+
+    setShowCreditWarning(false);
+    setShowManagerPinModal(false);
+    setManagerPinValue('');
+    setManagerPinError('');
+    setPendingOrderId(null);
+  };
+
   useEffect(() => {
     if (customerSearch.length > 0 && !selectedCustomer) {
       const timer = setTimeout(() => searchCustomers(), 300);
@@ -171,14 +290,25 @@ export default function POS() {
 
   const handleSaveNewCustomer = async (e) => {
     e.preventDefault();
-    const id = `CUST-${Date.now()}`;
     const timestamp = new Date().toISOString();
 
     if (window.electronAPI?.dbQuery) {
       try {
+        const res = await window.electronAPI.dbQuery('SELECT id FROM customers');
+        let nextNum = 1;
+        if (res.success && res.data) {
+          const numbers = res.data.map(c => {
+            const parts = c.id.split('-');
+            const num = parseInt(parts[1]);
+            return isNaN(num) || num > 999999 ? 0 : num;
+          });
+          nextNum = Math.max(0, ...numbers) + 1;
+        }
+        const id = `CUST-${nextNum}`;
+
         await window.electronAPI.dbQuery(
           'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, DEFAULT_SHOP_ID, customerFormData.name, customerFormData.phone, '', customerFormData.address, customerFormData.creditLimit || settings.defaultCreditLimit || 500, 0, timestamp]
+          [id, DEFAULT_SHOP_ID, customerFormData.name, customerFormData.phone, '', customerFormData.address, 0, 0, timestamp]
         );
         handleSelectCustomer({ id, ...customerFormData });
         setShowCustomerModal(false);
@@ -187,6 +317,7 @@ export default function POS() {
         console.error("Failed to save customer:", err);
       }
     } else {
+      const id = `CUST-temp`;
       handleSelectCustomer({ id, ...customerFormData });
       setShowCustomerModal(false);
     }
@@ -196,14 +327,18 @@ export default function POS() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [itemSearch, setItemSearch] = useState('');
   const [discount, setDiscount] = useState(0);
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [discountType, setDiscountType] = useState('flat'); // 'flat' or 'percent'
+  const [discountInput, setDiscountInput] = useState('');
 
   const handleDiscount = () => {
-    const val = prompt("Enter discount amount (د.إ):", discount);
-    if (val !== null) setDiscount(parseFloat(val) || 0);
+    setDiscountInput(discount > 0 ? discount.toString() : '');
+    setDiscountType('flat');
+    setShowDiscountModal(true);
   };
 
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  
+
   // Calculate total tax by summing per-item tax
   let totalTax = 0;
   let finalTotal = 0;
@@ -215,9 +350,9 @@ export default function POS() {
     const proportion = subtotal > 0 ? itemSubtotal / subtotal : 0;
     const itemDiscount = discount * proportion;
     const itemBase = itemSubtotal - itemDiscount;
-    
-    const rate = (item.taxRate !== null && item.taxRate !== undefined) 
-      ? (item.taxRate / 100) 
+
+    const rate = (item.taxRate !== null && item.taxRate !== undefined)
+      ? (item.taxRate / 100)
       : defaultRate;
 
     if (settings.isTaxEnabled) {
@@ -229,16 +364,16 @@ export default function POS() {
     }
   });
 
-  const total = settings.taxMethod === 'inclusive' 
-    ? (subtotal - discount) 
+  const total = settings.taxMethod === 'inclusive'
+    ? (subtotal - discount)
     : (subtotal - discount + totalTax);
   const tax = totalTax;
-  
+
   const changeDue = parseFloat(tenderedAmount || 0) - total;
 
   const handleWhatsApp = (phone, text = null) => {
     let cleanPhone = phone.replace(/\D/g, '');
-    
+
     // Prepend country code if not present
     const countryCode = settings.waCountryCode || '';
     if (countryCode && !cleanPhone.startsWith(countryCode)) {
@@ -260,7 +395,7 @@ export default function POS() {
     let parsedPricing = [];
     try {
       parsedPricing = typeof service.pricing === 'string' ? JSON.parse(service.pricing || '[]') : (service.pricing || []);
-    } catch (e) {}
+    } catch (e) { }
     if (parsedPricing.length > 0) {
       defaultTypeId = parsedPricing[0].serviceTypeId;
     } else if (serviceTypes.length > 0) {
@@ -271,22 +406,22 @@ export default function POS() {
 
   const addToCart = () => {
     if (!selectedService) return;
-    
+
     if (selectedService.isTemporary && !selectedService.name.trim()) {
       alert("Please enter a name for the temporary item.");
       return;
     }
-    
+
     if (!selectedService.isTemporary && (!serviceConfig.selectedTypeIds || serviceConfig.selectedTypeIds.length === 0)) {
       alert("Please select at least one treatment/service type.");
       return;
     }
-    
+
     if (selectedService.isTemporary) {
-      const unitPrice = serviceConfig.customPrice !== null && serviceConfig.customPrice !== '' 
-        ? parseFloat(serviceConfig.customPrice) 
+      const unitPrice = serviceConfig.customPrice !== null && serviceConfig.customPrice !== ''
+        ? parseFloat(serviceConfig.customPrice)
         : activeCalculatedPrice;
-      
+
       const newItem = {
         id: editingCartIdx !== null ? cart[editingCartIdx].id : Date.now().toString(),
         serviceId: selectedService.id,
@@ -300,7 +435,7 @@ export default function POS() {
         description: serviceConfig.description || '',
         category: selectedService.category || 'Standard'
       };
-      
+
       if (editingCartIdx !== null) {
         const newCart = [...cart];
         newCart[editingCartIdx] = newItem;
@@ -322,7 +457,7 @@ export default function POS() {
 
       const sumTypesPrice = selectedTypes.reduce((sum, t) => sum + t.price, 0);
       const calculatedUnitPrice = sumTypesPrice + activeAddonPrice;
-      const finalPrice = serviceConfig.customPrice !== null && serviceConfig.customPrice !== '' 
+      const finalPrice = serviceConfig.customPrice !== null && serviceConfig.customPrice !== ''
         ? parseFloat(serviceConfig.customPrice)
         : calculatedUnitPrice;
 
@@ -351,7 +486,7 @@ export default function POS() {
         setCart([...cart, newItem]);
       }
     }
-    
+
     setSelectedService(null);
     setItemSearch('');
     setShowItemPresets(false);
@@ -359,8 +494,8 @@ export default function POS() {
 
   const getModalPrice = () => {
     if (!selectedService) return 0;
-    const unitPrice = serviceConfig.customPrice !== null && serviceConfig.customPrice !== '' 
-      ? parseFloat(serviceConfig.customPrice) 
+    const unitPrice = serviceConfig.customPrice !== null && serviceConfig.customPrice !== ''
+      ? parseFloat(serviceConfig.customPrice)
       : activeCalculatedPrice;
     return unitPrice * serviceConfig.qty;
   };
@@ -383,7 +518,7 @@ export default function POS() {
       icon: 'Package',
       isTemporary: !services.find(s => s.name === item.name)
     };
-    
+
     // Resolve type IDs from item.types, falling back to split item.type (legacy)
     let resolvedTypeIds = [];
     if (item.types && Array.isArray(item.types) && item.types.length > 0) {
@@ -395,12 +530,12 @@ export default function POS() {
         return matchingType ? matchingType.id : '';
       }).filter(Boolean);
     }
-    
+
     // Resolve addon IDs from names
     const resolvedAddonIds = addons
       .filter(a => (item.addons || []).includes(a.name))
       .map(a => a.id);
-      
+
     setEditingCartIdx(idx);
     setSelectedService(svc);
     setServiceConfig({
@@ -426,7 +561,7 @@ export default function POS() {
   const toggleServiceType = (id) => {
     setServiceConfig(prev => {
       const isSelected = (prev.selectedTypeIds || []).includes(id);
-      const newTypeIds = isSelected 
+      const newTypeIds = isSelected
         ? prev.selectedTypeIds.filter(x => x !== id)
         : [...prev.selectedTypeIds, id];
       return {
@@ -439,19 +574,22 @@ export default function POS() {
   const toggleAddon = (id) => {
     setServiceConfig(prev => ({
       ...prev,
-      addons: prev.addons.includes(id) 
-        ? prev.addons.filter(a => a !== id) 
+      addons: prev.addons.includes(id)
+        ? prev.addons.filter(a => a !== id)
         : [...prev.addons, id]
     }));
   };
 
-  const handleCompletePayment = async () => {
-    const orderId = `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
+  const handleCompletePayment = async (isOverridden = false) => {
+    if (!isOverridden && checkCreditLimitBeforeAction('completePayment')) {
+      return;
+    }
+    const orderId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
     const billNumber = `BN-${Date.now().toString().slice(-6)}`;
-    
+
     if (window.electronAPI?.dbQuery) {
       try {
-        await window.electronAPI.dbQuery(
+        const insertResult = await window.electronAPI.dbQuery(
           `INSERT INTO orders (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, statusHistory, createdAt, isSynced, updatedAt, paymentMethod, expectedDeliveryDate, specialInstructions) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
@@ -475,6 +613,34 @@ export default function POS() {
             specialInstructions
           ]
         );
+
+        // CRITICAL: If DB blocked the insert (e.g. credit limit), stop here and show the override modal
+        if (!insertResult || !insertResult.success) {
+          const errMsg = insertResult?.error || '';
+          if (errMsg.includes('CREDIT_LIMIT_EXCEEDED') || errMsg.includes('Credit limit exceeded')) {
+            const currentOutstanding = selectedCustomer?.balance || 0;
+            const creditLimit = (selectedCustomer?.creditLimit && selectedCustomer.creditLimit !== 0)
+              ? selectedCustomer.creditLimit
+              : (settings.defaultCreditLimit ?? 500);
+            const newOutstanding = currentOutstanding + total;
+            setCreditWarningDetails({
+              orderId: orderId,
+              customerName: selectedCustomer?.name,
+              creditLimit,
+              currentOutstanding,
+              orderAmount: total,
+              newOutstanding,
+              exceededAmount: Math.max(0, newOutstanding - creditLimit),
+              overrideAllowed: true
+            });
+            setPendingOrderId(orderId);
+            setPendingOrderAction('completePayment');
+            setShowCreditWarning(true);
+          } else {
+            alert('Failed to save order: ' + (errMsg || 'Unknown error'));
+          }
+          return; // STOP — do not proceed
+        }
 
         // Sync to MongoDB Backend
         try {
@@ -502,8 +668,8 @@ export default function POS() {
         }
 
         // Also trigger local sync event (for frontend components)
-        window.dispatchEvent(new CustomEvent('order-created', { 
-          detail: { 
+        window.dispatchEvent(new CustomEvent('order-created', {
+          detail: {
             id: orderId,
             customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
             customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
@@ -520,7 +686,7 @@ export default function POS() {
             statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: new Date().toISOString() }],
             expectedDeliveryDate,
             specialInstructions
-          } 
+          }
         }));
 
         if (paymentMethod === 'credit' && selectedCustomer) {
@@ -534,7 +700,7 @@ export default function POS() {
         const txnId = `TXN-${Date.now()}`;
         const txnTimestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
         const accountType = (paymentMethod === 'card' || paymentMethod === 'wallet') ? 'BANK' : 'CASH';
-        
+
         if (paymentMethod !== 'credit') {
           const desc = `Order ${orderId}${accountType === 'BANK' ? ` via ${selectedBank}` : ''}`;
           await window.electronAPI.dbQuery(
@@ -545,30 +711,59 @@ export default function POS() {
           );
         }
 
+        setPendingOrderId(null);
         navigate(`/invoice/${orderId.replace('#', '')}?print=true`);
       } catch (err) {
         console.error("Failed to save order:", err);
-        alert("CRITICAL ERROR: Failed to save order to local database. Please check logs.");
+        // If DB-level credit limit check blocked the order, show the override modal
+        if (err?.message?.includes('CREDIT_LIMIT_EXCEEDED') || err?.message?.includes('Credit limit exceeded')) {
+          const currentOutstanding = selectedCustomer?.balance || 0;
+          const creditLimit = selectedCustomer?.creditLimit && selectedCustomer.creditLimit !== 0
+            ? selectedCustomer.creditLimit
+            : (settings.defaultCreditLimit ?? 500);
+          const orderAmount = total;
+          const newOutstanding = currentOutstanding + orderAmount;
+          const generatedId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
+          setPendingOrderId(generatedId);
+          setCreditWarningDetails({
+            orderId: generatedId,
+            customerName: selectedCustomer?.name,
+            creditLimit,
+            currentOutstanding,
+            orderAmount,
+            newOutstanding,
+            exceededAmount: Math.max(0, newOutstanding - creditLimit),
+            overrideAllowed: true
+          });
+          setPendingOrderAction('completePayment');
+          setShowCreditWarning(true);
+        } else {
+          alert("CRITICAL ERROR: Failed to save order to local database. Please check logs.");
+        }
       }
     } else {
       alert("Electron API not found. Order cannot be saved locally.");
     }
   };
 
-  const handleSaveOrder = async () => {
+  const handleSaveOrder = async (isOverridden = false) => {
     if (cart.length === 0) return;
-    
+
     if (!selectedCustomer) {
       alert("Please select or add a customer to save the bill.");
       return;
     }
-    
-    const orderId = `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
+
+    if (!isOverridden && checkCreditLimitBeforeAction('saveOrder')) {
+      return;
+    }
+
+    const orderId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
     const billNumber = `BN-${Date.now().toString().slice(-6)}`;
-    
+
     if (window.electronAPI?.dbQuery) {
       try {
-        await window.electronAPI.dbQuery(
+        const insertResult = await window.electronAPI.dbQuery(
           `INSERT INTO orders 
            (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, items, statusHistory, createdAt, updatedAt, paymentStatus, isSynced, paymentMethod, expectedDeliveryDate, specialInstructions) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -594,6 +789,34 @@ export default function POS() {
           ]
         );
 
+        // CRITICAL: If DB blocked the insert (e.g. credit limit), stop here and show the override modal
+        if (!insertResult || !insertResult.success) {
+          const errMsg = insertResult?.error || '';
+          if (errMsg.includes('CREDIT_LIMIT_EXCEEDED') || errMsg.includes('Credit limit exceeded')) {
+            const currentOutstanding = selectedCustomer?.balance || 0;
+            const creditLimit = (selectedCustomer?.creditLimit && selectedCustomer.creditLimit !== 0)
+              ? selectedCustomer.creditLimit
+              : (settings.defaultCreditLimit ?? 500);
+            const newOutstanding = currentOutstanding + total;
+            setCreditWarningDetails({
+              orderId: orderId,
+              customerName: selectedCustomer?.name,
+              creditLimit,
+              currentOutstanding,
+              orderAmount: total,
+              newOutstanding,
+              exceededAmount: Math.max(0, newOutstanding - creditLimit),
+              overrideAllowed: true
+            });
+            setPendingOrderId(orderId);
+            setPendingOrderAction('saveOrder');
+            setShowCreditWarning(true);
+          } else {
+            alert('Failed to save order: ' + (errMsg || 'Unknown error'));
+          }
+          return; // STOP — do not update balance or show success
+        }
+
         // Update customer balance in DB
         if (selectedCustomer) {
           await window.electronAPI.dbQuery('UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?', [total, new Date().toISOString(), selectedCustomer.id]);
@@ -604,8 +827,8 @@ export default function POS() {
         }
 
         // Trigger local event
-        window.dispatchEvent(new CustomEvent('order-created', { 
-          detail: { 
+        window.dispatchEvent(new CustomEvent('order-created', {
+          detail: {
             id: orderId,
             customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
             customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
@@ -622,7 +845,7 @@ export default function POS() {
             statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: new Date().toISOString() }],
             expectedDeliveryDate,
             specialInstructions
-          } 
+          }
         }));
 
         // Sync to MongoDB Backend
@@ -665,13 +888,37 @@ export default function POS() {
           customerPhone: selectedCustomer.phone,
           newBalance: freshBalance
         });
-        
+
         setShowSuccessModal(true);
         setCart([]);
         setExpectedDeliveryDate(getTomorrowDateString());
         setSpecialInstructions('');
+        setPendingOrderId(null);
       } catch (err) {
         console.error("Failed to save order:", err);
+        // If DB-level credit limit check blocked the order, show the override modal
+        if (err?.message?.includes('CREDIT_LIMIT_EXCEEDED') || err?.message?.includes('Credit limit exceeded')) {
+          const currentOutstanding = selectedCustomer?.balance || 0;
+          const creditLimit = selectedCustomer?.creditLimit && selectedCustomer.creditLimit !== 0
+            ? selectedCustomer.creditLimit
+            : (settings.defaultCreditLimit ?? 500);
+          const orderAmount = total;
+          const newOutstanding = currentOutstanding + orderAmount;
+          const generatedId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
+          setPendingOrderId(generatedId);
+          setCreditWarningDetails({
+            orderId: generatedId,
+            customerName: selectedCustomer?.name,
+            creditLimit,
+            currentOutstanding,
+            orderAmount,
+            newOutstanding,
+            exceededAmount: Math.max(0, newOutstanding - creditLimit),
+            overrideAllowed: true
+          });
+          setPendingOrderAction('saveOrder');
+          setShowCreditWarning(true);
+        }
       }
     } else {
       setLastOrderInfo({
@@ -683,6 +930,7 @@ export default function POS() {
       });
       setShowSuccessModal(true);
       setCart([]);
+      setPendingOrderId(null);
     }
   };
 
@@ -726,7 +974,7 @@ export default function POS() {
                 </div>
               </div>
             ))}
-            
+
             <div style={{ marginTop: 'auto', borderTop: '1px solid #F1F5F9', paddingTop: '1rem' }}>
               <div className={styles.cartRow}><span>Subtotal</span><span><CurrencySymbol size={14} /> {subtotal.toFixed(2)}</span></div>
               <div className={styles.cartRow}><span>{settings.taxName || 'Tax'} ({settings.isTaxEnabled ? settings.taxRate : 0}%)</span><span><CurrencySymbol size={14} /> {tax.toFixed(2)}</span></div>
@@ -767,8 +1015,8 @@ export default function POS() {
               <h3 className={styles.modalSectionTitle}>Select Bank Account</h3>
               <div className={styles.inputWrapper} style={{ background: 'white', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.25rem 0.5rem' }}>
                 <Landmark size={18} color="#2563EB" />
-                <select 
-                  className={styles.inputField} 
+                <select
+                  className={styles.inputField}
                   style={{ border: 'none', width: '100%', outline: 'none' }}
                   value={selectedBank}
                   onChange={(e) => setSelectedBank(e.target.value)}
@@ -814,7 +1062,7 @@ export default function POS() {
               </button>
 
               {selectedCustomer && (
-                <button 
+                <button
                   className={styles.waReceiptBtn}
                   onClick={() => {
                     const msg = `Hello ${selectedCustomer.name}! Your laundry order totaling ${total.toFixed(2)} has been received and is now being processed. Thank you for choosing us!`;
@@ -838,9 +1086,9 @@ export default function POS() {
         <div style={{ display: 'flex', gap: '1rem', width: '100%' }}>
           <div className={styles.searchBar} style={{ flex: 1 }}>
             <Search size={20} color="#94A3B8" />
-            <input 
-              type="text" 
-              placeholder="Search items..." 
+            <input
+              type="text"
+              placeholder="Search items..."
               value={itemSearch}
               onChange={(e) => setItemSearch(e.target.value)}
             />
@@ -852,15 +1100,15 @@ export default function POS() {
 
         <div className={styles.categoriesRow}>
           <div className={styles.categoryTabs}>
-            <button 
+            <button
               className={`${styles.categoryTab} ${selectedCategory === 'All' ? styles.active : ''}`}
               onClick={() => setSelectedCategory('All')}
             >
               All Services
             </button>
             {categories.map(cat => (
-              <button 
-                key={cat.id} 
+              <button
+                key={cat.id}
                 className={`${styles.categoryTab} ${selectedCategory === cat.name ? styles.active : ''}`}
                 onClick={() => setSelectedCategory(cat.name)}
               >
@@ -882,16 +1130,16 @@ export default function POS() {
               return matchesSearch && (itemSearch ? true : matchesCategory);
             })
             .map((service) => (
-            <div key={service.id} className={styles.itemCard} onClick={() => handleServiceClick(service)}>
-              <div className={styles.itemIcon}>
-                {service.image ? (
-                  <img src={service.image} alt={service.name} className={styles.itemImg} />
-                ) : getIcon(service.icon)}
+              <div key={service.id} className={styles.itemCard} onClick={() => handleServiceClick(service)}>
+                <div className={styles.itemIcon}>
+                  {service.image ? (
+                    <img src={service.image} alt={service.name} className={styles.itemImg} />
+                  ) : getIcon(service.icon)}
+                </div>
+                <span className={styles.itemName}>{service.name}</span>
+                <span className={styles.itemPrice}><CurrencySymbol size={16} /> {service.price.toFixed(2)}</span>
               </div>
-              <span className={styles.itemName}>{service.name}</span>
-              <span className={styles.itemPrice}><CurrencySymbol size={16} /> {service.price.toFixed(2)}</span>
-            </div>
-          ))}
+            ))}
           <div className={`${styles.itemCard} ${styles.addItemCard}`} style={{ borderStyle: 'solid', borderColor: '#3B82F6', background: '#EFF6FF', cursor: 'pointer' }} onClick={() => handleServiceClick({ id: 'temp-' + Date.now(), name: '', price: 0, icon: 'Package', isTemporary: true })}>
             <Plus size={32} color="#2563EB" />
             <span style={{ fontWeight: 800, fontSize: '0.8rem', color: '#2563EB', marginTop: '0.5rem' }}>TEMPORARY ITEM</span>
@@ -912,15 +1160,15 @@ export default function POS() {
                 <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
                   <div className={styles.customerSearchInput} style={{ flex: 1 }}>
                     <Search size={14} />
-                    <input 
-                      type="text" 
-                      placeholder="Search Customer..." 
+                    <input
+                      type="text"
+                      placeholder="Search Customer..."
                       value={customerSearch}
                       onChange={(e) => setCustomerSearch(e.target.value)}
                     />
                   </div>
-                  <button 
-                    className={styles.sidebarAddBtn} 
+                  <button
+                    className={styles.sidebarAddBtn}
                     onClick={() => setShowCustomerModal(true)}
                     title="Add New Customer"
                   >
@@ -934,15 +1182,15 @@ export default function POS() {
                     <span className={styles.selCustName}>{selectedCustomer.name}</span>
                     <div style={{ display: 'flex', alignItems: 'center' }}>
                       <span className={styles.selCustPhone}>{selectedCustomer.phone}</span>
-                      <MessageCircle 
-                        size={12} 
-                        className={styles.waIconMini} 
-                        onClick={() => handleWhatsApp(selectedCustomer.phone)} 
+                      <MessageCircle
+                        size={12}
+                        className={styles.waIconMini}
+                        onClick={() => handleWhatsApp(selectedCustomer.phone)}
                       />
                     </div>
                     {selectedCustomer.balance !== 0 && (
                       <span className={selectedCustomer.balance > 0 ? styles.overdueBadge : styles.advanceBadge}>
-                        {selectedCustomer.balance > 0 ? 'Overdue: ' : 'Advance: '} 
+                        {selectedCustomer.balance > 0 ? 'Overdue: ' : 'Advance: '}
                         <CurrencySymbol size={10} /> {Math.abs(selectedCustomer.balance).toFixed(2)}
                       </span>
                     )}
@@ -981,8 +1229,8 @@ export default function POS() {
               <Calendar size={13} style={{ marginRight: '4px' }} />
               Expected Delivery Date
             </label>
-            <input 
-              type="date" 
+            <input
+              type="date"
               className={styles.metadataInput}
               value={expectedDeliveryDate}
               onChange={(e) => setExpectedDeliveryDate(e.target.value)}
@@ -994,16 +1242,16 @@ export default function POS() {
                 <FileText size={13} style={{ marginRight: '4px' }} />
                 ⚠️ Special Instructions
               </label>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 className={styles.togglePresetsBtn}
                 onClick={() => setShowSpecialPresets(!showSpecialPresets)}
               >
                 {showSpecialPresets ? 'Hide Presets' : 'Show Presets'}
               </button>
             </div>
-            <input 
-              type="text" 
+            <input
+              type="text"
               className={styles.metadataInput}
               placeholder="e.g. Starch, hang, handle with care..."
               value={specialInstructions}
@@ -1093,27 +1341,25 @@ export default function POS() {
           )}
           <div className={styles.cartRow}><span>{settings.taxName || 'Tax'} ({settings.isTaxEnabled ? settings.taxRate : 0}%)</span><span><CurrencySymbol size={14} /> {tax.toFixed(2)}</span></div>
           <div className={`${styles.cartRow} ${styles.totalRow}`}><span>Total</span><span className={styles.totalValue}><CurrencySymbol size={16} /> {total.toFixed(2)}</span></div>
-          
+
           <div className={styles.cartActions}>
-
-
             <button className={styles.secondaryBtn} onClick={handleDiscount}><Receipt size={18} /> Discount</button>
-            {selectedCustomer && selectedCustomer.balance > 0 && (
-              <button 
-                className={styles.overdueBtn} 
-                onClick={() => navigate(`/overdue-statement/${selectedCustomer.id}`)}
-              >
-                <Printer size={18} /> Overdue Receipt
-              </button>
-            )}
-            <button 
-              className={`${styles.saveBtn} ${(!selectedCustomer || cart.length === 0) ? styles.disabled : ''}`} 
+            <button
+              className={`${styles.saveBtn} ${(!selectedCustomer || cart.length === 0) ? styles.disabled : ''}`}
               onClick={handleSaveOrder}
             >
               <ShoppingBag size={18} /> Save Bill
             </button>
-            <button 
-              className={`${styles.paymentBtn} ${(!selectedCustomer || cart.length === 0) ? styles.disabled : ''}`} 
+            {selectedCustomer && selectedCustomer.balance > 0 && (
+              <button
+                className={styles.overdueBtn}
+                onClick={() => navigate(`/overdue-statement/${selectedCustomer.id}`)}
+              >
+                <Printer size={18} /> {t('overdue', settings.language)} Receipt
+              </button>
+            )}
+            <button
+              className={`${styles.paymentBtn} ${(!selectedCustomer || cart.length === 0) ? styles.disabled : ''}`}
               onClick={() => {
                 if (cart.length === 0) return;
                 if (!selectedCustomer) {
@@ -1149,16 +1395,16 @@ export default function POS() {
                 <X size={20} />
               </button>
             </div>
-            
+
             <div className={styles.modalBody}>
               {selectedService.isTemporary && (
                 <div className={styles.tempFormGroup}>
                   <label htmlFor="tempItemName">Item Name / Description</label>
-                  <input 
+                  <input
                     id="tempItemName"
-                    type="text" 
-                    placeholder="e.g. Special Silk Dress, Custom Alteration..." 
-                    value={selectedService.name} 
+                    type="text"
+                    placeholder="e.g. Special Silk Dress, Custom Alteration..."
+                    value={selectedService.name}
                     onChange={(e) => {
                       const val = e.target.value;
                       setSelectedService(prev => ({ ...prev, name: val }));
@@ -1176,8 +1422,8 @@ export default function POS() {
                       {availableTypesForService.map(type => {
                         const isSelected = (serviceConfig.selectedTypeIds || []).includes(type.id);
                         return (
-                          <div 
-                            key={type.id} 
+                          <div
+                            key={type.id}
                             className={`${styles.serviceTypeCard} ${isSelected ? styles.active : ''}`}
                             onClick={() => toggleServiceType(type.id)}
                           >
@@ -1201,8 +1447,8 @@ export default function POS() {
                       {addons.map(addon => {
                         const isSelected = serviceConfig.addons.includes(addon.id);
                         return (
-                          <div 
-                            key={addon.id} 
+                          <div
+                            key={addon.id}
                             className={`${styles.addonChip} ${isSelected ? styles.active : ''}`}
                             onClick={() => toggleAddon(addon.id)}
                           >
@@ -1231,13 +1477,13 @@ export default function POS() {
                     <div className={styles.currencyPrefix}>
                       <CurrencySymbol size={16} />
                     </div>
-                    <input 
+                    <input
                       id="customPriceInput"
-                      type="number" 
+                      type="number"
                       step="0.01"
                       min="0"
                       placeholder={activeCalculatedPrice.toFixed(2)}
-                      value={serviceConfig.customPrice ?? ''} 
+                      value={serviceConfig.customPrice ?? ''}
                       onChange={(e) => {
                         const val = e.target.value;
                         setServiceConfig(prev => ({ ...prev, customPrice: val === '' ? null : val }));
@@ -1253,26 +1499,26 @@ export default function POS() {
                     <span className={styles.fieldSub}>Number of identical items</span>
                   </label>
                   <div className={styles.qtyControlLarge}>
-                    <button 
-                      type="button" 
-                      className={styles.qtyLargeBtn} 
+                    <button
+                      type="button"
+                      className={styles.qtyLargeBtn}
                       onClick={() => setServiceConfig(prev => ({ ...prev, qty: Math.max(1, prev.qty - 1) }))}
                     >
                       <Minus size={16} />
                     </button>
-                    <input 
+                    <input
                       id="qtyInput"
-                      type="number" 
-                      value={serviceConfig.qty} 
+                      type="number"
+                      value={serviceConfig.qty}
                       onChange={(e) => {
                         const val = parseInt(e.target.value, 10);
                         setServiceConfig(prev => ({ ...prev, qty: isNaN(val) || val < 1 ? 1 : val }));
                       }}
                       className={styles.qtyLargeInput}
                     />
-                    <button 
-                      type="button" 
-                      className={`${styles.qtyLargeBtn} ${styles.primary}`} 
+                    <button
+                      type="button"
+                      className={`${styles.qtyLargeBtn} ${styles.primary}`}
                       onClick={() => setServiceConfig(prev => ({ ...prev, qty: prev.qty + 1 }))}
                     >
                       <Plus size={16} />
@@ -1286,8 +1532,8 @@ export default function POS() {
                   <label className={styles.fieldLabel} htmlFor="damageRemarks">
                     <span>Damage Remarks / Fabric Notes</span>
                   </label>
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     className={styles.togglePresetsBtn}
                     onClick={() => setShowItemPresets(!showItemPresets)}
                   >
@@ -1295,10 +1541,10 @@ export default function POS() {
                   </button>
                 </div>
                 <span className={styles.fieldSub}>Describe stains, tears, fading, or special requirements</span>
-                <textarea 
+                <textarea
                   id="damageRemarks"
-                  placeholder="e.g., Small yellow stain on collar, missing middle button, handle with care..." 
-                  value={serviceConfig.description || ''} 
+                  placeholder="e.g., Small yellow stain on collar, missing middle button, handle with care..."
+                  value={serviceConfig.description || ''}
                   onChange={(e) => setServiceConfig(prev => ({ ...prev, description: e.target.value }))}
                   className={styles.remarksTextarea}
                 />
@@ -1358,12 +1604,12 @@ export default function POS() {
                   <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>FULL NAME</label>
                   <div className={styles.posInputWrapper}>
                     <User size={18} />
-                    <input 
-                      type="text" 
-                      required 
+                    <input
+                      type="text"
+                      required
                       placeholder="Customer name"
                       value={customerFormData.name}
-                      onChange={(e) => setCustomerFormData({...customerFormData, name: e.target.value})}
+                      onChange={(e) => setCustomerFormData({ ...customerFormData, name: e.target.value })}
                     />
                   </div>
                 </div>
@@ -1371,45 +1617,175 @@ export default function POS() {
                   <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>MOBILE NUMBER</label>
                   <div className={styles.posInputWrapper}>
                     <Phone size={18} />
-                    <input 
-                      type="tel" 
-                      required 
+                    <input
+                      type="tel"
+                      required
                       placeholder="Phone number"
                       value={customerFormData.phone}
-                      onChange={(e) => setCustomerFormData({...customerFormData, phone: e.target.value})}
+                      onChange={(e) => setCustomerFormData({ ...customerFormData, phone: e.target.value })}
                     />
                   </div>
                 </div>
-                <div className={styles.formGroup}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>CREDIT LIMIT (OPTIONAL)</label>
-                  <div className={styles.posInputWrapper}>
-                    <CreditCard size={18} />
-                    <input 
-                      type="number" 
-                      placeholder="Limit (e.g. 100)"
-                      value={customerFormData.creditLimit || ''}
-                      onChange={(e) => setCustomerFormData({...customerFormData, creditLimit: e.target.value})}
-                    />
-                  </div>
-                </div>
+
                 <div className={styles.formGroup}>
                   <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>ADDRESS (OPTIONAL)</label>
                   <div className={styles.posInputWrapper}>
                     <MapPin size={18} />
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       placeholder="Customer address"
                       value={customerFormData.address}
-                      onChange={(e) => setCustomerFormData({...customerFormData, address: e.target.value})}
+                      onChange={(e) => setCustomerFormData({ ...customerFormData, address: e.target.value })}
                     />
                   </div>
                 </div>
               </div>
-              <div className={styles.modalFooter}>
-                <button type="button" className={styles.secondaryBtn} onClick={() => setShowCustomerModal(false)}>Cancel</button>
-                <button type="submit" className={styles.saveBtn} style={{ padding: '0.75rem 1.5rem', flex: 1 }}>Save & Select</button>
+              <div className={styles.modalFooterRedesign}>
+                <button type="button" className={styles.modalCancelBtn} onClick={() => setShowCustomerModal(false)}>Cancel</button>
+                <button type="submit" className={styles.modalSubmitBtn}>Save & Select</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Discount Modal */}
+      {showDiscountModal && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.modal} style={{ width: '400px' }}>
+            <div className={styles.modalHeader}>
+              <div className={styles.modalTitle}>
+                <div className={styles.modalHeaderIcon} style={{ background: '#EFF6FF', color: '#2563EB', borderColor: '#DBEAFE' }}>
+                  <Receipt size={24} />
+                </div>
+                <div>
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Apply Discount</h2>
+                  <p style={{ margin: '0.15rem 0 0 0' }}>Select or enter discount details</p>
+                </div>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => setShowDiscountModal(false)} />
+            </div>
+
+            <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
+              {/* Toggle between Flat and Percentage */}
+              <div className={styles.paymentMethods} style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                <div
+                  className={`${styles.methodCard} ${discountType === 'flat' ? styles.active : ''}`}
+                  onClick={() => { setDiscountType('flat'); setDiscountInput(''); }}
+                  style={{ padding: '1rem', gap: '0.5rem' }}
+                >
+                  <span className={styles.methodName} style={{ fontSize: '0.9rem' }}>Flat (د.إ)</span>
+                </div>
+                <div
+                  className={`${styles.methodCard} ${discountType === 'percent' ? styles.active : ''}`}
+                  onClick={() => { setDiscountType('percent'); setDiscountInput(''); }}
+                  style={{ padding: '1rem', gap: '0.5rem' }}
+                >
+                  <span className={styles.methodName} style={{ fontSize: '0.9rem' }}>Percentage (%)</span>
+                </div>
+              </div>
+
+              {/* Presets */}
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '0.5rem', display: 'block' }}>
+                  Quick Presets
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem' }}>
+                  {discountType === 'flat' ? (
+                    [5, 10, 20, 50].map(val => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setDiscountInput(val.toString())}
+                        style={{
+                          padding: '0.5rem',
+                          borderRadius: '8px',
+                          border: '1px solid #E2E8F0',
+                          background: discountInput === val.toString() ? '#EFF6FF' : 'white',
+                          borderColor: discountInput === val.toString() ? '#2563EB' : '#E2E8F0',
+                          color: discountInput === val.toString() ? '#1E3A8A' : '#0F172A',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s'
+                        }}
+                      >
+                        د.إ {val}
+                      </button>
+                    ))
+                  ) : (
+                    [5, 10, 15, 20].map(val => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setDiscountInput(val.toString())}
+                        style={{
+                          padding: '0.5rem',
+                          borderRadius: '8px',
+                          border: '1px solid #E2E8F0',
+                          background: discountInput === val.toString() ? '#EFF6FF' : 'white',
+                          borderColor: discountInput === val.toString() ? '#2563EB' : '#E2E8F0',
+                          color: discountInput === val.toString() ? '#1E3A8A' : '#0F172A',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s'
+                        }}
+                      >
+                        {val}%
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Custom Input */}
+              <div className={styles.formGroup}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '0.5rem', display: 'block' }}>
+                  Custom {discountType === 'flat' ? 'Amount' : 'Percentage'}
+                </label>
+                <div className={styles.posInputWrapper}>
+                  {discountType === 'flat' ? (
+                    <CurrencySymbol size={16} />
+                  ) : (
+                    <span style={{ fontSize: '1rem', fontWeight: 800, color: '#64748B', width: '18px', display: 'inline-block', textAlign: 'center' }}>%</span>
+                  )}
+                  <input
+                    type="number"
+                    min="0"
+                    max={discountType === 'percent' ? "100" : undefined}
+                    step="any"
+                    placeholder="0.00"
+                    value={discountInput}
+                    onChange={(e) => setDiscountInput(e.target.value)}
+                    style={{ fontWeight: 700 }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className={styles.modalFooterRedesign}>
+              <button
+                type="button"
+                className={styles.modalCancelBtn}
+                onClick={() => setShowDiscountModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.modalSubmitBtn}
+                onClick={() => {
+                  const val = parseFloat(discountInput) || 0;
+                  if (discountType === 'percent') {
+                    setDiscount((subtotal * val) / 100);
+                  } else {
+                    setDiscount(val);
+                  }
+                  setShowDiscountModal(false);
+                }}
+              >
+                Apply Discount
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1433,20 +1809,20 @@ export default function POS() {
               </div>
               <div className={styles.summaryRow}>
                 <span>
-                  {lastOrderInfo.newBalance > 0 
-                    ? 'Customer Balance (Due)' 
-                    : lastOrderInfo.newBalance < 0 
-                      ? 'Customer Balance (Advance)' 
+                  {lastOrderInfo.newBalance > 0
+                    ? 'Customer Balance (Due)'
+                    : lastOrderInfo.newBalance < 0
+                      ? 'Customer Balance (Advance)'
                       : 'Customer Balance'}
                 </span>
-                <span 
-                  className={styles.summaryValue} 
-                  style={{ 
-                    color: lastOrderInfo.newBalance > 0 
-                      ? '#EF4444' 
-                      : lastOrderInfo.newBalance < 0 
-                        ? '#10B981' 
-                        : '#64748B' 
+                <span
+                  className={styles.summaryValue}
+                  style={{
+                    color: lastOrderInfo.newBalance > 0
+                      ? '#EF4444'
+                      : lastOrderInfo.newBalance < 0
+                        ? '#10B981'
+                        : '#64748B'
                   }}
                 >
                   {lastOrderInfo.newBalance !== 0 ? (
@@ -1460,13 +1836,13 @@ export default function POS() {
               </div>
 
               <div className={styles.successActions}>
-                <button 
+                <button
                   className={styles.waSuccessBtn}
                   onClick={() => {
-                    const balMsg = lastOrderInfo.newBalance > 0 
-                      ? `Your outstanding due is ${formatCurrency(lastOrderInfo.newBalance)}` 
-                      : lastOrderInfo.newBalance < 0 
-                        ? `Your prepaid advance is ${formatCurrency(Math.abs(lastOrderInfo.newBalance))}` 
+                    const balMsg = lastOrderInfo.newBalance > 0
+                      ? `Your outstanding due is ${formatCurrency(lastOrderInfo.newBalance)}`
+                      : lastOrderInfo.newBalance < 0
+                        ? `Your prepaid advance is ${formatCurrency(Math.abs(lastOrderInfo.newBalance))}`
                         : `Your balance is settled`;
                     const msg = `Hello ${lastOrderInfo.customerName}! Your laundry bill for ${lastOrderInfo.orderId} of ${formatCurrency(lastOrderInfo.total)} has been saved. ${balMsg}. Thank you!`;
                     handleWhatsApp(lastOrderInfo.customerPhone, msg);
@@ -1474,7 +1850,7 @@ export default function POS() {
                 >
                   <MessageCircle size={20} /> Send via WhatsApp
                 </button>
-                <button 
+                <button
                   className={styles.printSuccessBtn}
                   onClick={() => {
                     navigate(`/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=true`);
@@ -1482,7 +1858,7 @@ export default function POS() {
                 >
                   <Printer size={20} /> Print Receipt
                 </button>
-                <button 
+                <button
                   className={styles.doneBtn}
                   onClick={() => {
                     setShowSuccessModal(false);
@@ -1493,6 +1869,141 @@ export default function POS() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credit Limit Warning Modal */}
+      {showCreditWarning && creditWarningDetails && (
+        <div className={styles.modalOverlay}>
+          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '500px' }}>
+            <div className={styles.modalHeader} style={{ background: '#FEF2F2', borderBottom: '1px solid #FEE2E2' }}>
+              <div className={styles.modalTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <AlertTriangle size={24} color="#EF4444" />
+                <div>
+                  <h2 style={{ color: '#991B1B', margin: 0 }}>Credit Limit Exceeded</h2>
+                  <p style={{ color: '#B91C1C', margin: 0, fontSize: '0.8rem' }}>This customer has exceeded their credit threshold.</p>
+                </div>
+              </div>
+            </div>
+            <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
+              <div style={{ background: '#F8FAFC', borderRadius: '12px', padding: '1rem', border: '1px solid #E2E8F0', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Customer Name:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{creditWarningDetails.customerName}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Limit:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.creditLimit.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Outstanding Balance:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.currentOutstanding.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Current Order Amount:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.orderAmount.toFixed(2)}</span>
+                </div>
+                <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.5rem 0' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>New Outstanding Balance:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.newOutstanding.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
+                  <span>Exceeded Amount:</span>
+                  <span>{settings.currencySymbol} {creditWarningDetails.exceededAmount.toFixed(2)}</span>
+                </div>
+              </div>
+
+              {settings.enableManagerOverride ? (
+                <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '12px', padding: '0.75rem 1rem', color: '#1E40AF', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                  <Info size={18} />
+                  <span>This order can be authorized using the secure PIN.</span>
+                </div>
+              ) : (
+                <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: '12px', padding: '0.75rem 1rem', color: '#C53030', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                  <AlertCircle size={18} />
+                  <span>Credit Limit Protection is active and Manager Override is disabled.</span>
+                </div>
+              )}
+            </div>
+            <div className={styles.modalFooter} style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem' }}>
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                onClick={handleCancelOverride}
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+              {creditWarningDetails.overrideAllowed && settings.enableManagerOverride && (
+                <button
+                  type="button"
+                  className={styles.saveBtn}
+                  onClick={() => setShowManagerPinModal(true)}
+                  style={{ flex: 1, background: '#D97706', color: 'white' }}
+                >
+                  Manager Override
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manager PIN Modal */}
+      {showManagerPinModal && (
+        <div className={styles.modalOverlay}>
+          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '400px' }}>
+            <div className={styles.modalHeader}>
+              <div className={styles.modalTitle}>
+                <h2>Manager Verification</h2>
+                <p>Enter the PIN to approve this credit</p>
+              </div>
+            </div>
+            <form onSubmit={handleVerifyManagerPin}>
+              <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
+                <div className={styles.formGroup}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>SECURE PIN</label>
+                  <div className={styles.posInputWrapper}>
+                    <Lock size={18} />
+                    <input
+                      type="password"
+                      required
+                      maxLength={4}
+                      placeholder="Enter 4-Digit PIN"
+                      value={managerPinValue}
+                      onChange={(e) => setManagerPinValue(e.target.value.replace(/\D/g, ''))}
+                      style={{ fontSize: '1.25rem', letterSpacing: '0.25rem' }}
+                    />
+                  </div>
+                  {managerPinError && (
+                    <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 600 }}>{managerPinError}</p>
+                  )}
+                </div>
+              </div>
+              <div className={styles.modalFooter} style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem' }}>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => {
+                    setShowManagerPinModal(false);
+                    setManagerPinValue('');
+                    setManagerPinError('');
+                  }}
+                  style={{ flex: 1 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={styles.saveBtn}
+                  style={{ flex: 1 }}
+                >
+                  Verify
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

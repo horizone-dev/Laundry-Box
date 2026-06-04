@@ -209,7 +209,6 @@ export default function Expenses() {
     <div className={styles.expensesPage}>
       <div className={styles.headerRow}>
         <div className={styles.headerTitle}>
-          <p style={{ color: '#64748B', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.5rem' }}>Finance {'>'} Expenses</p>
           <h1>Expenses Tracking</h1>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem' }}>

@@ -13,7 +13,9 @@ export default function CurrencySymbol({ size = 16, className = "" }) {
         color: 'inherit',
         marginRight: '2px',
         fontFamily: 'inherit',
-        display: 'inline-block'
+        display: 'inline-block',
+        direction: 'ltr',
+        unicodeBidi: 'bidi-override'
       }}
     >
       {settings?.currencySymbol || 'د.إ'}

@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import {
   Upload, CheckCircle, Image as ImageIcon, X, Sliders, Scissors,
   Mail, Phone, Globe, Building2, MapPin, CreditCard, Hash, FileText,
-  Percent, Settings2, Info, Plus, Trash2, Star, DollarSign, Clock, Database, Save, AlertCircle, RefreshCw, Lock, Download, Cpu
+  Percent, Settings2, Info, Plus, Trash2, Star, DollarSign, Clock, Database, Save, AlertCircle, RefreshCw, Lock, Unlock, Download, Cpu
 } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 import getCroppedImg from '../utils/cropImage';
 import { useSettings } from '../store/SettingsContext';
+import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
 import InvoiceTemplate from '../components/InvoiceTemplate';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -20,6 +21,15 @@ export default function Settings() {
 
   const [activeTab, setActiveTab] = useState(tabParam || 'General');
   const { settings, updateSettings } = useSettings();
+  const [isCreditLimitUnlocked, setIsCreditLimitUnlocked] = useState(false);
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [enteredPin, setEnteredPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [creditLimitInput, setCreditLimitInput] = useState('');
+  const [oldPinInput, setOldPinInput] = useState('');
+  const [newPinInput, setNewPinInput] = useState('');
+  const [pinChangeError, setPinChangeError] = useState('');
+  const [pinChangeSuccess, setPinChangeSuccess] = useState('');
   
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
   const isSuperAdmin = user.role === 'super_admin' || user.role === 'admin';
@@ -31,6 +41,11 @@ export default function Settings() {
       navigate('/');
     }
   }, [isAuthorized, navigate]);
+
+  // Sync local credit limit input when settings load
+  useEffect(() => {
+    setCreditLimitInput(String(settings.defaultCreditLimit ?? 500));
+  }, [settings.defaultCreditLimit]);
 
   if (!isAuthorized) return null;
 
@@ -342,7 +357,7 @@ export default function Settings() {
                 <h2 className={styles.cardTitle}>Operational Rules</h2>
                 <div className={styles.formGrid}>
                   <div className={styles.formGroup}>
-                    <label>Default Overdue Period (Days)</label>
+                    <label>Default {t('overdue', settings.language)} Period (Days)</label>
                     <div className={styles.inputWrapper}>
                       <Clock size={18} color="#94A3B8" />
                       <input 
@@ -353,16 +368,41 @@ export default function Settings() {
                       />
                     </div>
                   </div>
-                  <div className={styles.formGroup}>
+                   <div className={styles.formGroup}>
                     <label>Default Credit Limit</label>
-                    <div className={styles.inputWrapper}>
+                    <div 
+                      className={styles.inputWrapper}
+                      style={{ 
+                        background: !isCreditLimitUnlocked ? '#F8FAFC' : 'white',
+                        cursor: !isCreditLimitUnlocked ? 'pointer' : 'default'
+                      }}
+                      onClick={() => {
+                        if (!isCreditLimitUnlocked) {
+                          setShowPinModal(true);
+                        }
+                      }}
+                    >
                       <CurrencySymbol size={18} />
                       <input 
                         type="number" 
                         className={styles.inputField}
-                        value={settings.defaultCreditLimit || 500}
-                        onChange={(e) => updateSettings({ defaultCreditLimit: parseFloat(e.target.value) })}
+                        value={creditLimitInput}
+                        onChange={(e) => setCreditLimitInput(e.target.value)}
+                        onBlur={(e) => {
+                          const parsed = parseFloat(e.target.value);
+                          const val = isNaN(parsed) ? 0 : parsed;
+                          setCreditLimitInput(String(val));
+                          updateSettings({ defaultCreditLimit: val });
+                        }}
+                        disabled={!isCreditLimitUnlocked}
+                        style={{ cursor: !isCreditLimitUnlocked ? 'pointer' : 'text' }}
+                        min="0"
                       />
+                      {!isCreditLimitUnlocked ? (
+                        <Lock size={16} color="#EF4444" style={{ cursor: 'pointer' }} />
+                      ) : (
+                        <Unlock size={16} color="#10B981" />
+                      )}
                     </div>
                   </div>
                   <div className={styles.formGroup}>
@@ -377,6 +417,44 @@ export default function Settings() {
                       />
                     </div>
                   </div>
+
+                  <div className={styles.formGroup} style={{ gridColumn: 'span 2' }}>
+                    <div className={styles.toggleWrapper} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0' }}>
+                      <div>
+                        <label style={{ fontWeight: 600, fontSize: '0.95rem' }}>Enable Credit Limit Protection</label>
+                        <p style={{ fontSize: '0.8rem', color: '#64748B', margin: 0 }}>Block orders when a customer exceeds their credit limit.</p>
+                      </div>
+                      <label className={styles.switch}>
+                        <input
+                          type="checkbox"
+                          checked={settings.enableCreditLimitProtection || false}
+                          onChange={(e) => updateSettings({ enableCreditLimitProtection: e.target.checked })}
+                        />
+                        <span className={`${styles.slider} ${styles.round}`}></span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {settings.enableCreditLimitProtection && (
+                    <>
+                      <div className={styles.formGroup} style={{ gridColumn: 'span 2' }}>
+                        <div className={styles.toggleWrapper} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0' }}>
+                          <div>
+                            <label style={{ fontWeight: 600, fontSize: '0.95rem' }}>Enable Manager Override</label>
+                            <p style={{ fontSize: '0.8rem', color: '#64748B', margin: 0 }}>Allow bypassing the credit limit using the Order Deletion PIN.</p>
+                          </div>
+                          <label className={styles.switch}>
+                            <input
+                              type="checkbox"
+                              checked={settings.enableManagerOverride || false}
+                              onChange={(e) => updateSettings({ enableManagerOverride: e.target.checked })}
+                            />
+                            <span className={`${styles.slider} ${styles.round}`}></span>
+                          </label>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -657,24 +735,82 @@ export default function Settings() {
                 </div>
 
                 <div className={styles.formGroup} style={{ marginTop: '1rem' }}>
-                  <label>Order Deletion PIN</label>
-                  <div className={styles.inputWrapper} style={{ maxWidth: '200px' }}>
-                    <Lock size={18} color="#94A3B8" />
-                    <input
-                      type="password"
-                      maxLength={4}
-                      className={styles.inputField}
-                      placeholder="••••"
-                      value={settings.orderDeletePin || ''}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/\D/g, ''); // only digits
-                        updateSettings({ orderDeletePin: val });
-                      }}
-                    />
-                  </div>
-                  <p style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '0.25rem' }}>
-                    A 4-digit PIN required to confirm order deletions in Order Management.
+                  <label>Manager / Deletion PIN</label>
+                  <p style={{ fontSize: '0.75rem', color: '#64748B', marginBottom: '0.5rem' }}>
+                    A 4-digit PIN required for manager overrides (like credit limit approvals) and confirming order deletions.
                   </p>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '300px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>Current PIN</span>
+                      <div className={styles.inputWrapper}>
+                        <Lock size={18} color="#94A3B8" />
+                        <input
+                          type="password"
+                          maxLength={4}
+                          className={styles.inputField}
+                          placeholder="••••"
+                          value={oldPinInput}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/\D/g, '');
+                            setOldPinInput(val);
+                            setPinChangeError('');
+                            setPinChangeSuccess('');
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {oldPinInput === (settings.orderDeletePin || '0000') && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', animation: 'fadeIn 0.3s ease' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>New PIN</span>
+                        <div className={styles.inputWrapper}>
+                          <Lock size={18} color="#94A3B8" />
+                          <input
+                            type="password"
+                            maxLength={4}
+                            className={styles.inputField}
+                            placeholder="••••"
+                            value={newPinInput}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, '');
+                              setNewPinInput(val);
+                              setPinChangeError('');
+                              setPinChangeSuccess('');
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {pinChangeError && (
+                      <p style={{ color: '#DC2626', fontSize: '0.75rem', fontWeight: 600, margin: 0 }}>
+                        {pinChangeError}
+                      </p>
+                    )}
+
+                    {pinChangeSuccess && (
+                      <p style={{ color: '#10B981', fontSize: '0.75rem', fontWeight: 600, margin: 0 }}>
+                        {pinChangeSuccess}
+                      </p>
+                    )}
+
+                    {oldPinInput === (settings.orderDeletePin || '0000') && newPinInput.length === 4 && (
+                      <button
+                        type="button"
+                        className={styles.primaryBtn}
+                        style={{ alignSelf: 'flex-start', marginTop: '0.25rem', padding: '0.4rem 1rem', fontSize: '0.85rem' }}
+                        onClick={() => {
+                          updateSettings({ orderDeletePin: newPinInput });
+                          setPinChangeSuccess('PIN updated successfully!');
+                          setOldPinInput('');
+                          setNewPinInput('');
+                        }}
+                      >
+                        Update PIN
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1599,6 +1735,84 @@ export default function Settings() {
               <div className={styles.cropperActions}>
                 <button className={styles.secondaryBtn} onClick={() => setIsCropping(false)}>Cancel</button>
                 <button className={styles.primaryBtn} onClick={saveCroppedImage}>Apply Crop</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PIN Verification Modal */}
+      {showPinModal && (
+        <div className={styles.cropperModalOverlay}>
+          <div className={styles.cropperModal} style={{ width: '380px' }}>
+            <div className={styles.cropperHeader}>
+              <div className={styles.modalTitle}>
+                <Lock size={20} color="#2563EB" />
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1E293B', margin: 0 }}>Verify Deletion PIN</h2>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => { setShowPinModal(false); setEnteredPin(''); setPinError(''); }} />
+            </div>
+
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p style={{ fontSize: '0.85rem', color: '#64748B', margin: 0, lineHeight: '1.4' }}>
+                Please enter the 4-digit **Order Deletion PIN** to unlock editing the Default Credit Limit.
+              </p>
+              
+              <div className={styles.formGroup} style={{ margin: 0 }}>
+                <div className={styles.inputWrapper}>
+                  <Lock size={18} color="#94A3B8" />
+                  <input 
+                    type="password" 
+                    maxLength={4}
+                    className={styles.inputField}
+                    placeholder="••••"
+                    value={enteredPin}
+                    onChange={(e) => {
+                      setPinError('');
+                      setEnteredPin(e.target.value.replace(/\D/g, ''));
+                    }}
+                    autoFocus
+                    style={{ letterSpacing: '0.5rem', textAlign: 'center', fontSize: '1.25rem', fontWeight: 'bold' }}
+                  />
+                </div>
+                {pinError && (
+                  <p style={{ fontSize: '0.75rem', color: '#EF4444', margin: '0.25rem 0 0 0', fontWeight: '600' }}>
+                    {pinError}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className={styles.cropperControls} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', borderTop: '1px solid #F1F5F9' }}>
+              <div className={styles.cropperActions} style={{ width: '100%', gap: '0.75rem', display: 'flex' }}>
+                <button 
+                  className={styles.secondaryBtn} 
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    setShowPinModal(false);
+                    setEnteredPin('');
+                    setPinError('');
+                  }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className={styles.primaryBtn} 
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    const correctPin = settings.orderDeletePin || '0000';
+                    if (enteredPin === correctPin) {
+                      setIsCreditLimitUnlocked(true);
+                      setShowPinModal(false);
+                      setEnteredPin('');
+                      setPinError('');
+                    } else {
+                      setPinError('Incorrect PIN! Access Denied.');
+                    }
+                  }}
+                >
+                  Unlock
+                </button>
               </div>
             </div>
           </div>

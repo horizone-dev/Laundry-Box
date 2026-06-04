@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID } from '../constants';
+import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Settlement.module.css';
 
@@ -423,7 +424,7 @@ export default function Settlement() {
             <div className={styles.overviewSection}>
               <div className={styles.sectionHeader}>
                 <h3>Urgent Pending Collections</h3>
-                <span className={styles.overdueDaysBadge}>Overdue ({settings?.overdueDays || 7}+ Days)</span>
+                <span className={styles.overdueDaysBadge}>{t('overdue', settings.language)} ({settings?.overdueDays || 7}+ Days)</span>
               </div>
 
               <div className={styles.collectionsTableCard}>
@@ -523,7 +524,7 @@ export default function Settlement() {
                   className={styles.btnSecondary} 
                   onClick={() => navigate(`/overdue-statement/${selectedCustomer.id}`)}
                 >
-                  <Printer size={16} /> Print Overdue Statement
+                  <Printer size={16} /> Print {t('overdue', settings.language)} Statement
                 </button>
                 <button 
                   className={styles.btnSecondary} 

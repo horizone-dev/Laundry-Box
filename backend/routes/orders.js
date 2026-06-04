@@ -49,7 +49,7 @@ router.patch('/:id/status', async (req, res) => {
   const orderId = req.params.id;
   console.log(`Updating status for order: ${orderId}`);
   try {
-    const { status, paymentStatus, paidAmount, dueAmount, updatedBy } = req.body;
+    const { status, paymentStatus, paidAmount, dueAmount, expectedDeliveryDate, updatedBy } = req.body;
     
     // Try matching by multiple fields for robustness
     let order = await Order.findOne({ 
@@ -75,6 +75,7 @@ router.patch('/:id/status', async (req, res) => {
     if (paymentStatus) order.paymentStatus = paymentStatus;
     if (paidAmount !== undefined) order.paidAmount = paidAmount;
     if (dueAmount !== undefined) order.dueAmount = dueAmount;
+    if (expectedDeliveryDate !== undefined) order.expectedDeliveryDate = expectedDeliveryDate;
 
     if (!order.statusHistory || !Array.isArray(order.statusHistory)) {
       order.statusHistory = [];

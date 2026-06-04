@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Search, UserPlus, Download, Calendar, MoreHorizontal, 
-  TrendingUp, ChevronLeft, ChevronRight, X, Phone, MapPin, MessageCircle, CreditCard, Wallet, DollarSign, Trash2, Users
+  TrendingUp, ChevronLeft, ChevronRight, X, Phone, MapPin, MessageCircle, CreditCard, Wallet, DollarSign, Trash2, Users, Edit2, Lock
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../store/SettingsContext';
@@ -27,9 +27,13 @@ export default function Customers() {
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
-    address: '',
-    creditLimit: '0'
+    address: ''
   });
+  const [showEditCreditLimitModal, setShowEditCreditLimitModal] = useState(false);
+  const [editCreditLimitValue, setEditCreditLimitValue] = useState('0');
+  const [managerPinValue, setManagerPinValue] = useState('');
+  const [managerPinError, setManagerPinError] = useState('');
+
 
   useEffect(() => {
     fetchCustomers();
@@ -67,14 +71,25 @@ export default function Customers() {
 
   const handleSaveCustomer = async (e) => {
     e.preventDefault();
-    const id = `CUST-${Date.now()}`;
     const timestamp = new Date().toISOString();
 
     if (window.electronAPI?.dbQuery) {
       try {
+        const res = await window.electronAPI.dbQuery('SELECT id FROM customers');
+        let nextNum = 1;
+        if (res.success && res.data) {
+          const numbers = res.data.map(c => {
+            const parts = c.id.split('-');
+            const num = parseInt(parts[1]);
+            return isNaN(num) || num > 999999 ? 0 : num;
+          });
+          nextNum = Math.max(0, ...numbers) + 1;
+        }
+        const id = `CUST-${nextNum}`;
+
         await window.electronAPI.dbQuery(
           'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, DEFAULT_SHOP_ID, formData.name, formData.phone, '', formData.address, parseFloat(formData.creditLimit) || 0, 0, timestamp]
+          [id, DEFAULT_SHOP_ID, formData.name, formData.phone, '', formData.address, 0, 0, timestamp]
         );
         fetchCustomers();
         setShowModal(false);
@@ -84,6 +99,7 @@ export default function Customers() {
       }
     } else {
       // Web demo
+      const id = `CUST-${customers.length + 1}`;
       setCustomers([{ ...formData, id, orders: 0, lastDate: 'Just now', tag: 'New' }, ...customers]);
       setShowModal(false);
       setFormData({ name: '', phone: '', address: '' });
@@ -204,6 +220,42 @@ export default function Customers() {
       }
     }
   };
+
+  const handleUpdateCreditLimit = async (e) => {
+    e.preventDefault();
+    if (!selectedCustomer) return;
+    const newLimit = parseFloat(editCreditLimitValue);
+    if (isNaN(newLimit) || newLimit < 0) {
+      alert('Please enter a valid credit limit (0 or more).');
+      return;
+    }
+
+    // Verify Manager PIN
+    const correctPin = settings.orderDeletePin || '0000';
+    if (String(managerPinValue) !== String(correctPin)) {
+      setManagerPinError("Incorrect Manager PIN! Access Denied.");
+      return;
+    }
+
+    if (window.electronAPI?.dbQuery) {
+      try {
+        await window.electronAPI.dbQuery(
+          'UPDATE customers SET creditLimit = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+          [newLimit, new Date().toISOString(), selectedCustomer.id]
+        );
+        fetchCustomers();
+        setShowEditCreditLimitModal(false);
+        setSelectedCustomer(null);
+        setEditCreditLimitValue('0');
+        setManagerPinValue('');
+        setManagerPinError('');
+      } catch (err) {
+        console.error('Update credit limit error:', err);
+        alert('Failed to update credit limit.');
+      }
+    }
+  };
+
 
   const fetchCustomerBills = async (customerId) => {
     if (window.electronAPI?.dbQuery) {
@@ -386,7 +438,36 @@ export default function Customers() {
                   </div>
                 </td>
                 <td><span className={styles.balanceBadge} style={{ color: (customer.balance || 0) > 0 ? '#EF4444' : '#10B981' }}><CurrencySymbol size={16} /> {(customer.balance || 0).toFixed(2)}</span></td>
-                <td><CurrencySymbol size={16} />{(customer.creditLimit || 0).toFixed(2)}</td>
+                <td>
+                  {(() => {
+                    const effectiveLimit = (customer.creditLimit && customer.creditLimit !== 0)
+                      ? customer.creditLimit
+                      : (settings.defaultCreditLimit ?? 500);
+                    const isAtLimit = (customer.balance || 0) >= effectiveLimit;
+                    const isDefaultLimit = !customer.creditLimit || customer.creditLimit === 0;
+                    return (
+                      <span style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ color: isAtLimit ? '#EF4444' : '#1E293B', fontWeight: isAtLimit ? 700 : 'normal' }}>
+                          <CurrencySymbol size={14} />{effectiveLimit.toFixed(2)}
+                          {isDefaultLimit && <span style={{ fontSize: '0.65rem', color: '#94A3B8', marginLeft: '2px' }}>(def)</span>}
+                        </span>
+                        {isAtLimit && (
+                          <span style={{
+                            fontSize: '0.6rem',
+                            background: '#FEE2E2',
+                            color: '#DC2626',
+                            fontWeight: 800,
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            letterSpacing: '0.03em'
+                          }}>
+                            ⚠ LIMIT REACHED
+                          </span>
+                        )}
+                      </span>
+                    );
+                  })()}
+                </td>
                 <td>{customer.lastDate || customer.updatedAt?.split('T')[0] || 'N/A'}</td>
                 <td>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -406,6 +487,20 @@ export default function Customers() {
                       }}
                     >
                       Bills
+                    </button>
+                     <button 
+                      className={styles.secondaryBtn} 
+                      style={{ padding: '0.4rem 0.6rem', color: '#2563EB', borderColor: '#2563EB' }}
+                      onClick={() => {
+                        setSelectedCustomer(customer);
+                        setEditCreditLimitValue(String(customer.creditLimit || 0));
+                        setManagerPinValue('');
+                        setManagerPinError('');
+                        setShowEditCreditLimitModal(true);
+                      }}
+                      title="Edit Credit Limit"
+                    >
+                      <Edit2 size={16} />
                     </button>
                     <button 
                       className={styles.secondaryBtn} 
@@ -500,21 +595,6 @@ export default function Customers() {
                       />
                     </div>
                   </div>
-                </div>
-
-                <div className={styles.formGroup}>
-                  <label>Credit Limit (Optional)</label>
-                  <div className={styles.inputWrapper}>
-                    <CreditCard size={18} />
-                    <input 
-                      type="number" 
-                      step="0.01"
-                      placeholder="e.g. 500.00" 
-                      value={formData.creditLimit}
-                      onChange={(e) => setFormData({...formData, creditLimit: e.target.value})}
-                    />
-                  </div>
-                  <p style={{ fontSize: '0.7rem', color: '#64748B', marginTop: '0.25rem' }}>Maximum amount this customer can carry as outstanding balance.</p>
                 </div>
 
               <div className={styles.modalFooter}>
@@ -765,6 +845,112 @@ export default function Customers() {
                 }
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Credit Limit Modal */}
+      {showEditCreditLimitModal && selectedCustomer && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.modal} style={{ maxWidth: '420px' }}>
+            <div className={styles.modalHeader}>
+              <div>
+                <h2>Edit Credit Limit</h2>
+                <p>Set individual credit limit for <strong>{selectedCustomer.name}</strong></p>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => { setShowEditCreditLimitModal(false); setSelectedCustomer(null); }} />
+            </div>
+            <form onSubmit={handleUpdateCreditLimit}>
+              <div className={styles.modalBody}>
+                <div style={{
+                  background: '#F8FAFC',
+                  borderRadius: '12px',
+                  padding: '1rem 1.25rem',
+                  marginBottom: '1rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>CURRENT BALANCE</div>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: (selectedCustomer.balance || 0) > 0 ? '#EF4444' : '#10B981' }}>
+                      <CurrencySymbol size={16} /> {Math.abs(selectedCustomer.balance || 0).toFixed(2)}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>CURRENT CREDIT LIMIT</div>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#2563EB' }}>
+                      <CurrencySymbol size={16} /> {(selectedCustomer.creditLimit || 0).toFixed(2)}
+                      {selectedCustomer.creditLimit === 0 && <span style={{ fontSize: '0.7rem', color: '#94A3B8', marginLeft: '0.25rem' }}>(using shop default: {settings.defaultCreditLimit})</span>}
+                    </div>
+                  </div>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>New Credit Limit</label>
+                  <div className={styles.inputWrapper}>
+                    <CreditCard size={18} />
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      autoFocus
+                      placeholder="e.g. 500.00"
+                      value={editCreditLimitValue}
+                      onChange={(e) => setEditCreditLimitValue(e.target.value)}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <p style={{ fontSize: '0.7rem', color: '#64748B', marginTop: '0.25rem' }}>
+                    Set to 0 to use the shop default limit ({settings.defaultCreditLimit} {settings.currencySymbol}).
+                  </p>
+                </div>
+
+                <div className={styles.formGroup} style={{ marginTop: '1rem' }}>
+                  <label>Manager PIN</label>
+                  <div className={styles.inputWrapper}>
+                    <Lock size={18} />
+                    <input
+                      type="password"
+                      maxLength={4}
+                      required
+                      placeholder="••••"
+                      value={managerPinValue}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, ''); // only digits
+                        setManagerPinValue(val);
+                        setManagerPinError('');
+                      }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  {managerPinError && (
+                    <p style={{ color: '#DC2626', fontSize: '0.75rem', fontWeight: 600, marginTop: '0.25rem' }}>
+                      {managerPinError}
+                    </p>
+                  )}
+                </div>
+
+                {parseFloat(editCreditLimitValue) > 0 && parseFloat(editCreditLimitValue) <= (selectedCustomer.balance || 0) && (
+                  <div style={{
+                    background: '#FEF2F2',
+                    border: '1px solid #FECACA',
+                    borderRadius: '8px',
+                    padding: '0.75rem 1rem',
+                    fontSize: '0.8rem',
+                    color: '#DC2626',
+                    marginTop: '0.5rem'
+                  }}>
+                    ⚠️ Warning: The new limit ({parseFloat(editCreditLimitValue).toFixed(2)}) is less than or equal to the current balance ({(selectedCustomer.balance || 0).toFixed(2)}). Future orders will require Manager Override.
+                  </div>
+                )}
+              </div>
+              <div className={styles.modalFooter}>
+                <button type="button" className={styles.secondaryBtn} onClick={() => { setShowEditCreditLimitModal(false); setSelectedCustomer(null); }}>Cancel</button>
+                <button type="submit" className={styles.primaryBtn} style={{ background: '#2563EB' }}>Save Credit Limit</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

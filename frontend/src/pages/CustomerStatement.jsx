@@ -310,7 +310,6 @@ export default function CustomerStatement() {
       {/* ── Header ──────────────────────────────────── */}
       <div className={styles.header}>
         <div className={styles.headerInfo}>
-          <p className={styles.breadcrumb}>Reports › Customer Statement</p>
           <h1>Customer Statement</h1>
           <p className={styles.subtext}>Full billing ledger with running balance for any customer.</p>
         </div>

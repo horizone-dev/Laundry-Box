@@ -338,9 +338,6 @@ export default function TaxReport() {
       {/* Header Info */}
       <div className={styles.headerRow}>
         <div className={styles.headerInfo}>
-          <p style={{ color: '#64748B', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.5rem' }}>
-            Reports &gt; Tax Statements
-          </p>
           <h1>{settings.taxName || 'VAT'} Statements</h1>
           <p>Consolidated Output vs Input tax statement report.</p>
         </div>

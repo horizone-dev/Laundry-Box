@@ -117,13 +117,9 @@ export default function MainLayout() {
   useEffect(() => {
     const handleGlobalUpdate = (event, status) => {
       if (status.type === 'available') {
-        // If we are already on settings and looking at Software Update, do not pop up modal
-        const searchParams = new URLSearchParams(location.search);
-        const isAtSettingsUpdate = location.pathname === '/settings' && searchParams.get('tab') === 'Software Update';
-        if (!isAtSettingsUpdate) {
-          setUpdateInfo(status);
-          setShowUpdateModal(true);
-        }
+        // Store update info silently — visible only on Settings → Software Update
+        setUpdateInfo(status);
+        // No popup modal — user can check updates from Settings
       }
     };
 
@@ -273,6 +269,7 @@ export default function MainLayout() {
       subItems: [
         { path: '/orders', label: 'All Orders' },
         { path: '/orders/pending', label: 'Pending Payments' },
+        { path: '/orders/expected-delivery', label: 'Expected Deliveries' },
         { path: '/orders/deleted', label: 'Deleted Orders' },
         { path: '/reports/cancelled', label: 'Cancelled Orders' },
       ]
@@ -306,6 +303,7 @@ export default function MainLayout() {
         { path: '/reports/expenses', label: 'Expenses' },
         { path: '/reports/tax', label: 'Tax Statements' },
         { path: '/reports/daily-tax', label: 'Daily Tax Report' },
+        { path: '/reports/credit-overrides', label: 'Credit Overrides' },
       ]
     },
     {
@@ -672,6 +670,19 @@ export default function MainLayout() {
               >
                 <item.icon size={20} />
                 <span className={styles.sidebarText}>{t(item.label.toLowerCase().replace(/ /g, ''), settings.language)}</span>
+                {item.path === '/settings' && updateInfo && (
+                  <span className={styles.updateBadge} style={{
+                    marginLeft: 'auto',
+                    backgroundColor: '#10B981',
+                    color: 'white',
+                    fontSize: '0.7rem',
+                    padding: '2px 6px',
+                    borderRadius: '8px',
+                    fontWeight: 'bold'
+                  }}>
+                    Update
+                  </span>
+                )}
               </NavLink>
             );
           })}
@@ -1097,63 +1108,7 @@ export default function MainLayout() {
           </div>
         </div>
       )}
-      {/* Software Update Notification Modal */}
-      {showUpdateModal && updateInfo && (
-        <div className={styles.modalOverlay} style={{ zIndex: 11000 }}>
-          <div className={styles.quickModal} style={{ width: '460px', overflow: 'hidden' }}>
-            <div className={styles.modalHeader} style={{ background: 'linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%)', borderBottom: '1px solid #E2E8F0', padding: '1.5rem 2rem' }}>
-              <div className={styles.titleWithIcon}>
-                <Cpu color="#2563EB" size={24} style={{ animation: 'pulse 2s infinite' }} />
-                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0F172A' }}>Software Update Available</h2>
-              </div>
-              <button 
-                className={styles.closeBtn} 
-                onClick={() => setShowUpdateModal(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8' }}
-              >
-                <X size={20} />
-              </button>
-            </div>
 
-            <div className={styles.modalBody} style={{ padding: '2rem' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                <p style={{ fontSize: '0.95rem', color: '#334155', lineHeight: '1.6', margin: 0 }}>
-                  A new version of the Laundry Billing system (<strong>v{updateInfo.version}</strong>) has been published and is ready to install.
-                </p>
-
-                {updateInfo.releaseNotes && (
-                  <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '1.25rem', borderRadius: '12px', maxHeight: '180px', overflowY: 'auto' }}>
-                    <h5 style={{ color: '#475569', margin: '0 0 0.5rem 0', fontWeight: 700, fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Release Notes:</h5>
-                    <pre style={{ margin: 0, fontFamily: 'inherit', fontSize: '0.85rem', color: '#475569', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
-                      {updateInfo.releaseNotes}
-                    </pre>
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-                  <button
-                    className={styles.newOrderBtn}
-                    style={{ background: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0', flex: 1, padding: '0.75rem', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', boxShadow: 'none' }}
-                    onClick={() => setShowUpdateModal(false)}
-                  >
-                    Remind Later
-                  </button>
-                  <button
-                    className={styles.newOrderBtn}
-                    style={{ background: '#2563EB', color: 'white', flex: 1, padding: '0.75rem', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' }}
-                    onClick={() => {
-                      setShowUpdateModal(false);
-                      navigate('/settings?tab=Software Update');
-                    }}
-                  >
-                    Update Now
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

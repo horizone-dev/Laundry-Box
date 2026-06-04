@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../store/SettingsContext';
+import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './OutstandingBills.module.css';
 import axios from 'axios';
@@ -182,7 +183,7 @@ export default function OutstandingBills() {
         <div className={styles.statCard}>
           <div className={styles.statIcon} style={{ background: '#FEF2F2' }}><AlertCircle color="#EF4444" /></div>
           <div className={styles.statInfo}>
-            <span>Overdue Bills</span>
+            <span>{t('overdue', settings.language)} Bills</span>
             <h3 style={{ color: '#EF4444' }}>{overdueCount} Invoices</h3>
           </div>
         </div>
@@ -206,7 +207,7 @@ export default function OutstandingBills() {
           className={`${styles.filterBtn} ${filterType === 'Overdue' ? styles.active : ''}`}
           onClick={() => setFilterType('Overdue')}
         >
-          Overdue
+          {t('overdue', settings.language)}
         </button>
         <button 
           className={`${styles.filterBtn} ${filterType === 'Due Soon' ? styles.active : ''}`}
@@ -276,7 +277,7 @@ export default function OutstandingBills() {
                 <td>{formatDate(bill.createdAt)}</td>
                 <td>
                   <span className={`${styles.badge} ${isOverdue(bill) ? styles.badgeRed : styles.badgeYellow}`}>
-                    {isOverdue(bill) ? 'Overdue' : 'Pending'}
+                    {isOverdue(bill) ? t('overdue', settings.language) : t('pending', settings.language)}
                   </span>
                 </td>
                 <td className={styles.amount}><CurrencySymbol size={12} /> {(bill.totalAmount || 0).toFixed(2)}</td>
