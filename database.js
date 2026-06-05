@@ -161,7 +161,11 @@ function initDB(appPath) {
       totalAmount REAL,
       items JSON,
       deletedAt TEXT,
-      deletedBy TEXT
+      deletedBy TEXT,
+      originalPaymentStatus TEXT,
+      paidAmount REAL DEFAULT 0,
+      returnStatus TEXT DEFAULT 'N/A',
+      approvedBy TEXT
     );
 
     CREATE TABLE IF NOT EXISTS credit_override_logs (
@@ -314,6 +318,21 @@ function initDB(appPath) {
         console.error("Auto-migration of services failed:", migrateErr);
       }
     }
+
+    const deletedOrderCols = db.prepare("PRAGMA table_info(deleted_orders)").all();
+    if (!deletedOrderCols.some(col => col.name === 'originalPaymentStatus')) {
+      db.exec("ALTER TABLE deleted_orders ADD COLUMN originalPaymentStatus TEXT DEFAULT NULL;");
+    }
+    if (!deletedOrderCols.some(col => col.name === 'paidAmount')) {
+      db.exec("ALTER TABLE deleted_orders ADD COLUMN paidAmount REAL DEFAULT 0;");
+    }
+    if (!deletedOrderCols.some(col => col.name === 'returnStatus')) {
+      db.exec("ALTER TABLE deleted_orders ADD COLUMN returnStatus TEXT DEFAULT 'N/A';");
+    }
+    if (!deletedOrderCols.some(col => col.name === 'approvedBy')) {
+      db.exec("ALTER TABLE deleted_orders ADD COLUMN approvedBy TEXT DEFAULT NULL;");
+    }
+
     // Data Healer: Run on init
     runDataHealer(db);
   } catch (err) {

@@ -338,14 +338,36 @@ function validateQueryCreditLimit(db, query, params) {
   }
 }
 
-ipcMain.handle('verify-manager-pin', (event, { pin, customerId, customerName, orderId, creditLimit, outstandingBalance, orderAmount, exceededAmount, userId }) => {
+ipcMain.handle('verify-manager-pin', async (event, { pin, customerId, customerName, orderId, creditLimit, outstandingBalance, orderAmount, exceededAmount, userId }) => {
   try {
     const db = getDB();
     const shopResult = db.prepare('SELECT settings FROM shops LIMIT 1').get();
     const settings = shopResult && shopResult.settings ? JSON.parse(shopResult.settings) : {};
     
     const correctPin = settings.orderDeletePin || '0000';
+    let pinOwner = null;
     if (String(pin) === String(correctPin)) {
+      pinOwner = 'Manager (PIN)';
+    } else {
+      // Fallback to checking active manager PINs on the backend
+      try {
+        const response = await fetch('http://localhost:3000/api/auth/verify-manager-pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin })
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.valid) {
+            pinOwner = `Manager: ${data.managerName}`;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Backend PIN check failed or offline:', apiErr.message);
+      }
+    }
+
+    if (pinOwner) {
       activeOverrides[customerId] = {
         timestamp: Date.now(),
         amount: orderAmount
@@ -356,7 +378,7 @@ ipcMain.handle('verify-manager-pin', (event, { pin, customerId, customerName, or
         customerName,
         orderId,
         userId,
-        managerId: 'orderDeletePinOwner',
+        managerId: pinOwner,
         creditLimit,
         outstandingBalance,
         orderAmount,

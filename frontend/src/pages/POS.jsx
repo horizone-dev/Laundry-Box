@@ -194,7 +194,8 @@ export default function POS() {
     e.preventDefault();
     setManagerPinError('');
     const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
-    const userId = userSession.userId || userSession._id || 'POS';
+    const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
+    const userId = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
 
     try {
       const res = await window.electronAPI.verifyManagerPin({
@@ -233,7 +234,8 @@ export default function POS() {
 
   const handleCancelOverride = async () => {
     const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
-    const userId = userSession.userId || userSession._id || 'POS';
+    const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
+    const userId = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
 
     try {
       await window.electronAPI.logOverrideRejection({

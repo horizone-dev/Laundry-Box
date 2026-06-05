@@ -61,6 +61,7 @@ export default function Orders({ isPendingView = false }) {
   const [pinError, setPinError] = useState('');
   const [orderToDelete, setOrderToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [refundImmediately, setRefundImmediately] = useState(true);
 
   // Credit Limit Protection states
   const [showCreditWarning, setShowCreditWarning] = useState(false);
@@ -133,7 +134,8 @@ export default function Orders({ isPendingView = false }) {
     e.preventDefault();
     setManagerPinError('');
     const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
-    const userId = userSession.userId || userSession._id || 'Orders';
+    const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
+    const userId = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
 
     try {
       const res = await window.electronAPI.verifyManagerPin({
@@ -167,7 +169,8 @@ export default function Orders({ isPendingView = false }) {
 
   const handleCancelOverride = async () => {
     const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
-    const userId = userSession.userId || userSession._id || 'Orders';
+    const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
+    const userId = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
 
     try {
       await window.electronAPI.logOverrideRejection({
@@ -476,12 +479,20 @@ export default function Orders({ isPendingView = false }) {
       }
       
       // PIN is valid! Delete the order.
+      const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+      const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
+      const currentLoggedInUser = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
+
       // A. Delete locally from SQLite (if electron app)
       if (window.electronAPI?.dbQuery) {
         // 0. Insert into deleted_orders audit log
+        const isPaid = orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus);
+        const initialReturnStatus = isPaid
+          ? (refundImmediately ? 'Returned' : 'Return Pending')
+          : 'N/A';
         await window.electronAPI.dbQuery(
-          `INSERT INTO deleted_orders (id, shopId, billNumber, customerId, customerName, customerPhone, totalAmount, items, deletedAt, deletedBy) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO deleted_orders (id, shopId, billNumber, customerId, customerName, customerPhone, totalAmount, items, deletedAt, deletedBy, originalPaymentStatus, paidAmount, returnStatus, approvedBy) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             orderToDelete.id,
             orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
@@ -492,6 +503,10 @@ export default function Orders({ isPendingView = false }) {
             orderToDelete.totalAmount || 0,
             typeof orderToDelete.items === 'string' ? orderToDelete.items : JSON.stringify(orderToDelete.items || []),
             new Date().toISOString(),
+            currentLoggedInUser,
+            orderToDelete.paymentStatus || 'Pending',
+            orderToDelete.paidAmount || 0,
+            initialReturnStatus,
             pinOwner
           ]
         );
@@ -500,7 +515,7 @@ export default function Orders({ isPendingView = false }) {
         await window.electronAPI.dbQuery('DELETE FROM payments WHERE orderId = ?', [orderToDelete.id]);
         
         // 2. Delete associated account transactions
-        await window.electronAPI.dbQuery('DELETE FROM account_transactions WHERE referenceId = ?', [orderToDelete.id]);
+        await window.electronAPI.dbQuery('DELETE FROM account_transactions WHERE description LIKE ?', ['%' + orderToDelete.id + '%']);
         
         // 3. Delete the order itself
         await window.electronAPI.dbQuery('DELETE FROM orders WHERE id = ?', [orderToDelete.id]);
@@ -512,7 +527,11 @@ export default function Orders({ isPendingView = false }) {
       // B. Delete remotely from Cloud
       try {
         await axios.delete(`${API_BASE}/orders/${encodeURIComponent(orderToDelete.id)}`, {
-          data: { deletedBy: pinOwner }
+          data: { 
+            deletedBy: currentLoggedInUser,
+            approvedBy: pinOwner,
+            refundImmediately: refundImmediately
+          }
         });
       } catch (remoteErr) {
         console.warn('Could not delete from cloud (offline):', remoteErr.message);
@@ -1354,6 +1373,7 @@ export default function Orders({ isPendingView = false }) {
                       className={`${styles.tagBtn} ${styles.deleteBtn}`}
                       onClick={() => {
                         setOrderToDelete(selectedOrder);
+                        setRefundImmediately(true);
                         setShowPinModal(true);
                       }}
                     >
@@ -1468,6 +1488,21 @@ export default function Orders({ isPendingView = false }) {
                 className={`${styles.pinInput} ${pinError ? styles.pinInputError : ''}`}
                 autoFocus
               />
+              
+              {orderToDelete && (orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus)) && (
+                <div style={{ margin: '1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#F8FAFC', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
+                  <input
+                    type="checkbox"
+                    id="markAsReturned"
+                    checked={refundImmediately}
+                    onChange={(e) => setRefundImmediately(e.target.checked)}
+                    style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                  />
+                  <label htmlFor="markAsReturned" style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
+                    Mark payment of <CurrencySymbol size={11} />{(orderToDelete.paidAmount || 0).toFixed(2)} as returned (refunded) now
+                  </label>
+                </div>
+              )}
               
               {pinError && (
                 <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 500, textAlign: 'center' }}>

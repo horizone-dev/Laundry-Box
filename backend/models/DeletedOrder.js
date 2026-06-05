@@ -10,7 +10,11 @@ const deletedOrderSchema = new mongoose.Schema({
   totalAmount: { type: Number },
   items: { type: Array },
   deletedAt: { type: Date, default: Date.now },
-  deletedBy: { type: String }
+  deletedBy: { type: String },
+  approvedBy: { type: String },
+  originalPaymentStatus: { type: String },
+  paidAmount: { type: Number, default: 0 },
+  returnStatus: { type: String, default: 'N/A' }
 }, { 
   timestamps: true,
   strict: true 

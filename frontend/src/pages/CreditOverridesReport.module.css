@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   gap: 2rem;
-  padding: 0 1rem 1rem 1rem;
+  padding: 1.5rem 1rem 1rem 1rem;
 }
 
 /* Header */
@@ -43,19 +43,20 @@
 /* KPI Cards */
 .kpiGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1.5rem;
 }
 
 .kpiCard {
   background: white;
-  padding: 1.5rem;
+  padding: 1.25rem;
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border);
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
@@ -64,42 +65,44 @@
   box-shadow: var(--shadow-md);
 }
 
-.cardHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
 .iconBox {
   padding: 0.75rem;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+}
+
+.kpiInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 
 .kpiLabel {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  display: block;
 }
 
 .kpiValue {
-  font-size: 1.9rem;
+  font-size: 1.7rem;
   font-weight: 800;
   color: var(--text-primary);
   display: flex;
   align-items: baseline;
   gap: 0.2rem;
+  line-height: 1.2;
 }
 
 .kpiSubtext {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text-secondary);
-  margin-top: 0.15rem;
+  display: block;
 }
 
 /* Table Card */
@@ -228,6 +231,11 @@
 }
 
 /* Table */
+.tableContainer {
+  overflow-x: auto;
+  width: 100%;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -243,6 +251,10 @@
   background: #F8FAFC;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+
+.table th.numCol {
+  text-align: right;
 }
 
 .table td {
@@ -364,7 +376,7 @@
   }
 
   .kpiGrid {
-    grid-template-columns: repeat(3, 1fr) !important;
+    grid-template-columns: repeat(4, 1fr) !important;
   }
 
   .kpiCard,

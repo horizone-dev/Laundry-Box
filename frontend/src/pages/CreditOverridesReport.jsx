@@ -2,12 +2,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   ShieldAlert, Calendar, Download, Printer, Search,
-  UserCheck, ShieldClose, RotateCcw, ShieldAlert as WarningIcon
+  UserCheck, ShieldClose, RotateCcw, ShieldAlert as WarningIcon,
+  FileText
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './CreditOverridesReport.module.css';
+import axios from 'axios';
+import { API_BASE_URL } from '../constants';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -32,18 +35,42 @@ export default function CreditOverridesReport() {
 
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [staffList, setStaffList] = useState([]);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [dateRange, setDateRange] = useState('Today');
-  const [actionFilter, setActionFilter] = useState('All');
+  const [actionFilter, setActionFilter] = useState('APPROVED');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
+
+  useEffect(() => {
+    const fetchStaff = async () => {
+      try {
+        const res = await axios.get(`${API_BASE_URL}/auth/users`);
+        if (res.data) setStaffList(res.data);
+      } catch (err) {
+        console.error("Failed to fetch staff for mapping:", err);
+      }
+    };
+    if (isAuthorized) fetchStaff();
+  }, [isAuthorized]);
+
+  const formatUser = (userIdOrFormatted) => {
+    if (!userIdOrFormatted) return '—';
+    if (userIdOrFormatted.includes(':')) return userIdOrFormatted;
+    const staff = staffList.find(s => s.userId === userIdOrFormatted);
+    if (staff) {
+      const roleName = staff.role === 'super_admin' ? 'Super Admin' : staff.role.charAt(0).toUpperCase() + staff.role.slice(1).replace('_', ' ');
+      return `${roleName}: ${staff.name}`;
+    }
+    return userIdOrFormatted;
+  };
 
   const getDateBounds = () => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
+
     const parseLocal = (str) => {
       if (!str) return new Date();
       const parts = str.split('-');
@@ -89,7 +116,7 @@ export default function CreditOverridesReport() {
     try {
       setLoading(true);
       const bounds = getDateBounds();
-      
+
       let query = `SELECT * FROM credit_override_logs`;
       let params = [];
       const whereClauses = [];
@@ -135,7 +162,8 @@ export default function CreditOverridesReport() {
         const customerId = (log.customerId || '').toLowerCase();
         const orderId = (log.orderId || '').toLowerCase();
         const approvedBy = (log.managerId || '').toLowerCase();
-        if (!name.includes(q) && !customerId.includes(q) && !orderId.includes(q) && !approvedBy.includes(q)) {
+        const staff = (log.userId || '').toLowerCase();
+        if (!name.includes(q) && !customerId.includes(q) && !orderId.includes(q) && !approvedBy.includes(q) && !staff.includes(q)) {
           return false;
         }
       }
@@ -149,12 +177,13 @@ export default function CreditOverridesReport() {
   const totalRejected = logs.filter(l => l.actionType === 'REJECTED').length;
 
   const exportCSV = () => {
-    const headers = ['Date', 'Customer Name', 'Customer ID', 'Order ID', 'Order Amount', 'Credit Limit', 'Balance Before', 'Exceeded Amount', 'Action'];
+    const headers = ['Date', 'Customer Name', 'Customer ID', 'Order ID', 'Approved By', 'Order Amount', 'Credit Limit', 'Balance Before', 'Exceeded Amount', 'Action'];
     const rows = filteredLogs.map(log => [
       formatDate(log.timestamp),
       `"${log.customerName || ''}"`,
       `"${log.customerId || ''}"`,
       `"${log.orderId || 'N/A'}"`,
+      `"${formatUser(log.userId)}"`,
       (log.orderAmount || 0).toFixed(2),
       (log.creditLimit || 0).toFixed(2),
       (log.outstandingBalance || 0).toFixed(2),
@@ -176,7 +205,6 @@ export default function CreditOverridesReport() {
       {/* Header */}
       <motion.div className={styles.headerRow} variants={itemVariants}>
         <div className={styles.headerInfo}>
-          <p className={styles.breadcrumb}>Reports › Credit Overrides</p>
           <h1>Credit Override Audit Log</h1>
           <p className={styles.subtext}>Monitor all customer credit limit overrides, manager approvals, and failed attempts.</p>
         </div>
@@ -192,6 +220,13 @@ export default function CreditOverridesReport() {
 
       {/* KPI Cards */}
       <motion.div className={styles.kpiGrid} variants={itemVariants}>
+        <KPICard
+          icon={<FileText size={20} color="#6366F1" />}
+          bg="#EEF2FF"
+          label="Total Override Attempts"
+          value={logs.length.toLocaleString()}
+          subtext="Total logged security overrides"
+        />
         <KPICard
           icon={<UserCheck size={20} color="#10B981" />}
           bg="#ECFDF5"
@@ -278,13 +313,14 @@ export default function CreditOverridesReport() {
             <p>No credit overrides found for the selection.</p>
           </div>
         ) : (
-          <>
+          <div className={styles.tableContainer}>
             <table className={styles.table}>
               <thead>
                 <tr>
                   <th>DATE</th>
                   <th>CUSTOMER</th>
                   <th>ORDER ID</th>
+                  <th>APPROVED BY</th>
                   <th className={styles.numCol}>ORDER AMOUNT</th>
                   <th className={styles.numCol}>LIMIT</th>
                   <th className={styles.numCol}>EXCEEDED</th>
@@ -312,13 +348,16 @@ export default function CreditOverridesReport() {
                       <td>
                         <span className={styles.billRef}>{log.orderId || '—'}</span>
                       </td>
-                      <td className={`${styles.numCol} ${styles.amountCell}`}>
+                      <td>
+                        <div className={styles.customerName}>{formatUser(log.userId)}</div>
+                      </td>
+                      <td className={`${styles.amountCell} ${styles.numCol}`}>
                         <CurrencySymbol size={11} /> {(log.orderAmount || 0).toFixed(2)}
                       </td>
-                      <td className={`${styles.numCol} ${styles.amountCell}`}>
+                      <td className={`${styles.amountCell} ${styles.numCol}`}>
                         <CurrencySymbol size={11} /> {(log.creditLimit || 0).toFixed(2)}
                       </td>
-                      <td className={`${styles.numCol} ${styles.exceededCell}`}>
+                      <td className={`${styles.exceededCell} ${styles.numCol}`}>
                         <CurrencySymbol size={11} /> {(log.exceededAmount || 0).toFixed(2)}
                       </td>
                       <td style={{ textAlign: 'center' }}>
@@ -331,7 +370,7 @@ export default function CreditOverridesReport() {
                 })}
               </tbody>
             </table>
-          </>
+          </div>
         )}
       </motion.div>
     </motion.div>
@@ -341,12 +380,12 @@ export default function CreditOverridesReport() {
 function KPICard({ icon, bg, label, value, subtext }) {
   return (
     <div className={styles.kpiCard}>
-      <div className={styles.cardHeader}>
-        <div className={styles.iconBox} style={{ background: bg }}>{icon}</div>
+      <div className={styles.iconBox} style={{ background: bg }}>{icon}</div>
+      <div className={styles.kpiInfo}>
+        <span className={styles.kpiLabel}>{label}</span>
+        <span className={styles.kpiValue}>{value}</span>
+        <span className={styles.kpiSubtext}>{subtext}</span>
       </div>
-      <div className={styles.kpiLabel}>{label}</div>
-      <div className={styles.kpiValue}>{value}</div>
-      <div className={styles.kpiSubtext}>{subtext}</div>
     </div>
   );
 }

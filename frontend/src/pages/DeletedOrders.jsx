@@ -111,6 +111,37 @@ export default function DeletedOrders() {
     }
   };
 
+  const handleMarkAsReturned = async (orderId) => {
+    if (!window.confirm('Are you sure you want to mark this payment as returned/refunded to the customer?')) return;
+    try {
+      if (window.electronAPI?.dbQuery) {
+        await window.electronAPI.dbQuery(
+          "UPDATE deleted_orders SET returnStatus = 'Returned' WHERE id = ?",
+          [orderId]
+        );
+      }
+      
+      // Update state locally
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, returnStatus: 'Returned' } : o));
+      
+      // Attempt backend sync
+      try {
+        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/orders/deleted/${encodeURIComponent(orderId)}/refund`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ returnStatus: 'Returned' })
+        });
+      } catch (remoteErr) {
+        console.warn('Backend sync failed (offline):', remoteErr.message);
+      }
+      
+      alert('Payment marked as returned successfully.');
+    } catch (err) {
+      console.error('Failed to mark as returned:', err);
+      alert('Failed to update return status: ' + err.message);
+    }
+  };
+
   useEffect(() => {
     if (pinVerified) fetchData();
   }, [pinVerified, dateRange, customStart, customEnd]);
@@ -149,7 +180,9 @@ export default function DeletedOrders() {
         const ref = (o.billNumber || o.id || '').toLowerCase();
         const name = (o.customerName || '').toLowerCase();
         const phone = (o.customerPhone || '').toLowerCase();
-        if (!ref.includes(q) && !name.includes(q) && !phone.includes(q)) return false;
+        const deletedBy = (o.deletedBy || '').toLowerCase();
+        const approvedBy = (o.approvedBy || '').toLowerCase();
+        if (!ref.includes(q) && !name.includes(q) && !phone.includes(q) && !deletedBy.includes(q) && !approvedBy.includes(q)) return false;
       }
       return true;
     });
@@ -160,7 +193,7 @@ export default function DeletedOrders() {
   const totalVoidedAmount = filteredOrders.reduce((s, o) => s + (o.totalAmount || 0), 0);
   // Export CSV
   const exportCSV = () => {
-    const headers = ['Deletion Date', 'Order ID', 'Bill No.', 'Customer', 'Phone', 'Items', 'Voided Amount'];
+    const headers = ['Deletion Date', 'Order ID', 'Bill No.', 'Customer', 'Phone', 'Items', 'Approved By', 'Original Payment Status', 'Paid Amount', 'Refund/Return Status', 'Voided Amount'];
     const rows = filteredOrders.map(o => {
       let items = '';
       try {
@@ -174,6 +207,10 @@ export default function DeletedOrders() {
         `"${o.customerName || 'Walk-in'}"`,
         o.customerPhone || '',
         `"${items}"`,
+        `"${o.deletedBy || '—'}"`,
+        `"${o.originalPaymentStatus || 'N/A'}"`,
+        (o.paidAmount || 0).toFixed(2),
+        `"${o.returnStatus || 'N/A'}"`,
         (o.totalAmount || 0).toFixed(2)
       ];
     });
@@ -332,6 +369,8 @@ export default function DeletedOrders() {
                 <th>Order Ref</th>
                 <th>Customer</th>
                 <th>Items Summary</th>
+                <th>Approved By</th>
+                <th>Return Status</th>
                 <th className={styles.numCol}>Amount</th>
               </tr>
             </thead>
@@ -367,6 +406,36 @@ export default function DeletedOrders() {
                         return <span className={styles.dash}>-</span>;
                       }
                     })()}
+                  </td>
+                  <td>
+                    <div className={styles.customerName}>{order.deletedBy || '—'}</div>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', alignItems: 'flex-start' }}>
+                      {order.returnStatus === 'Return Pending' ? (
+                        <>
+                          <span className={styles.badgePending}>Return Payment</span>
+                          <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>
+                            Paid: <CurrencySymbol size={10} /> {(order.paidAmount || 0).toFixed(2)} ({order.originalPaymentStatus})
+                          </span>
+                          <button
+                            className={styles.refundBtn}
+                            onClick={() => handleMarkAsReturned(order.id)}
+                          >
+                            Mark Returned
+                          </button>
+                        </>
+                      ) : order.returnStatus === 'Returned' ? (
+                        <>
+                          <span className={styles.badgeReturned}>Returned</span>
+                          <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 500 }}>
+                            Refunded: <CurrencySymbol size={10} /> {(order.paidAmount || 0).toFixed(2)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className={styles.badgeNA}>—</span>
+                      )}
+                    </div>
                   </td>
                   <td className={`${styles.amountCell} ${styles.numCol}`}>
                     <CurrencySymbol size={12} /> {(order.totalAmount || 0).toFixed(2)}

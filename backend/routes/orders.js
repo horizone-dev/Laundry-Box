@@ -108,8 +108,9 @@ router.post('/', async (req, res) => {
 // DELETE /api/orders/:id - Delete order
 router.delete('/:id', async (req, res) => {
   const orderId = req.params.id;
-  const { deletedBy } = req.body;
-  const finalDeletedBy = deletedBy || req.query.deletedBy || 'Manager';
+  const { deletedBy, approvedBy, refundImmediately } = req.body;
+  const finalDeletedBy = deletedBy || req.query.deletedBy || 'Staff';
+  const finalApprovedBy = approvedBy || req.query.approvedBy || 'Manager';
   try {
     let order = await Order.findOne({
       $or: [
@@ -139,7 +140,13 @@ router.delete('/:id', async (req, res) => {
       totalAmount: order.totalAmount,
       items: order.items,
       deletedBy: finalDeletedBy,
-      deletedAt: new Date()
+      approvedBy: finalApprovedBy,
+      deletedAt: new Date(),
+      originalPaymentStatus: order.paymentStatus,
+      paidAmount: order.paidAmount || 0,
+      returnStatus: (order.paidAmount > 0 || ['Paid', 'Partial'].includes(order.paymentStatus))
+        ? (refundImmediately ? 'Returned' : 'Return Pending')
+        : 'N/A'
     });
     await deletedRecord.save();
 
@@ -175,6 +182,22 @@ router.delete('/:id', async (req, res) => {
     }
 
     res.json({ message: 'Order deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// PATCH /api/orders/deleted/:id/refund - Update return payment status of a deleted order
+router.patch('/deleted/:id/refund', async (req, res) => {
+  try {
+    const { returnStatus } = req.body;
+    const updated = await DeletedOrder.findOneAndUpdate(
+      { id: req.params.id },
+      { returnStatus },
+      { new: true }
+    );
+    if (!updated) return res.status(404).json({ message: 'Deleted order log not found' });
+    res.json(updated);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
