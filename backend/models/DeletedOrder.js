@@ -14,7 +14,12 @@ const deletedOrderSchema = new mongoose.Schema({
   approvedBy: { type: String },
   originalPaymentStatus: { type: String },
   paidAmount: { type: Number, default: 0 },
-  returnStatus: { type: String, default: 'N/A' }
+  returnStatus: { type: String, default: 'N/A' },
+  originalPaymentMethod: { type: String },
+  payments: { type: mongoose.Schema.Types.Mixed },
+  refundMethod: { type: String },
+  returnedAt: { type: Date },
+  refundStatus: { type: String, default: 'Deleted' }
 }, { 
   timestamps: true,
   strict: true 

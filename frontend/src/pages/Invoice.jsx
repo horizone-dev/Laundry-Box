@@ -110,8 +110,14 @@ export default function Invoice() {
               total: rawOrder.totalAmount,
               paidAmount: paidAmount,
               previousBalance: previousBalance,
-              totalBalance: totalBalance,
-              expectedDeliveryDate: rawOrder.expectedDeliveryDate || '',
+              expectedDeliveryDate: (() => {
+                const rawDate = rawOrder.expectedDeliveryDate || '';
+                if (rawDate.includes(' ')) {
+                  const [datePart, timePart] = rawDate.split(' ');
+                  return `${formatDate(datePart)} ${timePart}`;
+                }
+                return rawDate ? formatDate(rawDate) : '';
+              })(),
               specialInstructions: rawOrder.specialInstructions || ''
             });
           } else {
@@ -147,7 +153,7 @@ export default function Invoice() {
         paidAmount: 113.40,
         previousBalance: 0.00,
         totalBalance: 0.00,
-        expectedDeliveryDate: '2026-06-02',
+        expectedDeliveryDate: '2026-06-02 17:00',
         specialInstructions: 'Handle with care'
       });
     };

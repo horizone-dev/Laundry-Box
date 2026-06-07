@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../store/SettingsContext';
 import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
+import { getLocalDateBounds, isWithinBounds } from '../utils/dateFilters';
 import styles from './OutstandingBills.module.css';
 import axios from 'axios';
 
@@ -65,54 +66,21 @@ export default function OutstandingBills() {
     return diffDays > overdueDays;
   };
 
-  const getDateBounds = () => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    if (dateRange === 'Today') {
-      return { from: today, to: new Date(today.getTime() + 86400000 - 1) };
-    }
-    if (dateRange === 'This Week') {
-      const day = today.getDay();
-      const start = new Date(today); start.setDate(today.getDate() - day);
-      const end = new Date(start); end.setDate(start.getDate() + 6);
-      return { from: start, to: end };
-    }
-    if (dateRange === 'This Month') {
-      return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59) };
-    }
-    if (dateRange === 'This Year') {
-      return { from: new Date(now.getFullYear(), 0, 1), to: new Date(now.getFullYear(), 11, 31, 23, 59, 59) };
-    }
-    if (dateRange === 'Custom' && customStart && customEnd) {
-      return { from: new Date(customStart), to: new Date(customEnd + 'T23:59:59') };
-    }
-    return null;
-  };
-
   const filteredBills = React.useMemo(() => {
-    if (dateRange === 'Custom' && (!customStart || !customEnd)) {
-      return [];
-    }
-    const bounds = getDateBounds();
+    const bounds = getLocalDateBounds(dateRange, customStart, customEnd);
+    if (bounds === false) return [];
     return bills.filter(bill => {
-      const matchesSearch = 
+      const matchesSearch =
         (bill.id || '').toString().toLowerCase().includes(searchTerm.toLowerCase()) ||
         (bill.customerName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (bill.billNumber || '').toLowerCase().includes(searchTerm.toLowerCase());
-      
       if (!matchesSearch) return false;
-      
       if (filterType === 'Overdue' && !isOverdue(bill)) return false;
       if (filterType === 'Due Soon') {
         const diffDays = Math.ceil(Math.abs(new Date() - new Date(bill.createdAt)) / (1000 * 60 * 60 * 24));
         if (!(diffDays <= 7 && !isOverdue(bill))) return false;
       }
-
-      if (bounds && bill.createdAt) {
-        const created = new Date(bill.createdAt);
-        if (created < bounds.from || created > bounds.to) return false;
-      }
-
+      if (bounds !== null) return isWithinBounds(bill.createdAt, bounds);
       return true;
     });
   }, [bills, searchTerm, filterType, dateRange, customStart, customEnd]);
@@ -225,7 +193,6 @@ export default function OutstandingBills() {
           >
             <option value="All">All Time</option>
             <option value="Today">Today</option>
-            <option value="This Week">This Week</option>
             <option value="This Month">This Month</option>
             <option value="This Year">This Year</option>
             <option value="Custom">Custom Range</option>

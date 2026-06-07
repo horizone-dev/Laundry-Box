@@ -9,6 +9,8 @@ import {
 import CurrencySymbol from '../components/CurrencySymbol';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID } from '../constants';
+import { getLocalDateBounds, localStrIsWithinBounds } from '../utils/dateFilters';
+import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
 import styles from './Accounts.module.css';
 
 const ICON_OPTIONS = [
@@ -120,7 +122,8 @@ export default function Accounts() {
     if (window.electronAPI?.dbQuery) {
       try {
         const id = `TXN-${Date.now()}`;
-        const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+        const _nowA = new Date();
+        const timestamp = `${_nowA.getFullYear()}-${String(_nowA.getMonth()+1).padStart(2,'0')}-${String(_nowA.getDate()).padStart(2,'0')} ${String(_nowA.getHours()).padStart(2,'0')}:${String(_nowA.getMinutes()).padStart(2,'0')}`;
         
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
@@ -136,7 +139,7 @@ export default function Accounts() {
             formData.description, 
             timestamp, 
             0, 
-            new Date().toISOString(),
+            getLocalISOString(),
             formData.icon
           ]
         );
@@ -165,7 +168,7 @@ export default function Accounts() {
     }
   };
 
-  const { settings } = useSettings();
+  const { settings, formatDate } = useSettings();
   const bankAccounts = settings.bankAccounts || [];
   const [selectedBankId, setSelectedBankId] = useState('all');
 
@@ -173,53 +176,12 @@ export default function Accounts() {
     const matchesSearch = t.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           t.category?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesBank = selectedBankId === 'all' || t.bankAccountId === selectedBankId;
-    
     if (!matchesSearch || !matchesBank) return false;
-    
-    if (dateRange === 'Custom' && (!customStart || !customEnd)) {
-      return false;
-    }
-    
-    if (dateRange !== 'All' && t.date) {
-      const parseDateSafe = (dateStr) => {
-        if (!dateStr) return new Date();
-        const parts = dateStr.split(' ');
-        const datePart = parts[0]; // YYYY-MM-DD
-        const dateParts = datePart.split('-');
-        return new Date(parseInt(dateParts[0], 10), parseInt(dateParts[1], 10) - 1, parseInt(dateParts[2], 10));
-      };
-      
-      const txDate = parseDateSafe(t.date);
-      const now = new Date();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      
-      if (dateRange === 'Today') {
-        return txDate.getFullYear() === today.getFullYear() &&
-               txDate.getMonth() === today.getMonth() &&
-               txDate.getDate() === today.getDate();
-      }
-      if (dateRange === 'This Week') {
-        const startOfWeek = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay());
-        const endOfWeek = new Date(startOfWeek);
-        endOfWeek.setDate(startOfWeek.getDate() + 7);
-        return txDate >= startOfWeek && txDate < endOfWeek;
-      }
-      if (dateRange === 'This Month') {
-        return txDate.getFullYear() === today.getFullYear() &&
-               txDate.getMonth() === today.getMonth();
-      }
-      if (dateRange === 'This Year') {
-        return txDate.getFullYear() === today.getFullYear();
-      }
-      if (dateRange === 'Custom') {
-        const start = new Date(customStart);
-        start.setHours(0,0,0,0);
-        const end = new Date(customEnd);
-        end.setHours(23,59,59,999);
-        return txDate >= start && txDate <= end;
-      }
-    }
-    return true;
+
+    const bounds = getLocalDateBounds(dateRange, customStart, customEnd);
+    if (bounds === false) return false; // Custom selected but dates not filled
+    if (bounds === null) return true;   // "All" — show everything
+    return localStrIsWithinBounds(t.date, bounds);
   });
 
   const filteredIncome = filteredTransactions.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + t.amount, 0);
@@ -283,7 +245,6 @@ export default function Accounts() {
                 >
                   <option value="All">All Time</option>
                   <option value="Today">Today</option>
-                  <option value="This Week">This Week</option>
                   <option value="This Month">This Month</option>
                   <option value="This Year">This Year</option>
                   <option value="Custom">Custom Range</option>
@@ -356,7 +317,7 @@ export default function Accounts() {
                         <div className={styles.tableIcon} style={{ background: ICON_OPTIONS.find(i => i.id === t.icon)?.color + '15', color: ICON_OPTIONS.find(i => i.id === t.icon)?.color }}>
                           <IconComp size={16} />
                         </div>
-                        {t.date}
+                        {formatDate(t.date)}
                       </div>
                     </td>
                     <td><span className={styles.categoryBadge}>{t.category}</span></td>

@@ -10,6 +10,7 @@ import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
 import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
+import { getLocalISOString, getLocalDateStr } from '../utils/dateUtils';
 import styles from './ExpectedDeliveries.module.css';
 
 const API_BASE = API_BASE_URL;
@@ -81,7 +82,7 @@ export default function ExpectedDeliveries() {
 
   // Helper date parsing/matching functions
   const getTodayString = () => {
-    return new Date().toISOString().split('T')[0];
+    return getLocalDateStr();
   };
 
   const getTomorrowString = () => {
@@ -112,9 +113,9 @@ export default function ExpectedDeliveries() {
   const todayStr = getTodayString();
   const tomorrowStr = getTomorrowString();
 
-  const overdueCount = activeOrders.filter(o => o.expectedDeliveryDate && o.expectedDeliveryDate < todayStr).length;
-  const todayCount = activeOrders.filter(o => o.expectedDeliveryDate === todayStr).length;
-  const tomorrowCount = activeOrders.filter(o => o.expectedDeliveryDate === tomorrowStr).length;
+  const overdueCount = activeOrders.filter(o => o.expectedDeliveryDate && o.expectedDeliveryDate.substring(0, 10) < todayStr).length;
+  const todayCount = activeOrders.filter(o => o.expectedDeliveryDate && o.expectedDeliveryDate.substring(0, 10) === todayStr).length;
+  const tomorrowCount = activeOrders.filter(o => o.expectedDeliveryDate && o.expectedDeliveryDate.substring(0, 10) === tomorrowStr).length;
   const totalPendingCount = activeOrders.length;
 
   const filteredOrders = React.useMemo(() => {
@@ -123,7 +124,7 @@ export default function ExpectedDeliveries() {
       if (statusFilter !== 'All' && order.status !== statusFilter) return false;
 
       // 2. Date Filter
-      const expDate = order.expectedDeliveryDate;
+      const expDate = order.expectedDeliveryDate ? order.expectedDeliveryDate.substring(0, 10) : '';
       
       if (dateFilter === 'All Pending') {
         // Only active/pending orders
@@ -138,11 +139,7 @@ export default function ExpectedDeliveries() {
         return expDate === tomorrowStr;
       }
 
-      if (dateFilter === 'This Week') {
-        if (!expDate) return false;
-        const d = new Date(expDate);
-        return d >= getStartOfWeekDate() && d <= getEndOfWeekDate();
-      }
+
 
       if (dateFilter === 'Overdue') {
         return expDate && expDate < todayStr && order.status !== 'Delivered' && order.status !== 'Cancelled';
@@ -159,7 +156,7 @@ export default function ExpectedDeliveries() {
 
   const handleUpdateExpectedDate = async (order, newDate) => {
     try {
-      const timestamp = new Date().toISOString();
+      const timestamp = getLocalISOString();
       if (window.electronAPI?.dbQuery) {
         await window.electronAPI.dbQuery(
           'UPDATE orders SET expectedDeliveryDate = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
@@ -191,7 +188,7 @@ export default function ExpectedDeliveries() {
     }
 
     try {
-      const timestamp = new Date().toISOString();
+      const timestamp = getLocalISOString();
       let newHistory = [];
       
       let history = [];
@@ -245,7 +242,15 @@ export default function ExpectedDeliveries() {
       cleanPhone = countryCode + cleanPhone;
     }
 
-    const formattedExp = expDate ? formatDate(expDate) : 'Not Scheduled';
+    let formattedExp = 'Not Scheduled';
+    if (expDate) {
+      if (expDate.includes(' ')) {
+        const [datePart, timePart] = expDate.split(' ');
+        formattedExp = `${formatDate(datePart)} at ${timePart}`;
+      } else {
+        formattedExp = formatDate(expDate);
+      }
+    }
     const message = `Hello! Regarding your laundry order #${id}, the current status is "${status}". Expected delivery date is ${formattedExp}. Thank you!`;
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
 
@@ -267,7 +272,7 @@ export default function ExpectedDeliveries() {
     
     try {
       const order = selectedOrderForPay;
-      const timestamp = new Date().toISOString();
+      const timestamp = getLocalISOString();
       const amountToPay = order.dueAmount || order.totalAmount;
       const nextStatus = ['Payment Pending', 'Credit', 'Pending'].includes(order.status)
         ? 'Confirmed'
@@ -290,7 +295,8 @@ export default function ExpectedDeliveries() {
 
         // Record account transaction
         const txnId = `TXN-${Date.now()}`;
-        const txnTimestamp = timestamp.replace('T', ' ').slice(0, 16);
+        const _nowEd = new Date();
+        const txnTimestamp = `${_nowEd.getFullYear()}-${String(_nowEd.getMonth()+1).padStart(2,'0')}-${String(_nowEd.getDate()).padStart(2,'0')} ${String(_nowEd.getHours()).padStart(2,'0')}:${String(_nowEd.getMinutes()).padStart(2,'0')}`;
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
@@ -440,12 +446,7 @@ export default function ExpectedDeliveries() {
           >
             Tomorrow
           </button>
-          <button 
-            className={`${styles.filterBtn} ${dateFilter === 'This Week' ? styles.active : ''}`}
-            onClick={() => setDateFilter('This Week')}
-          >
-            This Week
-          </button>
+
           <button 
             className={`${styles.filterBtn} ${dateFilter === 'Overdue' ? styles.active : ''}`}
             onClick={() => setDateFilter('Overdue')}
@@ -506,7 +507,7 @@ export default function ExpectedDeliveries() {
               <th>Order ID</th>
               <th>Customer</th>
               <th>Created Date</th>
-              <th>Expected Date (Edit Inline)</th>
+              <th>Expected Date & Time (Edit Inline)</th>
               <th>Status (Edit Inline)</th>
               <th>Payment</th>
               <th>Dues</th>
@@ -538,14 +539,36 @@ export default function ExpectedDeliveries() {
                         </td>
                         <td>{formatDate(order.createdAt)}</td>
                         <td>
-                          <div className={styles.datePickerContainer}>
-                            <Calendar size={14} className={styles.datePickerIcon} />
-                            <input 
-                              type="date" 
-                              value={order.expectedDeliveryDate || ''} 
-                              onChange={(e) => handleUpdateExpectedDate(order, e.target.value)}
-                              className={styles.inlineDateInput}
-                            />
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', alignItems: 'flex-start' }}>
+                            <div className={styles.datePickerContainer} style={{ width: '130px' }}>
+                              <Calendar size={13} className={styles.datePickerIcon} />
+                              <input 
+                                type="date" 
+                                value={order.expectedDeliveryDate ? order.expectedDeliveryDate.substring(0, 10) : ''} 
+                                onChange={(e) => {
+                                  const newDate = e.target.value;
+                                  const existingTime = order.expectedDeliveryDate && order.expectedDeliveryDate.includes(' ')
+                                    ? order.expectedDeliveryDate.split(' ')[1]
+                                    : '17:00';
+                                  handleUpdateExpectedDate(order, `${newDate} ${existingTime}`);
+                                }}
+                                className={styles.inlineDateInput}
+                                style={{ paddingLeft: '1.75rem', fontSize: '0.8rem' }}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', padding: '0.35rem 0.5rem', background: 'white', border: '1px solid #CBD5E1', borderRadius: '6px', width: '130px', boxSizing: 'border-box' }}>
+                              <Clock size={12} color="#64748B" />
+                              <input 
+                                type="time" 
+                                value={order.expectedDeliveryDate && order.expectedDeliveryDate.includes(' ') ? order.expectedDeliveryDate.split(' ')[1] : '17:00'} 
+                                onChange={(e) => {
+                                  const newTime = e.target.value || '17:00';
+                                  const existingDate = order.expectedDeliveryDate ? order.expectedDeliveryDate.substring(0, 10) : getTodayString();
+                                  handleUpdateExpectedDate(order, `${existingDate} ${newTime}`);
+                                }}
+                                style={{ border: 'none', background: 'transparent', fontSize: '0.8rem', outline: 'none', color: '#334155', fontWeight: 600, width: '100%', padding: 0 }}
+                              />
+                            </div>
                           </div>
                         </td>
                         <td>

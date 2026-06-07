@@ -20,15 +20,41 @@ router.get('/search', async (req, res) => {
   try {
     const { q } = req.query;
     const searchRegex = new RegExp(q, 'i');
-    const orders = await Order.find({
+    const activeOrders = await Order.find({
       $or: [
         { id: searchRegex },
         { billNumber: searchRegex },
         { customerName: searchRegex },
         { customerPhone: searchRegex }
       ]
-    }).sort({ createdAt: -1 });
-    res.json(orders);
+    }).sort({ createdAt: -1 }).lean();
+
+    const deletedOrders = await DeletedOrder.find({
+      $or: [
+        { id: searchRegex },
+        { billNumber: searchRegex },
+        { customerName: searchRegex },
+        { customerPhone: searchRegex }
+      ]
+    }).sort({ deletedAt: -1 }).lean();
+
+    const activeMapped = activeOrders.map(o => ({
+      ...o,
+      isDeleted: false
+    }));
+
+    const deletedMapped = deletedOrders.map(d => ({
+      ...d,
+      isDeleted: true,
+      status: 'Deleted',
+      createdAt: d.deletedAt,
+      dueAmount: 0,
+      paymentStatus: d.originalPaymentStatus,
+      paymentMethod: d.originalPaymentMethod
+    }));
+
+    const all = [...activeMapped, ...deletedMapped].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json(all);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -108,7 +134,7 @@ router.post('/', async (req, res) => {
 // DELETE /api/orders/:id - Delete order
 router.delete('/:id', async (req, res) => {
   const orderId = req.params.id;
-  const { deletedBy, approvedBy, refundImmediately } = req.body;
+  const { deletedBy, approvedBy, refundImmediately, refundMethod, payments, originalPaymentMethod } = req.body;
   const finalDeletedBy = deletedBy || req.query.deletedBy || 'Staff';
   const finalApprovedBy = approvedBy || req.query.approvedBy || 'Manager';
   try {
@@ -129,6 +155,11 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
+    const isPaid = order.paidAmount > 0 || ['Paid', 'Partial'].includes(order.paymentStatus);
+    const initialRefundStatus = isPaid
+      ? (refundImmediately ? 'Returned' : 'Refund Pending')
+      : 'Deleted';
+
     // 0. Save to DeletedOrder audit log collection in MongoDB
     const deletedRecord = new DeletedOrder({
       id: order.id,
@@ -144,9 +175,12 @@ router.delete('/:id', async (req, res) => {
       deletedAt: new Date(),
       originalPaymentStatus: order.paymentStatus,
       paidAmount: order.paidAmount || 0,
-      returnStatus: (order.paidAmount > 0 || ['Paid', 'Partial'].includes(order.paymentStatus))
-        ? (refundImmediately ? 'Returned' : 'Return Pending')
-        : 'N/A'
+      returnStatus: isPaid ? (refundImmediately ? 'Returned' : 'Return Pending') : 'N/A',
+      originalPaymentMethod: originalPaymentMethod || order.paymentMethod || 'CASH',
+      payments: payments || [],
+      refundMethod: refundImmediately ? (refundMethod || 'CASH') : null,
+      returnedAt: refundImmediately ? new Date() : null,
+      refundStatus: initialRefundStatus
     });
     await deletedRecord.save();
 
@@ -173,7 +207,12 @@ router.delete('/:id', async (req, res) => {
       });
       const totalPayments = unlinkedPayments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
 
-      const newBalance = totalDue - totalPayments;
+      // Subtract the deleted order's paidAmount — the customer already paid this,
+      // and now the order is removed. If NOT refunded immediately, their balance
+      // should decrease (meaning we owe them). If refunded immediately, their balance
+      // shouldn't change relative to the deleted order since they got the cash back.
+      const deletedPaidAmount = refundImmediately ? 0 : (order.paidAmount || 0);
+      const newBalance = totalDue - totalPayments - deletedPaidAmount;
 
       await Customer.findOneAndUpdate(
         { id: customerId, shopId },
@@ -190,14 +229,32 @@ router.delete('/:id', async (req, res) => {
 // PATCH /api/orders/deleted/:id/refund - Update return payment status of a deleted order
 router.patch('/deleted/:id/refund', async (req, res) => {
   try {
-    const { returnStatus } = req.body;
-    const updated = await DeletedOrder.findOneAndUpdate(
-      { id: req.params.id },
-      { returnStatus },
-      { new: true }
-    );
-    if (!updated) return res.status(404).json({ message: 'Deleted order log not found' });
-    res.json(updated);
+    const { returnStatus, refundMethod } = req.body;
+    const deletedOrder = await DeletedOrder.findOne({ id: req.params.id });
+    if (!deletedOrder) return res.status(404).json({ message: 'Deleted order log not found' });
+    
+    const oldStatus = deletedOrder.refundStatus || deletedOrder.returnStatus;
+    
+    deletedOrder.returnStatus = returnStatus || 'Returned';
+    deletedOrder.refundStatus = 'Returned';
+    deletedOrder.refundMethod = refundMethod || 'CASH';
+    deletedOrder.returnedAt = new Date();
+    
+    await deletedOrder.save();
+
+    // If status changed to Returned, adjust customer balance
+    if (oldStatus !== 'Returned') {
+      if (deletedOrder.customerId) {
+        const customer = await Customer.findOne({ id: deletedOrder.customerId, shopId: deletedOrder.shopId });
+        if (customer) {
+          customer.balance += deletedOrder.paidAmount;
+          customer.updatedAt = new Date();
+          await customer.save();
+        }
+      }
+    }
+    
+    res.json(deletedOrder);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

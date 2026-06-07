@@ -7,11 +7,12 @@ import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
+import { getLocalISOString, getLocalDateStr } from '../utils/dateUtils';
 import styles from './Customers.module.css';
 
 export default function Customers() {
   const navigate = useNavigate();
-  const { settings } = useSettings();
+  const { settings, formatDate } = useSettings();
   const [customers, setCustomers] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
@@ -71,7 +72,7 @@ export default function Customers() {
 
   const handleSaveCustomer = async (e) => {
     e.preventDefault();
-    const timestamp = new Date().toISOString();
+    const timestamp = getLocalISOString();
 
     if (window.electronAPI?.dbQuery) {
       try {
@@ -114,7 +115,7 @@ export default function Customers() {
       try {
         let remainingPayment = parseFloat(paymentData.amount);
         const totalPaid = remainingPayment;
-        const timestamp = new Date().toISOString();
+        const timestamp = getLocalISOString();
 
         console.log(`Starting settlement for ${selectedCustomer.name}. Amount: ${totalPaid}`);
 
@@ -188,7 +189,8 @@ export default function Customers() {
 
         // 3. Record Transaction in Accounts
         const txnId = `TXN-${Date.now()}`;
-        const txnTimestamp = timestamp.replace('T', ' ').slice(0, 16);
+        const _nowC = new Date();
+        const txnTimestamp = `${_nowC.getFullYear()}-${String(_nowC.getMonth()+1).padStart(2,'0')}-${String(_nowC.getDate()).padStart(2,'0')} ${String(_nowC.getHours()).padStart(2,'0')}:${String(_nowC.getMinutes()).padStart(2,'0')}`;
         
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
@@ -241,7 +243,7 @@ export default function Customers() {
       try {
         await window.electronAPI.dbQuery(
           'UPDATE customers SET creditLimit = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          [newLimit, new Date().toISOString(), selectedCustomer.id]
+          [newLimit, getLocalISOString(), selectedCustomer.id]
         );
         fetchCustomers();
         setShowEditCreditLimitModal(false);
@@ -385,7 +387,7 @@ export default function Customers() {
             const link = document.createElement('a');
             const url = URL.createObjectURL(blob);
             link.setAttribute('href', url);
-            link.setAttribute('download', `customers_${new Date().toISOString().split('T')[0]}.csv`);
+            link.setAttribute('download', `customers_${getLocalDateStr()}.csv`);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
@@ -468,7 +470,7 @@ export default function Customers() {
                     );
                   })()}
                 </td>
-                <td>{customer.lastDate || customer.updatedAt?.split('T')[0] || 'N/A'}</td>
+                <td>{customer.lastDate ? formatDate(customer.lastDate) : customer.updatedAt ? formatDate(customer.updatedAt) : 'N/A'}</td>
                 <td>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button 
@@ -648,7 +650,7 @@ export default function Customers() {
                   {customerBills.length > 0 ? customerBills.map((bill) => (
                     <tr key={bill.id}>
                       <td style={{ fontWeight: 700 }}>{bill.id}</td>
-                      <td>{bill.createdAt?.split('T')[0]}</td>
+                      <td>{formatDate(bill.createdAt)}</td>
                       <td><CurrencySymbol size={14} /> {bill.totalAmount.toFixed(2)}</td>
                       <td>
                         <CurrencySymbol size={14} /> {

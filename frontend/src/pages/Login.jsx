@@ -68,7 +68,7 @@ export default function Login({ onLogin }) {
         sessionStorage.setItem('user', JSON.stringify(response.data.user));
         sessionStorage.setItem('isAuthenticated', 'true');
         onLogin(true);
-        navigate('/');
+        navigate('/pos', { replace: true });
       }
     } catch (err) {
       console.error("Login failed:", err);

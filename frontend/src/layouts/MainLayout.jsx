@@ -11,6 +11,7 @@ import { syncData } from '../services/syncService';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
 import { t } from '../utils/translations';
+import { getLocalDateTime, getLocalISOString } from '../utils/dateUtils';
 import styles from './MainLayout.module.css';
 
 const API_BASE = API_BASE_URL;
@@ -42,6 +43,14 @@ export default function MainLayout() {
   const [settleAmount, setSettleAmount] = useState('');
   const [settleMethod, setSettleMethod] = useState('CASH');
   const [logoClicks, setLogoClicks] = useState(0);
+  const [selectedBank, setSelectedBank] = useState('');
+
+  useEffect(() => {
+    if (settings.bankAccounts && settings.bankAccounts.length > 0 && !selectedBank) {
+      const defaultBank = settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || settings.bankAccounts[0];
+      setSelectedBank(defaultBank.bankName);
+    }
+  }, [settings.bankAccounts, settings.defaultBankId, selectedBank]);
 
   // Software Update States
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -396,8 +405,8 @@ export default function MainLayout() {
       if (window.electronAPI?.dbQuery) {
         let history = [];
         try {
-          history = typeof foundOrder.statusHistory === 'string' 
-            ? JSON.parse(foundOrder.statusHistory || '[]') 
+          history = typeof foundOrder.statusHistory === 'string'
+            ? JSON.parse(foundOrder.statusHistory || '[]')
             : (foundOrder.statusHistory || []);
           if (!Array.isArray(history)) history = [];
         } catch (e) {
@@ -483,11 +492,11 @@ export default function MainLayout() {
     setIsUpdating(true);
     try {
       const amount = parseFloat(settleAmount);
-      const timestamp = new Date().toISOString();
+      const timestamp = getLocalISOString();
 
       if (selectedSettleTarget.type === 'customer') {
         const customer = selectedSettleTarget.data;
-        
+
         // 1. Update Customer Balance
         await window.electronAPI.dbQuery(
           'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
@@ -499,6 +508,28 @@ export default function MainLayout() {
           `INSERT INTO payments (id, customerId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
           [`PAY-QUICK-${Date.now()}`, customer.id, DEFAULT_SHOP_ID, amount, settleMethod, 'SUCCESS', timestamp, timestamp]
+        );
+
+        // Record Transaction in Accounts
+        const txnId = `TXN-${Date.now()}`;
+        const txnTimestamp = getLocalDateTime();
+        await window.electronAPI.dbQuery(
+          `INSERT INTO account_transactions 
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+          [
+            txnId,
+            DEFAULT_SHOP_ID,
+            settleMethod,
+            'INCOME',
+            'Credit Settlement',
+            amount,
+            `Settlement from ${customer.name}${settleMethod === 'BANK' && selectedBank ? ` via ${selectedBank}` : ''}`,
+            txnTimestamp,
+            timestamp,
+            'DollarSign',
+            settleMethod === 'BANK' ? selectedBank : null
+          ]
         );
 
         // 3. Try to settle orders (simplified FIFO)
@@ -561,6 +592,28 @@ export default function MainLayout() {
         await window.electronAPI.dbQuery(
           'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
           [amount, timestamp, bill.customerId]
+        );
+
+        // Record Transaction in Accounts
+        const txnId = `TXN-${Date.now()}`;
+        const txnTimestamp = getLocalDateTime();
+        await window.electronAPI.dbQuery(
+          `INSERT INTO account_transactions 
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+          [
+            txnId,
+            DEFAULT_SHOP_ID,
+            settleMethod,
+            'INCOME',
+            'Sales Settlement',
+            amount,
+            `Settlement for Bill #${bill.billNumber || bill.id}${settleMethod === 'BANK' && selectedBank ? ` via ${selectedBank}` : ''}`,
+            txnTimestamp,
+            timestamp,
+            'DollarSign',
+            settleMethod === 'BANK' ? selectedBank : null
+          ]
         );
 
         alert(`Successfully settled ${amount} for Bill #${bill.billNumber || bill.id}`);
@@ -994,8 +1047,8 @@ export default function MainLayout() {
               {!selectedSettleTarget && quickSettleResults.length > 0 && (
                 <div className={styles.quickSettleResults}>
                   {quickSettleResults.map((result, idx) => (
-                    <div 
-                      key={idx} 
+                    <div
+                      key={idx}
                       className={styles.quickSettleResultItem}
                       onClick={() => {
                         setSelectedSettleTarget(result);
@@ -1018,8 +1071,8 @@ export default function MainLayout() {
                             {result.type === 'customer' ? result.data.name : `Bill #${result.data.billNumber || result.data.id}`}
                           </span>
                           <span className={styles.resultItemSub}>
-                            {result.type === 'customer' 
-                              ? (result.data.phone ? `Phone: ${result.data.phone}` : 'No Phone Number') 
+                            {result.type === 'customer'
+                              ? (result.data.phone ? `Phone: ${result.data.phone}` : 'No Phone Number')
                               : `Cust: ${result.data.customerName || 'Walk-in'} ${result.data.customerPhone ? `(${result.data.customerPhone})` : ''}`}
                           </span>
                         </div>
@@ -1041,8 +1094,8 @@ export default function MainLayout() {
                 <div className={styles.orderResult}>
                   <div className={styles.resultHeader}>
                     <span className={styles.orderId}>
-                      {selectedSettleTarget.type === 'customer' 
-                        ? selectedSettleTarget.data.name 
+                      {selectedSettleTarget.type === 'customer'
+                        ? selectedSettleTarget.data.name
                         : `Bill #${selectedSettleTarget.data.billNumber || selectedSettleTarget.data.id}`}
                     </span>
                     <span className={`${styles.statusBadge} ${styles.statusPending}`}>
@@ -1090,6 +1143,21 @@ export default function MainLayout() {
                         <option value="UPI">Digital (UPI)</option>
                       </select>
                     </div>
+
+                    {settleMethod === 'BANK' && settings.bankAccounts?.length > 0 && (
+                      <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
+                        <label>Select Bank Account</label>
+                        <select
+                          value={selectedBank}
+                          onChange={(e) => setSelectedBank(e.target.value)}
+                          style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0' }}
+                        >
+                          {settings.bankAccounts.map((acc, idx) => (
+                            <option key={idx} value={acc.bankName}>{acc.bankName}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
                     <button
                       className={styles.confirmDeliverBtn}

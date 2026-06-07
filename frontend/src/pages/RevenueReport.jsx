@@ -50,10 +50,7 @@ export default function RevenueReport() {
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
         matchesDate = pDate >= yesterday && pDate < today;
-      } else if (filterDate === 'This Week') {
-        const startOfWeek = new Date(today);
-        startOfWeek.setDate(today.getDate() - today.getDay());
-        matchesDate = pDate >= startOfWeek;
+
       } else if (filterDate === 'This Month') {
         const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
         matchesDate = pDate >= startOfMonth;
@@ -156,7 +153,6 @@ export default function RevenueReport() {
                <option value="All">All Time</option>
                <option value="Today">Today</option>
                <option value="Yesterday">Yesterday</option>
-               <option value="This Week">This Week</option>
                <option value="This Month">This Month</option>
              </select>
 

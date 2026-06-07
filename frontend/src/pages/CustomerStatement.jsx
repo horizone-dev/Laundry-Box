@@ -41,13 +41,7 @@ export default function CustomerStatement() {
       const todayStr = now.toISOString().split('T')[0];
       setDateFrom(todayStr);
       setDateTo(todayStr);
-    } else if (dateRange === 'This Week') {
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const day = today.getDay();
-      const start = new Date(today); start.setDate(today.getDate() - day);
-      const end = new Date(start); end.setDate(start.getDate() + 6);
-      setDateFrom(start.toISOString().split('T')[0]);
-      setDateTo(end.toISOString().split('T')[0]);
+
     } else if (dateRange === 'This Month') {
       const start = new Date(now.getFullYear(), now.getMonth(), 1);
       const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
@@ -133,16 +127,31 @@ export default function CustomerStatement() {
     }
     setLoading(true);
     try {
-      /* Build date conditions */
-      let orderWhere = 'WHERE o.customerId = ?';
-      const orderParams = [customerId];
-      if (dateFrom) { orderWhere += ' AND o.createdAt >= ?'; orderParams.push(dateFrom); }
-      if (dateTo)   { orderWhere += ' AND o.createdAt <= ?'; orderParams.push(dateTo + 'T23:59:59'); }
+      /* Build date conditions on the UNION wrapper */
+      let orderQuery = `
+        SELECT * FROM (
+          SELECT 
+            id, shopId, billNumber, customerId, totalAmount, paidAmount, dueAmount, 
+            paymentStatus, status, paymentMethod, items, createdAt, updatedAt, 
+            0 AS isDeleted, NULL AS refundStatus, NULL AS refundMethod, NULL AS returnedAt, NULL AS payments 
+          FROM orders 
 
-      const ordersRes = await window.electronAPI.dbQuery(
-        `SELECT o.*, '' as type FROM orders o ${orderWhere} ORDER BY o.createdAt ASC`,
-        orderParams
-      );
+          UNION ALL
+
+          SELECT 
+            id, shopId, billNumber, customerId, totalAmount, paidAmount, 0 AS dueAmount, 
+            originalPaymentStatus AS paymentStatus, 'Deleted' AS status, originalPaymentMethod AS paymentMethod, items, deletedAt AS createdAt, deletedAt AS updatedAt, 
+            1 AS isDeleted, refundStatus, refundMethod, returnedAt, payments 
+          FROM deleted_orders 
+        ) AS u
+        WHERE u.customerId = ?
+      `;
+      const orderParams = [customerId, customerId]; // two placeholders for customerId in UNION subqueries
+      if (dateFrom) { orderQuery += ' AND u.createdAt >= ?'; orderParams.push(dateFrom); }
+      if (dateTo)   { orderQuery += ' AND u.createdAt <= ?'; orderParams.push(dateTo + 'T23:59:59'); }
+      orderQuery += ' ORDER BY u.createdAt ASC';
+
+      const ordersRes = await window.electronAPI.dbQuery(orderQuery, orderParams);
 
       let payWhere = 'WHERE customerId = ?';
       const payParams = [customerId];
@@ -167,35 +176,93 @@ export default function CustomerStatement() {
   const ledgerRows = React.useMemo(() => {
     const rows = [];
 
-    if (filterType !== 'Payments') {
-      orders.forEach(o => {
-        const cleanRef = o.id.startsWith('#') ? o.id : `#${o.id}`;
-        const displayDesc = o.id.startsWith('#') ? `Order ${o.id}` : `Order #${o.id}`;
-        
-        let itemSummary = '';
-        try {
-          const itemsList = typeof o.items === 'string' ? JSON.parse(o.items || '[]') : (o.items || []);
-          if (Array.isArray(itemsList) && itemsList.length > 0) {
-            itemSummary = itemsList.map(item => `${item.qty || item.quantity || 1}x ${item.name}`).join(', ');
-          }
-        } catch (e) {
-          console.error("Failed to parse items for ledger row", e);
+    orders.forEach(o => {
+      const cleanRef = o.id.startsWith('#') ? o.id : `#${o.id}`;
+      
+      if (o.isDeleted) {
+        if (filterType !== 'Payments') {
+          rows.push({
+            date: o.createdAt,
+            type: 'deleted_order',
+            ref: cleanRef,
+            description: `Deleted Bill ${cleanRef}`,
+            itemsSummary: `Status: ${o.refundStatus || 'Deleted'}`,
+            debit: 0,
+            credit: 0,
+            status: o.refundStatus || 'Deleted',
+            dueAmount: 0,
+            rawOrder: o
+          });
         }
 
-        rows.push({
-          date: o.createdAt,
-          type: 'order',
-          ref: cleanRef,
-          description: displayDesc,
-          itemsSummary: itemSummary,
-          debit: o.totalAmount,
-          credit: 0,
-          status: o.paymentStatus,
-          dueAmount: o.dueAmount,
-          rawOrder: o
-        });
-      });
-    }
+        if (filterType !== 'Orders') {
+          // Add refund row if Returned
+          if (o.refundStatus === 'Returned' && o.paidAmount > 0) {
+            rows.push({
+              date: o.returnedAt || o.createdAt,
+              type: 'refund',
+              ref: `REF-${o.id}`,
+              description: `Refund – ${o.refundMethod || 'CASH'}`,
+              itemsSummary: `Refund for Deleted Order ${cleanRef}`,
+              debit: o.paidAmount,
+              credit: 0,
+              status: 'SUCCESS',
+              dueAmount: 0
+            });
+          }
+
+          // Add original payments parsed from JSON
+          let parsedPayments = [];
+          try {
+            parsedPayments = typeof o.payments === 'string' ? JSON.parse(o.payments || '[]') : (o.payments || []);
+          } catch (e) {
+            parsedPayments = [];
+          }
+          if (Array.isArray(parsedPayments)) {
+            parsedPayments.forEach(p => {
+              rows.push({
+                date: p.createdAt || o.createdAt,
+                type: 'payment',
+                ref: p.id || `PAY-DEL-${o.id}`,
+                description: `Payment – ${p.method || 'CASH'}`,
+                itemsSummary: `Linked to Order ${cleanRef}`,
+                debit: 0,
+                credit: p.amount || 0,
+                status: 'SUCCESS',
+                dueAmount: 0
+              });
+            });
+          }
+        }
+      } else {
+        // Active Order
+        if (filterType !== 'Payments') {
+          const displayDesc = o.id.startsWith('#') ? `Order ${o.id}` : `Order #${o.id}`;
+          let itemSummary = '';
+          try {
+            const itemsList = typeof o.items === 'string' ? JSON.parse(o.items || '[]') : (o.items || []);
+            if (Array.isArray(itemsList) && itemsList.length > 0) {
+              itemSummary = itemsList.map(item => `${item.qty || item.quantity || 1}x ${item.name}`).join(', ');
+            }
+          } catch (e) {
+            console.error("Failed to parse items for ledger row", e);
+          }
+
+          rows.push({
+            date: o.createdAt,
+            type: 'order',
+            ref: cleanRef,
+            description: displayDesc,
+            itemsSummary: itemSummary,
+            debit: o.totalAmount,
+            credit: 0,
+            status: o.paymentStatus,
+            dueAmount: o.dueAmount,
+            rawOrder: o
+          });
+        }
+      }
+    });
 
     // Map table payments and group by order ID to prevent double counting
     const paymentsFromTable = payments.map(p => {
@@ -225,6 +292,7 @@ export default function CustomerStatement() {
     const initialPaymentsFromOrders = [];
     if (filterType !== 'Orders') {
       orders.forEach(o => {
+        if (o.isDeleted) return; // Skip deleted orders here, we already extracted their payments!
         const tablePaySum = tablePaymentsByOrder[o.id] || 0;
         const initialPay = (o.paidAmount || 0) - tablePaySum;
         if (initialPay > 0.01) {
@@ -260,6 +328,12 @@ export default function CustomerStatement() {
     rows.forEach(row => {
       if (row.type === 'order') {
         balance += row.debit - row.credit;
+      } else if (row.type === 'deleted_order') {
+        // deleted bill row itself has debit=0, credit=0, so no balance change
+        balance += row.debit - row.credit;
+      } else if (row.type === 'refund') {
+        // refund is a debit to increase balance back
+        balance += row.debit;
       } else {
         balance -= row.credit;
       }
@@ -275,11 +349,11 @@ export default function CustomerStatement() {
   }, [orders, payments, filterType, sortOrder]);
 
   /* ─── KPIs ────────────────────────────────────────── */
-  const totalBilled    = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
+  const totalBilled    = orders.filter(o => !o.isDeleted).reduce((s, o) => s + (o.totalAmount || 0), 0);
   const totalPaid      = payments.reduce((s, p) => s + (p.amount || 0), 0);
   const outstanding    = Math.max(0, selectedCustomer?.balance || 0);
   const advanceCredit  = selectedCustomer?.balance < 0 ? Math.abs(selectedCustomer.balance) : 0;
-  const orderCount     = orders.length;
+  const orderCount     = orders.filter(o => !o.isDeleted).length;
 
   /* ─── Export CSV ──────────────────────────────────── */
   const exportCSV = () => {
@@ -392,7 +466,6 @@ export default function CustomerStatement() {
             >
               <option value="All">All Time</option>
               <option value="Today">Today</option>
-              <option value="This Week">This Week</option>
               <option value="This Month">This Month</option>
               <option value="This Year">This Year</option>
               <option value="Custom">Custom Range</option>
@@ -522,6 +595,10 @@ export default function CustomerStatement() {
                         <div className={styles.refCell}>
                           {row.type === 'order'
                             ? <Package size={13} color="#2563EB" />
+                            : row.type === 'deleted_order'
+                            ? <X size={13} color="#EF4444" />
+                            : row.type === 'refund'
+                            ? <RotateCcw size={13} color="#F59E0B" />
                             : <Wallet size={13} color="#10B981" />
                           }
                           <span className={styles.refText}>{row.ref}</span>

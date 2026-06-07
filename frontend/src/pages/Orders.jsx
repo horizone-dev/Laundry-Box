@@ -10,6 +10,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
 import { t } from '../utils/translations';
+import { getLocalDateBounds, isWithinBounds } from '../utils/dateFilters';
+import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
 import CurrencySymbol from '../components/CurrencySymbol';
 import DressTag from '../components/DressTag';
 import styles from './Orders.module.css';
@@ -62,6 +64,7 @@ export default function Orders({ isPendingView = false }) {
   const [orderToDelete, setOrderToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [refundImmediately, setRefundImmediately] = useState(true);
+  const [refundMethod, setRefundMethod] = useState('CASH');
 
   // Credit Limit Protection states
   const [showCreditWarning, setShowCreditWarning] = useState(false);
@@ -223,98 +226,77 @@ export default function Orders({ isPendingView = false }) {
     return diffDays > overdueLimit;
   };
 
-  /* ── Date range filter helper ─────────────────────── */
-  const getDateBounds = () => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    if (dateRange === 'Today') {
-      return { from: today, to: new Date(today.getTime() + 86400000 - 1) };
-    }
-    if (dateRange === 'This Week') {
-      const day = today.getDay();
-      const start = new Date(today); start.setDate(today.getDate() - day);
-      const end = new Date(start); end.setDate(start.getDate() + 6);
-      return { from: start, to: end };
-    }
-    if (dateRange === 'This Month') {
-      return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59) };
-    }
-    if (dateRange === 'This Year') {
-      return { from: new Date(now.getFullYear(), 0, 1), to: new Date(now.getFullYear(), 11, 31, 23, 59, 59) };
-    }
-    if (dateRange === 'Custom' && customStart && customEnd) {
-      return { from: new Date(customStart), to: new Date(customEnd + 'T23:59:59') };
-    }
-    return null; // All time
-  };
-
   const dateFilteredOrders = React.useMemo(() => {
-    if (dateRange === 'Custom' && (!customStart || !customEnd)) {
-      return [];
-    }
-    const bounds = getDateBounds();
-    if (!bounds) return orders;
-    return orders.filter(o => {
-      const created = new Date(o.createdAt);
-      return created >= bounds.from && created <= bounds.to;
-    });
+    const bounds = getLocalDateBounds(dateRange, customStart, customEnd);
+    if (bounds === false) return []; // Custom selected but dates missing
+    if (bounds === null) return orders; // All time
+    return orders.filter(o => isWithinBounds(o.createdAt, bounds));
   }, [orders, dateRange, customStart, customEnd]);
 
   // Filtering logic
-  let filteredOrders = isPendingView 
-    ? dateFilteredOrders.filter(o => o.dueAmount > 0 || o.paymentStatus !== 'Paid') 
-    : dateFilteredOrders;
-
+  let filteredOrders = [];
   if (isPendingView) {
+    filteredOrders = dateFilteredOrders.filter(o => !o.isDeleted && (o.dueAmount > 0 || o.paymentStatus !== 'Paid'));
     if (pendingSubFilter === 'Pending') {
       filteredOrders = filteredOrders.filter(o => !isOverdue(o));
     } else if (pendingSubFilter === 'Overdue') {
       filteredOrders = filteredOrders.filter(o => isOverdue(o));
     }
   } else {
-    if (workflowFilter === 'Confirmed') {
-      filteredOrders = filteredOrders.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status));
-    } else if (workflowFilter === 'Processing') {
-      filteredOrders = filteredOrders.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status));
-    } else if (workflowFilter === 'Ready') {
-      filteredOrders = filteredOrders.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status));
-    } else if (workflowFilter === 'Delivered') {
-      filteredOrders = filteredOrders.filter(o => o.status === 'Delivered');
-    } else if (workflowFilter === 'Cancelled') {
-      filteredOrders = filteredOrders.filter(o => o.status === 'Cancelled');
+    if (workflowFilter === 'Deleted') {
+      filteredOrders = dateFilteredOrders.filter(o => o.isDeleted);
+    } else {
+      const activeOnly = dateFilteredOrders.filter(o => !o.isDeleted);
+      if (workflowFilter === 'All') {
+        filteredOrders = activeOnly;
+      } else if (workflowFilter === 'Confirmed') {
+        filteredOrders = activeOnly.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status));
+      } else if (workflowFilter === 'Processing') {
+        filteredOrders = activeOnly.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status));
+      } else if (workflowFilter === 'Ready') {
+        filteredOrders = activeOnly.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status));
+      } else if (workflowFilter === 'Delivered') {
+        filteredOrders = activeOnly.filter(o => o.status === 'Delivered');
+      } else if (workflowFilter === 'Cancelled') {
+        filteredOrders = activeOnly.filter(o => o.status === 'Cancelled');
+      }
     }
   }
 
+  // Active orders only for financial KPIs and workflowCounts of active states
+  const activeDateFilteredOrders = dateFilteredOrders.filter(o => !o.isDeleted);
+
   // Financial Calculations for KPIs
-  const totalAmount = dateFilteredOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+  const totalAmount = activeDateFilteredOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
   
-  const totalPaid = dateFilteredOrders
+  const totalPaid = activeDateFilteredOrders
     .filter(o => (o.dueAmount === 0 || o.dueAmount === null) && o.totalAmount > 0)
     .reduce((sum, o) => sum + (o.totalAmount || 0), 0);
     
-  const totalPending = dateFilteredOrders
+  const totalPending = activeDateFilteredOrders
     .filter(o => (o.dueAmount > 0))
     .reduce((sum, o) => sum + (o.dueAmount || 0), 0);
   
-  const overdueOrdersList = dateFilteredOrders.filter(o => isOverdue(o));
+  const overdueOrdersList = activeDateFilteredOrders.filter(o => isOverdue(o));
   const overdueAmount = overdueOrdersList.reduce((sum, o) => sum + (o.dueAmount || 0), 0);
 
   const counts = {
-    all: dateFilteredOrders.filter(o => o.dueAmount > 0).length,
-    pending: dateFilteredOrders.filter(o => o.dueAmount > 0 && !isOverdue(o)).length,
+    all: activeDateFilteredOrders.filter(o => o.dueAmount > 0).length,
+    pending: activeDateFilteredOrders.filter(o => o.dueAmount > 0 && !isOverdue(o)).length,
     overdue: overdueOrdersList.length
   };
 
   const workflowCounts = {
-    All: dateFilteredOrders.length,
-    Confirmed: dateFilteredOrders.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status)).length,
-    Processing: dateFilteredOrders.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status)).length,
-    Ready: dateFilteredOrders.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status)).length,
-    Delivered: dateFilteredOrders.filter(o => o.status === 'Delivered').length,
-    Cancelled: dateFilteredOrders.filter(o => o.status === 'Cancelled').length
+    All: activeDateFilteredOrders.length,
+    Confirmed: activeDateFilteredOrders.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status)).length,
+    Processing: activeDateFilteredOrders.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status)).length,
+    Ready: activeDateFilteredOrders.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status)).length,
+    Delivered: activeDateFilteredOrders.filter(o => o.status === 'Delivered').length,
+    Cancelled: activeDateFilteredOrders.filter(o => o.status === 'Cancelled').length,
+    Deleted: dateFilteredOrders.filter(o => o.isDeleted).length
   };
 
-  const dueSoonOrders = dateFilteredOrders.filter(o => {
+  const dueSoonOrders = activeDateFilteredOrders.filter(o => {
     if (o.status !== 'Credit' && o.status !== 'Payment Pending') return false;
     const diffDays = Math.ceil(Math.abs(new Date() - new Date(o.createdAt)) / (1000 * 60 * 60 * 24));
     return diffDays <= 7 && diffDays > 0;
@@ -335,17 +317,36 @@ export default function Orders({ isPendingView = false }) {
       // Try local DB first if in Electron
       if (window.electronAPI?.dbQuery) {
         let query = `
-          SELECT orders.*, customers.name as customerName, customers.phone as customerPhone 
-          FROM orders 
-          LEFT JOIN customers ON orders.customerId = customers.id
+          SELECT * FROM (
+            SELECT 
+              orders.id, orders.shopId, orders.billNumber, orders.customerId, 
+              customers.name AS customerName, customers.phone AS customerPhone, 
+              orders.totalAmount, orders.paidAmount, orders.dueAmount, 
+              orders.paymentStatus, orders.status, orders.paymentMethod, 
+              orders.items, orders.createdAt, orders.updatedAt, orders.isSynced,
+              0 AS isDeleted, NULL AS refundStatus, NULL AS refundMethod, NULL AS returnedAt, NULL AS payments
+            FROM orders 
+            LEFT JOIN customers ON orders.customerId = customers.id
+
+            UNION ALL
+
+            SELECT 
+              deleted_orders.id, deleted_orders.shopId, deleted_orders.billNumber, deleted_orders.customerId, 
+              deleted_orders.customerName AS customerName, deleted_orders.customerPhone AS customerPhone, 
+              deleted_orders.totalAmount, deleted_orders.paidAmount, 0 AS dueAmount, 
+              deleted_orders.originalPaymentStatus AS paymentStatus, 'Deleted' AS status, deleted_orders.originalPaymentMethod AS paymentMethod, 
+              deleted_orders.items, deleted_orders.deletedAt AS createdAt, deleted_orders.deletedAt AS updatedAt, 1 AS isSynced,
+              1 AS isDeleted, deleted_orders.refundStatus, deleted_orders.refundMethod, deleted_orders.returnedAt, deleted_orders.payments
+            FROM deleted_orders
+          ) AS all_orders
         `;
         let params = [];
         if (searchTerm) {
-          query += ' WHERE orders.id LIKE ? OR orders.billNumber LIKE ? OR customers.name LIKE ? OR customers.phone LIKE ?';
+          query += ' WHERE id LIKE ? OR billNumber LIKE ? OR customerName LIKE ? OR customerPhone LIKE ?';
           const term = `%${searchTerm}%`;
           params = [term, term, term, term];
         }
-        query += ' ORDER BY orders.createdAt DESC';
+        query += ' ORDER BY createdAt DESC';
         const res = await window.electronAPI.dbQuery(query, params);
         if (res.success) {
           setOrders(res.data);
@@ -416,11 +417,11 @@ export default function Orders({ isPendingView = false }) {
         } catch (e) {
           history = [];
         }
-        newHistory = [...history, { status: newStatus, updatedBy: 'Admin Staff', timestamp: new Date().toISOString() }];
+        newHistory = [...history, { status: newStatus, updatedBy: 'Admin Staff', timestamp: getLocalISOString() }];
         
         await window.electronAPI.dbQuery(
           'UPDATE orders SET status = ?, statusHistory = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          [newStatus, JSON.stringify(newHistory), new Date().toISOString(), orderToUpdate.id]
+          [newStatus, JSON.stringify(newHistory), getLocalISOString(), orderToUpdate.id]
         );
       }
 
@@ -485,14 +486,28 @@ export default function Orders({ isPendingView = false }) {
 
       // A. Delete locally from SQLite (if electron app)
       if (window.electronAPI?.dbQuery) {
-        // 0. Insert into deleted_orders audit log
+        // 1. Before deleting payments, query linked payment details so we can save them in audit log
+        //    and use them to remove corresponding account_transactions
+        const linkedPaymentsRes = await window.electronAPI.dbQuery(
+          'SELECT id, amount, createdAt, method FROM payments WHERE orderId = ?',
+          [orderToDelete.id]
+        );
+        const linkedPayments = linkedPaymentsRes.success ? linkedPaymentsRes.data : [];
+
+        // 2. Insert into deleted_orders audit log
         const isPaid = orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus);
         const initialReturnStatus = isPaid
           ? (refundImmediately ? 'Returned' : 'Return Pending')
           : 'N/A';
+        const initialRefundStatus = isPaid
+          ? (refundImmediately ? 'Returned' : 'Refund Pending')
+          : 'Deleted';
+        const refundMethodVal = isPaid && refundImmediately ? refundMethod.toUpperCase() : null;
+        const returnedAtVal = isPaid && refundImmediately ? getLocalISOString() : null;
+
         await window.electronAPI.dbQuery(
-          `INSERT INTO deleted_orders (id, shopId, billNumber, customerId, customerName, customerPhone, totalAmount, items, deletedAt, deletedBy, originalPaymentStatus, paidAmount, returnStatus, approvedBy) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO deleted_orders (id, shopId, billNumber, customerId, customerName, customerPhone, totalAmount, items, deletedAt, deletedBy, originalPaymentStatus, paidAmount, returnStatus, approvedBy, originalPaymentMethod, payments, refundMethod, returnedAt, refundStatus) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             orderToDelete.id,
             orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
@@ -502,25 +517,54 @@ export default function Orders({ isPendingView = false }) {
             orderToDelete.customerPhone || orderToDelete.phone || '',
             orderToDelete.totalAmount || 0,
             typeof orderToDelete.items === 'string' ? orderToDelete.items : JSON.stringify(orderToDelete.items || []),
-            new Date().toISOString(),
+            getLocalISOString(),
             currentLoggedInUser,
             orderToDelete.paymentStatus || 'Pending',
             orderToDelete.paidAmount || 0,
             initialReturnStatus,
-            pinOwner
+            pinOwner,
+            orderToDelete.paymentMethod || 'CASH',
+            JSON.stringify(linkedPayments),
+            refundMethodVal,
+            returnedAtVal,
+            initialRefundStatus
           ]
         );
 
-        // 1. Delete associated payments
+        // 3. Delete associated payments
         await window.electronAPI.dbQuery('DELETE FROM payments WHERE orderId = ?', [orderToDelete.id]);
         
-        // 2. Delete associated account transactions
-        await window.electronAPI.dbQuery('DELETE FROM account_transactions WHERE description LIKE ?', ['%' + orderToDelete.id + '%']);
-        
-        // 3. Delete the order itself
+        // 4. Delete the order itself
         await window.electronAPI.dbQuery('DELETE FROM orders WHERE id = ?', [orderToDelete.id]);
         
-        // 4. Run data healer to automatically heal customer balances and ledgers
+        // 5. Process refund if the order has a paid amount and refundImmediately is selected
+        const paidAmt = orderToDelete.paidAmount || 0;
+        
+        if (isPaid && paidAmt > 0 && refundImmediately) {
+          const refundTxnId = `TXN-RETURN-${Date.now()}`;
+          const _now1 = new Date();
+          const txnTimestamp = `${_now1.getFullYear()}-${String(_now1.getMonth()+1).padStart(2,'0')}-${String(_now1.getDate()).padStart(2,'0')} ${String(_now1.getHours()).padStart(2,'0')}:${String(_now1.getMinutes()).padStart(2,'0')}`;
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              refundTxnId,
+              orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
+              refundMethod.toUpperCase(),
+              'EXPENSE',
+              'Return',
+              paidAmt,
+              `Return - Bill #${orderToDelete.id}`,
+              txnTimestamp,
+              0,
+              getLocalISOString(),
+              'Zap'
+            ]
+          );
+        }
+        
+        // 6. Run data healer to reconcile any remaining inconsistencies
         await window.electronAPI.runDataHealer();
       }
       
@@ -530,7 +574,10 @@ export default function Orders({ isPendingView = false }) {
           data: { 
             deletedBy: currentLoggedInUser,
             approvedBy: pinOwner,
-            refundImmediately: refundImmediately
+            refundImmediately: refundImmediately,
+            refundMethod: refundMethod,
+            originalPaymentMethod: orderToDelete.paymentMethod,
+            payments: linkedPayments
           }
         });
       } catch (remoteErr) {
@@ -586,7 +633,7 @@ export default function Orders({ isPendingView = false }) {
         // Update order amounts and payment status
         await window.electronAPI.dbQuery(
           'UPDATE orders SET paymentStatus = ?, paidAmount = ?, dueAmount = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          [newPayStatus, updatedPaidAmount, updatedDueAmount, new Date().toISOString(), selectedOrder.id]
+          [newPayStatus, updatedPaidAmount, updatedDueAmount, getLocalISOString(), selectedOrder.id]
         );
         
         // Revert any linked payments if changed to Credit or Pending
@@ -652,7 +699,7 @@ export default function Orders({ isPendingView = false }) {
         // Update Local Order
         await window.electronAPI.dbQuery(
           'UPDATE orders SET status = ?, paymentStatus = ?, paidAmount = ?, dueAmount = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          [nextStatus, 'Paid', selectedOrder.totalAmount, 0, payMethod, new Date().toISOString(), selectedOrder.id]
+          [nextStatus, 'Paid', selectedOrder.totalAmount, 0, payMethod, getLocalISOString(), selectedOrder.id]
         );
 
         // Update Customer Balance if it was Credit/Pending/Partial
@@ -660,22 +707,23 @@ export default function Orders({ isPendingView = false }) {
         if (wasUnpaid && selectedOrder.customerId) {
           await window.electronAPI.dbQuery(
             'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-            [amountToPay, new Date().toISOString(), selectedOrder.customerId]
+            [amountToPay, getLocalISOString(), selectedOrder.customerId]
           );
         }
 
         const txnId = `TXN-${Date.now()}`;
-        const txnTimestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+        const _now2 = new Date();
+        const txnTimestamp = `${_now2.getFullYear()}-${String(_now2.getMonth()+1).padStart(2,'0')}-${String(_now2.getDate()).padStart(2,'0')} ${String(_now2.getHours()).padStart(2,'0')}:${String(_now2.getMinutes()).padStart(2,'0')}`;
         
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, payMethod, 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${selectedOrder.id}`, txnTimestamp, 0, new Date().toISOString(), 'DollarSign']
+          [txnId, DEFAULT_SHOP_ID, payMethod, 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${selectedOrder.id}`, txnTimestamp, 0, getLocalISOString(), 'DollarSign']
         );
 
         // Record Payment in payments table
-        const currentTimestamp = new Date().toISOString();
+        const currentTimestamp = getLocalISOString();
         await window.electronAPI.dbQuery(
           `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
@@ -700,10 +748,8 @@ export default function Orders({ isPendingView = false }) {
       setOrders(prev => prev.map(o => o.id === selectedOrder.id ? updatedOrder : o));
       setSelectedOrder(updatedOrder);
 
-      // 3. Sync to Backend (fire-and-forget — DO NOT overwrite React state with backend response
-      //    because the backend may return stale data or a 404 for legacy orders, which would
-      //    visually REVERT the payment in the UI)
-      axios.patch(`${API_BASE}/orders/${encodeURIComponent(selectedOrder.id)}/status`, {
+      // 3. Sync to Backend
+      const syncPromise = axios.patch(`${API_BASE}/orders/${encodeURIComponent(selectedOrder.id)}/status`, {
         status: nextStatus,
         paymentStatus: 'Paid',
         paidAmount: selectedOrder.totalAmount,
@@ -715,8 +761,17 @@ export default function Orders({ isPendingView = false }) {
 
       setShowPayModal(false);
       alert(t('paymentRecordedLocally', settings.language));
-      // Re-fetch from SQLite to confirm the change persisted in local DB
-      fetchOrders();
+
+      if (window.electronAPI?.dbQuery) {
+        // Local DB was updated synchronously, re-fetch immediately
+        fetchOrders();
+      } else {
+        // Fallback/web: wait for API patch to complete to avoid race condition
+        syncPromise.finally(() => {
+          fetchOrders();
+        });
+      }
+
     } catch (err) {
       console.error('Failed to update local status:', err);
       alert(t('failedRecordPayment', settings.language) + err.message);
@@ -874,7 +929,6 @@ export default function Orders({ isPendingView = false }) {
             >
               <option value="All">All Time</option>
               <option value="Today">Today</option>
-              <option value="This Week">This Week</option>
               <option value="This Month">This Month</option>
               <option value="This Year">This Year</option>
               <option value="Custom">Custom Range</option>
@@ -948,7 +1002,6 @@ export default function Orders({ isPendingView = false }) {
             >
               <option value="All">All Time</option>
               <option value="Today">Today</option>
-              <option value="This Week">This Week</option>
               <option value="This Month">This Month</option>
               <option value="This Year">This Year</option>
               <option value="Custom">Custom Range</option>
@@ -997,22 +1050,30 @@ export default function Orders({ isPendingView = false }) {
                     </div>
                   </div>
 
-                  <div className={styles.listFinancialSection}>
+                  <div className={styles.listFinancialSection} style={{ width: '220px' }}>
                      <div className={styles.listStat}>
-                       <span className={styles.listStatLabel}>{t('dueAmount', settings.language)}</span>
-                       <span className={styles.listStatValue}><CurrencySymbol size={14} /> {(order.dueAmount ?? order.totalAmount ?? 0).toFixed(2)}</span>
+                        <span className={styles.listStatLabel}>{t('dueAmount', settings.language)}</span>
+                        <span className={styles.listStatValue} style={{ color: (order.dueAmount ?? (order.totalAmount - (order.paidAmount || 0))) > 0 ? '#EF4444' : '#107C41' }}>
+                          <CurrencySymbol size={14} /> {((order.dueAmount !== undefined && order.dueAmount !== null) ? order.dueAmount : (order.totalAmount - (order.paidAmount || 0))).toFixed(2)}
+                        </span>
                      </div>
-                     <div className={styles.listStat} style={{ marginLeft: '1.5rem' }}>
-                       <span className={styles.listStatLabel}>{t('paymentMethodLabel', settings.language)}</span>
-                       {order.paymentStatus === 'Paid' ? (
-                         <span className={order.paymentMethod?.toUpperCase() === 'CASH' ? styles.methodCash : styles.methodOther} style={{ marginTop: '2px' }}>
-                           {order.paymentMethod}
-                         </span>
-                       ) : (
-                         <span className={styles.methodCredit} style={{ marginTop: '2px' }}>
-                           {t('notPaid', settings.language)}
-                         </span>
-                       )}
+                     <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600, marginTop: '4px', textTransform: 'capitalize' }}>
+                        {t('total', settings.language)}: <CurrencySymbol size={10} /> {(order.totalAmount || 0).toFixed(2)} | {t('paid', settings.language)}: <CurrencySymbol size={10} /> {(order.paidAmount || 0).toFixed(2)}
+                     </div>
+                     <div style={{ marginTop: '6px' }}>
+                        {order.paymentStatus === 'Paid' || (order.dueAmount !== undefined && order.dueAmount <= 0) ? (
+                          <span className={order.paymentMethod?.toUpperCase() === 'CASH' ? styles.methodCash : styles.methodOther}>
+                            {order.paymentMethod}
+                          </span>
+                        ) : order.paymentStatus === 'Partial' ? (
+                          <span className={styles.methodPartial}>
+                            {t('partial', settings.language) || 'Partial'}
+                          </span>
+                        ) : (
+                          <span className={styles.methodCredit}>
+                            {t('notPaid', settings.language)}
+                          </span>
+                        )}
                      </div>
                   </div>
 
@@ -1134,7 +1195,15 @@ export default function Orders({ isPendingView = false }) {
                      </td>
                     <td>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', alignItems: 'flex-start' }}>
-                        {!['Payment Pending', 'Paid', 'Credit'].includes(order.status) ? (
+                        {order.isDeleted ? (
+                          <span className={`${styles.statusBadge} ${
+                            order.refundStatus === 'Returned' ? styles.statusDelivered :
+                            order.refundStatus === 'Refund Pending' ? styles.statusPending :
+                            styles.statusCancelled
+                          }`}>
+                            {order.refundStatus || 'Deleted'}
+                          </span>
+                        ) : !['Payment Pending', 'Paid', 'Credit'].includes(order.status) ? (
                           <span className={`${styles.statusBadge} ${STATUS_COLORS[order.status]}`}>
                             {translateStatus(order.status)}
                           </span>
@@ -1143,7 +1212,7 @@ export default function Orders({ isPendingView = false }) {
                             {t('confirmed', settings.language)}
                           </span>
                         )}
-                        {order.status !== 'Delivered' && order.status !== 'Cancelled' && (
+                        {!order.isDeleted && order.status !== 'Delivered' && order.status !== 'Cancelled' && (
                           <button 
                             className={styles.deliverBtn}
                             onClick={(e) => {
@@ -1159,7 +1228,11 @@ export default function Orders({ isPendingView = false }) {
                     <td className={styles.actionsCell}>
                       <div className={styles.actionCellContainer}>
                         <div className={styles.paymentCol}>
-                          {order.paymentStatus === 'Paid' ? (
+                          {order.isDeleted ? (
+                            <span className={styles.statusBadge} style={{ background: '#F1F5F9', color: '#475569', border: '1px solid #CBD5E1', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 600, fontSize: '0.75rem' }}>
+                              Deleted
+                            </span>
+                          ) : order.paymentStatus === 'Paid' ? (
                             <span className={styles.paidActionBadge}>
                               <CheckCircle size={14} /> {t('paid', settings.language)}
                             </span>
@@ -1249,6 +1322,27 @@ export default function Orders({ isPendingView = false }) {
                     </div>
                   </div>
 
+                  {selectedOrder.expectedDeliveryDate && (
+                    <div className={styles.section}>
+                      <h3>Expected Delivery</h3>
+                      <div className={styles.infoCard} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem' }}>
+                        <Clock size={16} color="#E11D48" />
+                        <div>
+                          <p className={styles.infoVal} style={{ color: '#E11D48', fontWeight: 'bold', fontSize: '0.95rem' }}>
+                            {(() => {
+                              const rawDate = selectedOrder.expectedDeliveryDate || '';
+                              if (rawDate.includes(' ')) {
+                                const [datePart, timePart] = rawDate.split(' ');
+                                return `${formatDate(datePart)} at ${timePart}`;
+                              }
+                              return rawDate ? formatDate(rawDate) : 'Not Scheduled';
+                            })()}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className={styles.section}>
                     <h3>{t('orderItems', settings.language)}</h3>
                     <div className={styles.itemsList}>
@@ -1322,39 +1416,68 @@ export default function Orders({ isPendingView = false }) {
                     <p>{t('scanToVerify', settings.language)}</p>
                   </div>
 
-                  <div className={styles.statusAction}>
-                    <label>{t('workflowStatus', settings.language)}</label>
-                    <div className={styles.statusSelectWrapper}>
-                      <select 
-                        value={['Payment Pending', 'Credit', 'Pending'].includes(selectedOrder.status) ? 'Confirmed' : selectedOrder.status} 
-                        onChange={(e) => handleUpdateStatus(e.target.value)}
-                        className={styles.statusSelect}
-                      >
-                        {(settings.workflowStatuses || ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled']).map((status) => (
-                          <option key={status} value={status}>{translateStatus(status)}</option>
-                        ))}
-                      </select>
-                      <ChevronDown size={18} />
+                  {selectedOrder.isDeleted ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0', marginTop: '1rem', textAlign: 'left' }}>
+                      <div>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Workflow Status:</span>
+                        <p style={{ margin: '0.2rem 0 0 0', fontWeight: 600, color: '#EF4444' }}>Deleted</p>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Refund Status:</span>
+                        <p style={{ margin: '0.2rem 0 0 0', fontWeight: 600, color: selectedOrder.refundStatus === 'Returned' ? '#10B981' : '#F59E0B' }}>
+                          {selectedOrder.refundStatus}
+                        </p>
+                      </div>
+                      {selectedOrder.refundStatus === 'Returned' && (
+                        <>
+                          <div>
+                            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Refund Method:</span>
+                            <p style={{ margin: '0.2rem 0 0 0', fontWeight: 600, color: '#1E293B' }}>{selectedOrder.refundMethod}</p>
+                          </div>
+                          <div>
+                            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Returned At:</span>
+                            <p style={{ margin: '0.2rem 0 0 0', fontWeight: 600, color: '#1E293B' }}>{formatDate(selectedOrder.returnedAt)}</p>
+                          </div>
+                        </>
+                      )}
                     </div>
-                  </div>
+                  ) : (
+                    <>
+                      <div className={styles.statusAction}>
+                        <label>{t('workflowStatus', settings.language)}</label>
+                        <div className={styles.statusSelectWrapper}>
+                          <select 
+                            value={['Payment Pending', 'Credit', 'Pending'].includes(selectedOrder.status) ? 'Confirmed' : selectedOrder.status} 
+                            onChange={(e) => handleUpdateStatus(e.target.value)}
+                            className={styles.statusSelect}
+                          >
+                            {(settings.workflowStatuses || ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled']).map((status) => (
+                              <option key={status} value={status}>{translateStatus(status)}</option>
+                            ))}
+                          </select>
+                          <ChevronDown size={18} />
+                        </div>
+                      </div>
 
-                  <div className={styles.statusAction} style={{ marginTop: '1rem' }}>
-                    <label>{t('paymentStatus', settings.language)}</label>
-                    <div className={styles.statusSelectWrapper}>
-                      <select 
-                        value={selectedOrder.paymentStatus || 'Pending'} 
-                        onChange={(e) => handleUpdatePaymentStatus(e.target.value)}
-                        className={styles.statusSelect}
-                        style={{ borderLeftColor: selectedOrder.paymentStatus === 'Paid' ? '#10B981' : '#F59E0B' }}
-                      >
-                        <option value="Pending">{t('pending', settings.language)}</option>
-                        <option value="Paid">{t('paid', settings.language)}</option>
-                        <option value="Credit">{t('credit', settings.language)}</option>
-                        <option value="Partial">{t('partial', settings.language)}</option>
-                      </select>
-                      <ChevronDown size={18} />
-                    </div>
-                  </div>
+                      <div className={styles.statusAction} style={{ marginTop: '1rem' }}>
+                        <label>{t('paymentStatus', settings.language)}</label>
+                        <div className={styles.statusSelectWrapper}>
+                          <select 
+                            value={selectedOrder.paymentStatus || 'Pending'} 
+                            onChange={(e) => handleUpdatePaymentStatus(e.target.value)}
+                            className={styles.statusSelect}
+                            style={{ borderLeftColor: selectedOrder.paymentStatus === 'Paid' ? '#10B981' : '#F59E0B' }}
+                          >
+                            <option value="Pending">{t('pending', settings.language)}</option>
+                            <option value="Paid">{t('paid', settings.language)}</option>
+                            <option value="Credit">{t('credit', settings.language)}</option>
+                            <option value="Partial">{t('partial', settings.language)}</option>
+                          </select>
+                          <ChevronDown size={18} />
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   <div className={styles.actionBtns}>
                     <button 
@@ -1363,22 +1486,26 @@ export default function Orders({ isPendingView = false }) {
                     >
                       <Printer size={18} /> {t('printReceipt', settings.language)}
                     </button>
-                    <button 
-                      className={styles.tagBtn}
-                      onClick={handlePrintTags}
-                    >
-                      <QrCode size={18} /> {t('printGarmentTags', settings.language)}
-                    </button>
-                    <button 
-                      className={`${styles.tagBtn} ${styles.deleteBtn}`}
-                      onClick={() => {
-                        setOrderToDelete(selectedOrder);
-                        setRefundImmediately(true);
-                        setShowPinModal(true);
-                      }}
-                    >
-                      <Trash2 size={18} /> Delete Order
-                    </button>
+                    {!selectedOrder.isDeleted && (
+                      <>
+                        <button 
+                          className={styles.tagBtn}
+                          onClick={handlePrintTags}
+                        >
+                          <QrCode size={18} /> {t('printGarmentTags', settings.language)}
+                        </button>
+                        <button 
+                          className={`${styles.tagBtn} ${styles.deleteBtn}`}
+                          onClick={() => {
+                            setOrderToDelete(selectedOrder);
+                            setRefundImmediately(true);
+                            setShowPinModal(true);
+                          }}
+                        >
+                          <Trash2 size={18} /> Delete Order
+                        </button>
+                      </>
+                    )}
                    </div>
                 </div>
               </div>
@@ -1490,17 +1617,49 @@ export default function Orders({ isPendingView = false }) {
               />
               
               {orderToDelete && (orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus)) && (
-                <div style={{ margin: '1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#F8FAFC', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
-                  <input
-                    type="checkbox"
-                    id="markAsReturned"
-                    checked={refundImmediately}
-                    onChange={(e) => setRefundImmediately(e.target.checked)}
-                    style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                  />
-                  <label htmlFor="markAsReturned" style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
-                    Mark payment of <CurrencySymbol size={11} />{(orderToDelete.paidAmount || 0).toFixed(2)} as returned (refunded) now
-                  </label>
+                <div style={{ margin: '1rem 0', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: '#F8FAFC', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      id="markAsReturned"
+                      checked={refundImmediately}
+                      onChange={(e) => setRefundImmediately(e.target.checked)}
+                      style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                    />
+                    <label htmlFor="markAsReturned" style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
+                      Mark payment of <CurrencySymbol size={11} />{(orderToDelete.paidAmount || 0).toFixed(2)} as returned (refunded) now
+                    </label>
+                  </div>
+                  
+                  {refundImmediately && (
+                    <div style={{ paddingLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Refund Source:</span>
+                      <div style={{ display: 'flex', gap: '1.25rem' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                          <input
+                            type="radio"
+                            name="refundMethod"
+                            value="CASH"
+                            checked={refundMethod === 'CASH'}
+                            onChange={() => setRefundMethod('CASH')}
+                            style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                          />
+                          Cash Account
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                          <input
+                            type="radio"
+                            name="refundMethod"
+                            value="BANK"
+                            checked={refundMethod === 'BANK'}
+                            onChange={() => setRefundMethod('BANK')}
+                            style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                          />
+                          Bank Account
+                        </label>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               

@@ -7,6 +7,7 @@ import {
 import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
+import { getLocalDateBounds, isWithinBounds } from '../utils/dateFilters';
 import styles from './CancelledOrdersReport.module.css';
 
 const containerVariants = {
@@ -40,57 +41,13 @@ export default function CancelledOrdersReport() {
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
 
-  /* ── Date range filter helper ─────────────────────── */
-  const getDateBounds = () => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
-    const parseLocal = (str) => {
-      if (!str) return new Date();
-      const parts = str.split('-');
-      return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-    };
-
-    if (dateRange === 'Today') {
-      const start = new Date(today);
-      const end = new Date(today);
-      end.setHours(23, 59, 59, 999);
-      return { from: start, to: end };
-    }
-    if (dateRange === 'This Week') {
-      const day = today.getDay();
-      const start = new Date(today); start.setDate(today.getDate() - day);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(start); end.setDate(start.getDate() + 6);
-      end.setHours(23, 59, 59, 999);
-      return { from: start, to: end };
-    }
-    if (dateRange === 'This Month') {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-      return { from: start, to: end };
-    }
-    if (dateRange === 'This Year') {
-      const start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
-      const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-      return { from: start, to: end };
-    }
-    if (dateRange === 'Custom' && customStart && customEnd) {
-      const start = parseLocal(customStart);
-      start.setHours(0, 0, 0, 0);
-      const end = parseLocal(customEnd);
-      end.setHours(23, 59, 59, 999);
-      return { from: start, to: end };
-    }
-    return null; // All time
-  };
 
   const fetchData = async () => {
     if (!window.electronAPI?.dbQuery) return;
     try {
       setLoading(true);
-      const bounds = getDateBounds();
-      
+      const bounds = getLocalDateBounds(dateRange, customStart, customEnd);
+
       let query = `
         SELECT o.id, o.billNumber, o.totalAmount, o.items, o.createdAt, o.statusHistory,
                c.name as customerName, c.phone as customerPhone
@@ -100,13 +57,15 @@ export default function CancelledOrdersReport() {
       `;
       let params = [];
 
-      if (bounds) {
-        query += ` AND o.createdAt >= ? AND o.createdAt <= ?`;
-        params = [bounds.from.toISOString(), bounds.to.toISOString()];
-      } else if (dateRange === 'Custom') {
+      if (bounds === false) {
         setOrders([]);
         setLoading(false);
         return;
+      }
+
+      if (bounds !== null) {
+        query += ` AND o.createdAt >= ? AND o.createdAt <= ?`;
+        params = [bounds.from.toISOString(), bounds.to.toISOString()];
       }
 
       query += ` ORDER BY o.createdAt DESC`;
@@ -249,9 +208,8 @@ export default function CancelledOrdersReport() {
               value={dateRange}
               onChange={e => setDateRange(e.target.value)}
             >
-              <option value="All Time">All Time</option>
+              <option value="All">All Time</option>
               <option value="Today">Today</option>
-              <option value="This Week">This Week</option>
               <option value="This Month">This Month</option>
               <option value="This Year">This Year</option>
               <option value="Custom">Custom Range</option>

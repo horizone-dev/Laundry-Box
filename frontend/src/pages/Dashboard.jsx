@@ -108,7 +108,7 @@ export default function Dashboard() {
   // KPI processing helper
   const processStats = (allOrders, allPayments, range) => {
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
     
     const getDaysAgo = (days) => {
       const d = new Date();
@@ -120,7 +120,7 @@ export default function Dashboard() {
     let previousOrders = [];
     
     if (range === 'Today') {
-      const yesterdayStr = getDaysAgo(1).toISOString().split('T')[0];
+      const yesterdayStr = (() => { const d = getDaysAgo(1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
       currentOrders = allOrders.filter(o => o.createdAt.startsWith(todayStr));
       previousOrders = allOrders.filter(o => o.createdAt.startsWith(yesterdayStr));
     } else if (range === 'Week') {
@@ -168,7 +168,11 @@ export default function Dashboard() {
     const revenueTrend = calculateTrend(currRevenue, prevRevenue);
     const ordersTrend = calculateTrend(currOrdersCount, prevOrdersCount);
     
-    const completedYesterday = allOrders.filter(o => o.status === 'Delivered' && o.createdAt.includes(getDaysAgo(1).toISOString().split('T')[0])).length;
+    const completedYesterday = allOrders.filter(o => {
+      const d = getDaysAgo(1);
+      const yStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      return o.status === 'Delivered' && o.createdAt.includes(yStr);
+    }).length;
     const completedTrend = calculateTrend(totalCompletedToday, completedYesterday);
     
     const pendingYesterday = allOrders.filter(o => !['Delivered', 'Cancelled'].includes(o.status) && o.createdAt < todayStr).length;
@@ -200,8 +204,9 @@ export default function Dashboard() {
     };
     for (let i = 6; i >= 0; i--) {
       const d = getDaysAgo(i);
+      const localStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
       last7Days.push({
-        dateStr: d.toISOString().split('T')[0],
+        dateStr: localStr,
         label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
       });
     }
@@ -387,10 +392,10 @@ export default function Dashboard() {
         <div className={styles.headerFilters}>
           <div className={styles.datePickerWrapper}>
             <Calendar size={16} color="#64748B" />
-            <span className={styles.dateVal}>{formatDate(new Date().toISOString())}</span>
+            <span className={styles.dateVal}>{formatDate(new Date())}</span>
           </div>
           <div className={styles.dateFilter}>
-            {['Today', 'Week', 'Month'].map(range => (
+            {['Today', 'Month'].map(range => (
               <button 
                 key={range} 
                 className={`${styles.dateBtn} ${dateRange === range ? styles.active : ''}`}
@@ -421,7 +426,7 @@ export default function Dashboard() {
           <div className={styles.cardHeader}>
             <h3>Revenue Trend</h3>
             <div className={styles.cardSelect}>
-              <span>This Week</span>
+              <span>Last 7 Days</span>
             </div>
           </div>
           <div style={{ width: '100%', height: 210 }}>

@@ -30,7 +30,7 @@ export default function Settings() {
   const [newPinInput, setNewPinInput] = useState('');
   const [pinChangeError, setPinChangeError] = useState('');
   const [pinChangeSuccess, setPinChangeSuccess] = useState('');
-  
+
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
   const isSuperAdmin = user.role === 'super_admin' || user.role === 'admin';
   const isManager = user.role === 'manager';
@@ -75,7 +75,7 @@ export default function Settings() {
     if (window.electronAPI?.onUpdateStatus) {
       window.electronAPI.onUpdateStatus(handleUpdate);
     }
-    
+
     // Load app version dynamically
     const loadVersion = async () => {
       if (window.electronAPI?.getAppVersion) {
@@ -270,7 +270,7 @@ export default function Settings() {
                 <div className={styles.formGrid}>
                   <div className={styles.formGroup}>
                     <label>System Language</label>
-                    <select 
+                    <select
                       className={styles.inputField}
                       value={settings.language || 'English'}
                       onChange={(e) => updateSettings({ language: e.target.value })}
@@ -284,8 +284,8 @@ export default function Settings() {
                     <label>Currency Symbol</label>
                     <div className={styles.inputWrapper}>
                       <DollarSign size={18} color="#94A3B8" />
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         className={styles.inputField}
                         value={settings.currencySymbol || ''}
                         onChange={(e) => updateSettings({ currencySymbol: e.target.value })}
@@ -295,7 +295,7 @@ export default function Settings() {
                   </div>
                   <div className={styles.formGroup}>
                     <label>Date Format</label>
-                    <select 
+                    <select
                       className={styles.inputField}
                       value={settings.dateFormat || 'DD/MM/YYYY'}
                       onChange={(e) => updateSettings({ dateFormat: e.target.value })}
@@ -310,7 +310,7 @@ export default function Settings() {
                   </div>
                   <div className={styles.formGroup}>
                     <label>Time Format</label>
-                    <select 
+                    <select
                       className={styles.inputField}
                       value={settings.timeFormat || '12h'}
                       onChange={(e) => updateSettings({ timeFormat: e.target.value })}
@@ -329,7 +329,7 @@ export default function Settings() {
                     <label>Auto-Print Receipt</label>
                     <div className={styles.toggleRow}>
                       <span className={styles.toggleLabel}>Automatically trigger print dialog after order</span>
-                      <div 
+                      <div
                         className={`${styles.switch} ${settings.autoPrint ? styles.switchOn : ''}`}
                         onClick={() => updateSettings({ autoPrint: !settings.autoPrint })}
                       >
@@ -339,7 +339,7 @@ export default function Settings() {
                   </div>
                   <div className={styles.formGroup}>
                     <label>Default Payment Method</label>
-                    <select 
+                    <select
                       className={styles.inputField}
                       value={settings.defaultPaymentMethod || 'CASH'}
                       onChange={(e) => updateSettings({ defaultPaymentMethod: e.target.value })}
@@ -360,19 +360,19 @@ export default function Settings() {
                     <label>Default {t('overdue', settings.language)} Period (Days)</label>
                     <div className={styles.inputWrapper}>
                       <Clock size={18} color="#94A3B8" />
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         className={styles.inputField}
                         value={settings.overdueDays || 7}
                         onChange={(e) => updateSettings({ overdueDays: parseInt(e.target.value) })}
                       />
                     </div>
                   </div>
-                   <div className={styles.formGroup}>
+                  <div className={styles.formGroup}>
                     <label>Default Credit Limit</label>
-                    <div 
+                    <div
                       className={styles.inputWrapper}
-                      style={{ 
+                      style={{
                         background: !isCreditLimitUnlocked ? '#F8FAFC' : 'white',
                         cursor: !isCreditLimitUnlocked ? 'pointer' : 'default'
                       }}
@@ -383,8 +383,8 @@ export default function Settings() {
                       }}
                     >
                       <CurrencySymbol size={18} />
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         className={styles.inputField}
                         value={creditLimitInput}
                         onChange={(e) => setCreditLimitInput(e.target.value)}
@@ -409,8 +409,8 @@ export default function Settings() {
                     <label>Late Delivery Threshold (Days)</label>
                     <div className={styles.inputWrapper}>
                       <Clock size={18} color="#94A3B8" />
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         className={styles.inputField}
                         value={settings.lateDeliveryDays || 3}
                         onChange={(e) => updateSettings({ lateDeliveryDays: parseInt(e.target.value) || 0 })}
@@ -483,9 +483,9 @@ export default function Settings() {
                       }}>
                         {isEditing ? (
                           <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
-                            <input 
-                              type="text" 
-                              className={styles.inputField} 
+                            <input
+                              type="text"
+                              className={styles.inputField}
                               style={{ flex: 1, padding: '0.4rem 0.75rem', fontSize: '0.9rem' }}
                               value={editingStatusVal}
                               onChange={(e) => setEditingStatusVal(e.target.value)}
@@ -522,9 +522,9 @@ export default function Settings() {
                 <div style={{ borderTop: '1px solid #F1F5F9', paddingTop: '1.25rem' }}>
                   <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#1E293B', marginBottom: '0.5rem' }}>Add New Status</h4>
                   <div style={{ display: 'flex', gap: '0.75rem' }}>
-                    <input 
-                      type="text" 
-                      className={styles.inputField} 
+                    <input
+                      type="text"
+                      className={styles.inputField}
                       placeholder="e.g. Dry Cleaning, Stain Treatment..."
                       value={newStatusInput}
                       onChange={(e) => setNewStatusInput(e.target.value)}
@@ -558,9 +558,9 @@ export default function Settings() {
                       }}>
                         {isEditing ? (
                           <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
-                            <input 
-                              type="text" 
-                              className={styles.inputField} 
+                            <input
+                              type="text"
+                              className={styles.inputField}
                               style={{ flex: 1, padding: '0.4rem 0.75rem', fontSize: '0.9rem' }}
                               value={editingDamageNoteVal}
                               onChange={(e) => setEditingDamageNoteVal(e.target.value)}
@@ -590,9 +590,9 @@ export default function Settings() {
                 <div style={{ borderTop: '1px solid #F1F5F9', paddingTop: '1.25rem' }}>
                   <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#1E293B', marginBottom: '0.5rem' }}>Add New Preset Note</h4>
                   <div style={{ display: 'flex', gap: '0.75rem' }}>
-                    <input 
-                      type="text" 
-                      className={styles.inputField} 
+                    <input
+                      type="text"
+                      className={styles.inputField}
                       placeholder="e.g. Colour Bleeding, Loose Threads, Torn Lining..."
                       value={newDamageNoteInput}
                       onChange={(e) => setNewDamageNoteInput(e.target.value)}
@@ -739,7 +739,7 @@ export default function Settings() {
                   <p style={{ fontSize: '0.75rem', color: '#64748B', marginBottom: '0.5rem' }}>
                     A 4-digit PIN required for manager overrides (like credit limit approvals) and confirming order deletions.
                   </p>
-                  
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '300px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                       <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>Current PIN</span>
@@ -993,7 +993,7 @@ export default function Settings() {
                     </div>
                     <div className={styles.presets}>
                       {[0, 5, 12, 15].map(rate => (
-                        <button 
+                        <button
                           key={rate}
                           type="button"
                           className={`${styles.presetBtn} ${settings.taxRate === rate ? styles.activePreset : ''}`}
@@ -1009,7 +1009,7 @@ export default function Settings() {
                 <div className={settings.isTaxEnabled ? styles.methodSelection : styles.formDisabled}>
                   <label className={styles.methodLabel}>Tax Calculation Method</label>
                   <div className={styles.methodGrid}>
-                    <div 
+                    <div
                       className={`${styles.methodCard} ${settings.taxMethod === 'exclusive' ? styles.methodActive : ''}`}
                       onClick={() => settings.isTaxEnabled && updateSettings({ taxMethod: 'exclusive' })}
                     >
@@ -1019,7 +1019,7 @@ export default function Settings() {
                         <p>Tax is added on top of the item price.</p>
                       </div>
                     </div>
-                    <div 
+                    <div
                       className={`${styles.methodCard} ${settings.taxMethod === 'inclusive' ? styles.methodActive : ''}`}
                       onClick={() => settings.isTaxEnabled && updateSettings({ taxMethod: 'inclusive' })}
                     >
@@ -1053,7 +1053,7 @@ export default function Settings() {
                     <span className={styles.statLabel}>{settings.taxName} ({settings.taxRate}%)</span>
                     <span className={styles.statValue}>
                       {settings.isTaxEnabled ? (
-                        settings.taxMethod === 'inclusive' 
+                        settings.taxMethod === 'inclusive'
                           ? <><CurrencySymbol size={14} /> {(100 - (100 / (1 + (settings.taxRate / 100)))).toFixed(2)}</>
                           : <><CurrencySymbol size={14} /> {(100 * settings.taxRate / 100).toFixed(2)}</>
                       ) : <><CurrencySymbol size={14} /> 0.00</>}
@@ -1086,8 +1086,8 @@ export default function Settings() {
                 <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.25rem' }}>Choose the overall look of your printed invoice.</p>
                 <div className={styles.templatesGrid} style={{ marginBottom: '1rem' }}>
                   <TemplateCard id="standard" name="Standard" description="Bilingual office layout" active={settings.invoiceTemplate === 'standard'} onClick={() => updateSettings({ invoiceTemplate: 'standard' })} />
-                  <TemplateCard id="modern"   name="Modern"   description="Clean single-language" active={settings.invoiceTemplate === 'modern'}   onClick={() => updateSettings({ invoiceTemplate: 'modern' })} />
-                  <TemplateCard id="compact"  name="Compact"  description="Thermal / small receipt" active={settings.invoiceTemplate === 'compact'}  onClick={() => updateSettings({ invoiceTemplate: 'compact' })} />
+                  <TemplateCard id="modern" name="Modern" description="Clean single-language" active={settings.invoiceTemplate === 'modern'} onClick={() => updateSettings({ invoiceTemplate: 'modern' })} />
+                  <TemplateCard id="compact" name="Compact" description="Thermal / small receipt" active={settings.invoiceTemplate === 'compact'} onClick={() => updateSettings({ invoiceTemplate: 'compact' })} />
                 </div>
               </div>
 
@@ -1097,11 +1097,11 @@ export default function Settings() {
                 <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.5rem' }}>Toggle which sections appear on printed / downloaded invoices.</p>
                 <div className={styles.formGrid}>
                   {[
-                    { label: 'Shop Logo',           sub: 'Company logo in header',            key: 'invoiceShowLogo' },
-                    { label: 'Compliance QR Code',  sub: 'Order QR code for tracking',        key: 'invoiceShowQrCode' },
-                    { label: 'Bilingual Text',       sub: 'Headings in English & Arabic',      key: 'invoiceShowBilingual' },
-                    { label: 'Terms & Conditions',   sub: 'Print note at bottom',              key: 'invoiceShowTerms' },
-                    { label: 'Bank Transfer Details',sub: 'Payment bank accounts',             key: 'invoiceShowBankDetails' },
+                    { label: 'Shop Logo', sub: 'Company logo in header', key: 'invoiceShowLogo' },
+                    { label: 'Compliance QR Code', sub: 'Order QR code for tracking', key: 'invoiceShowQrCode' },
+                    { label: 'Bilingual Text', sub: 'Headings in English & Arabic', key: 'invoiceShowBilingual' },
+                    { label: 'Terms & Conditions', sub: 'Print note at bottom', key: 'invoiceShowTerms' },
+                    { label: 'Bank Transfer Details', sub: 'Payment bank accounts', key: 'invoiceShowBankDetails' },
                   ].map(({ label, sub, key }) => (
                     <div className={styles.formGroup} key={key}>
                       <label>{label}</label>
@@ -1217,7 +1217,7 @@ export default function Settings() {
                         placeholder="#2563EB"
                       />
                       <div style={{ display: 'flex', gap: '0.4rem' }}>
-                        {['#2563EB','#0F766E','#7C3AED','#DC2626','#D97706','#16A34A','#0F172A'].map(c => (
+                        {['#2563EB', '#0F766E', '#7C3AED', '#DC2626', '#D97706', '#16A34A', '#0F172A'].map(c => (
                           <button key={c} onClick={() => updateSettings({ invoiceAccentColor: c })}
                             style={{ width: 24, height: 24, borderRadius: '50%', background: c, border: settings.invoiceAccentColor === c ? '2.5px solid #0F172A' : '2px solid transparent', cursor: 'pointer' }}
                           />
@@ -1262,8 +1262,8 @@ export default function Settings() {
                     <h2 className={styles.cardTitle}>Bank Transfer Details</h2>
                     <p style={{ fontSize: '0.85rem', color: '#64748B' }}>Add one or more bank accounts for customer payments.</p>
                   </div>
-                  <button 
-                    className={styles.saveBtn} 
+                  <button
+                    className={styles.saveBtn}
                     style={{ background: '#2563EB', fontSize: '0.8rem', padding: '0.5rem 1rem' }}
                     onClick={() => {
                       const newAccounts = [...(settings.bankAccounts || []), { id: Date.now().toString(), bankName: '', accountNumber: '', iban: '' }];
@@ -1278,7 +1278,7 @@ export default function Settings() {
                   {(settings.bankAccounts || []).map((account, index) => (
                     <div key={index} className={`${styles.bankAccountItem} ${settings.defaultBankId === account.id ? styles.defaultBank : ''}`} style={{ border: '1px solid #E2E8F0', padding: '1.5rem', borderRadius: '12px', position: 'relative' }}>
                       <div className={styles.bankItemActions} style={{ position: 'absolute', top: '1rem', right: '1rem', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                        <button 
+                        <button
                           className={styles.defaultToggle}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', color: settings.defaultBankId === account.id ? '#F59E0B' : '#94A3B8', fontWeight: 700, fontSize: '0.8rem' }}
                           onClick={() => updateSettings({ defaultBankId: account.id })}
@@ -1286,7 +1286,7 @@ export default function Settings() {
                           <Star size={18} fill={settings.defaultBankId === account.id ? '#F59E0B' : 'none'} />
                           {settings.defaultBankId === account.id ? 'Default Account' : 'Set as Default'}
                         </button>
-                        <button 
+                        <button
                           style={{ background: 'transparent', border: 'none', color: '#EF4444', cursor: 'pointer' }}
                           onClick={() => {
                             const newAccounts = settings.bankAccounts.filter((_, i) => i !== index);
@@ -1358,7 +1358,7 @@ export default function Settings() {
                     <div style={{ textAlign: 'center', padding: '3rem', background: '#F8FAFC', borderRadius: '12px', border: '1px dashed #CBD5E1' }}>
                       <Building2 size={40} color="#94A3B8" style={{ marginBottom: '1rem' }} />
                       <p style={{ color: '#64748B', fontSize: '0.9rem' }}>No bank accounts added yet.</p>
-                      <button 
+                      <button
                         style={{ marginTop: '1rem', color: '#2563EB', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}
                         onClick={() => updateSettings({ bankAccounts: [{ bankName: '', accountNumber: '', iban: '' }] })}
                       >
@@ -1372,7 +1372,7 @@ export default function Settings() {
               <div className={styles.card} style={{ background: '#F8FAFC', border: '1px dashed #CBD5E1' }}>
                 <h3 className={styles.cardTitle} style={{ fontSize: '1rem', color: '#475569' }}>Payment Note</h3>
                 <p style={{ fontSize: '0.875rem', color: '#64748B', lineHeight: '1.6' }}>
-                  These details will be displayed on your invoices to allow customers to pay via bank transfer. 
+                  These details will be displayed on your invoices to allow customers to pay via bank transfer.
                   Please ensure all information is accurate to avoid payment delays.
                 </p>
               </div>
@@ -1397,11 +1397,11 @@ export default function Settings() {
                     <div style={{ flex: 1 }}>
                       <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Manual Database Export</h3>
                       <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
-                        This will create a complete copy of your local database (laundry_pos.sqlite). 
+                        This will create a complete copy of your local database (laundry_pos.sqlite).
                         You can save this to a USB drive or any folder on your computer.
                       </p>
-                      <button 
-                        className={styles.saveBtn} 
+                      <button
+                        className={styles.saveBtn}
                         style={{ background: '#2563EB', padding: '0.75rem 1.5rem' }}
                         onClick={async () => {
                           if (window.electronAPI?.backupDatabase) {
@@ -1428,11 +1428,11 @@ export default function Settings() {
                       <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
                         Set a default folder (e.g., on your USB drive). The system will automatically save a backup there based on the selected interval.
                       </p>
-                      
+
                       {settings.autoBackupPath && (
                         <div className={styles.formGroup} style={{ marginBottom: '1.25rem', maxWidth: '320px' }}>
                           <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#1E293B', display: 'block', marginBottom: '0.5rem' }}>Auto-Backup Interval</label>
-                          <select 
+                          <select
                             className={styles.inputField}
                             value={settings.autoBackupInterval ?? 60}
                             onChange={(e) => updateSettings({ autoBackupInterval: parseInt(e.target.value) })}
@@ -1448,10 +1448,10 @@ export default function Settings() {
                           </select>
                         </div>
                       )}
-                      
+
                       <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                        <button 
-                          className={styles.saveBtn} 
+                        <button
+                          className={styles.saveBtn}
                           style={{ background: '#10B981', padding: '0.6rem 1.2rem', fontSize: '0.85rem' }}
                           onClick={async () => {
                             if (window.electronAPI?.selectFolder) {
@@ -1463,15 +1463,15 @@ export default function Settings() {
                             }
                           }}
                         >
-                           {settings.autoBackupPath ? 'Change USB Path' : 'Select USB Path'}
+                          {settings.autoBackupPath ? 'Change USB Path' : 'Select USB Path'}
                         </button>
-                        
+
                         {settings.autoBackupPath && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#10B981', fontSize: '0.85rem', fontWeight: 600 }}>
                               <CheckCircle size={14} />
                               <span>Path: {settings.autoBackupPath}</span>
-                              <button 
+                              <button
                                 style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', marginLeft: '0.5rem' }}
                                 onClick={() => updateSettings({ autoBackupPath: '', lastBackupTime: '' })}
                               >
@@ -1628,14 +1628,14 @@ export default function Settings() {
                         <span style={{ fontWeight: 600, color: '#334155' }}>Downloading software update...</span>
                         <span style={{ fontWeight: 700, color: '#2563EB' }}>{updateStatus.progress}%</span>
                       </div>
-                      
+
                       <div style={{ width: '100%', height: '8px', background: '#E2E8F0', borderRadius: '4px', overflow: 'hidden' }}>
-                        <div style={{ 
-                          width: `${updateStatus.progress}%`, 
-                          height: '100%', 
-                          background: 'linear-gradient(90deg, #3B82F6 0%, #2563EB 100%)', 
-                          borderRadius: '4px', 
-                          transition: 'width 0.3s ease-out' 
+                        <div style={{
+                          width: `${updateStatus.progress}%`,
+                          height: '100%',
+                          background: 'linear-gradient(90deg, #3B82F6 0%, #2563EB 100%)',
+                          borderRadius: '4px',
+                          transition: 'width 0.3s ease-out'
                         }} />
                       </div>
                       <span style={{ fontSize: '0.8rem', color: '#64748B' }}>Please do not close the application or disconnect from the internet.</span>
@@ -1757,12 +1757,12 @@ export default function Settings() {
               <p style={{ fontSize: '0.85rem', color: '#64748B', margin: 0, lineHeight: '1.4' }}>
                 Please enter the 4-digit **Order Deletion PIN** to unlock editing the Default Credit Limit.
               </p>
-              
+
               <div className={styles.formGroup} style={{ margin: 0 }}>
                 <div className={styles.inputWrapper}>
                   <Lock size={18} color="#94A3B8" />
-                  <input 
-                    type="password" 
+                  <input
+                    type="password"
                     maxLength={4}
                     className={styles.inputField}
                     placeholder="••••"
@@ -1785,8 +1785,8 @@ export default function Settings() {
 
             <div className={styles.cropperControls} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', borderTop: '1px solid #F1F5F9' }}>
               <div className={styles.cropperActions} style={{ width: '100%', gap: '0.75rem', display: 'flex' }}>
-                <button 
-                  className={styles.secondaryBtn} 
+                <button
+                  className={styles.secondaryBtn}
                   style={{ flex: 1 }}
                   onClick={() => {
                     setShowPinModal(false);
@@ -1796,8 +1796,8 @@ export default function Settings() {
                 >
                   Cancel
                 </button>
-                <button 
-                  className={styles.primaryBtn} 
+                <button
+                  className={styles.primaryBtn}
                   style={{ flex: 1 }}
                   onClick={() => {
                     const correctPin = settings.orderDeletePin || '0000';

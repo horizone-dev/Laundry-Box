@@ -60,11 +60,7 @@ export default function TaxReport() {
       startLocal = new Date(today);
       endLocal = new Date(today);
       endLocal.setHours(23, 59, 59, 999);
-    } else if (range === 'This Week') {
-      startLocal = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay());
-      endLocal = new Date(startLocal);
-      endLocal.setDate(startLocal.getDate() + 6);
-      endLocal.setHours(23, 59, 59, 999);
+
     } else if (range === 'This Month') {
       startLocal = new Date(today.getFullYear(), today.getMonth(), 1);
       endLocal = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -414,7 +410,6 @@ export default function TaxReport() {
                 className={styles.filterSelect}
               >
                 <option value="Today">Today</option>
-                <option value="This Week">This Week</option>
                 <option value="This Month">This Month</option>
                 <option value="This Year">This Year</option>
                 <option value="Custom">Custom Date Range</option>

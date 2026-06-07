@@ -5,13 +5,14 @@ import {
   X, ChevronDown, Shirt, Bed, Wind, Layers, Package,
   Droplet, Zap, Heart, Sparkles, User, CreditCard, Wallet,
   Gift, Printer, Receipt, Edit3, UserPlus, Phone, MapPin, MessageCircle, Landmark,
-  Calendar, FileText, AlertTriangle, AlertCircle, Info, Lock
+  Calendar, FileText, AlertTriangle, AlertCircle, Info, Lock, Clock
 } from 'lucide-react';
 import axios from 'axios';
 import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { DEFAULT_SHOP_ID, DEFAULT_BRANCH_ID, API_BASE_URL, CATEGORIES, PAYMENT_STATUS, ORDER_STATUS, PAYMENT_METHODS } from '../constants';
 import { t } from '../utils/translations';
+import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
 import styles from './POS.module.css';
 
 
@@ -114,6 +115,7 @@ export default function POS() {
   };
 
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(getTomorrowDateString());
+  const [expectedDeliveryTime, setExpectedDeliveryTime] = useState('17:00');
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [showSpecialPresets, setShowSpecialPresets] = useState(false);
   const [showItemPresets, setShowItemPresets] = useState(false);
@@ -292,7 +294,7 @@ export default function POS() {
 
   const handleSaveNewCustomer = async (e) => {
     e.preventDefault();
-    const timestamp = new Date().toISOString();
+    const timestamp = getLocalISOString();
 
     if (window.electronAPI?.dbQuery) {
       try {
@@ -588,6 +590,7 @@ export default function POS() {
     }
     const orderId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
     const billNumber = `BN-${Date.now().toString().slice(-6)}`;
+    const combinedExpectedDelivery = expectedDeliveryDate ? `${expectedDeliveryDate} ${expectedDeliveryTime || '17:00'}` : '';
 
     if (window.electronAPI?.dbQuery) {
       try {
@@ -606,12 +609,12 @@ export default function POS() {
             paymentMethod === 'credit' ? total : 0,
             paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
             JSON.stringify(cart),
-            JSON.stringify([{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: new Date().toISOString() }]),
-            new Date().toISOString(),
+            JSON.stringify([{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }]),
+            getLocalISOString(),
             0,
-            new Date().toISOString(),
+            getLocalISOString(),
             paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI)),
-            expectedDeliveryDate,
+            combinedExpectedDelivery,
             specialInstructions
           ]
         );
@@ -661,8 +664,8 @@ export default function POS() {
             paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
             paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI)),
             items: cart,
-            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: new Date().toISOString() }],
-            expectedDeliveryDate,
+            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
+            expectedDeliveryDate: combinedExpectedDelivery,
             specialInstructions
           });
         } catch (syncErr) {
@@ -685,8 +688,8 @@ export default function POS() {
             paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
             paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI)),
             items: cart,
-            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: new Date().toISOString() }],
-            expectedDeliveryDate,
+            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
+            expectedDeliveryDate: combinedExpectedDelivery,
             specialInstructions
           }
         }));
@@ -694,13 +697,14 @@ export default function POS() {
         if (paymentMethod === 'credit' && selectedCustomer) {
           await window.electronAPI.dbQuery(
             'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-            [total, new Date().toISOString(), selectedCustomer.id]
+            [total, getLocalISOString(), selectedCustomer.id]
           );
         }
 
         // Record Transaction in Accounts
         const txnId = `TXN-${Date.now()}`;
-        const txnTimestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+        const _nowP = new Date();
+        const txnTimestamp = `${_nowP.getFullYear()}-${String(_nowP.getMonth()+1).padStart(2,'0')}-${String(_nowP.getDate()).padStart(2,'0')} ${String(_nowP.getHours()).padStart(2,'0')}:${String(_nowP.getMinutes()).padStart(2,'0')}`;
         const accountType = (paymentMethod === 'card' || paymentMethod === 'wallet') ? 'BANK' : 'CASH';
 
         if (paymentMethod !== 'credit') {
@@ -709,7 +713,7 @@ export default function POS() {
             `INSERT INTO account_transactions 
              (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [txnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales', total, desc, txnTimestamp, 0, new Date().toISOString(), 'ShoppingBag', accountType === 'BANK' ? selectedBank : null]
+            [txnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales', total, desc, txnTimestamp, 0, getLocalISOString(), 'ShoppingBag', accountType === 'BANK' ? selectedBank : null]
           );
         }
 
@@ -762,6 +766,7 @@ export default function POS() {
 
     const orderId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
     const billNumber = `BN-${Date.now().toString().slice(-6)}`;
+    const combinedExpectedDelivery = expectedDeliveryDate ? `${expectedDeliveryDate} ${expectedDeliveryTime || '17:00'}` : '';
 
     if (window.electronAPI?.dbQuery) {
       try {
@@ -780,13 +785,13 @@ export default function POS() {
             0,
             total,
             JSON.stringify(cart),
-            JSON.stringify([{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: new Date().toISOString() }]),
-            new Date().toISOString(),
-            new Date().toISOString(),
+            JSON.stringify([{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: getLocalISOString() }]),
+            getLocalISOString(),
+            getLocalISOString(),
             PAYMENT_STATUS.CREDIT,
             0,
             PAYMENT_METHODS.CREDIT,
-            expectedDeliveryDate,
+            combinedExpectedDelivery,
             specialInstructions
           ]
         );
@@ -821,7 +826,7 @@ export default function POS() {
 
         // Update customer balance in DB
         if (selectedCustomer) {
-          await window.electronAPI.dbQuery('UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?', [total, new Date().toISOString(), selectedCustomer.id]);
+          await window.electronAPI.dbQuery('UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?', [total, getLocalISOString(), selectedCustomer.id]);
         }
 
         if (window.electronAPI?.runDataHealer) {
@@ -844,8 +849,8 @@ export default function POS() {
             paymentStatus: PAYMENT_STATUS.CREDIT,
             paymentMethod: PAYMENT_METHODS.CREDIT,
             items: cart,
-            statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: new Date().toISOString() }],
-            expectedDeliveryDate,
+            statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: getLocalISOString() }],
+            expectedDeliveryDate: combinedExpectedDelivery,
             specialInstructions
           }
         }));
@@ -867,8 +872,8 @@ export default function POS() {
             paymentStatus: PAYMENT_STATUS.CREDIT,
             paymentMethod: PAYMENT_METHODS.CREDIT.toUpperCase(),
             items: cart,
-            statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: new Date().toISOString() }],
-            expectedDeliveryDate,
+            statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: getLocalISOString() }],
+            expectedDeliveryDate: combinedExpectedDelivery,
             specialInstructions
           });
         } catch (syncErr) {
@@ -894,6 +899,7 @@ export default function POS() {
         setShowSuccessModal(true);
         setCart([]);
         setExpectedDeliveryDate(getTomorrowDateString());
+        setExpectedDeliveryTime('17:00');
         setSpecialInstructions('');
         setPendingOrderId(null);
       } catch (err) {
@@ -1222,21 +1228,34 @@ export default function POS() {
               )}
             </div>
           </div>
-          <Trash2 size={18} className={styles.clearCart} onClick={() => { setCart([]); setExpectedDeliveryDate(getTomorrowDateString()); setSpecialInstructions(''); }} />
+          <Trash2 size={18} className={styles.clearCart} onClick={() => { setCart([]); setExpectedDeliveryDate(getTomorrowDateString()); setExpectedDeliveryTime('17:00'); setSpecialInstructions(''); }} />
         </div>
-
         <div className={styles.cartMetadata}>
-          <div className={styles.metadataRow}>
-            <label className={styles.metadataLabel}>
-              <Calendar size={13} style={{ marginRight: '4px' }} />
-              Expected Delivery Date
-            </label>
-            <input
-              type="date"
-              className={styles.metadataInput}
-              value={expectedDeliveryDate}
-              onChange={(e) => setExpectedDeliveryDate(e.target.value)}
-            />
+          <div style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem' }}>
+            <div className={styles.metadataRow} style={{ flex: 1 }}>
+              <label className={styles.metadataLabel}>
+                <Calendar size={13} style={{ marginRight: '4px' }} />
+                Expected Date
+              </label>
+              <input
+                type="date"
+                className={styles.metadataInput}
+                value={expectedDeliveryDate}
+                onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+              />
+            </div>
+            <div className={styles.metadataRow} style={{ flex: 1 }}>
+              <label className={styles.metadataLabel}>
+                <Clock size={13} style={{ marginRight: '4px' }} />
+                Expected Time
+              </label>
+              <input
+                type="time"
+                className={styles.metadataInput}
+                value={expectedDeliveryTime}
+                onChange={(e) => setExpectedDeliveryTime(e.target.value)}
+              />
+            </div>
           </div>
           <div className={styles.metadataRow}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

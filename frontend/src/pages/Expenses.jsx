@@ -7,6 +7,7 @@ import {
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
+import { getLocalISOString, getLocalDateStr, getLocalDateTime } from '../utils/dateUtils';
 import styles from './Expenses.module.css';
 
 export default function Expenses() {
@@ -24,7 +25,7 @@ export default function Expenses() {
     title: '', 
     amount: '', 
     category: 'Supplies', 
-    date: new Date().toISOString().split('T')[0],
+    date: getLocalDateStr(),
     paymentSource: 'CASH',
     isTaxEnabled: false,
     taxMethod: 'inclusive'
@@ -95,11 +96,7 @@ export default function Expenses() {
           const yesterday = new Date(today);
           yesterday.setDate(yesterday.getDate() - 1);
           matchesDate = itemDate.getTime() === yesterday.getTime();
-        } else if (selectedDateRange === 'This Week') {
-          const diff = today.getDate() - today.getDay();
-          const startOfWeek = new Date(today.setDate(diff));
-          startOfWeek.setHours(0, 0, 0, 0);
-          matchesDate = itemDate >= startOfWeek;
+
         } else if (selectedDateRange === 'This Month') {
           matchesDate = itemDate.getFullYear() === now.getFullYear() && itemDate.getMonth() === now.getMonth();
         } else if (selectedDateRange === 'This Year') {
@@ -155,24 +152,25 @@ export default function Expenses() {
 
         await window.electronAPI.dbQuery(
           'INSERT INTO expenses (id, shopId, title, amount, taxAmount, isTaxEnabled, taxMethod, category, date, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, DEFAULT_SHOP_ID, formData.title, totalAmount, taxAmount, formData.isTaxEnabled ? 1 : 0, formData.taxMethod, categoryToSave, formData.date, new Date().toISOString()]
+          [id, DEFAULT_SHOP_ID, formData.title, totalAmount, taxAmount, formData.isTaxEnabled ? 1 : 0, formData.taxMethod, categoryToSave, formData.date, getLocalISOString()]
         );
 
         // Also record in Accounts
         const txnId = `TXN-${Date.now()}`;
-        const txnTimestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+        const _nowE = new Date();
+        const txnTimestamp = `${_nowE.getFullYear()}-${String(_nowE.getMonth()+1).padStart(2,'0')}-${String(_nowE.getDate()).padStart(2,'0')} ${String(_nowE.getHours()).padStart(2,'0')}:${String(_nowE.getMinutes()).padStart(2,'0')}`;
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, formData.paymentSource, 'EXPENSE', categoryToSave, totalAmount, formData.title, txnTimestamp, 0, new Date().toISOString(), 'Zap']
+          [txnId, DEFAULT_SHOP_ID, formData.paymentSource, 'EXPENSE', categoryToSave, totalAmount, formData.title, txnTimestamp, 0, getLocalISOString(), 'Zap']
         );
 
         fetchExpenses();
         setShowModal(false);
         setShowCustomCategoryInput(false);
         setCustomCategoryName('');
-        setFormData({ title: '', amount: '', category: 'Supplies', date: new Date().toISOString().split('T')[0], paymentSource: 'CASH', isTaxEnabled: false, taxMethod: settings.taxMethod || 'inclusive' });
+        setFormData({ title: '', amount: '', category: 'Supplies', date: getLocalDateStr(), paymentSource: 'CASH', isTaxEnabled: false, taxMethod: settings.taxMethod || 'inclusive' });
       } catch (err) {
         console.error("Add expense error:", err);
       }
@@ -198,7 +196,7 @@ export default function Expenses() {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `expenses_report_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `expenses_report_${getLocalDateStr()}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -307,7 +305,6 @@ export default function Expenses() {
                 <option value="All">All Time</option>
                 <option value="Today">Today</option>
                 <option value="Yesterday">Yesterday</option>
-                <option value="This Week">This Week</option>
                 <option value="This Month">This Month</option>
                 <option value="This Year">This Year</option>
                 <option value="Custom">Custom Range</option>

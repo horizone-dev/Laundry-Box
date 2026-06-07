@@ -83,14 +83,7 @@ export default function CreditOverridesReport() {
       end.setHours(23, 59, 59, 999);
       return { from: start, to: end };
     }
-    if (dateRange === 'This Week') {
-      const day = today.getDay();
-      const start = new Date(today); start.setDate(today.getDate() - day);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(start); end.setDate(start.getDate() + 6);
-      end.setHours(23, 59, 59, 999);
-      return { from: start, to: end };
-    }
+
     if (dateRange === 'This Month') {
       const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
       const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -272,7 +265,6 @@ export default function CreditOverridesReport() {
             >
               <option value="All Time">All Time</option>
               <option value="Today">Today</option>
-              <option value="This Week">This Week</option>
               <option value="This Month">This Month</option>
               <option value="This Year">This Year</option>
               <option value="Custom">Custom Range</option>

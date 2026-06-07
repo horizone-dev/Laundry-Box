@@ -11,6 +11,7 @@ import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID } from '../constants';
 import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
+import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
 import styles from './Settlement.module.css';
 
 export default function Settlement() {
@@ -40,6 +41,14 @@ export default function Settlement() {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [notes, setNotes] = useState('');
+  const [selectedBank, setSelectedBank] = useState('');
+
+  useEffect(() => {
+    if (settings.bankAccounts && settings.bankAccounts.length > 0 && !selectedBank) {
+      const defaultBank = settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || settings.bankAccounts[0];
+      setSelectedBank(defaultBank.bankName);
+    }
+  }, [settings.bankAccounts, settings.defaultBankId, selectedBank]);
 
   // 1. Initial Load of Customer from query params
   useEffect(() => {
@@ -200,7 +209,7 @@ export default function Settlement() {
       return;
     }
 
-    const timestamp = new Date().toISOString();
+    const timestamp = getLocalISOString();
     
     if (window.electronAPI?.dbQuery) {
       try {
@@ -266,6 +275,28 @@ export default function Settlement() {
         await window.electronAPI.dbQuery(
           'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
           [amount, timestamp, selectedCustomer.id]
+        );
+
+        // 3. Record Transaction in Accounts
+        const txnId = `TXN-${Date.now()}`;
+        const txnTimestamp = getLocalDateTime();
+        await window.electronAPI.dbQuery(
+          `INSERT INTO account_transactions 
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+          [
+            txnId,
+            DEFAULT_SHOP_ID,
+            paymentMethod,
+            'INCOME',
+            'Credit Settlement',
+            amount,
+            `Settlement from ${selectedCustomer.name}${paymentMethod === 'BANK' && selectedBank ? ` via ${selectedBank}` : ''}`,
+            txnTimestamp,
+            timestamp,
+            'DollarSign',
+            paymentMethod === 'BANK' ? selectedBank : null
+          ]
         );
 
         if (window.electronAPI?.runDataHealer) {
@@ -803,6 +834,24 @@ export default function Settlement() {
                   })}
                 </div>
               </div>
+
+              {paymentMethod === 'BANK' && settings.bankAccounts?.length > 0 && (
+                <div className={styles.modalInputGroup} style={{ marginTop: '0.5rem' }}>
+                  <label>Select Bank Account</label>
+                  <div className={styles.largeInputBox} style={{ padding: '0.5rem 1rem' }}>
+                    <Landmark size={18} color="#2563EB" />
+                    <select
+                      style={{ border: 'none', width: '100%', outline: 'none', background: 'transparent', fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}
+                      value={selectedBank}
+                      onChange={(e) => setSelectedBank(e.target.value)}
+                    >
+                      {settings.bankAccounts.map((acc, idx) => (
+                        <option key={idx} value={acc.bankName}>{acc.bankName}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
 
               {/* Live Preview Summary Box */}
               <div className={styles.liveSummaryBox}>

@@ -165,7 +165,12 @@ function initDB(appPath) {
       originalPaymentStatus TEXT,
       paidAmount REAL DEFAULT 0,
       returnStatus TEXT DEFAULT 'N/A',
-      approvedBy TEXT
+      approvedBy TEXT,
+      originalPaymentMethod TEXT,
+      refundMethod TEXT,
+      returnedAt TEXT,
+      refundStatus TEXT DEFAULT 'Deleted',
+      payments TEXT
     );
 
     CREATE TABLE IF NOT EXISTS credit_override_logs (
@@ -332,6 +337,68 @@ function initDB(appPath) {
     if (!deletedOrderCols.some(col => col.name === 'approvedBy')) {
       db.exec("ALTER TABLE deleted_orders ADD COLUMN approvedBy TEXT DEFAULT NULL;");
     }
+    if (!deletedOrderCols.some(col => col.name === 'originalPaymentMethod')) {
+      db.exec("ALTER TABLE deleted_orders ADD COLUMN originalPaymentMethod TEXT DEFAULT NULL;");
+    }
+    if (!deletedOrderCols.some(col => col.name === 'payments')) {
+      db.exec("ALTER TABLE deleted_orders ADD COLUMN payments TEXT DEFAULT NULL;");
+    }
+    if (!deletedOrderCols.some(col => col.name === 'refundMethod')) {
+      db.exec("ALTER TABLE deleted_orders ADD COLUMN refundMethod TEXT DEFAULT NULL;");
+    }
+    if (!deletedOrderCols.some(col => col.name === 'returnedAt')) {
+      db.exec("ALTER TABLE deleted_orders ADD COLUMN returnedAt TEXT DEFAULT NULL;");
+    }
+    if (!deletedOrderCols.some(col => col.name === 'refundStatus')) {
+      db.exec("ALTER TABLE deleted_orders ADD COLUMN refundStatus TEXT DEFAULT 'Deleted';");
+    }
+
+    // ─── Timezone Migration (run once per row) ──────────────────────────
+    // Old records were stored using toISOString() (UTC). This migration
+    // corrects them to local time by adding the UTC offset.
+    // The timezoneMigrated flag ensures we never double-apply the shift.
+    const txnCols2 = db.prepare("PRAGMA table_info(account_transactions)").all();
+    if (!txnCols2.some(col => col.name === 'timezoneMigrated')) {
+      db.exec("ALTER TABLE account_transactions ADD COLUMN timezoneMigrated INTEGER DEFAULT 0;");
+    }
+    if (!txnCols2.some(col => col.name === 'bankAccountId')) {
+      db.exec("ALTER TABLE account_transactions ADD COLUMN bankAccountId TEXT;");
+    }
+
+    // Detect the device's UTC offset in hours (positive = ahead of UTC, e.g. +4 for UAE)
+    const tzOffsetHours = -(new Date().getTimezoneOffset()) / 60;
+
+    if (tzOffsetHours !== 0) {
+      // Only shift rows that haven't been migrated yet
+      const unmigrated = db.prepare(
+        "SELECT COUNT(*) as cnt FROM account_transactions WHERE timezoneMigrated = 0"
+      ).get();
+
+      if (unmigrated && unmigrated.cnt > 0) {
+        const sign = tzOffsetHours >= 0 ? '+' : '-';
+        const absHours = Math.abs(tzOffsetHours);
+        const shiftExpr = `datetime(date, '${sign}${absHours} hours')`;
+        db.exec(`
+          UPDATE account_transactions
+          SET date = ${shiftExpr},
+              timezoneMigrated = 1
+          WHERE timezoneMigrated = 0
+            AND date IS NOT NULL
+            AND date != '';
+        `);
+        const migratedCount = db.prepare(
+          "SELECT COUNT(*) as cnt FROM account_transactions WHERE timezoneMigrated = 1"
+        ).get();
+        console.log(`[TZ Migration] Shifted ${migratedCount.cnt} account_transactions by ${sign}${absHours}h to local time.`);
+      } else {
+        console.log('[TZ Migration] All account_transactions already migrated. Skipping.');
+      }
+    } else {
+      // UTC device — mark all rows as migrated so we never re-run
+      db.exec("UPDATE account_transactions SET timezoneMigrated = 1 WHERE timezoneMigrated = 0;");
+      console.log('[TZ Migration] UTC device detected. No shift needed.');
+    }
+    // ───────────────────────────────────────────────────────────────────
 
     // Data Healer: Run on init
     runDataHealer(db);
@@ -367,88 +434,61 @@ function runDataHealer(db) {
             SET dueAmount = totalAmount - IFNULL(paidAmount, 0), isSynced = 0, updatedAt = '${timestamp}'
             WHERE ABS(dueAmount - (totalAmount - IFNULL(paidAmount, 0))) > 0.01;`);
 
-    // 3. Smart Advance Application:
-    // If a customer has a negative balance (Advance), try to apply it to their Credit orders
-    console.log("Applying customer advances to credit orders...");
-    const customersWithAdvance = db.prepare("SELECT id, balance FROM customers WHERE balance < 0").all();
-    
-    for (const customer of customersWithAdvance) {
-      let advance = Math.abs(customer.balance);
-      const creditOrders = db.prepare("SELECT id, totalAmount, paidAmount, dueAmount FROM orders WHERE customerId = ? AND (paymentStatus = 'Credit' OR paymentStatus = 'Partial') ORDER BY createdAt ASC").all(customer.id);
+    // Heal already-corrupted credit/partial orders against payments table
+    console.log("Healing mismatched order paid/due amounts against payments table...");
+    const nonPaidOrders = db.prepare("SELECT id, totalAmount, paidAmount, paymentStatus FROM orders WHERE paymentStatus IN ('Credit', 'Partial')").all();
+    for (const order of nonPaidOrders) {
+      const paymentSumRes = db.prepare("SELECT IFNULL(SUM(amount), 0) as totalPaid FROM payments WHERE orderId = ?").get(order.id);
+      const actualPaid = paymentSumRes ? paymentSumRes.totalPaid : 0;
       
-      for (const order of creditOrders) {
-        if (advance <= 0) break;
-        const remainingDue = order.totalAmount - (order.paidAmount || 0);
-        if (remainingDue <= 0) continue;
-
-        let apply = Math.min(advance, remainingDue);
-        let newPaid = (order.paidAmount || 0) + apply;
-        let newDue = order.totalAmount - newPaid;
-        let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
-        let newPaymentMethod = newDue <= 0 ? 'CASH' : (order.paymentMethod || 'Credit');
+      if (Math.abs(order.paidAmount - actualPaid) > 0.01) {
+        console.log(`Data Healer: Healing order ${order.id}. DB paidAmount: ${order.paidAmount}, actual payments: ${actualPaid}.`);
+        const newPaid = actualPaid;
+        const newDue = Math.max(0, order.totalAmount - newPaid);
+        const newStatus = newDue <= 0 ? 'Paid' : (newPaid > 0 ? 'Partial' : 'Credit');
         
-        db.prepare("UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?").run(newPaid, newDue, newStatus, newPaymentMethod, timestamp, order.id);
-        advance -= apply;
-      }
-    }
-
-    // 3.5. Smart Unapplied Payments Application:
-    // If a customer has paid more than what the individual orders reflect (ledger balance < sum(dueAmount)),
-    // apply the difference to settle their oldest outstanding credit/partial orders.
-    console.log("Applying customer unapplied payments to credit orders...");
-    const allCustomers = db.prepare("SELECT id, balance FROM customers").all();
-    for (const customer of allCustomers) {
-      const ordersDue = db.prepare("SELECT SUM(dueAmount) as totalDue FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND status != 'Cancelled'").get(customer.id);
-      const totalDue = ordersDue ? (ordersDue.totalDue || 0) : 0;
-      
-      if (customer.balance < totalDue) {
-        let unapplied = totalDue - customer.balance;
-        const dueOrders = db.prepare("SELECT id, totalAmount, paidAmount, dueAmount, status FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND (dueAmount > 0 OR paymentStatus = 'Credit' OR paymentStatus = 'Partial') AND status != 'Cancelled' ORDER BY createdAt ASC").all(customer.id);
-        
-        for (const order of dueOrders) {
-          if (unapplied <= 0) break;
-          const currentDue = order.dueAmount > 0 ? order.dueAmount : (order.totalAmount - (order.paidAmount || 0));
-          if (currentDue <= 0) continue;
-          
-          let apply = Math.min(unapplied, currentDue);
-          let newPaid = (order.paidAmount || 0) + apply;
-          let newDue = order.totalAmount - newPaid;
-          let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
-          
-          const newWorkflowStatus = newDue <= 0 ? 'Confirmed' : order.status;
-          
-          // Reconcile payments table: split and link the unapplied payments
-          let remainingToLink = apply;
-          const unlinkedPayments = db.prepare("SELECT id, amount, method, shopId, createdAt FROM payments WHERE customerId = ? AND (orderId IS NULL OR orderId = '') ORDER BY createdAt ASC").all(customer.id);
-          
-          const firstPayment = unlinkedPayments[0];
-          const finalPayMethod = (firstPayment && firstPayment.method && firstPayment.method.toUpperCase() !== 'CREDIT') ? firstPayment.method : 'CASH';
-          
-          db.prepare("UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?").run(newPaid, newDue, newStatus, newWorkflowStatus, finalPayMethod, timestamp, order.id);
-          
-          for (const payment of unlinkedPayments) {
-            if (remainingToLink <= 0) break;
-            
-            const splitPayMethod = (payment.method && payment.method.toUpperCase() !== 'CREDIT') ? payment.method : 'CASH';
-            if (payment.amount <= remainingToLink) {
-              db.prepare("UPDATE payments SET orderId = ?, method = ?, isSynced = 0 WHERE id = ?").run(order.id, splitPayMethod, payment.id);
-              remainingToLink -= payment.amount;
-            } else {
-              const newUnlinkedAmount = payment.amount - remainingToLink;
-              db.prepare("UPDATE payments SET amount = ?, isSynced = 0 WHERE id = ?").run(newUnlinkedAmount, payment.id);
-              
-              db.prepare(`INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`)
-                .run(`PAY-SPLIT-${Date.now()}-${order.id}`, customer.id, order.id, payment.shopId || 'SHOP_01', remainingToLink, splitPayMethod, 'SUCCESS', payment.createdAt, timestamp);
-              
-              remainingToLink = 0;
-            }
-          }
-          
-          unapplied -= apply;
+        let updateQuery = `UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, isSynced = 0, updatedAt = ?`;
+        const params = [newPaid, newDue, newStatus, timestamp];
+        if (newStatus === 'Credit') {
+          updateQuery += `, paymentMethod = 'Credit'`;
         }
+        updateQuery += ` WHERE id = ?`;
+        params.push(order.id);
+        db.prepare(updateQuery).run(params);
       }
     }
+
+    // Recalculate customer balances from actual orders and payments before smart advance/unapplied payments logic
+    console.log("Recalculating customer balances from actual orders and payments...");
+    db.exec(`UPDATE customers SET balance = (
+              SELECT IFNULL(SUM(dueAmount), 0) 
+              FROM orders 
+              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+            ) - IFNULL((
+              SELECT SUM(amount) 
+              FROM payments 
+              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+            ), 0) - IFNULL((
+              SELECT SUM(paidAmount)
+              FROM deleted_orders
+              WHERE deleted_orders.customerId = customers.id AND deleted_orders.refundStatus = 'Refund Pending'
+            ), 0), isSynced = 0, updatedAt = '${timestamp}'
+            WHERE balance != (
+              SELECT IFNULL(SUM(dueAmount), 0) 
+              FROM orders 
+              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+            ) - IFNULL((
+              SELECT SUM(amount) 
+              FROM payments 
+              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+            ), 0) - IFNULL((
+              SELECT SUM(paidAmount)
+              FROM deleted_orders
+              WHERE deleted_orders.customerId = customers.id AND deleted_orders.refundStatus = 'Refund Pending'
+            ), 0);`);
+
+    // Auto-application of customer advances and unapplied payments has been disabled to prevent mutating historical order statuses without explicit action.
+
 
     // 4. Final Sync: Ensure customer balance matches the sum of remaining dueAmounts minus any remaining unlinked payments
     // Only update and mark isSynced = 0 if the balance has actually changed

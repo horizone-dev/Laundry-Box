@@ -7,6 +7,8 @@ import {
 import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
+import { getLocalDateBounds } from '../utils/dateFilters';
+import { getLocalISOString, getLocalDateStr } from '../utils/dateUtils';
 import styles from './DeletedOrders.module.css';
 
 const containerVariants = {
@@ -41,6 +43,9 @@ export default function DeletedOrders() {
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [orderToRefund, setOrderToRefund] = useState(null);
+  const [selectedRefundMethod, setSelectedRefundMethod] = useState('CASH');
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -57,37 +62,20 @@ export default function DeletedOrders() {
         let query = 'SELECT * FROM deleted_orders';
         let params = [];
 
-        // Apply local date filters if not "All"
+        const bounds = getLocalDateBounds(dateRange, customStart, customEnd);
+
         if (dateRange !== 'All') {
-          const now = new Date();
-          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          
-          if (dateRange === 'Today') {
-            const start = new Date(today).toISOString();
-            const end = new Date(today);
-            end.setHours(23, 59, 59, 999);
+          if (bounds === false) {
+            setOrders([]);
+            setLoading(false);
+            return;
+          }
+          if (bounds !== null) {
+            // Format bounds as local YYYY-MM-DD HH:MM strings for comparison with stored dates
+            const pad = n => String(n).padStart(2, '0');
+            const fmtLocal = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
             query += ' WHERE deletedAt >= ? AND deletedAt <= ?';
-            params = [start, end.toISOString()];
-          } else if (dateRange === 'This Week') {
-            const first = today.getDate() - today.getDay();
-            const start = new Date(today.setDate(first)).toISOString();
-            const end = new Date();
-            end.setHours(23, 59, 59, 999);
-            query += ' WHERE deletedAt >= ? AND deletedAt <= ?';
-            params = [start, end.toISOString()];
-          } else if (dateRange === 'This Month') {
-            const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
-            const end = new Date();
-            end.setHours(23, 59, 59, 999);
-            query += ' WHERE deletedAt >= ? AND deletedAt <= ?';
-            params = [start, end.toISOString()];
-          } else if (dateRange === 'Custom' && customStart && customEnd) {
-            const start = new Date(customStart);
-            start.setHours(0, 0, 0, 0);
-            const end = new Date(customEnd);
-            end.setHours(23, 59, 59, 999);
-            query += ' WHERE deletedAt >= ? AND deletedAt <= ?';
-            params = [start.toISOString(), end.toISOString()];
+            params = [fmtLocal(bounds.from), fmtLocal(bounds.to)];
           }
         }
 
@@ -111,31 +99,85 @@ export default function DeletedOrders() {
     }
   };
 
-  const handleMarkAsReturned = async (orderId) => {
-    if (!window.confirm('Are you sure you want to mark this payment as returned/refunded to the customer?')) return;
+  const confirmRefund = async () => {
+    if (!orderToRefund) return;
     try {
       if (window.electronAPI?.dbQuery) {
+        // 1. Process refund if paid amount exists: Create a single Return expense transaction
+        const paidAmt = orderToRefund.paidAmount || 0;
+        if (paidAmt > 0) {
+          const refundTxnId = `TXN-RETURN-${Date.now()}`;
+          const _nowD = new Date();
+          const txnTimestamp = `${_nowD.getFullYear()}-${String(_nowD.getMonth()+1).padStart(2,'0')}-${String(_nowD.getDate()).padStart(2,'0')} ${String(_nowD.getHours()).padStart(2,'0')}:${String(_nowD.getMinutes()).padStart(2,'0')}`;
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              refundTxnId,
+              orderToRefund.shopId || 'SHOP_01',
+              selectedRefundMethod.toUpperCase(),
+              'EXPENSE',
+              'Return',
+              paidAmt,
+              `Return - Bill #${orderToRefund.id}`,
+              txnTimestamp,
+              0,
+              getLocalISOString(),
+              'Zap'
+            ]
+          );
+        }
+
+        // 2. Update return status and refund details in SQLite database
+        const nowIso = getLocalISOString();
         await window.electronAPI.dbQuery(
-          "UPDATE deleted_orders SET returnStatus = 'Returned' WHERE id = ?",
-          [orderId]
+          "UPDATE deleted_orders SET returnStatus = 'Returned', refundStatus = 'Returned', refundMethod = ?, returnedAt = ? WHERE id = ?",
+          [selectedRefundMethod.toUpperCase(), nowIso, orderToRefund.id]
         );
+
+        // 3. Adjust customer balance (since refund is no longer pending, add it back to customer balance)
+        if (paidAmt > 0 && orderToRefund.customerId && orderToRefund.customerId !== 'Walk-in') {
+          await window.electronAPI.dbQuery(
+            'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+            [paidAmt, getLocalISOString(), orderToRefund.customerId]
+          );
+        }
+
+        // 4. Run data healer to make sure sync and state are correct
+        if (window.electronAPI?.runDataHealer) {
+          await window.electronAPI.runDataHealer();
+        }
       }
       
       // Update state locally
-      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, returnStatus: 'Returned' } : o));
+      const nowStr = getLocalISOString();
+      setOrders(prev => prev.map(o => o.id === orderToRefund.id ? { 
+        ...o, 
+        returnStatus: 'Returned', 
+        refundStatus: 'Returned',
+        refundMethod: selectedRefundMethod.toUpperCase(),
+        returnedAt: nowStr
+      } : o));
       
       // Attempt backend sync
       try {
-        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/orders/deleted/${encodeURIComponent(orderId)}/refund`, {
+        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/orders/deleted/${encodeURIComponent(orderToRefund.id)}/refund`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ returnStatus: 'Returned' })
+          body: JSON.stringify({ 
+            returnStatus: 'Returned', 
+            refundStatus: 'Returned',
+            refundMethod: selectedRefundMethod.toUpperCase() 
+          })
         });
       } catch (remoteErr) {
         console.warn('Backend sync failed (offline):', remoteErr.message);
       }
       
       alert('Payment marked as returned successfully.');
+      setShowRefundModal(false);
+      setOrderToRefund(null);
     } catch (err) {
       console.error('Failed to mark as returned:', err);
       alert('Failed to update return status: ' + err.message);
@@ -159,10 +201,7 @@ export default function DeletedOrders() {
           const end = new Date(today);
           end.setHours(23, 59, 59, 999);
           if (delDate < start || delDate > end) return false;
-        } else if (dateRange === 'This Week') {
-          const first = today.getDate() - today.getDay();
-          const start = new Date(today.setDate(first));
-          if (delDate < start) return false;
+
         } else if (dateRange === 'This Month') {
           const start = new Date(today.getFullYear(), today.getMonth(), 1);
           if (delDate < start) return false;
@@ -218,7 +257,7 @@ export default function DeletedOrders() {
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `deleted_orders_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `deleted_orders_${getLocalDateStr()}.csv`;
     a.click();
   };
 
@@ -331,7 +370,6 @@ export default function DeletedOrders() {
             >
               <option value="All">All Time</option>
               <option value="Today">Today</option>
-              <option value="This Week">This Week</option>
               <option value="This Month">This Month</option>
               <option value="Custom">Custom Date Range</option>
             </select>
@@ -420,7 +458,11 @@ export default function DeletedOrders() {
                           </span>
                           <button
                             className={styles.refundBtn}
-                            onClick={() => handleMarkAsReturned(order.id)}
+                            onClick={() => {
+                              setOrderToRefund(order);
+                              setSelectedRefundMethod('CASH');
+                              setShowRefundModal(true);
+                            }}
                           >
                             Mark Returned
                           </button>
@@ -451,6 +493,65 @@ export default function DeletedOrders() {
           </div>
         )}
       </div>
+
+      {/* Refund Method Selection Modal */}
+      {showRefundModal && orderToRefund && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.pinCard} style={{ maxWidth: '400px', textAlign: 'left', alignItems: 'stretch' }}>
+            <div className={styles.pinIconBox} style={{ alignSelf: 'center' }}>
+              <DollarSign size={32} />
+            </div>
+            <h2 style={{ alignSelf: 'center' }}>Confirm Refund Account</h2>
+            <p style={{ alignSelf: 'center', textAlign: 'center', marginBottom: '0.5rem' }}>
+              Select the account to refund <strong><CurrencySymbol size={12} />{(orderToRefund.paidAmount || 0).toFixed(2)}</strong> for order <strong>{orderToRefund.id}</strong>.
+            </p>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', margin: '0.5rem 0 1.5rem 0' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 600, color: '#334155' }}>
+                <input
+                  type="radio"
+                  name="refundAccount"
+                  value="CASH"
+                  checked={selectedRefundMethod === 'CASH'}
+                  onChange={() => setSelectedRefundMethod('CASH')}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+                Cash Account
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 600, color: '#334155' }}>
+                <input
+                  type="radio"
+                  name="refundAccount"
+                  value="BANK"
+                  checked={selectedRefundMethod === 'BANK'}
+                  onChange={() => setSelectedRefundMethod('BANK')}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+                Bank Account
+              </label>
+            </div>
+            
+            <div className={styles.pinActions} style={{ display: 'flex', gap: '0.75rem' }}>
+              <button 
+                type="button" 
+                className={styles.cancelBtn} 
+                onClick={() => { setShowRefundModal(false); setOrderToRefund(null); }}
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                className={styles.submitBtn} 
+                onClick={confirmRefund}
+                style={{ flex: 1.5, background: '#10B981', color: 'white', border: 'none' }}
+              >
+                Confirm Refund
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
