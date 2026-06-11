@@ -613,7 +613,7 @@ export default function POS() {
             getLocalISOString(),
             0,
             getLocalISOString(),
-            paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI)),
+            paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'bank' ? PAYMENT_METHODS.BANK : PAYMENT_METHODS.NOT_PAID),
             combinedExpectedDelivery,
             specialInstructions
           ]
@@ -662,7 +662,7 @@ export default function POS() {
             paidAmount: paymentMethod === 'credit' ? 0 : total,
             dueAmount: paymentMethod === 'credit' ? total : 0,
             paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
-            paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI)),
+            paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'bank' ? PAYMENT_METHODS.BANK : PAYMENT_METHODS.NOT_PAID),
             items: cart,
             statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
             expectedDeliveryDate: combinedExpectedDelivery,
@@ -686,7 +686,7 @@ export default function POS() {
             paidAmount: paymentMethod === 'credit' ? 0 : total,
             dueAmount: paymentMethod === 'credit' ? total : 0,
             paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
-            paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'credit' ? PAYMENT_METHODS.CREDIT : PAYMENT_METHODS.UPI)),
+            paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'bank' ? PAYMENT_METHODS.BANK : PAYMENT_METHODS.NOT_PAID),
             items: cart,
             statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
             expectedDeliveryDate: combinedExpectedDelivery,
@@ -705,7 +705,7 @@ export default function POS() {
         const txnId = `TXN-${Date.now()}`;
         const _nowP = new Date();
         const txnTimestamp = `${_nowP.getFullYear()}-${String(_nowP.getMonth()+1).padStart(2,'0')}-${String(_nowP.getDate()).padStart(2,'0')} ${String(_nowP.getHours()).padStart(2,'0')}:${String(_nowP.getMinutes()).padStart(2,'0')}`;
-        const accountType = (paymentMethod === 'card' || paymentMethod === 'wallet') ? 'BANK' : 'CASH';
+        const accountType = paymentMethod === 'bank' ? 'BANK' : 'CASH';
 
         if (paymentMethod !== 'credit') {
           const desc = `Order ${orderId}${accountType === 'BANK' ? ` via ${selectedBank}` : ''}`;
@@ -790,7 +790,7 @@ export default function POS() {
             getLocalISOString(),
             PAYMENT_STATUS.CREDIT,
             0,
-            PAYMENT_METHODS.CREDIT,
+            PAYMENT_METHODS.NOT_PAID,
             combinedExpectedDelivery,
             specialInstructions
           ]
@@ -847,7 +847,7 @@ export default function POS() {
             paidAmount: 0,
             dueAmount: total,
             paymentStatus: PAYMENT_STATUS.CREDIT,
-            paymentMethod: PAYMENT_METHODS.CREDIT,
+            paymentMethod: PAYMENT_METHODS.NOT_PAID,
             items: cart,
             statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: getLocalISOString() }],
             expectedDeliveryDate: combinedExpectedDelivery,
@@ -870,7 +870,7 @@ export default function POS() {
             paidAmount: 0,
             dueAmount: total,
             paymentStatus: PAYMENT_STATUS.CREDIT,
-            paymentMethod: PAYMENT_METHODS.CREDIT.toUpperCase(),
+            paymentMethod: PAYMENT_METHODS.NOT_PAID.toUpperCase(),
             items: cart,
             statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: getLocalISOString() }],
             expectedDeliveryDate: combinedExpectedDelivery,
@@ -1012,13 +1012,12 @@ export default function POS() {
             <h3 className={styles.modalSectionTitle}>Payment Method</h3>
             <div className={styles.paymentMethods}>
               <MethodCard id="cash" label="Cash" icon={<Wallet />} active={paymentMethod === 'cash'} onClick={setPaymentMethod} />
-              <MethodCard id="card" label="Card" icon={<CreditCard />} active={paymentMethod === 'card'} onClick={setPaymentMethod} />
-              <MethodCard id="wallet" label="Wallet" icon={<Wallet />} active={paymentMethod === 'wallet'} onClick={setPaymentMethod} />
+              <MethodCard id="bank" label="Bank" icon={<Landmark />} active={paymentMethod === 'bank'} onClick={setPaymentMethod} />
               <MethodCard id="credit" label="Store Credit" icon={<User />} active={paymentMethod === 'credit'} onClick={setPaymentMethod} />
             </div>
           </div>
 
-          {(paymentMethod === 'card' || paymentMethod === 'wallet') && settings.bankAccounts?.length > 0 && (
+          {paymentMethod === 'bank' && settings.bankAccounts?.length > 0 && (
             <div style={{ marginTop: '1rem' }}>
               <h3 className={styles.modalSectionTitle}>Select Bank Account</h3>
               <div className={styles.inputWrapper} style={{ background: 'white', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.25rem 0.5rem' }}>

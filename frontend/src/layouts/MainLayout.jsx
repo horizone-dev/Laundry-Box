@@ -271,6 +271,7 @@ export default function MainLayout() {
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permissionKey: 'dashboard' },
     { path: '/pos', label: 'POS', icon: ShoppingCart, permissionKey: 'pos' },
+    { path: '/workflow', label: 'Workflow', icon: Zap, permissionKey: 'orders' },
     {
       label: 'Orders',
       icon: ClipboardList,
@@ -308,10 +309,12 @@ export default function MainLayout() {
       permissionKey: 'reports',
       subItems: [
         { path: '/reports', label: 'Analytics' },
+        { path: '/reports/services', label: 'Services Report' },
         { path: '/reports/revenue', label: 'Revenue' },
         { path: '/reports/expenses', label: 'Expenses' },
         { path: '/reports/tax', label: 'Tax Statements' },
         { path: '/reports/daily-tax', label: 'Daily Tax Report' },
+        { path: '/reports/z-report', label: 'Z Report' },
         { path: '/reports/credit-overrides', label: 'Credit Overrides' },
       ]
     },

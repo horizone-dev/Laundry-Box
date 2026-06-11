@@ -45,7 +45,7 @@ export default function DeletedOrders() {
   const [loading, setLoading] = useState(true);
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [orderToRefund, setOrderToRefund] = useState(null);
-  const [selectedRefundMethod, setSelectedRefundMethod] = useState('CASH');
+  const [selectedRefundMethod, setSelectedRefundMethod] = useState('Cash');
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -102,6 +102,7 @@ export default function DeletedOrders() {
   const confirmRefund = async () => {
     if (!orderToRefund) return;
     try {
+      const nowIso = getLocalISOString();
       if (window.electronAPI?.dbQuery) {
         // 1. Process refund if paid amount exists: Create a single Return expense transaction
         const paidAmt = orderToRefund.paidAmount || 0;
@@ -116,7 +117,7 @@ export default function DeletedOrders() {
             [
               refundTxnId,
               orderToRefund.shopId || 'SHOP_01',
-              selectedRefundMethod.toUpperCase(),
+              selectedRefundMethod === 'Bank' ? 'BANK' : 'CASH',
               'EXPENSE',
               'Return',
               paidAmt,
@@ -130,10 +131,9 @@ export default function DeletedOrders() {
         }
 
         // 2. Update return status and refund details in SQLite database
-        const nowIso = getLocalISOString();
         await window.electronAPI.dbQuery(
           "UPDATE deleted_orders SET returnStatus = 'Returned', refundStatus = 'Returned', refundMethod = ?, returnedAt = ? WHERE id = ?",
-          [selectedRefundMethod.toUpperCase(), nowIso, orderToRefund.id]
+          [selectedRefundMethod, nowIso, orderToRefund.id]
         );
 
         // 3. Adjust customer balance (since refund is no longer pending, add it back to customer balance)
@@ -150,27 +150,34 @@ export default function DeletedOrders() {
         }
       }
       
-      // Update state locally
-      const nowStr = getLocalISOString();
-      setOrders(prev => prev.map(o => o.id === orderToRefund.id ? { 
-        ...o, 
-        returnStatus: 'Returned', 
-        refundStatus: 'Returned',
-        refundMethod: selectedRefundMethod.toUpperCase(),
-        returnedAt: nowStr
-      } : o));
-      
+      setOrders(prev =>
+        prev.map((o) =>
+          o.id === orderToRefund.id
+            ? {
+                ...o,
+                returnStatus: 'Returned',
+                refundStatus: 'Returned',
+                refundMethod: selectedRefundMethod,
+                returnedAt: nowIso,
+              }
+            : o
+        )
+      );
+
       // Attempt backend sync
       try {
-        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/orders/deleted/${encodeURIComponent(orderToRefund.id)}/refund`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            returnStatus: 'Returned', 
-            refundStatus: 'Returned',
-            refundMethod: selectedRefundMethod.toUpperCase() 
-          })
-        });
+        await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/orders/deleted/${encodeURIComponent(orderToRefund.id)}/refund`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              returnStatus: 'Returned',
+              refundStatus: 'Returned',
+              refundMethod: selectedRefundMethod,
+            }),
+          }
+        );
       } catch (remoteErr) {
         console.warn('Backend sync failed (offline):', remoteErr.message);
       }
@@ -460,7 +467,7 @@ export default function DeletedOrders() {
                             className={styles.refundBtn}
                             onClick={() => {
                               setOrderToRefund(order);
-                              setSelectedRefundMethod('CASH');
+                              setSelectedRefundMethod('Cash');
                               setShowRefundModal(true);
                             }}
                           >
@@ -511,9 +518,9 @@ export default function DeletedOrders() {
                 <input
                   type="radio"
                   name="refundAccount"
-                  value="CASH"
-                  checked={selectedRefundMethod === 'CASH'}
-                  onChange={() => setSelectedRefundMethod('CASH')}
+                  value="Cash"
+                  checked={selectedRefundMethod === 'Cash'}
+                  onChange={() => setSelectedRefundMethod('Cash')}
                   style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                 />
                 Cash Account
@@ -522,9 +529,9 @@ export default function DeletedOrders() {
                 <input
                   type="radio"
                   name="refundAccount"
-                  value="BANK"
-                  checked={selectedRefundMethod === 'BANK'}
-                  onChange={() => setSelectedRefundMethod('BANK')}
+                  value="Bank"
+                  checked={selectedRefundMethod === 'Bank'}
+                  onChange={() => setSelectedRefundMethod('Bank')}
                   style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                 />
                 Bank Account

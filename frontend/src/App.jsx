@@ -13,10 +13,12 @@ import CustomerStatement from './pages/CustomerStatement';
 import Expenses from './pages/Expenses';
 import TaxReport from './pages/TaxReport';
 import DailyTaxReport from './pages/DailyTaxReport';
+import ZReport from './pages/ZReport';
 import CancelledOrdersReport from './pages/CancelledOrdersReport';
 import CreditOverridesReport from './pages/CreditOverridesReport';
 import DeletedOrders from './pages/DeletedOrders';
 import ExpectedDeliveries from './pages/ExpectedDeliveries';
+import ServicesReport from './pages/ServicesReport';
 import Invoice from './pages/Invoice';
 import Login from './pages/Login';
 import Users from './pages/Users';
@@ -26,6 +28,7 @@ import OutstandingBills from './pages/OutstandingBills';
 import OverdueStatement from './pages/OverdueStatement';
 import HelpCenter from './pages/HelpCenter';
 import Activation from './pages/Activation';
+import Workflow from './pages/Workflow';
 import { SettingsProvider } from './store/SettingsContext';
 
 function App() {
@@ -47,6 +50,7 @@ function App() {
           <Route index element={<Navigate to="/pos" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="pos" element={<POS />} />
+          <Route path="workflow" element={<Workflow />} />
           <Route path="orders">
             <Route index element={<Orders />} />
             <Route path="pending" element={<Orders isPendingView={true} />} />
@@ -63,12 +67,14 @@ function App() {
           </Route>
           <Route path="reports">
             <Route index element={<Reports />} />
+            <Route path="services" element={<ServicesReport />} />
             <Route path="revenue" element={<RevenueReport />} />
             <Route path="expenses" element={<Expenses />} />
             <Route path="customer-statement" element={<CustomerStatement />} />
             <Route path="customer-statement/:customerId" element={<CustomerStatement />} />
             <Route path="tax" element={<TaxReport />} />
             <Route path="daily-tax" element={<DailyTaxReport />} />
+            <Route path="z-report" element={<ZReport />} />
             <Route path="cancelled" element={<CancelledOrdersReport />} />
             <Route path="credit-overrides" element={<CreditOverridesReport />} />
           </Route>

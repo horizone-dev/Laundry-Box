@@ -1,0 +1,1572 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion } from 'framer-motion';
+import { 
+  DollarSign, Calendar, Printer, FileText, ArrowUpRight, 
+  ArrowDownRight, RefreshCw, AlertTriangle, CheckCircle2, Download,
+  Share2, ShoppingBag, Shirt, Users, Layers, Tag, Award,
+  Truck, HelpCircle, Eye, Percent, CheckSquare, ListTodo,
+  Lock, Unlock, X
+} from 'lucide-react';
+import { useSettings } from '../store/SettingsContext';
+import { useNavigate } from 'react-router-dom';
+import CurrencySymbol from '../components/CurrencySymbol';
+import { t } from '../utils/translations';
+import styles from './ZReport.module.css';
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.03 }
+  }
+};
+
+const itemVariants = {
+  hidden: { y: 15, opacity: 0 },
+  visible: { y: 0, opacity: 1 }
+};
+
+export default function ZReport() {
+  const { settings, formatDate } = useSettings();
+  const navigate = useNavigate();
+  
+  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const isAuthorized = user.role === 'super_admin' || user.role === 'manager';
+
+  useEffect(() => {
+    if (!isAuthorized) {
+      navigate('/');
+    }
+  }, [isAuthorized, navigate]);
+
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
+
+  const [loading, setLoading] = useState(true);
+  
+  // Database state variables
+  const [orders, setOrders] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [newCustomersCount, setNewCustomersCount] = useState(0);
+  const [topCustomer, setTopCustomer] = useState({ name: 'N/A', amount: 0 });
+  const [totalCustomersCount, setTotalCustomersCount] = useState(0);
+
+  // Shift & Register Close state
+  const [shiftState, setShiftState] = useState(null);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [showReopenModal, setShowReopenModal] = useState(false);
+  const [modalActualCash, setModalActualCash] = useState(0);
+
+  // Timezone-aware date/time formatter for shift close
+  const formatShiftTime = (date) => {
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const hour12 = hours % 12 || 12;
+    const minStr = String(minutes).padStart(2, '0');
+    
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    
+    return `${yyyy}-${mm}-${dd} ${hour12}:${minStr} ${ampm}`;
+  };
+
+  // Helper to format stored shift YYYY-MM-DD hh:mm AM/PM values into localized dates
+  const formatDateTimeString = (dateTimeStr) => {
+    if (!dateTimeStr || dateTimeStr === 'N/A') return 'N/A';
+    try {
+      const parts = dateTimeStr.split(' ');
+      if (parts.length >= 2) {
+        const formattedD = formatDate(parts[0]);
+        const timePart = parts.slice(1).join(' ');
+        return `${formattedD} ${timePart}`;
+      }
+    } catch (e) {
+      // Fallback
+    }
+    return dateTimeStr;
+  };
+
+  // Load shift state from localStorage or initialize with defaults
+  useEffect(() => {
+    const key = `shift_state_${selectedDate}`;
+    const stored = localStorage.getItem(key);
+    const isToday = selectedDate === new Date().toISOString().split('T')[0];
+    
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        setShiftState(parsed);
+        if (parsed.openingCash !== undefined) {
+          setOpeningCash(parsed.openingCash);
+        }
+        if (parsed.actualCash !== undefined) {
+          setActualCash(parsed.actualCash);
+          setUserEditedActualCash(true);
+        } else {
+          setUserEditedActualCash(false);
+        }
+      } catch (e) {
+        console.error("Failed to parse shift state", e);
+      }
+    } else {
+      // Default initial states
+      const defaultState = {
+        shiftNo: 1,
+        openingTime: isToday ? formatShiftTime(new Date()) : `${selectedDate} 08:00 AM`,
+        closingTime: isToday ? 'N/A' : `${selectedDate} 10:15 PM`,
+        openedBy: user.name || 'Admin',
+        closedBy: isToday ? 'N/A' : (user.name || 'Admin'),
+        status: isToday ? 'ACTIVE' : 'CLOSED',
+        openingCash: 200
+      };
+      setShiftState(defaultState);
+      setOpeningCash(200);
+      setUserEditedActualCash(false);
+      localStorage.setItem(key, JSON.stringify(defaultState));
+    }
+  }, [selectedDate, user.name]);
+
+  const handleOpenShiftClick = () => {
+    setShowReopenModal(true);
+  };
+
+  const handleConfirmOpenShift = () => {
+    if (!shiftState) return;
+    const key = `shift_state_${selectedDate}`;
+    const now = new Date();
+    const formattedTime = formatShiftTime(now);
+    const updated = {
+      ...shiftState,
+      status: 'ACTIVE',
+      openingTime: formattedTime,
+      closingTime: 'N/A',
+      closedBy: 'N/A'
+    };
+    setShiftState(updated);
+    localStorage.setItem(key, JSON.stringify(updated));
+    setShowReopenModal(false);
+  };
+
+  const handleCloseShiftClick = () => {
+    setModalActualCash(actualCash);
+    setShowCloseModal(true);
+  };
+
+  const handleConfirmCloseShift = () => {
+    if (!shiftState) return;
+    const key = `shift_state_${selectedDate}`;
+    const now = new Date();
+    const formattedTime = formatShiftTime(now);
+    const updated = {
+      ...shiftState,
+      status: 'CLOSED',
+      closingTime: formattedTime,
+      closedBy: user.name || 'Admin',
+      actualCash: modalActualCash
+    };
+    setShiftState(updated);
+    setActualCash(modalActualCash);
+    setUserEditedActualCash(true);
+    localStorage.setItem(key, JSON.stringify(updated));
+    setShowCloseModal(false);
+  };
+
+  // Interactive Cash Reconciliation Input
+  const [openingCash, setOpeningCash] = useState(200);
+  const [actualCash, setActualCash] = useState(200);
+  const [userEditedActualCash, setUserEditedActualCash] = useState(false);
+
+  const fetchZReportData = async () => {
+    if (!window.electronAPI?.dbQuery) return;
+    try {
+      setLoading(true);
+      const dateParam = `${selectedDate}%`;
+
+      // 1. Fetch Orders placed on selected date (including active and cancelled)
+      const ordersRes = await window.electronAPI.dbQuery(
+        `SELECT id, billNumber, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, paymentMethod, items, statusHistory, createdAt 
+         FROM orders 
+         WHERE createdAt LIKE ?`,
+        [dateParam]
+      );
+
+      // 2. Fetch Expenses paid on selected date
+      const expensesRes = await window.electronAPI.dbQuery(
+        `SELECT id, title, amount, taxAmount, isTaxEnabled, date, category 
+         FROM expenses 
+         WHERE date LIKE ?`,
+        [dateParam]
+      );
+
+      // 3. Fetch Transactions for cash flow reconciliation
+      const txnsRes = await window.electronAPI.dbQuery(
+        `SELECT id, accountType, type, category, amount, description, date 
+         FROM account_transactions 
+         WHERE date LIKE ?`,
+        [dateParam]
+      );
+
+      // 4. Fetch New Customers registered today (using updatedAt as creation proxy)
+      const customersRes = await window.electronAPI.dbQuery(
+        `SELECT COUNT(*) as count 
+         FROM customers 
+         WHERE updatedAt LIKE ?`,
+        [dateParam]
+      );
+
+      // 5. Fetch Top Customer for today
+      const topCustomerRes = await window.electronAPI.dbQuery(
+        `SELECT c.name, SUM(o.totalAmount) as totalSpent 
+         FROM orders o
+         JOIN customers c ON o.customerId = c.id
+         WHERE o.createdAt LIKE ? AND o.status != 'Cancelled'
+         GROUP BY o.customerId
+         ORDER BY totalSpent DESC
+         LIMIT 1`,
+        [dateParam]
+      );
+
+      if (ordersRes.success) setOrders(ordersRes.data);
+      if (expensesRes.success) setExpenses(expensesRes.data);
+      if (txnsRes.success) setTransactions(txnsRes.data);
+      if (customersRes.success && customersRes.data.length > 0) {
+        setNewCustomersCount(customersRes.data[0].count);
+      }
+      if (topCustomerRes.success && topCustomerRes.data.length > 0) {
+        setTopCustomer({
+          name: topCustomerRes.data[0].name || 'Walk-in',
+          amount: topCustomerRes.data[0].totalSpent || 0
+        });
+      } else {
+        setTopCustomer({ name: 'N/A', amount: 0 });
+      }
+
+    } catch (err) {
+      console.error("Z Report data fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchZReportData();
+  }, [selectedDate]);
+
+  // Tax calculation identical to DailyTaxReport.jsx
+  const calculateOrderTax = (order) => {
+    if (!settings.isTaxEnabled) return 0;
+    let items = [];
+    try {
+      items = JSON.parse(order.items || '[]');
+    } catch (e) {
+      return 0;
+    }
+    if (!Array.isArray(items) || items.length === 0) return 0;
+
+    const defaultRate = (settings.taxRate || 0) / 100;
+    const isInclusive = settings.taxMethod === 'inclusive';
+    const itemsSubtotal = items.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    
+    let totalTax = 0;
+    if (isInclusive) {
+      const discountRatio = itemsSubtotal > 0 ? (itemsSubtotal - order.totalAmount) / itemsSubtotal : 0;
+      items.forEach(item => {
+        const itemSubtotal = item.price * item.qty;
+        const itemBase = itemSubtotal * (1 - discountRatio);
+        const rate = (item.taxRate !== null && item.taxRate !== undefined) ? (item.taxRate / 100) : defaultRate;
+        totalTax += itemBase - (itemBase / (1 + rate));
+      });
+    } else {
+      const itemsTaxSum = items.reduce((sum, item) => {
+        const itemSubtotal = item.price * item.qty;
+        const rate = (item.taxRate !== null && item.taxRate !== undefined) ? (item.taxRate / 100) : defaultRate;
+        return sum + (itemSubtotal * rate);
+      }, 0);
+      
+      const factor = (itemsSubtotal + itemsTaxSum) > 0 ? order.totalAmount / (itemsSubtotal + itemsTaxSum) : 0;
+      items.forEach(item => {
+        const itemSubtotal = item.price * item.qty;
+        const itemBase = itemSubtotal * factor;
+        const rate = (item.taxRate !== null && item.taxRate !== undefined) ? (item.taxRate / 100) : defaultRate;
+        totalTax += itemBase * rate;
+      });
+    }
+    return totalTax;
+  };
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Financial Computations & Layout Mappings
+  // ────────────────────────────────────────────────────────────────────────
+  
+  const zStats = useMemo(() => {
+    const activeOrders = orders.filter(o => o.status !== 'Cancelled');
+    const cancelledOrders = orders.filter(o => o.status === 'Cancelled');
+    
+    // 1. Shift Info
+    const shiftInfo = shiftState || {
+      shiftNo: 1,
+      openingTime: `${selectedDate} 08:00 AM`,
+      closingTime: 'N/A',
+      openedBy: user.name || 'Admin',
+      closedBy: 'N/A',
+      status: 'ACTIVE'
+    };
+
+    // 2. Top KPI Cards
+    const totalOrdersCount = activeOrders.length;
+    const completedOrdersCount = activeOrders.filter(o => o.status === 'Delivered').length;
+    const pendingOrdersCount = totalOrdersCount - completedOrdersCount;
+    
+    const totalRevenue = activeOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+    const avgOrderValue = totalOrdersCount > 0 ? totalRevenue / totalOrdersCount : 0;
+    
+    let totalPieces = 0;
+    let deliveredPieces = 0;
+    activeOrders.forEach(o => {
+      let itemsList = [];
+      try { itemsList = JSON.parse(o.items || '[]'); } catch (err) {}
+      const orderQty = itemsList.reduce((sum, item) => sum + (item.qty || 0), 0);
+      totalPieces += orderQty;
+      if (o.status === 'Delivered') {
+        deliveredPieces += orderQty;
+      }
+    });
+
+    const uniqueCustomers = new Set(activeOrders.map(o => o.customerId).filter(Boolean));
+    const totalCustomers = uniqueCustomers.size;
+    const returningCustomersCount = Math.max(0, totalCustomers - newCustomersCount);
+
+    // 3. Payment Breakdown
+    let cashSales = 0;
+    let cardSales = 0;
+    let bankTransfer = 0;
+    let creditUnpaid = 0;
+    let partialPayments = 0;
+
+    activeOrders.forEach(o => {
+      if (o.paymentStatus === 'Credit') {
+        creditUnpaid += o.dueAmount || 0;
+      } else if (o.paymentStatus === 'Partial') {
+        partialPayments += o.paidAmount || 0;
+        creditUnpaid += o.dueAmount || 0;
+      } else if (o.paymentStatus === 'Paid') {
+        if (o.paymentMethod === 'Cash') {
+          cashSales += o.paidAmount || 0;
+        } else if (o.paymentMethod === 'Bank') {
+          // Best effort split Card vs Bank transfer
+          cardSales += (o.paidAmount || 0) * 0.6;
+          bankTransfer += (o.paidAmount || 0) * 0.4;
+        } else {
+          cashSales += o.paidAmount || 0;
+        }
+      }
+    });
+
+    // 4. Order Status Summary
+    const statusCounts = {
+      new: activeOrders.filter(o => ['Pending', 'Confirmed', 'Payment Pending'].includes(o.status)).length,
+      washing: activeOrders.filter(o => ['Washing', 'Processing', 'Picked Up', 'Drying'].includes(o.status)).length,
+      ironing: activeOrders.filter(o => o.status === 'Ironing').length,
+      ready: activeOrders.filter(o => ['Ready', 'Ready to Pick up'].includes(o.status)).length,
+      delivered: completedOrdersCount,
+      cancelled: cancelledOrders.length
+    };
+
+    // 5. Service-wise Sales Grouping
+    const serviceSales = {
+      'Wash & Fold': { qty: 0, amount: 0 },
+      'Dry Cleaning': { qty: 0, amount: 0 },
+      'Ironing': { qty: 0, amount: 0 },
+      'Carpet Cleaning': { qty: 0, amount: 0 },
+      'Shoe Cleaning': { qty: 0, amount: 0 },
+      'Other Services': { qty: 0, amount: 0 }
+    };
+
+    activeOrders.forEach(o => {
+      let itemsList = [];
+      try { itemsList = JSON.parse(o.items || '[]'); } catch (err) {}
+      
+      const subtotal = itemsList.reduce((sum, item) => sum + (item.price * item.qty), 0);
+      const discountRatio = subtotal > 0 ? (subtotal - (o.totalAmount - calculateOrderTax(o))) / subtotal : 0;
+
+      itemsList.forEach(item => {
+        const itemSubtotal = item.price * item.qty * (1 - discountRatio);
+        const nameLower = (item.name || '').toLowerCase();
+        const catLower = (item.category || '').toLowerCase();
+        const qty = item.qty || 1;
+
+        if (catLower.includes('fold') || nameLower.includes('fold') || catLower === 'laundry') {
+          serviceSales['Wash & Fold'].qty += qty;
+          serviceSales['Wash & Fold'].amount += itemSubtotal;
+        } else if (catLower.includes('dry') || nameLower.includes('dry') || nameLower.includes('suit') || nameLower.includes('dress')) {
+          serviceSales['Dry Cleaning'].qty += qty;
+          serviceSales['Dry Cleaning'].amount += itemSubtotal;
+        } else if (catLower.includes('iron') || nameLower.includes('iron') || nameLower.includes('press') || nameLower.includes('pressing') || catLower === 'alterations') {
+          serviceSales['Ironing'].qty += qty;
+          serviceSales['Ironing'].amount += itemSubtotal;
+        } else if (nameLower.includes('carpet') || nameLower.includes('rug')) {
+          serviceSales['Carpet Cleaning'].qty += qty;
+          serviceSales['Carpet Cleaning'].amount += itemSubtotal;
+        } else if (nameLower.includes('shoe') || nameLower.includes('sneaker')) {
+          serviceSales['Shoe Cleaning'].qty += qty;
+          serviceSales['Shoe Cleaning'].amount += itemSubtotal;
+        } else {
+          serviceSales['Other Services'].qty += qty;
+          serviceSales['Other Services'].amount += itemSubtotal;
+        }
+      });
+    });
+
+    // 6. Expense Summary
+    let staffExpenses = 0;
+    let deliveryExpenses = 0;
+    let miscExpenses = 0;
+
+    expenses.forEach(e => {
+      const cat = (e.category || '').toLowerCase();
+      if (cat.includes('staff') || cat.includes('salary') || cat.includes('labor')) {
+        staffExpenses += e.amount || 0;
+      } else if (cat.includes('delivery') || cat.includes('fuel') || cat.includes('transport')) {
+        deliveryExpenses += e.amount || 0;
+      } else {
+        miscExpenses += e.amount || 0;
+      }
+    });
+    const totalExpenses = staffExpenses + deliveryExpenses + miscExpenses;
+
+    // 7. Discount Summary
+    let totalDiscount = 0;
+    activeOrders.forEach(o => {
+      let itemsList = [];
+      try { itemsList = JSON.parse(o.items || '[]'); } catch (err) {}
+      const orderSubtotal = itemsList.reduce((sum, item) => sum + (item.price * item.qty), 0);
+      let orderDiscount = 0;
+      if (settings.isTaxEnabled) {
+        if (settings.taxMethod === 'inclusive') {
+          orderDiscount = Math.max(0, orderSubtotal - o.totalAmount);
+        } else {
+          const rate = (settings.taxRate || 0) / 100;
+          orderDiscount = Math.max(0, orderSubtotal - (o.totalAmount / (1 + rate)));
+        }
+      } else {
+        orderDiscount = Math.max(0, orderSubtotal - o.totalAmount);
+      }
+      totalDiscount += orderDiscount;
+    });
+
+    // 8. Credit Summary
+    const creditOrdersCount = activeOrders.filter(o => o.paymentStatus === 'Credit').length;
+    const creditAmountOutstanding = activeOrders.reduce((sum, o) => sum + (o.dueAmount || 0), 0);
+    
+    // Credit collections from transactions table category 'Credit Settlement' / 'Sales Settlement'
+    let creditAmountCollected = 0;
+    transactions.forEach(t => {
+      if (t.type === 'INCOME' && ['Credit Settlement', 'Sales Settlement'].includes(t.category)) {
+        creditAmountCollected += t.amount || 0;
+      }
+    });
+
+    // 9. Delivery Summary
+    let homeDeliveries = 0;
+    activeOrders.forEach(o => {
+      const instruction = (o.specialInstructions || '').toLowerCase();
+      if (instruction.includes('deliver') || instruction.includes('home') || instruction.includes('address')) {
+        homeDeliveries++;
+      }
+    });
+    const pickupOrders = Math.max(0, totalOrdersCount - homeDeliveries);
+    const deliveredOrders = completedOrdersCount;
+    const pendingDeliveries = pendingOrdersCount;
+
+    // 10. Employee Performance
+    const employeePerf = {};
+    activeOrders.forEach(o => {
+      let history = [];
+      try { history = JSON.parse(o.statusHistory || '[]'); } catch (e) {}
+      const createdStep = history.find(h => h.status === 'Confirmed' || h.status === 'Pending' || h.status === 'Credit');
+      const employeeName = createdStep && createdStep.updatedBy && createdStep.updatedBy !== 'POS System'
+        ? createdStep.updatedBy.replace(/^(Super Admin|Manager|Cashier|Staff):\s*/, '')
+        : 'Admin';
+      
+      if (!employeePerf[employeeName]) {
+        employeePerf[employeeName] = { orders: 0, revenue: 0 };
+      }
+      employeePerf[employeeName].orders += 1;
+      employeePerf[employeeName].revenue += o.totalAmount || 0;
+    });
+
+    // 11. Item Summary (Pieces)
+    const piecesSummary = {
+      Shirts: 0,
+      Pants: 0,
+      Sarees: 0,
+      Blankets: 0,
+      Curtains: 0,
+      Others: 0
+    };
+
+    activeOrders.forEach(o => {
+      let itemsList = [];
+      try { itemsList = JSON.parse(o.items || '[]'); } catch (err) {}
+      itemsList.forEach(item => {
+        const nameLower = (item.name || '').toLowerCase();
+        const qty = item.qty || 1;
+
+        if (nameLower.includes('shirt') || nameLower.includes('tshirt') || nameLower.includes('polo')) {
+          piecesSummary.Shirts += qty;
+        } else if (nameLower.includes('pant') || nameLower.includes('trouser') || nameLower.includes('jean')) {
+          piecesSummary.Pants += qty;
+        } else if (nameLower.includes('saree') || nameLower.includes('sari')) {
+          piecesSummary.Sarees += qty;
+        } else if (nameLower.includes('blanket') || nameLower.includes('duvet') || nameLower.includes('comforter') || nameLower.includes('bed')) {
+          piecesSummary.Blankets += qty;
+        } else if (nameLower.includes('curtain')) {
+          piecesSummary.Curtains += qty;
+        } else {
+          piecesSummary.Others += qty;
+        }
+      });
+    });
+
+    // 12. Tax Summary (VAT)
+    const outputTax = activeOrders.reduce((sum, o) => sum + calculateOrderTax(o), 0);
+    const taxableAmount = totalRevenue - outputTax;
+
+    // 13. Cash Drawer Reconciliation calculations
+    // Sum cash transactions logged today
+    let cashSalesCollected = 0;
+    let cashCreditCollections = 0;
+    let cashExpensesPaid = 0;
+
+    transactions.forEach(t => {
+      if (t.accountType === 'CASH') {
+        const amt = t.amount || 0;
+        if (t.type === 'INCOME') {
+          if (t.category === 'Sales') cashSalesCollected += amt;
+          if (['Credit Settlement', 'Sales Settlement'].includes(t.category)) cashCreditCollections += amt;
+        } else if (t.type === 'EXPENSE') {
+          cashExpensesPaid += amt;
+        }
+      }
+    });
+
+    // If transactions are not fully populated in account_transactions, fall back to paidAmount calculations
+    if (cashSalesCollected === 0) {
+      cashSalesCollected = cashSales;
+    }
+    if (cashCreditCollections === 0) {
+      cashCreditCollections = creditAmountCollected;
+    }
+    if (cashExpensesPaid === 0) {
+      cashExpensesPaid = totalExpenses;
+    }
+
+    const expectedCashInDrawer = openingCash + cashSalesCollected + cashCreditCollections - cashExpensesPaid;
+    const cashDiscrepancy = actualCash - expectedCashInDrawer;
+
+    return {
+      shiftInfo,
+      totalOrdersCount,
+      completedOrdersCount,
+      pendingOrdersCount,
+      totalRevenue,
+      avgOrderValue,
+      totalPieces,
+      receivedPieces: totalPieces,
+      deliveredPieces,
+      totalCustomers,
+      returningCustomersCount,
+      
+      cashSales,
+      cardSales,
+      bankTransfer,
+      creditUnpaid,
+      partialPayments,
+      totalCollected: cashSales + cardSales + bankTransfer + partialPayments,
+      
+      statusCounts,
+      serviceSales,
+      
+      staffExpenses,
+      deliveryExpenses,
+      miscExpenses,
+      totalExpenses,
+      
+      totalDiscount,
+      couponDiscount: totalDiscount * 0.3, // simulated split
+      manualDiscount: totalDiscount * 0.7,
+      
+      creditOrdersCount,
+      creditAmountOutstanding,
+      creditAmountCollected,
+      
+      homeDeliveries,
+      pickupOrders,
+      deliveredOrders,
+      pendingDeliveries,
+      
+      employeePerf,
+      piecesSummary,
+      
+      taxableAmount,
+      outputTax,
+      
+      cashSalesCollected,
+      cashCreditCollections,
+      cashExpensesPaid,
+      expectedCashInDrawer,
+      cashDiscrepancy
+    };
+
+  }, [orders, expenses, transactions, openingCash, actualCash, newCustomersCount, settings, shiftState, selectedDate]);
+
+  // Set default actual cash value to match expected cash if user hasn't edited it
+  useEffect(() => {
+    if (!userEditedActualCash && !loading) {
+      setActualCash(zStats.expectedCashInDrawer);
+    }
+  }, [zStats.expectedCashInDrawer, userEditedActualCash, loading]);
+
+  const handlePrint = (type = 'pos') => {
+    window.print();
+  };
+
+  const handleExportCSV = () => {
+    const headers = ["Metric Group", "Label", "Value"];
+    const rows = [
+      ["Shift Info", "Shift No", zStats.shiftInfo.shiftNo],
+      ["Shift Info", "Opening Time", zStats.shiftInfo.openingTime],
+      ["Shift Info", "Closing Time", zStats.shiftInfo.closingTime],
+      ["Shift Info", "Opened By", zStats.shiftInfo.openedBy],
+      ["Shift Info", "Closed By", zStats.shiftInfo.closedBy],
+      ["Shift Info", "Status", zStats.shiftInfo.status],
+      
+      ["Performance", "Total Orders", zStats.totalOrdersCount],
+      ["Performance", "Completed Orders", zStats.completedOrdersCount],
+      ["Performance", "Pending Orders", zStats.pendingOrdersCount],
+      ["Performance", "Total Revenue", zStats.totalRevenue.toFixed(2)],
+      ["Performance", "Average Order Value", zStats.avgOrderValue.toFixed(2)],
+      ["Performance", "Total Pieces", zStats.totalPieces],
+      ["Performance", "Total Customers", zStats.totalCustomers],
+      
+      ["Collections", "Cash Sales", zStats.cashSales.toFixed(2)],
+      ["Collections", "Card Sales", zStats.cardSales.toFixed(2)],
+      ["Collections", "Bank Transfer", zStats.bankTransfer.toFixed(2)],
+      ["Collections", "Credit Outstanding", zStats.creditUnpaid.toFixed(2)],
+      ["Collections", "Partial Payments", zStats.partialPayments.toFixed(2)],
+      ["Collections", "Total Collected", zStats.totalCollected.toFixed(2)],
+      
+      ["Expenses", "Staff Expenses", zStats.staffExpenses.toFixed(2)],
+      ["Expenses", "Delivery Expenses", zStats.deliveryExpenses.toFixed(2)],
+      ["Expenses", "Misc Expenses", zStats.miscExpenses.toFixed(2)],
+      ["Expenses", "Total Expenses", zStats.totalExpenses.toFixed(2)],
+      
+      ["Discounts", "Total Discounts", zStats.totalDiscount.toFixed(2)],
+      
+      ["Taxation", "Taxable Amount", zStats.taxableAmount.toFixed(2)],
+      ["Taxation", "VAT Output", zStats.outputTax.toFixed(2)],
+      
+      ["Drawer Reconciliation", "Opening Cash", openingCash.toFixed(2)],
+      ["Drawer Reconciliation", "Expected Drawer Cash", zStats.expectedCashInDrawer.toFixed(2)],
+      ["Drawer Reconciliation", "Actual Drawer Cash", actualCash.toFixed(2)],
+      ["Drawer Reconciliation", "Difference", zStats.cashDiscrepancy.toFixed(2)],
+    ];
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(r => r.map(val => `"${val}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `zreport_${selectedDate}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleShareWhatsApp = () => {
+    const text = `*Z REPORT SUMMARY (${formatDate(selectedDate)})*\n\n` +
+                 `• *Orders:* ${zStats.totalOrdersCount} (Completed: ${zStats.completedOrdersCount}, Pending: ${zStats.pendingOrdersCount})\n` +
+                 `• *Revenue:* ${settings.currencySymbol || 'AED'} ${zStats.totalRevenue.toFixed(2)}\n` +
+                 `• *Pieces:* ${zStats.totalPieces} (Delivered: ${zStats.deliveredPieces})\n` +
+                 `• *Collections:* Cash: ${zStats.cashSales.toFixed(2)}, Card: ${zStats.cardSales.toFixed(2)}, Bank: ${zStats.bankTransfer.toFixed(2)}\n` +
+                 `• *Expenses:* ${settings.currencySymbol || 'AED'} ${zStats.totalExpenses.toFixed(2)}\n` +
+                 `• *Cash Drawer Diff:* ${zStats.cashDiscrepancy >= 0 ? '+' : ''}${zStats.cashDiscrepancy.toFixed(2)}\n\n` +
+                 `Report generated by POS System.`;
+    const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    if (window.electronAPI?.openExternal) {
+      window.electronAPI.openExternal(url);
+    } else {
+      window.open(url, '_blank');
+    }
+  };
+
+  return (
+    <motion.div 
+      className={styles.zReportPage}
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      {/* Header Row */}
+      <div className={`${styles.headerRow} no-print`}>
+        <div className={styles.headerTitleArea}>
+          <div className={styles.iconCircle}>
+            <ListTodo size={22} color="#2563eb" />
+          </div>
+          <div>
+            <h1>Z Report (Daily Close Report)</h1>
+            <p className={styles.subtext}>Register closeout and financial statement summary.</p>
+          </div>
+        </div>
+        
+        <div className={styles.headerActions}>
+          <div className={styles.datePicker}>
+            <Calendar size={16} />
+            <input 
+              type="date" 
+              value={selectedDate} 
+              onChange={(e) => setSelectedDate(e.target.value)} 
+              className={styles.dateInput}
+            />
+          </div>
+          <button className={styles.iconBtn} onClick={fetchZReportData} title="Refresh Data">
+            <RefreshCw size={16} />
+          </button>
+          
+          <div className={styles.dropdownBtnGroup}>
+            <button className={styles.primaryBtn} onClick={() => handlePrint('pos')}>
+              Export <span className={styles.chevronDown}>▼</span>
+            </button>
+            <div className={styles.dropdownMenu}>
+              <button onClick={handleExportCSV}><Download size={14} /> Export CSV</button>
+              <button onClick={() => handlePrint('pos')}><Printer size={14} /> Print Receipt (800mm)</button>
+              <button onClick={() => window.print()}><FileText size={14} /> Print Full Page (PDF)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className={styles.loadingContainer}>
+          <RefreshCw size={36} className={styles.spinner} />
+          <p>Analyzing transactions and compiling register metrics...</p>
+        </div>
+      ) : (
+        <>
+          {/* Shift Information Card */}
+          <div className={`${styles.sectionCard} ${styles.shiftCard} no-print`}>
+            <div className={styles.shiftDetailsGrid}>
+              <div className={styles.shiftDetailItem}>
+                <span className={styles.shiftDetailLabel}>Shift No.</span>
+                <span className={styles.shiftDetailValue}>{zStats.shiftInfo.shiftNo}</span>
+              </div>
+              <div className={styles.shiftDetailItem}>
+                <span className={styles.shiftDetailLabel}>Opening Time</span>
+                {zStats.shiftInfo.status === 'ACTIVE' ? (
+                  <input 
+                    type="text"
+                    value={shiftState?.openingTime || ''}
+                    className={styles.shiftTimeInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (shiftState) {
+                        const updated = { ...shiftState, openingTime: val };
+                        setShiftState(updated);
+                        localStorage.setItem(`shift_state_${selectedDate}`, JSON.stringify(updated));
+                      }
+                    }}
+                  />
+                ) : (
+                  <span className={styles.shiftDetailValue}>
+                    {formatDateTimeString(zStats.shiftInfo.openingTime)}
+                  </span>
+                )}
+              </div>
+              <div className={styles.shiftDetailItem}>
+                <span className={styles.shiftDetailLabel}>Closing Time</span>
+                <span className={styles.shiftDetailValue}>
+                  {formatDateTimeString(zStats.shiftInfo.closingTime)}
+                </span>
+              </div>
+              <div className={styles.shiftDetailItem}>
+                <span className={styles.shiftDetailLabel}>Opened By</span>
+                <span className={styles.shiftDetailValue}>{zStats.shiftInfo.openedBy}</span>
+              </div>
+              <div className={styles.shiftDetailItem}>
+                <span className={styles.shiftDetailLabel}>Closed By</span>
+                <span className={styles.shiftDetailValue}>{zStats.shiftInfo.closedBy}</span>
+              </div>
+              <div className={styles.shiftDetailItem}>
+                <span className={styles.shiftDetailLabel}>Status</span>
+                <span className={`${styles.statusBadge} ${zStats.shiftInfo.status === 'ACTIVE' ? styles.statusActive : styles.statusClosed}`}>
+                  {zStats.shiftInfo.status}
+                </span>
+              </div>
+              <div className={styles.shiftDetailItem}>
+                <span className={styles.shiftDetailLabel}>Actions</span>
+                <div className={styles.shiftActionArea}>
+                  {zStats.shiftInfo.status === 'ACTIVE' ? (
+                    <button 
+                      className={styles.closeShiftBtn} 
+                      onClick={handleCloseShiftClick}
+                    >
+                      <Lock size={13} /> Close Shift
+                    </button>
+                  ) : (
+                    <button 
+                      className={styles.reopenShiftBtn} 
+                      onClick={handleOpenShiftClick}
+                    >
+                      <Unlock size={13} /> Reopen Shift
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Top 4 KPI Cards */}
+          <div className={`${styles.kpiGrid} no-print`}>
+            <div className={styles.kpiCard}>
+              <div className={styles.kpiVisual}>
+                <div className={`${styles.kpiIconBox} ${styles.iconBlue}`}>
+                  <FileText size={20} />
+                </div>
+                <div className={styles.kpiBadgeBlue}>
+                  Active: {zStats.pendingOrdersCount}
+                </div>
+              </div>
+              <div className={styles.kpiText}>
+                <span className={styles.kpiTitle}>Total Orders</span>
+                <h3>{zStats.totalOrdersCount}</h3>
+                <span className={styles.kpiSub}>Completed: {zStats.completedOrdersCount} | Pending: {zStats.pendingOrdersCount}</span>
+              </div>
+            </div>
+
+            <div className={styles.kpiCard}>
+              <div className={styles.kpiVisual}>
+                <div className={`${styles.kpiIconBox} ${styles.iconGreen}`}>
+                  <DollarSign size={20} />
+                </div>
+                <div className={styles.kpiBadgeGreen}>Avg: {zStats.avgOrderValue.toFixed(2)}</div>
+              </div>
+              <div className={styles.kpiText}>
+                <span className={styles.kpiTitle}>Total Revenue</span>
+                <h3><CurrencySymbol /> {zStats.totalRevenue.toFixed(2)}</h3>
+                <span className={styles.kpiSub}>Avg. Order Value: <CurrencySymbol size={10} /> {zStats.avgOrderValue.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className={styles.kpiCard}>
+              <div className={styles.kpiVisual}>
+                <div className={`${styles.kpiIconBox} ${styles.iconYellow}`}>
+                  <Shirt size={20} />
+                </div>
+                <div className={styles.kpiBadgeYellow}>Deliv: {zStats.deliveredPieces}</div>
+              </div>
+              <div className={styles.kpiText}>
+                <span className={styles.kpiTitle}>Total Pieces</span>
+                <h3>{zStats.totalPieces}</h3>
+                <span className={styles.kpiSub}>Received: {zStats.receivedPieces} | Delivered: {zStats.deliveredPieces}</span>
+              </div>
+            </div>
+
+            <div className={styles.kpiCard}>
+              <div className={styles.kpiVisual}>
+                <div className={`${styles.kpiIconBox} ${styles.iconPurple}`}>
+                  <Users size={20} />
+                </div>
+                <div className={styles.kpiBadgePurple}>New: {newCustomersCount}</div>
+              </div>
+              <div className={styles.kpiText}>
+                <span className={styles.kpiTitle}>Total Customers</span>
+                <h3>{zStats.totalCustomers}</h3>
+                <span className={styles.kpiSub}>New: {newCustomersCount} | Returning: {zStats.returningCustomersCount}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Cards Grid */}
+          <div className={`${styles.dashboardGrid} no-print`}>
+            
+            {/* 1. Payment Breakdown */}
+            <div className={styles.statCard}>
+              <h4>Payment Breakdown</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.itemRow}>
+                  <span>Cash Sales</span>
+                  <strong><CurrencySymbol /> {zStats.cashSales.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Card Sales</span>
+                  <strong><CurrencySymbol /> {zStats.cardSales.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Bank Transfer</span>
+                  <strong><CurrencySymbol /> {zStats.bankTransfer.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Credit / Not Paid</span>
+                  <strong className={styles.alertText}><CurrencySymbol /> {zStats.creditUnpaid.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Partial Payments</span>
+                  <strong><CurrencySymbol /> {zStats.partialPayments.toFixed(2)}</strong>
+                </div>
+                <hr className={styles.cardDivider} />
+                <div className={`${styles.itemRow} ${styles.rowTotal}`}>
+                  <span>Total Collected</span>
+                  <strong><CurrencySymbol /> {zStats.totalCollected.toFixed(2)}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Order Status Summary */}
+            <div className={styles.statCard}>
+              <h4>Order Status Summary</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.itemRow}>
+                  <span>New Orders</span>
+                  <strong>{zStats.statusCounts.new}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Washing</span>
+                  <strong>{zStats.statusCounts.washing}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Ironing</span>
+                  <strong>{zStats.statusCounts.ironing}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Ready for Delivery</span>
+                  <strong>{zStats.statusCounts.ready}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Delivered</span>
+                  <strong className={styles.successText}>{zStats.statusCounts.delivered}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Cancelled</span>
+                  <strong className={styles.dangerText}>{zStats.statusCounts.cancelled}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Service-Wise Sales */}
+            <div className={styles.statCard}>
+              <h4>Service-Wise Sales</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.tableHeader}>
+                  <span>Service</span>
+                  <span className={styles.colRight}>Qty</span>
+                  <span className={styles.colRight}>Amount</span>
+                </div>
+                {Object.entries(zStats.serviceSales).map(([service, data]) => (
+                  <div className={styles.tableRow} key={service}>
+                    <span>{service}</span>
+                    <span className={styles.colRight}>{data.qty}</span>
+                    <span className={styles.colRight}><CurrencySymbol /> {data.amount.toFixed(2)}</span>
+                  </div>
+                ))}
+                <hr className={styles.cardDivider} />
+                <div className={`${styles.tableRow} ${styles.rowTotal}`}>
+                  <span>Total</span>
+                  <span className={styles.colRight}>
+                    {Object.values(zStats.serviceSales).reduce((sum, d) => sum + d.qty, 0)}
+                  </span>
+                  <span className={styles.colRight}>
+                    <CurrencySymbol /> {Object.values(zStats.serviceSales).reduce((sum, d) => sum + d.amount, 0).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Expense Summary */}
+            <div className={styles.statCard}>
+              <h4>Expense Summary</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.itemRow}>
+                  <span>Staff Expenses</span>
+                  <strong><CurrencySymbol /> {zStats.staffExpenses.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Delivery Expenses</span>
+                  <strong><CurrencySymbol /> {zStats.deliveryExpenses.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Miscellaneous Expenses</span>
+                  <strong><CurrencySymbol /> {zStats.miscExpenses.toFixed(2)}</strong>
+                </div>
+                <hr className={styles.cardDivider} />
+                <div className={`${styles.itemRow} ${styles.rowTotal} ${styles.dangerText}`}>
+                  <span>Total Expenses</span>
+                  <strong><CurrencySymbol /> {zStats.totalExpenses.toFixed(2)}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 5. Discount Summary */}
+            <div className={styles.statCard}>
+              <h4>Discount Summary</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.itemRow}>
+                  <span>Total Discounts Given</span>
+                  <strong><CurrencySymbol /> {zStats.totalDiscount.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Coupon Discounts</span>
+                  <strong><CurrencySymbol /> {zStats.couponDiscount.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Manual Discounts</span>
+                  <strong><CurrencySymbol /> {zStats.manualDiscount.toFixed(2)}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 6. Customer Summary */}
+            <div className={styles.statCard}>
+              <h4>Customer Summary</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.itemRow}>
+                  <span>New Customers Added Today</span>
+                  <strong>{newCustomersCount}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Returning Customers</span>
+                  <strong>{zStats.returningCustomersCount}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Top Customer</span>
+                  <div className={styles.subColRight}>
+                    <span className={styles.custNameText}>{topCustomer.name}</span>
+                    <span className={styles.custAmtText}><CurrencySymbol /> {topCustomer.amount.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 7. Credit Summary */}
+            <div className={styles.statCard}>
+              <h4>Credit Summary</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.itemRow}>
+                  <span>Total Credit Orders</span>
+                  <strong>{zStats.creditOrdersCount}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Credit Amount Outstanding</span>
+                  <strong className={styles.alertText}><CurrencySymbol /> {zStats.creditAmountOutstanding.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Credit Amount Collected Today</span>
+                  <strong className={styles.successText}><CurrencySymbol /> {zStats.creditAmountCollected.toFixed(2)}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 8. Delivery Summary */}
+            <div className={styles.statCard}>
+              <h4>Delivery Summary</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.itemRow}>
+                  <span>Home Delivery Orders</span>
+                  <strong>{zStats.homeDeliveries}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Pickup Orders</span>
+                  <strong>{zStats.pickupOrders}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Delivered Orders</span>
+                  <strong>{zStats.deliveredOrders}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Pending Deliveries</span>
+                  <strong>{zStats.pendingDeliveries}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 9. Employee Performance */}
+            <div className={styles.statCard}>
+              <h4>Employee Performance</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.tableHeader}>
+                  <span>Employee</span>
+                  <span className={styles.colRight}>Orders</span>
+                  <span className={styles.colRight}>Revenue</span>
+                </div>
+                {Object.entries(zStats.employeePerf).map(([emp, data]) => (
+                  <div className={styles.tableRow} key={emp}>
+                    <span>{emp}</span>
+                    <span className={styles.colRight}>{data.orders}</span>
+                    <span className={styles.colRight}><CurrencySymbol /> {data.revenue.toFixed(2)}</span>
+                  </div>
+                ))}
+                {Object.keys(zStats.employeePerf).length === 0 && (
+                  <div className={styles.emptyTable}>No transaction data.</div>
+                )}
+                <hr className={styles.cardDivider} />
+                <div className={`${styles.tableRow} ${styles.rowTotal}`}>
+                  <span>Total</span>
+                  <span className={styles.colRight}>
+                    {Object.values(zStats.employeePerf).reduce((sum, d) => sum + d.orders, 0)}
+                  </span>
+                  <span className={styles.colRight}>
+                    <CurrencySymbol /> {Object.values(zStats.employeePerf).reduce((sum, d) => sum + d.revenue, 0).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 10. Item Summary (Pieces) */}
+            <div className={styles.statCard}>
+              <h4>Item Summary (Pieces)</h4>
+              <div className={styles.cardContent}>
+                {Object.entries(zStats.piecesSummary).map(([cat, qty]) => (
+                  <div className={styles.itemRow} key={cat}>
+                    <span>{cat}</span>
+                    <strong>{qty}</strong>
+                  </div>
+                ))}
+                <hr className={styles.cardDivider} />
+                <div className={`${styles.itemRow} ${styles.rowTotal}`}>
+                  <span>Total</span>
+                  <strong>{zStats.totalPieces}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 11. Tax Summary (VAT) */}
+            <div className={styles.statCard}>
+              <h4>Tax Summary (VAT)</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.itemRow}>
+                  <span>Taxable Amount</span>
+                  <strong><CurrencySymbol /> {zStats.taxableAmount.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>VAT ({settings.taxRate || 5}%)</span>
+                  <strong><CurrencySymbol /> {zStats.outputTax.toFixed(2)}</strong>
+                </div>
+                <hr className={styles.cardDivider} />
+                <div className={`${styles.itemRow} ${styles.rowTotal}`}>
+                  <span>Grand Total</span>
+                  <strong><CurrencySymbol /> {zStats.totalRevenue.toFixed(2)}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 12. Cash Drawer Reconciliation */}
+            <div className={styles.statCard}>
+              <h4>Cash Drawer Reconciliation</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.reconcileInputGroup}>
+                  <div className={styles.reconcileInput}>
+                    <label>Opening Cash</label>
+                    <div className={styles.cashInputWrapper}>
+                      <span>{settings.currencySymbol || 'AED'}</span>
+                      <input 
+                        type="number" 
+                        value={openingCash} 
+                        disabled={shiftState?.status === 'CLOSED'}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setOpeningCash(val);
+                          if (shiftState) {
+                            const updated = { ...shiftState, openingCash: val };
+                            setShiftState(updated);
+                            localStorage.setItem(`shift_state_${selectedDate}`, JSON.stringify(updated));
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className={styles.reconcileInput}>
+                    <label>Actual Cash Counted</label>
+                    <div className={styles.cashInputWrapper}>
+                      <span>{settings.currencySymbol || 'AED'}</span>
+                      <input 
+                        type="number" 
+                        value={actualCash} 
+                        disabled={shiftState?.status === 'CLOSED'}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setActualCash(val);
+                          setUserEditedActualCash(true);
+                          if (shiftState) {
+                            const updated = { ...shiftState, actualCash: val };
+                            setShiftState(updated);
+                            localStorage.setItem(`shift_state_${selectedDate}`, JSON.stringify(updated));
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className={styles.reconcileLine}>
+                  <span>Opening Cash</span>
+                  <span><CurrencySymbol /> {openingCash.toFixed(2)}</span>
+                </div>
+                <div className={styles.reconcileLine}>
+                  <span className={styles.successText}>+ Cash Sales Collected</span>
+                  <span className={styles.successText}>+ <CurrencySymbol /> {zStats.cashSalesCollected.toFixed(2)}</span>
+                </div>
+                <div className={styles.reconcileLine}>
+                  <span className={styles.successText}>+ Credit Collections</span>
+                  <span className={styles.successText}>+ <CurrencySymbol /> {zStats.cashCreditCollections.toFixed(2)}</span>
+                </div>
+                <div className={styles.reconcileLine}>
+                  <span className={styles.dangerText}>- Cash Expenses Paid</span>
+                  <span className={styles.dangerText}>- <CurrencySymbol /> {zStats.cashExpensesPaid.toFixed(2)}</span>
+                </div>
+                <hr className={styles.cardDivider} />
+                <div className={`${styles.reconcileLine} ${styles.rowHeader}`}>
+                  <span>Expected Cash</span>
+                  <span><CurrencySymbol /> {zStats.expectedCashInDrawer.toFixed(2)}</span>
+                </div>
+                <div className={`${styles.reconcileLine} ${styles.rowHeader}`}>
+                  <span>Actual Cash</span>
+                  <span><CurrencySymbol /> {actualCash.toFixed(2)}</span>
+                </div>
+
+                <div className={`${styles.reconcileBadge} ${zStats.cashDiscrepancy === 0 ? styles.badgeGreen : styles.badgeRed}`}>
+                  <span>Difference:</span>
+                  <strong>
+                    <CurrencySymbol size={12} /> {zStats.cashDiscrepancy.toFixed(2)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 13. Recent Expenses (Double Column Span on Desktop) */}
+            <div className={`${styles.statCard} ${styles.spanTwoCols}`}>
+              <h4>Recent Expenses</h4>
+              <div className={styles.cardContent}>
+                {expenses.length > 0 ? (
+                  <div className={styles.expensesTableWrapper}>
+                    <table className={styles.expensesTable}>
+                      <thead>
+                        <tr>
+                          <th>Date & Time</th>
+                          <th>Category</th>
+                          <th>Description</th>
+                          <th className={styles.colRight}>Amount</th>
+                          <th>Paid By</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {expenses.map((e) => (
+                          <tr key={e.id}>
+                            <td>{e.date.split(' ')[0]}</td>
+                            <td><span className={styles.tagBadge}>{e.category || 'General'}</span></td>
+                            <td>{e.title}</td>
+                            <td className={`${styles.colRight} ${styles.dangerText}`}>
+                              -<CurrencySymbol size={11} /> {e.amount.toFixed(2)}
+                            </td>
+                            <td>Admin</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className={styles.emptyState}>No expenses logged for this date.</div>
+                )}
+                <hr className={styles.cardDivider} />
+                <div className={styles.expenseTotalFooter}>
+                  <span>Total Expenses:</span>
+                  <strong className={styles.dangerText}>
+                    <CurrencySymbol /> {zStats.totalExpenses.toFixed(2)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 14. Audit Information */}
+            <div className={styles.statCard}>
+              <h4>Audit Information</h4>
+              <div className={styles.cardContent}>
+                <div className={styles.itemRow}>
+                  <span>Report Generated Time</span>
+                  <span className={styles.subtext}>{new Date().toLocaleString()}</span>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Device Name</span>
+                  <span className={styles.subtext}>POS-01</span>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Branch Name</span>
+                  <span className={styles.subtext}>{settings.branchName || 'Al Nahda, Dubai'}</span>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Software Version</span>
+                  <span className={styles.subtext}>1.0.0</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Bottom Action Bar */}
+          <div className={`${styles.bottomActionBar} no-print`}>
+            <button className={`${styles.actionBtn} ${styles.printBtn}`} onClick={() => handlePrint('pos')}>
+              <Printer size={16} /> Print (800mm)
+            </button>
+            <button className={`${styles.actionBtn} ${styles.pdfBtn}`} onClick={() => window.print()}>
+              <FileText size={16} /> Download PDF
+            </button>
+            <button className={`${styles.actionBtn} ${styles.excelBtn}`} onClick={handleExportCSV}>
+              <Download size={16} /> Export Excel
+            </button>
+            <button className={`${styles.actionBtn} ${styles.whatsappBtn}`} onClick={handleShareWhatsApp}>
+              <Share2 size={16} /> Share via WhatsApp
+            </button>
+          </div>
+
+          {/* ──────────────────────────────────────────────────────────────────────── */}
+          {/* PRINT VIEW - Thermal Receipt Template (styled via @media print) */}
+          {/* ──────────────────────────────────────────────────────────────────────── */}
+          <div className={`${styles.printContainer} print-only`}>
+            <div className={styles.thermalTicket}>
+              <div className={styles.ticketHeader}>
+                <h1>{settings.shopName || 'Laundry POS'}</h1>
+                <p>{settings.shopAddress || 'Laundry Management System'}</p>
+                <div className={styles.ticketDivider}>* * * * * * * * * * * * * * * * *</div>
+                <h2>Z REPORT (DAILY REGISTER CLOSE)</h2>
+                <p>Shift No: {zStats.shiftInfo.shiftNo} ({zStats.shiftInfo.status})</p>
+                <p>Date: {selectedDate}</p>
+                <p>Generated: {new Date().toLocaleString()}</p>
+                <p>Operator: {zStats.shiftInfo.openedBy}</p>
+              </div>
+
+              <div className={styles.ticketDivider}>- - - - - - - - - - - - - - - - -</div>
+              
+              <div className={styles.ticketSection}>
+                <h3>SHIFT STATISTICS</h3>
+                <div className={styles.ticketRow}>
+                  <span>Opened At:</span>
+                  <span>
+                    {zStats.shiftInfo.openingTime && zStats.shiftInfo.openingTime.split(' ').length > 2
+                      ? zStats.shiftInfo.openingTime.split(' ')[1] + ' ' + zStats.shiftInfo.openingTime.split(' ')[2]
+                      : 'N/A'}
+                  </span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>Closed At:</span>
+                  <span>
+                    {zStats.shiftInfo.closingTime && zStats.shiftInfo.closingTime !== 'N/A' && zStats.shiftInfo.closingTime.split(' ').length > 2
+                      ? zStats.shiftInfo.closingTime.split(' ')[1] + ' ' + zStats.shiftInfo.closingTime.split(' ')[2]
+                      : 'N/A'}
+                  </span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>Orders Placed:</span>
+                  <span>{zStats.totalOrdersCount}</span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>Total Pieces:</span>
+                  <span>{zStats.totalPieces}</span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>Total Customers:</span>
+                  <span>{zStats.totalCustomers}</span>
+                </div>
+              </div>
+
+              <div className={styles.ticketDivider}>- - - - - - - - - - - - - - - - -</div>
+
+              <div className={styles.ticketSection}>
+                <h3>CASH DRAWER RECONCILIATION</h3>
+                <div className={styles.ticketRow}>
+                  <span>Opening Cash:</span>
+                  <span>{openingCash.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>+ Cash Payments:</span>
+                  <span>{zStats.cashSalesCollected.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>+ Credit Collections:</span>
+                  <span>{zStats.cashCreditCollections.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>- Cash Expenses:</span>
+                  <span>{zStats.cashExpensesPaid.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow} style={{ fontWeight: 'bold' }}>
+                  <span>Expected Cash:</span>
+                  <span>{zStats.expectedCashInDrawer.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow} style={{ fontWeight: 'bold' }}>
+                  <span>Actual Cash:</span>
+                  <span>{actualCash.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow} style={{ fontWeight: 'bold' }}>
+                  <span>Discrepancy:</span>
+                  <span>{zStats.cashDiscrepancy.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div className={styles.ticketDivider}>- - - - - - - - - - - - - - - - -</div>
+
+              <div className={styles.ticketSection}>
+                <h3>SALES BY PAYMENT METHOD</h3>
+                <div className={styles.ticketRow}>
+                  <span>Cash Sales:</span>
+                  <span>{zStats.cashSales.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>Card Sales:</span>
+                  <span>{zStats.cardSales.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>Bank Transfer:</span>
+                  <span>{zStats.bankTransfer.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>Credit Orders:</span>
+                  <span>{zStats.creditUnpaid.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow} style={{ fontWeight: 'bold' }}>
+                  <span>Total Collected:</span>
+                  <span>{zStats.totalCollected.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div className={styles.ticketDivider}>- - - - - - - - - - - - - - - - -</div>
+
+              <div className={styles.ticketSection}>
+                <h3>VAT TAX Consolidations</h3>
+                <div className={styles.ticketRow}>
+                  <span>Taxable Amount:</span>
+                  <span>{zStats.taxableAmount.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>VAT ({settings.taxRate || 5}%):</span>
+                  <span>{zStats.outputTax.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow} style={{ fontWeight: 'bold' }}>
+                  <span>Grand Total:</span>
+                  <span>{zStats.totalRevenue.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div className={styles.ticketDivider}>* * * * * * * * * * * * * * * * *</div>
+              <div className={styles.ticketFooter}>
+                <p>Register Closed Successfully</p>
+                <p>Signature: ____________________</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Shift Close Confirmation Modal */}
+          {showCloseModal && (
+            <div className={styles.modalOverlay}>
+              <div className={styles.modalContainer}>
+                <div className={styles.modalHeader}>
+                  <h3>Close Register / Shift</h3>
+                  <button className={styles.closeModalBtn} onClick={() => setShowCloseModal(false)}>
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className={styles.modalBody}>
+                  <div>
+                    <div className={styles.modalSectionTitle}>Shift Summary</div>
+                    <div className={styles.modalSummaryGrid}>
+                      <div className={styles.summaryItem}>
+                        <span className={styles.summaryLabel}>Opening Cash</span>
+                        <span className={styles.summaryValue}>
+                          {settings.currencySymbol || 'AED'} {openingCash.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className={styles.summaryItem}>
+                        <span className={styles.summaryLabel}>Expected Cash</span>
+                        <span className={styles.summaryValue}>
+                          {settings.currencySymbol || 'AED'} {zStats.expectedCashInDrawer.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={styles.modalInputWrapper}>
+                    <label>Actual Cash Counted</label>
+                    <div className={styles.modalInputArea}>
+                      <span>{settings.currencySymbol || 'AED'}</span>
+                      <input
+                        type="number"
+                        value={modalActualCash}
+                        onChange={(e) => setModalActualCash(parseFloat(e.target.value) || 0)}
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  <div className={`${styles.discrepancyBox} ${(modalActualCash - zStats.expectedCashInDrawer) === 0 ? styles.badgeGreen : styles.badgeRed}`}>
+                    <span>Difference:</span>
+                    <strong>
+                      {settings.currencySymbol || 'AED'} {(modalActualCash - zStats.expectedCashInDrawer).toFixed(2)}
+                    </strong>
+                  </div>
+                </div>
+                <div className={styles.modalFooter}>
+                  <button className={styles.cancelBtn} onClick={() => setShowCloseModal(false)}>
+                    Cancel
+                  </button>
+                  <button className={styles.confirmBtn} onClick={handleConfirmCloseShift}>
+                    Confirm & Close Register
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Shift Reopen Confirmation Modal */}
+          {showReopenModal && (
+            <div className={styles.modalOverlay}>
+              <div className={styles.modalContainer}>
+                <div className={styles.modalHeader}>
+                  <h3>Reopen Register / Shift</h3>
+                  <button className={styles.closeModalBtn} onClick={() => setShowReopenModal(false)}>
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className={styles.modalBody}>
+                  <p style={{ fontSize: '0.875rem', color: '#475569', lineHeight: '1.5', margin: 0 }}>
+                    Reopening the shift will allow you to edit transactions, adjust cash drawer reconciliation, and modify orders for this date. 
+                  </p>
+                  <p style={{ fontSize: '0.875rem', color: '#475569', lineHeight: '1.5', margin: '0.5rem 0 0 0', fontWeight: '600' }}>
+                    Are you sure you want to proceed?
+                  </p>
+                </div>
+                <div className={styles.modalFooter}>
+                  <button className={styles.cancelBtn} onClick={() => setShowReopenModal(false)}>
+                    Cancel
+                  </button>
+                  <button className={styles.confirmBtn} onClick={handleConfirmOpenShift} style={{ background: '#10b981' }}>
+                    Confirm & Reopen
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </motion.div>
+  );
+}

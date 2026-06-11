@@ -146,7 +146,7 @@ export default function CustomerStatement() {
         ) AS u
         WHERE u.customerId = ?
       `;
-      const orderParams = [customerId, customerId]; // two placeholders for customerId in UNION subqueries
+      const orderParams = [customerId]; // single placeholder for customerId in wrapped query
       if (dateFrom) { orderQuery += ' AND u.createdAt >= ?'; orderParams.push(dateFrom); }
       if (dateTo)   { orderQuery += ' AND u.createdAt <= ?'; orderParams.push(dateTo + 'T23:59:59'); }
       orderQuery += ' ORDER BY u.createdAt ASC';
@@ -202,7 +202,7 @@ export default function CustomerStatement() {
               date: o.returnedAt || o.createdAt,
               type: 'refund',
               ref: `REF-${o.id}`,
-              description: `Refund – ${o.refundMethod || 'CASH'}`,
+              description: `Refund – ${o.refundMethod || 'Cash'}`,
               itemsSummary: `Refund for Deleted Order ${cleanRef}`,
               debit: o.paidAmount,
               credit: 0,
@@ -224,7 +224,7 @@ export default function CustomerStatement() {
                 date: p.createdAt || o.createdAt,
                 type: 'payment',
                 ref: p.id || `PAY-DEL-${o.id}`,
-                description: `Payment – ${p.method || 'CASH'}`,
+                description: `Payment – ${p.method || 'Cash'}`,
                 itemsSummary: `Linked to Order ${cleanRef}`,
                 debit: 0,
                 credit: p.amount || 0,
@@ -271,7 +271,7 @@ export default function CustomerStatement() {
         date: p.createdAt,
         type: 'payment',
         ref: p.id,
-        description: `Payment – ${p.method || 'CASH'}`,
+        description: `Payment – ${p.method || 'Cash'}`,
         itemsSummary: p.orderId ? `Linked to Order ${cleanOrderRef}` : 'Advance Deposit',
         debit: 0,
         credit: p.amount,
@@ -301,7 +301,7 @@ export default function CustomerStatement() {
             date: o.createdAt,
             type: 'payment',
             ref: cleanRef,
-            description: `Payment – ${o.paymentMethod || 'CASH'}`,
+            description: `Payment – ${o.paymentMethod || 'Cash'}`,
             itemsSummary: `Linked to Order ${cleanRef}`,
             debit: 0,
             credit: initialPay,

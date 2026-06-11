@@ -36,7 +36,7 @@ export default function RevenueReport() {
 
   const filteredPayments = payments.filter(p => {
     const matchesSearch = p.orderId?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesMethod = filterMethod === 'All' || p.method === filterMethod;
+    const matchesMethod = filterMethod === 'All' || p.method?.toUpperCase() === filterMethod.toUpperCase();
     
     let matchesDate = true;
     if (filterDate !== 'All') {
@@ -64,9 +64,9 @@ export default function RevenueReport() {
 
   const stats = [
     { label: 'Total Collected', value: totalRevenue, icon: DollarSign, color: '#10B981', bg: '#ECFDF5' },
-    { label: 'Cash Payments', value: filteredPayments.filter(p => p.method === 'CASH').reduce((s, p) => s + p.amount, 0), icon: Wallet, color: '#3B82F6', bg: '#EFF6FF' },
-    { label: 'Bank/Card', value: filteredPayments.filter(p => p.method === 'BANK').reduce((s, p) => s + p.amount, 0), icon: Landmark, color: '#8B5CF6', bg: '#F5F3FF' },
-    { label: 'Digital/Other', value: filteredPayments.filter(p => ['UPI', 'WALLET', 'ONLINE'].includes(p.method)).reduce((s, p) => s + p.amount, 0), icon: Smartphone, color: '#F59E0B', bg: '#FFFBEB' },
+    { label: 'Cash Payments', value: filteredPayments.filter(p => p.method === 'Cash' || p.method === 'CASH').reduce((s, p) => s + p.amount, 0), icon: Wallet, color: '#3B82F6', bg: '#EFF6FF' },
+    { label: 'Bank/Card', value: filteredPayments.filter(p => p.method === 'Bank' || p.method === 'BANK').reduce((s, p) => s + p.amount, 0), icon: Landmark, color: '#8B5CF6', bg: '#F5F3FF' },
+    { label: 'Digital/Other', value: filteredPayments.filter(p => ['UPI', 'WALLET', 'ONLINE'].includes(p.method?.toUpperCase())).reduce((s, p) => s + p.amount, 0), icon: Smartphone, color: '#F59E0B', bg: '#FFFBEB' },
   ];
 
   const handleExportCSV = () => {
@@ -162,10 +162,8 @@ export default function RevenueReport() {
                style={{ padding: '0.75rem 1rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', fontWeight: 600, color: '#475569' }}
              >
                <option value="All">All Methods</option>
-               <option value="CASH">Cash</option>
-               <option value="BANK">Bank Transfer</option>
-               <option value="CARD">Credit/Debit Card</option>
-               <option value="UPI">Digital (UPI)</option>
+               <option value="Cash">Cash</option>
+               <option value="Bank">Bank Transfer</option>
              </select>
           </div>
         </div>
@@ -189,7 +187,7 @@ export default function RevenueReport() {
                 <td style={{ padding: '1.25rem 1rem', fontWeight: 700, color: '#1E293B' }}>{p.orderId || 'Direct Payment'}</td>
                 <td style={{ padding: '1.25rem 1rem' }}>
                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                     {p.method === 'CASH' ? <Wallet size={14} color="#3B82F6" /> : <Landmark size={14} color="#8B5CF6" />}
+                     {p.method?.toUpperCase() === 'CASH' ? <Wallet size={14} color="#3B82F6" /> : <Landmark size={14} color="#8B5CF6" />}
                      <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{p.method}</span>
                    </div>
                 </td>

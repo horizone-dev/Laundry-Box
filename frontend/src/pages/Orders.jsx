@@ -48,7 +48,7 @@ export default function Orders({ isPendingView = false }) {
   
   // Filtering logic
   const [showPayModal, setShowPayModal] = useState(false);
-  const [payMethod, setPayMethod] = useState('CASH');
+  const [payMethod, setPayMethod] = useState('Cash');
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [pendingSubFilter, setPendingSubFilter] = useState('All'); // 'All', 'Pending', 'Overdue'
   const [workflowFilter, setWorkflowFilter] = useState('All'); // 'All', 'Confirmed', 'Processing', 'Ready', 'Delivered', 'Cancelled'
@@ -64,7 +64,7 @@ export default function Orders({ isPendingView = false }) {
   const [orderToDelete, setOrderToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [refundImmediately, setRefundImmediately] = useState(true);
-  const [refundMethod, setRefundMethod] = useState('CASH');
+  const [refundMethod, setRefundMethod] = useState('Cash');
 
   // Credit Limit Protection states
   const [showCreditWarning, setShowCreditWarning] = useState(false);
@@ -211,8 +211,10 @@ export default function Orders({ isPendingView = false }) {
 
   const getPaymentMethodTranslation = (method) => {
     if (!method) return '';
-    if (method.toUpperCase() === 'CASH') return t('cashaccount', settings.language);
-    if (method.toUpperCase() === 'BANK') return t('bankaccount', settings.language);
+    if (method === 'Cash' || method.toUpperCase() === 'CASH') return t('cashaccount', settings.language);
+    if (method === 'Bank' || method.toUpperCase() === 'BANK') return t('bankaccount', settings.language);
+    if (method === 'Not Paid') return t('notPaid', settings.language) || 'Not Paid';
+    if (method === 'Mixed') return 'Mixed';
     return method;
   };
 
@@ -502,7 +504,7 @@ export default function Orders({ isPendingView = false }) {
         const initialRefundStatus = isPaid
           ? (refundImmediately ? 'Returned' : 'Refund Pending')
           : 'Deleted';
-        const refundMethodVal = isPaid && refundImmediately ? refundMethod.toUpperCase() : null;
+        const refundMethodVal = isPaid && refundImmediately ? refundMethod : null;
         const returnedAtVal = isPaid && refundImmediately ? getLocalISOString() : null;
 
         await window.electronAPI.dbQuery(
@@ -551,7 +553,7 @@ export default function Orders({ isPendingView = false }) {
             [
               refundTxnId,
               orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
-              refundMethod.toUpperCase(),
+              refundMethod === 'Bank' ? 'BANK' : 'CASH',
               'EXPENSE',
               'Return',
               paidAmt,
@@ -719,7 +721,7 @@ export default function Orders({ isPendingView = false }) {
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, payMethod, 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${selectedOrder.id}`, txnTimestamp, 0, getLocalISOString(), 'DollarSign']
+          [txnId, DEFAULT_SHOP_ID, payMethod === 'Bank' ? 'BANK' : 'CASH', 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${selectedOrder.id}`, txnTimestamp, 0, getLocalISOString(), 'DollarSign']
         );
 
         // Record Payment in payments table
@@ -1062,8 +1064,13 @@ export default function Orders({ isPendingView = false }) {
                      </div>
                      <div style={{ marginTop: '6px' }}>
                         {order.paymentStatus === 'Paid' || (order.dueAmount !== undefined && order.dueAmount <= 0) ? (
-                          <span className={order.paymentMethod?.toUpperCase() === 'CASH' ? styles.methodCash : styles.methodOther}>
-                            {order.paymentMethod}
+                          <span className={
+                           order.paymentMethod === 'Cash' ? styles.methodCash : 
+                           order.paymentMethod === 'Bank' ? styles.methodOther :
+                           order.paymentMethod === 'Mixed' ? styles.methodOther :
+                           styles.methodOther
+                         }>
+                           {order.paymentMethod}
                           </span>
                         ) : order.paymentStatus === 'Partial' ? (
                           <span className={styles.methodPartial}>
@@ -1178,11 +1185,13 @@ export default function Orders({ isPendingView = false }) {
                     <td>
                        {order.paymentStatus === 'Paid' ? (
                          order.paymentMethod ? (
-                           <span className={
-                             order.paymentMethod.toUpperCase() === 'CASH' ? styles.methodCash : 
-                             styles.methodOther
-                           }>
-                             {order.paymentMethod}
+                            <span className={
+                              order.paymentMethod === 'Cash' ? styles.methodCash : 
+                              order.paymentMethod === 'Bank' ? styles.methodOther :
+                              order.paymentMethod === 'Mixed' ? styles.methodOther :
+                              styles.methodOther
+                            }>
+                              {order.paymentMethod}
                            </span>
                          ) : (
                            <span style={{ color: '#94A3B8' }}>-</span>
@@ -1549,15 +1558,15 @@ export default function Orders({ isPendingView = false }) {
               
               <div className={styles.payOptionGrid}>
                 <div 
-                  className={`${styles.payOption} ${payMethod === 'CASH' ? styles.payOptionActive : ''}`}
-                  onClick={() => setPayMethod('CASH')}
+                  className={`${styles.payOption} ${payMethod === 'Cash' ? styles.payOptionActive : ''}`}
+                  onClick={() => setPayMethod('Cash')}
                 >
                   <Wallet size={24} />
                   <span>{t('cashaccount', settings.language)}</span>
                 </div>
                 <div 
-                  className={`${styles.payOption} ${payMethod === 'BANK' ? styles.payOptionActive : ''}`}
-                  onClick={() => setPayMethod('BANK')}
+                  className={`${styles.payOption} ${payMethod === 'Bank' ? styles.payOptionActive : ''}`}
+                  onClick={() => setPayMethod('Bank')}
                 >
                   <CreditCard size={24} />
                   <span>{t('bankaccount', settings.language)}</span>
@@ -1639,9 +1648,9 @@ export default function Orders({ isPendingView = false }) {
                           <input
                             type="radio"
                             name="refundMethod"
-                            value="CASH"
-                            checked={refundMethod === 'CASH'}
-                            onChange={() => setRefundMethod('CASH')}
+                            value="Cash"
+                            checked={refundMethod === 'Cash'}
+                            onChange={() => setRefundMethod('Cash')}
                             style={{ width: '15px', height: '15px', cursor: 'pointer' }}
                           />
                           Cash Account
@@ -1650,9 +1659,9 @@ export default function Orders({ isPendingView = false }) {
                           <input
                             type="radio"
                             name="refundMethod"
-                            value="BANK"
-                            checked={refundMethod === 'BANK'}
-                            onChange={() => setRefundMethod('BANK')}
+                            value="Bank"
+                            checked={refundMethod === 'Bank'}
+                            onChange={() => setRefundMethod('Bank')}
                             style={{ width: '15px', height: '15px', cursor: 'pointer' }}
                           />
                           Bank Account

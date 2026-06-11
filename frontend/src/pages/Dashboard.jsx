@@ -90,7 +90,7 @@ export default function Dashboard() {
 
       // 8. Footer: Confirmed Work stats
       const activeOrders = allOrders.filter(o => !['Cancelled', 'Delivered'].includes(o.status));
-      const confirmedOrders = allOrders.filter(o => o.status === 'Confirmed');
+      const confirmedOrders = activeOrders.filter(o => !['Pending', 'Payment Pending'].includes(o.status));
       const deliveredOrders = allOrders.filter(o => o.status === 'Delivered');
       setFooterStats({
         confirmedCount: confirmedOrders.length,
@@ -547,6 +547,7 @@ export default function Dashboard() {
         <div className={`${styles.card} ${styles.boardCard}`}>
           <div className={styles.cardHeader}>
             <h3>Operations Board</h3>
+            <span className={styles.viewAllBtn} onClick={() => navigate('/workflow')}>View board</span>
           </div>
           
           <div className={styles.boardColumns}>
@@ -555,7 +556,7 @@ export default function Dashboard() {
             <BoardColumn 
               title="New Orders" 
               count={operationsBoard.new.length} 
-              orders={operationsBoard.new.slice(0, 2)} 
+              orders={operationsBoard.new.slice(0, 4)} 
               badgeClass={styles.badgeNew}
               lateDeliveryDays={settings.lateDeliveryDays || 3}
             />
@@ -564,7 +565,7 @@ export default function Dashboard() {
             <BoardColumn 
               title="Processing" 
               count={operationsBoard.processing.length} 
-              orders={operationsBoard.processing.slice(0, 2)} 
+              orders={operationsBoard.processing.slice(0, 4)} 
               badgeClass={styles.badgeProcessing}
               lateDeliveryDays={settings.lateDeliveryDays || 3}
             />
@@ -573,7 +574,7 @@ export default function Dashboard() {
             <BoardColumn 
               title="Ready" 
               count={operationsBoard.ready.length} 
-              orders={operationsBoard.ready.slice(0, 2)} 
+              orders={operationsBoard.ready.slice(0, 4)} 
               badgeClass={styles.badgeReady}
               lateDeliveryDays={settings.lateDeliveryDays || 3}
             />
@@ -582,7 +583,7 @@ export default function Dashboard() {
             <BoardColumn 
               title="Out for Delivery" 
               count={operationsBoard.outForDelivery.length} 
-              orders={operationsBoard.outForDelivery.slice(0, 2)} 
+              orders={operationsBoard.outForDelivery.slice(0, 4)} 
               badgeClass={styles.badgeDelivery}
               lateDeliveryDays={settings.lateDeliveryDays || 3}
             />
@@ -622,7 +623,7 @@ export default function Dashboard() {
           <div className={`${styles.card} ${styles.servicesCard}`}>
             <div className={styles.cardHeader}>
               <h3>Top Services (This Month)</h3>
-              <span className={styles.viewAllBtn} onClick={() => navigate('/services')}>View report</span>
+              <span className={styles.viewAllBtn} onClick={() => navigate('/reports/services')}>View report</span>
             </div>
             <div className={styles.servicesList}>
               {topServices.map((s, idx) => (
@@ -672,6 +673,7 @@ export default function Dashboard() {
 
 // Kanban Column Component
 function BoardColumn({ title, count, orders, badgeClass, lateDeliveryDays }) {
+  const navigate = useNavigate();
   const isOrderLate = (createdAt) => {
     if (!createdAt) return false;
     const diffMs = new Date() - new Date(createdAt);
@@ -706,13 +708,13 @@ function BoardColumn({ title, count, orders, badgeClass, lateDeliveryDays }) {
             </div>
           );
         })}
-        {count > 2 && (
-          <div className={styles.moreLabel}>+ {count - 2} more orders</div>
-        )}
         {count === 0 && (
           <div className={styles.emptyColumn}>No orders</div>
         )}
       </div>
+      {count > 4 && (
+        <div className={styles.moreLabel} onClick={() => navigate('/workflow')}>+ {count - 4} more orders</div>
+      )}
     </div>
   );
 }

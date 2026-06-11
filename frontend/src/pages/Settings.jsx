@@ -341,13 +341,12 @@ export default function Settings() {
                     <label>Default Payment Method</label>
                     <select
                       className={styles.inputField}
-                      value={settings.defaultPaymentMethod || 'CASH'}
+                      value={settings.defaultPaymentMethod || 'Cash'}
                       onChange={(e) => updateSettings({ defaultPaymentMethod: e.target.value })}
                     >
-                      <option value="CASH">Cash</option>
-                      <option value="CARD">Card</option>
-                      <option value="UPI">UPI / QR</option>
-                      <option value="CREDIT">Store Credit</option>
+                      <option value="Cash">Cash</option>
+                      <option value="Bank">Bank</option>
+                      <option value="Not Paid">Not Paid</option>
                     </select>
                   </div>
                 </div>

@@ -418,15 +418,10 @@ function runDataHealer(db) {
     // Fix legacy shopId = 'SHOP_1' to 'SHOP_01'
     db.exec(`UPDATE orders SET shopId = 'SHOP_01', isSynced = 0, updatedAt = '${timestamp}' WHERE shopId = 'SHOP_1';`);
 
-    // Fix orders with dueAmount > 0 but paymentStatus = 'Paid' (correcting to Partial or Credit)
-    db.exec(`UPDATE orders SET paymentStatus = CASE WHEN IFNULL(paidAmount, 0) > 0 THEN 'Partial' ELSE 'Credit' END, isSynced = 0, updatedAt = '${timestamp}' WHERE dueAmount > 0 AND paymentStatus = 'Paid';`);
-
-    // 1. Fix inconsistent paymentStatus (Only if status is clearly Payment Pending but marked Paid)
-    db.exec(`UPDATE orders SET paymentStatus = 'Credit', isSynced = 0, updatedAt = '${timestamp}' WHERE status = 'Payment Pending' AND (paidAmount = 0 OR paidAmount IS NULL) AND paymentStatus != 'Credit';`);
-    db.exec(`UPDATE orders SET paymentStatus = 'Paid', status = 'Confirmed', isSynced = 0, updatedAt = '${timestamp}' WHERE status = 'Paid' AND (paymentStatus != 'Paid' OR status != 'Confirmed');`);
-    
-    // Fix orders that are mathematically paid but have incorrect status/paymentStatus fields
-    db.exec(`UPDATE orders SET paymentStatus = 'Paid', isSynced = 0, updatedAt = '${timestamp}' WHERE dueAmount <= 0 AND paymentStatus != 'Paid';`);
+    // Fix inconsistent paymentStatus mathematically
+    db.exec(`UPDATE orders SET paymentStatus = 'Credit', isSynced = 0, updatedAt = '${timestamp}' WHERE (paidAmount = 0 OR paidAmount IS NULL) AND paymentStatus != 'Credit';`);
+    db.exec(`UPDATE orders SET paymentStatus = 'Partial', isSynced = 0, updatedAt = '${timestamp}' WHERE paidAmount > 0 AND paidAmount < totalAmount AND paymentStatus != 'Partial';`);
+    db.exec(`UPDATE orders SET paymentStatus = 'Paid', isSynced = 0, updatedAt = '${timestamp}' WHERE paidAmount >= totalAmount AND paymentStatus != 'Paid';`);
     db.exec(`UPDATE orders SET status = 'Confirmed', isSynced = 0, updatedAt = '${timestamp}' WHERE dueAmount <= 0 AND status = 'Payment Pending';`);
 
     // 2. Data Healer: Only fix dueAmount if it's mathematically wrong, but don't overwrite Status unless confirmed
@@ -450,12 +445,43 @@ function runDataHealer(db) {
         let updateQuery = `UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, isSynced = 0, updatedAt = ?`;
         const params = [newPaid, newDue, newStatus, timestamp];
         if (newStatus === 'Credit') {
-          updateQuery += `, paymentMethod = 'Credit'`;
+          updateQuery += `, paymentMethod = 'Not Paid'`;
         }
         updateQuery += ` WHERE id = ?`;
         params.push(order.id);
         db.prepare(updateQuery).run(params);
       }
+    }
+
+    // Normalize legacy paymentMethod values to the 3-option system: Not Paid, Cash, Bank
+    console.log("Normalizing legacy paymentMethod values...");
+    // Orders that are credit/unpaid: set to 'Not Paid'
+    db.exec(`UPDATE orders SET paymentMethod = 'Not Paid', isSynced = 0, updatedAt = '${timestamp}'
+             WHERE paymentStatus IN ('Credit') AND (paymentMethod IS NULL OR paymentMethod = '' OR paymentMethod NOT IN ('Not Paid', 'Cash', 'Bank', 'Mixed'));`);
+    // Old 'Credit' method on any orders -> 'Not Paid'
+    db.exec(`UPDATE orders SET paymentMethod = 'Not Paid', isSynced = 0, updatedAt = '${timestamp}' WHERE paymentMethod = 'Credit';`);
+    // Old Card/UPI/Wallet paid orders -> treat as Cash (best-effort normalization)
+    db.exec(`UPDATE orders SET paymentMethod = 'Cash', isSynced = 0, updatedAt = '${timestamp}' WHERE paymentMethod IN ('Card', 'UPI / QR Payment', 'Wallet', 'UPI', 'CASH') AND paymentStatus = 'Paid';`);
+    // Old 'BANK' (uppercase) -> 'Bank'
+    db.exec(`UPDATE orders SET paymentMethod = 'Bank', isSynced = 0, updatedAt = '${timestamp}' WHERE paymentMethod = 'BANK';`);
+
+    // For fully-paid orders that came from settlements, recalculate paymentMethod from payments table
+    console.log("Recalculating paymentMethod for settled credit orders from payment history...");
+    const paidOrdersFromCredit = db.prepare(
+      "SELECT id FROM orders WHERE paymentStatus = 'Paid' AND dueAmount <= 0 AND paidAmount > 0"
+    ).all();
+    for (const order of paidOrdersFromCredit) {
+      const payRows = db.prepare("SELECT DISTINCT method FROM payments WHERE orderId = ?").all(order.id);
+      if (payRows.length === 0) continue; // No payment records — skip (direct POS sale, keep its method)
+      const methods = payRows.map(r => r.method);
+      const hasCash = methods.some(m => m === 'Cash');
+      const hasBank = methods.some(m => m === 'Bank');
+      if (!hasCash && !hasBank) continue; // Unknown legacy methods, skip
+      let newMethod;
+      if (hasCash && hasBank) newMethod = 'Mixed';
+      else if (hasBank) newMethod = 'Bank';
+      else newMethod = 'Cash';
+      db.prepare(`UPDATE orders SET paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?`).run(newMethod, timestamp, order.id);
     }
 
     // Recalculate customer balances from actual orders and payments before smart advance/unapplied payments logic

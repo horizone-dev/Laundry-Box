@@ -41,7 +41,7 @@ export default function ExpectedDeliveries() {
   // Settle / Payment Quick Modal
   const [showPayModal, setShowPayModal] = useState(false);
   const [selectedOrderForPay, setSelectedOrderForPay] = useState(null);
-  const [payMethod, setPayMethod] = useState('CASH');
+  const [payMethod, setPayMethod] = useState('Cash');
 
   useEffect(() => {
     fetchOrders();
@@ -263,7 +263,7 @@ export default function ExpectedDeliveries() {
 
   const openPaymentModal = (order) => {
     setSelectedOrderForPay(order);
-    setPayMethod('CASH');
+    setPayMethod('Cash');
     setShowPayModal(true);
   };
 
@@ -301,7 +301,7 @@ export default function ExpectedDeliveries() {
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, payMethod, 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${order.id}`, txnTimestamp, timestamp, 'DollarSign']
+          [txnId, DEFAULT_SHOP_ID, payMethod === 'Bank' ? 'BANK' : 'CASH', 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${order.id}`, txnTimestamp, timestamp, 'DollarSign']
         );
 
         // Record payment
@@ -725,12 +725,12 @@ export default function ExpectedDeliveries() {
               <p>You are marking Order <strong>{selectedOrderForPay.id}</strong> as Paid. Choose payment method:</p>
               
               <div className={styles.methodList}>
-                <label className={`${styles.methodLabel} ${payMethod === 'CASH' ? styles.activeMethod : ''}`}>
-                  <input type="radio" name="payMethod" value="CASH" checked={payMethod === 'CASH'} onChange={() => setPayMethod('CASH')} />
+                <label className={`${styles.methodLabel} ${payMethod === 'Cash' ? styles.activeMethod : ''}`}>
+                  <input type="radio" name="payMethod" value="Cash" checked={payMethod === 'Cash'} onChange={() => setPayMethod('Cash')} />
                   <span>Cash Account</span>
                 </label>
-                <label className={`${styles.methodLabel} ${payMethod === 'BANK' ? styles.activeMethod : ''}`}>
-                  <input type="radio" name="payMethod" value="BANK" checked={payMethod === 'BANK'} onChange={() => setPayMethod('BANK')} />
+                <label className={`${styles.methodLabel} ${payMethod === 'Bank' ? styles.activeMethod : ''}`}>
+                  <input type="radio" name="payMethod" value="Bank" checked={payMethod === 'Bank'} onChange={() => setPayMethod('Bank')} />
                   <span>Bank Account</span>
                 </label>
               </div>

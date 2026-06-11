@@ -22,7 +22,7 @@ export default function Customers() {
   const [quickSettleSearch, setQuickSettleSearch] = useState('');
   const [customerBills, setCustomerBills] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [paymentData, setPaymentData] = useState({ amount: '', method: 'CASH' });
+  const [paymentData, setPaymentData] = useState({ amount: '', method: 'Cash' });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState({
@@ -196,11 +196,15 @@ export default function Customers() {
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, paymentData.method, 'INCOME', 'Credit Settlement', totalPaid, `Settlement from ${selectedCustomer.name}`, txnTimestamp, 0, timestamp, 'DollarSign']
+          [txnId, DEFAULT_SHOP_ID, paymentData.method === 'Bank' ? 'BANK' : 'CASH', 'INCOME', 'Credit Settlement', totalPaid, `Settlement from ${selectedCustomer.name}`, txnTimestamp, 0, timestamp, 'DollarSign']
         );
 
+        if (window.electronAPI?.runDataHealer) {
+          await window.electronAPI.runDataHealer();
+        }
+
         setShowPaymentModal(false);
-        setPaymentData({ amount: '', method: 'CASH' });
+        setPaymentData({ amount: '', method: 'Cash' });
         fetchCustomers();
         alert(`Settlement complete! Remaining unallocated: ${remainingPayment.toFixed(2)}`);
       } catch (err) {
@@ -661,8 +665,14 @@ export default function Customers() {
                       </td>
                       <td><span style={{ color: (bill.dueAmount || 0) > 0 ? '#EF4444' : 'inherit' }}><CurrencySymbol size={14} /> {(bill.dueAmount || 0).toFixed(2)}</span></td>
                       <td>
-                        <span className={`${styles.statusBadge} ${getStatusClass(bill.paymentStatus)}`}>
-                          {bill.paymentStatus}
+                        <span className={`${styles.statusBadge} ${getStatusClass(
+                          (bill.paidAmount || 0) === 0 
+                            ? 'Credit' 
+                            : ((bill.paidAmount || 0) >= bill.totalAmount ? 'Paid' : 'Partial')
+                        )}`}>
+                          {(bill.paidAmount || 0) === 0 
+                            ? 'Credit' 
+                            : ((bill.paidAmount || 0) >= bill.totalAmount ? 'Paid' : 'Partial')}
                         </span>
                       </td>
                     </tr>
@@ -774,9 +784,8 @@ export default function Customers() {
                       value={paymentData.method}
                       onChange={(e) => setPaymentData({...paymentData, method: e.target.value})}
                     >
-                      <option value="CASH">Cash Payment</option>
-                      <option value="BANK">Bank Transfer</option>
-                      <option value="CARD">Card Payment</option>
+                      <option value="Cash">Cash Payment</option>
+                      <option value="Bank">Bank Transfer</option>
                     </select>
                   </div>
                 </div>

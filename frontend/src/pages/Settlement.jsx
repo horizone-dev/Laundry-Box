@@ -39,7 +39,7 @@ export default function Settlement() {
   // Payment Modal State
   const [showPayModal, setShowPayModal] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('CASH');
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [notes, setNotes] = useState('');
   const [selectedBank, setSelectedBank] = useState('');
 
@@ -250,9 +250,27 @@ export default function Settlement() {
 
             // Update workflow status to 'Confirmed' when fully paid
             const newWorkflowStatus = newDue <= 0 ? 'Confirmed' : bill.status;
+
+            // Recalculate paymentMethod for this order from all payments
+            let newOrderPaymentMethod = paymentMethod; // current payment being made
+            if (newDue <= 0) {
+              // Order is now fully paid – look at all previous payments + this one
+              const prevPayRes = await window.electronAPI.dbQuery(
+                'SELECT DISTINCT method FROM payments WHERE orderId = ?',
+                [bill.id]
+              );
+              const prevMethods = prevPayRes.success ? prevPayRes.data.map(p => p.method) : [];
+              const allMethods = [...new Set([...prevMethods, paymentMethod])];
+              const hasCash = allMethods.some(m => m === 'Cash');
+              const hasBank = allMethods.some(m => m === 'Bank');
+              if (hasCash && hasBank) newOrderPaymentMethod = 'Mixed';
+              else if (hasBank) newOrderPaymentMethod = 'Bank';
+              else newOrderPaymentMethod = 'Cash';
+            }
+
             await window.electronAPI.dbQuery(
               'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-              [newPaid, newDue, newStatus, newWorkflowStatus, paymentMethod, timestamp, bill.id]
+              [newPaid, newDue, newStatus, newWorkflowStatus, newOrderPaymentMethod, timestamp, bill.id]
             );
 
             await window.electronAPI.dbQuery(
@@ -287,15 +305,15 @@ export default function Settlement() {
           [
             txnId,
             DEFAULT_SHOP_ID,
-            paymentMethod,
+            paymentMethod === 'Bank' ? 'BANK' : 'CASH',
             'INCOME',
             'Credit Settlement',
             amount,
-            `Settlement from ${selectedCustomer.name}${paymentMethod === 'BANK' && selectedBank ? ` via ${selectedBank}` : ''}`,
+            `Settlement from ${selectedCustomer.name}${paymentMethod === 'Bank' && selectedBank ? ` via ${selectedBank}` : ''}`,
             txnTimestamp,
             timestamp,
             'DollarSign',
-            paymentMethod === 'BANK' ? selectedBank : null
+            paymentMethod === 'Bank' ? selectedBank : null
           ]
         );
 
@@ -677,9 +695,9 @@ export default function Settlement() {
                               <td className={styles.redAmountText}><CurrencySymbol size={10} /> {Number(bill.dueAmount || 0).toFixed(2)}</td>
                               <td>
                                 <span className={`${styles.pillBadge} ${
-                                  bill.paymentStatus === 'Partial' ? styles.pillBadgePartial : styles.pillBadgeRed
+                                  (bill.paidAmount || 0) > 0 ? styles.pillBadgePartial : styles.pillBadgeRed
                                 }`}>
-                                  {bill.paymentStatus}
+                                  {(bill.paidAmount || 0) > 0 ? 'Partial' : 'Credit'}
                                 </span>
                               </td>
                               <td>
@@ -814,9 +832,8 @@ export default function Settlement() {
                 <label>Payment Method</label>
                 <div className={styles.methodCardsGrid}>
                   {[
-                    { id: 'CASH', label: 'Cash', icon: <Wallet size={20} /> },
-                    { id: 'BANK', label: 'Bank Transfer', icon: <Landmark size={20} /> },
-                    { id: 'UPI', label: 'Digital / UPI', icon: <CreditCard size={20} /> }
+                    { id: 'Cash', label: 'Cash', icon: <Wallet size={20} /> },
+                    { id: 'Bank', label: 'Bank Transfer', icon: <Landmark size={20} /> }
                   ].map(method => {
                     const isSelected = paymentMethod === method.id;
                     

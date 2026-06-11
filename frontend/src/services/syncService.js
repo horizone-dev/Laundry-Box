@@ -99,7 +99,7 @@ export const syncData = async () => {
           statusHistoryJson,
           order.createdAt, 
           order.updatedAt || new Date().toISOString(),
-          order.paymentMethod || 'CASH',
+          order.paymentMethod || 'Cash',
           order.expectedDeliveryDate || null,
           order.specialInstructions || null
         ]);
