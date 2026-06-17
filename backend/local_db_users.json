@@ -1,0 +1,24 @@
+[
+  {
+    "_id": "local_admin_2",
+    "name": "muhammed",
+    "phone": "+971547825153",
+    "userId": "142",
+    "password": "$2b$10$FMoisnPKoc26QBKJI2Rs5upfuJIowkxxRSIgqEEt6gBWejBoXoJV6",
+    "pin": "$2b$10$FMoisnPKoc26QBKJI2Rs5upfuJIowkxxRSIgqEEt6gBWejBoXoJV6",
+    "role": "super_admin",
+    "shopId": "SHOP_01",
+    "createdAt": "2026-06-16T20:48:40.967Z"
+  },
+  {
+    "_id": "local_user_1781642965886",
+    "shopId": "SHOP_01",
+    "name": "horizon",
+    "phone": "1234567890",
+    "userId": "USER_1781642965624",
+    "password": "$2b$10$1jxX65Knw1PVmN9Fxx6DruzmwLbUxSrZhP8MY7yfixzwBzOu5wsiO",
+    "pin": "$2b$10$tw04dXyf.XosP48FqB/Et.Eu7ymGDy0st8QxmRh6fpXifWV5pLlz.",
+    "role": "manager",
+    "createdAt": "2026-06-16T20:49:25.890Z"
+  }
+]

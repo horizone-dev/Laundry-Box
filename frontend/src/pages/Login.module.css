@@ -40,21 +40,23 @@
 }
 
 .logoIcon {
-  width: 100px;
-  height: 100px;
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(15px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 28px;
+  width: 220px;
+  height: 96px;
+  background: #ffffff;
+  border: 4px solid rgba(255, 255, 255, 0.35);
+  border-radius: 48px; /* Perfect pill-shape side round */
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  transition: all 0.3s ease;
+  padding: 10px 24px;
 }
 
 .logoIcon img {
-  width: 70%;
-  height: 70%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 

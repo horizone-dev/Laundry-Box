@@ -126,7 +126,7 @@ export default function Accounts() {
   const [receivablesTotal, setReceivablesTotal] = useState(1450.00);
   const [advancesTotal, setAdvancesTotal] = useState(320.00);
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateRange, setDateRange] = useState('This Month');
+  const [dateRange, setDateRange] = useState('Today');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   

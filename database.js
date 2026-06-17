@@ -238,7 +238,8 @@ function initDB(appPath) {
     const expiryDate = thirtyDaysFromNow.toISOString().split('T')[0];
     const defaultSettings = JSON.stringify({ expiryDate, currencySymbol: 'د.إ' });
     
-    db.prepare("INSERT OR IGNORE INTO shops (shopId, name, isActivated, settings) VALUES (?, ?, ?, ?)").run('SHOP_01', 'ABC Laundry', 1, defaultSettings);
+    db.prepare("INSERT OR IGNORE INTO shops (shopId, name, isActivated, settings) VALUES (?, ?, ?, ?)").run('SHOP_01', 'Laundry Box', 1, defaultSettings);
+    db.exec("UPDATE shops SET name = 'Laundry Box' WHERE name = 'ABC Laundry' OR name = 'Laundry Management System';");
 
     // Force activation for now as requested "manualy set"
     db.exec("UPDATE shops SET isActivated = 1 WHERE isActivated = 0;");

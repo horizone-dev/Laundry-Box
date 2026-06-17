@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
+import { getLocalDateBounds, isWithinBounds, localStrIsWithinBounds } from '../utils/dateFilters';
 import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './TaxReport.module.css';
 
@@ -55,90 +56,27 @@ export default function TaxReport() {
   
 
 
-  const getDateBounds = (range, startStr, endStr) => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    let startLocal, endLocal;
-
-    if (range === 'Today') {
-      startLocal = new Date(today);
-      endLocal = new Date(today);
-      endLocal.setHours(23, 59, 59, 999);
-
-    } else if (range === 'This Month') {
-      startLocal = new Date(today.getFullYear(), today.getMonth(), 1);
-      endLocal = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
-    } else if (range === 'This Year') {
-      startLocal = new Date(today.getFullYear(), 0, 1);
-      endLocal = new Date(today.getFullYear(), 11, 31, 23, 59, 59, 999);
-    } else if (range === 'Custom') {
-      if (!startStr || !endStr) {
-        return null;
-      }
-      startLocal = parseDateSafe(startStr);
-      startLocal.setHours(0, 0, 0, 0);
-      endLocal = parseDateSafe(endStr);
-      endLocal.setHours(23, 59, 59, 999);
-    } else {
-      return null;
-    }
-
-    const orderStart = startLocal.toISOString();
-    const orderEnd = endLocal.toISOString();
-
-    const formatDateObj = (d) => {
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
-    const expenseStart = formatDateObj(startLocal);
-    const expenseEnd = formatDateObj(endLocal);
-
-    return {
-      orderStart,
-      orderEnd,
-      expenseStart,
-      expenseEnd
-    };
-  };
 
   const fetchTaxData = async () => {
     if (window.electronAPI?.dbQuery) {
       try {
         setLoading(true);
-        const bounds = getDateBounds(dateRange, customStartDate, customEndDate);
         
-        let ordersQuery = `
+        const ordersQuery = `
           SELECT orders.id, orders.billNumber, orders.totalAmount, orders.items, orders.createdAt, customers.name as customerName 
           FROM orders 
           LEFT JOIN customers ON orders.customerId = customers.id 
           WHERE orders.status != 'Cancelled'
         `;
-        let ordersParams = [];
 
-        let expensesQuery = `
+        const expensesQuery = `
           SELECT id, title, amount, taxAmount, isTaxEnabled, date 
           FROM expenses
         `;
-        let expensesParams = [];
 
-        if (bounds) {
-          ordersQuery += ` AND orders.createdAt >= ? AND orders.createdAt <= ?`;
-          ordersParams = [bounds.orderStart, bounds.orderEnd];
-
-          expensesQuery += ` WHERE date >= ? AND date <= ?`;
-          expensesParams = [bounds.expenseStart, bounds.expenseEnd];
-        } else if (dateRange === 'Custom') {
-          setOrders([]);
-          setExpenses([]);
-          setLoading(false);
-          return;
-        }
-
-        const ordersRes = await window.electronAPI.dbQuery(ordersQuery, ordersParams);
-        const expensesRes = await window.electronAPI.dbQuery(expensesQuery, expensesParams);
+        const ordersRes = await window.electronAPI.dbQuery(ordersQuery, []);
+        const expensesRes = await window.electronAPI.dbQuery(expensesQuery, []);
 
         if (ordersRes.success) setOrders(ordersRes.data);
         if (expensesRes.success) setExpenses(expensesRes.data);
@@ -156,7 +94,7 @@ export default function TaxReport() {
     if (isAuthorized) {
       fetchTaxData();
     }
-  }, [isAuthorized, dateRange, customStartDate, customEndDate]);
+  }, [isAuthorized]);
 
   // Helper to calculate exact order tax based on items or settings
   const calculateOrderTax = (order, settingsObj) => {
@@ -209,9 +147,14 @@ export default function TaxReport() {
   // Consolidate both Sales and Expenses into a unified list of transactions
   const transactions = useMemo(() => {
     const list = [];
+    const bounds = getLocalDateBounds(dateRange, customStartDate, customEndDate);
+    if (bounds === false) return [];
 
     // Sales (Orders)
     orders.forEach(order => {
+      if (bounds && !isWithinBounds(order.createdAt, bounds)) {
+        return;
+      }
       const taxVal = calculateOrderTax(order, settings);
       const gross = order.totalAmount;
       const net = gross - taxVal;
@@ -230,6 +173,9 @@ export default function TaxReport() {
 
     // Expenses
     expenses.forEach(exp => {
+      if (bounds && !localStrIsWithinBounds(exp.date, bounds)) {
+        return;
+      }
       const isTax = exp.isTaxEnabled === 1 || exp.taxAmount > 0;
       const taxVal = isTax ? exp.taxAmount : 0;
       const gross = exp.amount;
@@ -249,7 +195,7 @@ export default function TaxReport() {
 
     // Sort by date descending
     return list.sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [orders, expenses, settings]);
+  }, [orders, expenses, settings, dateRange, customStartDate, customEndDate]);
 
   // Safe date parser to avoid timezone shifts
   const parseDateSafe = (dateStr) => {

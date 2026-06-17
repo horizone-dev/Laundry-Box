@@ -308,7 +308,6 @@ export default function MainLayout() {
       icon: BarChart3,
       permissionKey: 'reports',
       subItems: [
-        { path: '/reports', label: 'Analytics' },
         { path: '/reports/services', label: 'Services Report' },
         { path: '/reports/revenue', label: 'Revenue' },
         { path: '/reports/expenses', label: 'Expenses' },

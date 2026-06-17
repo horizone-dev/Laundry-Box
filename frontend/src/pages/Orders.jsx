@@ -54,7 +54,7 @@ export default function Orders({ isPendingView = false }) {
   const [pendingSubFilter, setPendingSubFilter] = useState('All'); // 'All', 'Pending', 'Overdue'
   const [workflowFilter, setWorkflowFilter] = useState('All'); // 'All', 'Confirmed', 'Processing', 'Ready', 'Delivered', 'Cancelled'
   const [isPrintingTags, setIsPrintingTags] = useState(false);
-  const [dateRange, setDateRange] = useState('All');
+  const [dateRange, setDateRange] = useState('Today');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
 
@@ -580,21 +580,19 @@ export default function Orders({ isPendingView = false }) {
         await window.electronAPI.runDataHealer();
       }
       
-      // B. Delete remotely from Cloud
-      try {
-        await axios.delete(`${API_BASE}/orders/${encodeURIComponent(orderToDelete.id)}`, {
-          data: { 
-            deletedBy: currentLoggedInUser,
-            approvedBy: pinOwner,
-            refundImmediately: refundImmediately,
-            refundMethod: refundMethod,
-            originalPaymentMethod: orderToDelete.paymentMethod,
-            payments: linkedPayments
-          }
-        });
-      } catch (remoteErr) {
+      // B. Delete remotely from Cloud (Background invocation - non-blocking)
+      axios.delete(`${API_BASE}/orders/${encodeURIComponent(orderToDelete.id)}`, {
+        data: { 
+          deletedBy: currentLoggedInUser,
+          approvedBy: pinOwner,
+          refundImmediately: refundImmediately,
+          refundMethod: refundMethod,
+          originalPaymentMethod: orderToDelete.paymentMethod,
+          payments: linkedPayments
+        }
+      }).catch(remoteErr => {
         console.warn('Could not delete from cloud (offline):', remoteErr.message);
-      }
+      });
       
       // C. Update State
       setOrders(prev => prev.filter(o => o.id !== orderToDelete.id));
@@ -1384,12 +1382,12 @@ export default function Orders({ isPendingView = false }) {
                   </div>
 
                   {selectedOrder.expectedDeliveryDate && (
-                    <div className={styles.section}>
+                    <div className={`${styles.section} ${styles.expectedDeliverySection}`}>
                       <h3>Expected Delivery</h3>
-                      <div className={styles.infoCard} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem' }}>
-                        <Clock size={16} color="#E11D48" />
+                      <div className={styles.infoCard}>
+                        <Clock size={16} />
                         <div>
-                          <p className={styles.infoVal} style={{ color: '#E11D48', fontWeight: 'bold', fontSize: '0.95rem' }}>
+                          <p className={styles.infoVal}>
                             {(() => {
                               const rawDate = selectedOrder.expectedDeliveryDate || '';
                               if (rawDate.includes(' ')) {

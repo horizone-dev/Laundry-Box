@@ -5,9 +5,9 @@ const SettingsContext = createContext();
 
 export function SettingsProvider({ children }) {
   const [settings, setSettings] = useState({
-    companyName: 'Laundry Management System',
+    companyName: 'Laundry Box',
     companyNameAr: '',
-    shopName: 'Laundry Management System',
+    shopName: 'Laundry Box',
     logo: null,
     email: '',
     phone: '',
@@ -62,7 +62,9 @@ export function SettingsProvider({ children }) {
     invoiceShowTerms: true,
     invoiceShowBankDetails: true,
     invoiceShowBilingual: true,
-    invoiceTermsText: '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.'
+    invoiceTermsText: '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.',
+    billingPrinter: '',
+    tagPrinter: ''
   });
 
   const settingsRef = useRef(settings);
@@ -82,7 +84,7 @@ export function SettingsProvider({ children }) {
           const shop = result.data[0];
           const shopSettings = typeof shop.settings === 'string' ? JSON.parse(shop.settings) : shop.settings;
           setSettings({
-            companyName: shop.name || 'Laundry Management System',
+            companyName: shop.name || 'Laundry Box',
             companyNameAr: shopSettings?.companyNameAr || '',
             logo: shopSettings?.logo || null,
             email: shopSettings?.email || '',
@@ -138,8 +140,12 @@ export function SettingsProvider({ children }) {
             invoiceShowTerms: shopSettings?.invoiceShowTerms ?? true,
             invoiceShowBankDetails: shopSettings?.invoiceShowBankDetails ?? true,
             invoiceShowBilingual: shopSettings?.invoiceShowBilingual ?? true,
-            invoiceTermsText: shopSettings?.invoiceTermsText ?? '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.'
+            invoiceTermsText: shopSettings?.invoiceTermsText ?? '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.',
+            billingPrinter: shopSettings?.billingPrinter || '',
+            tagPrinter: shopSettings?.tagPrinter || ''
           });
+          window.localStorage.setItem('billingPrinter', shopSettings?.billingPrinter || '');
+          window.localStorage.setItem('tagPrinter', shopSettings?.tagPrinter || '');
         }
       } catch (err) {
         console.error("Failed to fetch settings:", err);
@@ -151,6 +157,14 @@ export function SettingsProvider({ children }) {
     const updated = { ...settingsRef.current, ...newSettings };
     settingsRef.current = updated;
     setSettings(updated);
+
+    if (newSettings.hasOwnProperty('billingPrinter')) {
+      window.localStorage.setItem('billingPrinter', newSettings.billingPrinter || '');
+    }
+    if (newSettings.hasOwnProperty('tagPrinter')) {
+      window.localStorage.setItem('tagPrinter', newSettings.tagPrinter || '');
+    }
+
 
     if (window.electronAPI?.dbQuery) {
       try {
@@ -201,7 +215,9 @@ export function SettingsProvider({ children }) {
           invoiceShowTerms: updated.invoiceShowTerms,
           invoiceShowBankDetails: updated.invoiceShowBankDetails,
           invoiceShowBilingual: updated.invoiceShowBilingual,
-          invoiceTermsText: updated.invoiceTermsText
+          invoiceTermsText: updated.invoiceTermsText,
+          billingPrinter: updated.billingPrinter,
+          tagPrinter: updated.tagPrinter
         });
 
         await window.electronAPI.dbQuery(

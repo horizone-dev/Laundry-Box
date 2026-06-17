@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 const staffSchema = new mongoose.Schema({
   shopId: { type: String, required: true },

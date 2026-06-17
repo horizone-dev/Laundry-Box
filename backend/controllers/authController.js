@@ -1,9 +1,89 @@
 const User = require('../models/Staff');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
+const bcrypt = require('bcryptjs');
+
+const USERS_FILE = path.join(__dirname, '..', 'local_db_users.json');
+
+function isMongoConnected() {
+  return mongoose.connection.readyState === 1; // 1 = connected
+}
+
+async function initLocalDb() {
+  if (!fs.existsSync(USERS_FILE)) {
+    const muhammedPassHash = await bcrypt.hash('0000', 10);
+    const defaultUsers = [
+      {
+        _id: 'local_admin_2',
+        name: 'muhammed',
+        phone: '+971547825153',
+        userId: '142',
+        password: muhammedPassHash,
+        pin: muhammedPassHash,
+        role: 'super_admin',
+        shopId: 'SHOP_01',
+        createdAt: new Date().toISOString()
+      }
+    ];
+    fs.writeFileSync(USERS_FILE, JSON.stringify(defaultUsers, null, 2), 'utf8');
+  }
+}
+
+function loadLocalUsers() {
+  try {
+    return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+  } catch (err) {
+    return [];
+  }
+}
+
+function saveLocalUsers(users) {
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
+}
 
 exports.signup = async (req, res) => {
   try {
     const { shopId, name, phone, password, pin, userId, role } = req.body;
+
+    if (!isMongoConnected()) {
+      await initLocalDb();
+      const users = loadLocalUsers();
+
+      // Check if user already exists
+      const exists = users.some(u => 
+        (u.phone && phone && u.phone === phone) || 
+        (u.userId && userId && u.userId === userId) ||
+        (u.name && name && u.name.toLowerCase() === name.toLowerCase())
+      );
+      if (exists) {
+        return res.status(400).json({ error: 'User already exists with this name, phone, or User ID.' });
+      }
+
+      const passHash = await bcrypt.hash(password || '0000', 10);
+      const pinHash = await bcrypt.hash(pin || '0000', 10);
+
+      const newUser = {
+        _id: 'local_user_' + Date.now(),
+        shopId: shopId || 'SHOP_01',
+        name,
+        phone: phone || '',
+        userId: userId || 'USER_' + Date.now(),
+        password: passHash,
+        pin: pinHash,
+        role: role || 'cashier',
+        createdAt: new Date().toISOString()
+      };
+
+      users.push(newUser);
+      saveLocalUsers(users);
+
+      const token = jwt.sign({ id: newUser._id, shopId: newUser.shopId }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+      return res.status(201).json({ token, user: { id: newUser._id, name, phone, userId, shopId, role } });
+    }
+
+    // MongoDB path
     const user = new User({ shopId, name, phone, password, pin, userId, role });
     await user.save();
     
@@ -17,7 +97,61 @@ exports.signup = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { identifier, secret, method } = req.body; // identifier: email/phone/name/userId, secret: password/pin
-    
+
+    if (!isMongoConnected()) {
+      await initLocalDb();
+      const users = loadLocalUsers();
+      
+      let user;
+      if (method === 'pin' && (!identifier || identifier.trim() === '')) {
+        // Support PIN-only login if identifier is missing
+        for (const u of users) {
+          if (await bcrypt.compare(secret, u.pin)) {
+            user = u;
+            break;
+          }
+        }
+      } else {
+        // Standard login with identifier
+        user = users.find(u => 
+          u.userId === identifier || 
+          u.phone === identifier || 
+          u.name === identifier ||
+          (u.email && u.email === identifier)
+        );
+      }
+
+      if (!user) {
+        return res.status(401).json({ message: 'User not found or invalid credentials' });
+      }
+
+      // Strict Role-Based Login Paths
+      if (user.role === 'super_admin') {
+        if (method !== 'super_admin') {
+          return res.status(403).json({ message: 'Super Admin must use the dedicated Super Admin login portal.' });
+        }
+      } else {
+        if (method === 'super_admin') {
+          return res.status(403).json({ message: 'This portal is reserved for Super Admin only.' });
+        }
+      }
+
+      let isMatch = false;
+      if (method === 'pin') {
+        isMatch = await bcrypt.compare(secret, user.pin);
+      } else {
+        isMatch = await bcrypt.compare(secret, user.password);
+      }
+
+      if (!isMatch) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      const token = jwt.sign({ id: user._id, shopId: user.shopId }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+      return res.json({ token, user: { id: user._id, name: user.name, phone: user.phone, userId: user.userId, shopId: user.shopId, role: user.role } });
+    }
+
+    // MongoDB path
     let user;
     
     // Support PIN-only login if identifier is missing
@@ -60,7 +194,6 @@ exports.login = async (req, res) => {
     if (method === 'pin') {
       isMatch = await user.comparePin(secret);
     } else {
-      // Both 'password' and 'super_admin' methods use password comparison
       isMatch = await user.comparePassword(secret);
     }
 
@@ -77,6 +210,14 @@ exports.login = async (req, res) => {
 
 exports.getUsers = async (req, res) => {
   try {
+    if (!isMongoConnected()) {
+      await initLocalDb();
+      const users = loadLocalUsers();
+      // Remove sensitive details
+      const safeUsers = users.map(({ password, pin, ...rest }) => rest);
+      return res.json(safeUsers);
+    }
+
     const users = await User.find({}, '-password -pin');
     res.json(users);
   } catch (err) {
@@ -87,6 +228,25 @@ exports.getUsers = async (req, res) => {
 exports.updateUser = async (req, res) => {
   try {
     const { name, phone, role, password, pin } = req.body;
+
+    if (!isMongoConnected()) {
+      await initLocalDb();
+      const users = loadLocalUsers();
+      const userIdx = users.findIndex(u => u._id === req.params.id);
+      if (userIdx === -1) return res.status(404).json({ message: 'User not found' });
+
+      if (name) users[userIdx].name = name;
+      if (phone !== undefined) users[userIdx].phone = phone;
+      if (role) users[userIdx].role = role;
+      if (password) users[userIdx].password = await bcrypt.hash(password, 10);
+      if (pin) users[userIdx].pin = await bcrypt.hash(pin, 10);
+      users[userIdx].updatedAt = new Date().toISOString();
+
+      saveLocalUsers(users);
+      const { password: _, pin: __, ...safeUser } = users[userIdx];
+      return res.json({ message: 'User updated successfully', user: safeUser });
+    }
+
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
@@ -105,6 +265,15 @@ exports.updateUser = async (req, res) => {
 
 exports.deleteUser = async (req, res) => {
   try {
+    if (!isMongoConnected()) {
+      await initLocalDb();
+      const users = loadLocalUsers();
+      const newUsers = users.filter(u => u._id !== req.params.id);
+      if (newUsers.length === users.length) return res.status(404).json({ message: 'User not found' });
+      saveLocalUsers(newUsers);
+      return res.json({ message: 'User deleted successfully' });
+    }
+
     const user = await User.findByIdAndDelete(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.json({ message: 'User deleted successfully' });
@@ -118,6 +287,18 @@ exports.verifyManagerPin = async (req, res) => {
     const { pin } = req.body;
     if (!pin) {
       return res.status(400).json({ valid: false, message: 'PIN is required' });
+    }
+
+    if (!isMongoConnected()) {
+      await initLocalDb();
+      const users = loadLocalUsers();
+      const managers = users.filter(u => u.role === 'manager' || u.role === 'super_admin');
+      for (const u of managers) {
+        if (await bcrypt.compare(pin, u.pin)) {
+          return res.json({ valid: true, managerName: u.name });
+        }
+      }
+      return res.status(401).json({ valid: false, message: 'Invalid Manager PIN' });
     }
     
     // Find all users (staff) with manager or super_admin roles

@@ -1,6 +1,21 @@
-const { app, BrowserWindow, ipcMain, net, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, net, shell, dialog, Menu } = require('electron');
 const fs = require('fs');
 const path = require('path');
+
+// Global error handlers to log main process exceptions
+process.on('uncaughtException', (err) => {
+  try {
+    const logPath = path.join(app.getPath('userData'), 'startup.log');
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Uncaught Exception: ${err.stack || err}\n`);
+  } catch (_) {}
+});
+
+process.on('unhandledRejection', (reason) => {
+  try {
+    const logPath = path.join(app.getPath('userData'), 'startup.log');
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Unhandled Rejection: ${reason}\n`);
+  } catch (_) {}
+});
 const { spawn } = require('child_process');
 const { initDB, getDB } = require('./database');
 
@@ -14,8 +29,26 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webSecurity: false,
       preload: path.join(__dirname, 'preload.js')
     }
+  });
+
+  // Remove default window menu bar (File, Edit, View, Window)
+  mainWindow.setMenu(null);
+
+  // Log all frontend console messages to a local file for debugging
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    try {
+      fs.appendFileSync(path.join(app.getPath('userData'), 'frontend_console.log'), `[LVL:${level}] ${message} (${path.basename(sourceId)}:${line})\n`);
+    } catch (_) {}
+  });
+
+  // Log any page load failures
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    try {
+      fs.appendFileSync(path.join(app.getPath('userData'), 'startup.log'), `[${new Date().toISOString()}] Page Load Failed: ${errorDescription} (Code: ${errorCode}) URL: ${validatedURL}\n`);
+    } catch (_) {}
   });
 
   // Check if we are in dev mode
@@ -161,6 +194,14 @@ app.on('quit', () => {
 // Offline/online handling
 ipcMain.handle('check-connection', () => {
   return net.isOnline();
+});
+
+ipcMain.on('request-refocus', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) {
+    win.blur();
+    win.focus();
+  }
 });
 
 // DB IPC Handlers
@@ -808,5 +849,81 @@ try {
 } catch (e) {
   // Graceful fallback
 }
+
+ipcMain.handle('get-printers', async () => {
+  if (mainWindow) {
+    try {
+      return await mainWindow.webContents.getPrintersAsync();
+    } catch (err) {
+      console.error('Failed to get printers:', err);
+    }
+  }
+  return [];
+});
+
+ipcMain.handle('print-html', async (event, { html, css, printerName }) => {
+  let printWin = null;
+  let tmpPath = '';
+  try {
+    const fullHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      background: white;
+      color: black;
+    }
+    ${css}
+  </style>
+</head>
+<body>
+  ${html}
+</body>
+</html>`;
+
+    tmpPath = path.join(app.getPath('temp'), `print_job_${Date.now()}.html`);
+    fs.writeFileSync(tmpPath, fullHtml, 'utf8');
+
+    printWin = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+
+    await printWin.loadFile(tmpPath);
+
+    return new Promise((resolve) => {
+      printWin.webContents.print({
+        silent: true,
+        printBackground: true,
+        deviceName: (printerName === 'System Default Printer' || !printerName) ? '' : printerName
+      }, (success, failureReason) => {
+        resolve({ success, error: failureReason });
+      });
+
+    });
+  } catch (err) {
+    console.error('Print-HTML error:', err);
+    return { success: false, error: err.message };
+  } finally {
+    if (printWin) {
+      try {
+        printWin.close();
+      } catch (_) {}
+    }
+    if (tmpPath && fs.existsSync(tmpPath)) {
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch (_) {}
+    }
+  }
+});
+
+
 
 

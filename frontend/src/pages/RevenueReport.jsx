@@ -15,7 +15,7 @@ export default function RevenueReport() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMethod, setFilterMethod] = useState('All');
-  const [filterDate, setFilterDate] = useState('All');
+  const [filterDate, setFilterDate] = useState('Today');
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {

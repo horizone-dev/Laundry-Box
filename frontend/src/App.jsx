@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import Dashboard from './pages/Dashboard';
 import POS from './pages/POS';
@@ -7,7 +7,6 @@ import Orders from './pages/Orders';
 import Customers from './pages/Customers';
 import Settings from './pages/Settings';
 import Services from './pages/Services';
-import Reports from './pages/Reports';
 import RevenueReport from './pages/RevenueReport';
 import CustomerStatement from './pages/CustomerStatement';
 import Expenses from './pages/Expenses';
@@ -38,7 +37,7 @@ function App() {
 
   return (
     <SettingsProvider>
-      <BrowserRouter>
+      <HashRouter>
       <Routes>
         <Route path="/login" element={<Login onLogin={setIsAuthenticated} />} />
         <Route 
@@ -66,7 +65,7 @@ function App() {
             <Route path="addons" element={<Services defaultTab="addons" />} />
           </Route>
           <Route path="reports">
-            <Route index element={<Reports />} />
+            <Route index element={<Navigate to="services" replace />} />
             <Route path="services" element={<ServicesReport />} />
             <Route path="revenue" element={<RevenueReport />} />
             <Route path="expenses" element={<Expenses />} />
@@ -90,7 +89,7 @@ function App() {
           <Route path="help" element={<HelpCenter />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
     </SettingsProvider>
   );
 }

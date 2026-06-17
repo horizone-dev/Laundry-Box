@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { authApi } from '../services/api';
 import { useSettings } from '../store/SettingsContext';
+import defaultLogo from '../assets/logo.png';
 import styles from './Login.module.css';
 
 export default function Login({ onLogin }) {
@@ -95,7 +96,7 @@ export default function Login({ onLogin }) {
               {settings.logo ? (
                 <img src={settings.logo} alt="Logo" />
               ) : (
-                <Cpu size={42} color="white" />
+                <img src={defaultLogo} alt="Logo" />
               )}
             </div>
           </motion.div>
@@ -106,7 +107,7 @@ export default function Login({ onLogin }) {
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.2 }}
           >
-            <h1>{settings.companyName || 'Laundry Management System'}</h1>
+            <h1>{settings.companyName || 'Laundry Box'}</h1>
             <p>Next-Generation POS Ecosystem</p>
           </motion.div>
 
@@ -258,7 +259,7 @@ export default function Login({ onLogin }) {
           </form>
 
           <footer className={styles.formFooter}>
-            <p>© 2026 Laundry Management System. All rights reserved.</p>
+            <p>© 2026 Laundry Box. All rights reserved.</p>
           </footer>
         </motion.div>
       </div>

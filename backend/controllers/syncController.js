@@ -4,8 +4,16 @@ const Service = require('../models/Service');
 const Category = require('../models/Category');
 const Payment = require('../models/Payment');
 const AccountTransaction = require('../models/AccountTransaction');
+const mongoose = require('mongoose');
+
+function isMongoConnected() {
+  return mongoose.connection.readyState === 1;
+}
 
 exports.syncData = async (req, res) => {
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, message: 'Sync failed: MongoDB offline' });
+  }
   const { shopId, orders, customers, payments, accountTransactions, lastSyncTimestamp } = req.body;
   
   try {

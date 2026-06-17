@@ -21,9 +21,14 @@ app.use((req, res, next) => {
   next();
 });
 
+// Disable Mongoose query buffering when offline to fail fast
+mongoose.set('bufferCommands', false);
+
 // MongoDB connection
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/laundry_saas';
-mongoose.connect(MONGO_URI)
+mongoose.connect(MONGO_URI, {
+  serverSelectionTimeoutMS: 2000 // Fail fast (2 seconds) if offline
+})
   .then(() => console.log('MongoDB Connected'))
   .catch(err => console.error('MongoDB Connection Error:', err));
 
@@ -34,7 +39,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/roles', roleRoutes);
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Laundry Management System Backend Running' });
+  res.json({ status: 'ok', message: 'Laundry Box Backend Running' });
 });
 
 app.listen(PORT, () => {

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { authApi } from '../services/api';
 import { useSettings } from '../store/SettingsContext';
+import defaultLogo from '../assets/logo.png';
 import styles from './Login.module.css'; // Reusing some styles from Login
 
 export default function SignUp() {
@@ -51,9 +52,9 @@ export default function SignUp() {
         >
           <div className={styles.logoIcon}>
             {settings.logo ? (
-              <img src={settings.logo} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              <img src={settings.logo} alt="Logo" />
             ) : (
-              <ShieldCheck size={48} />
+              <img src={defaultLogo} alt="Logo" />
             )}
           </div>
           <div className={styles.logoText}>

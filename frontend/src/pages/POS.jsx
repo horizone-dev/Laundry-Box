@@ -647,30 +647,28 @@ export default function POS() {
           return; // STOP — do not proceed
         }
 
-        // Sync to MongoDB Backend
-        try {
-          await axios.post(`${API_BASE_URL}/orders`, {
-            id: orderId,
-            billNumber,
-            customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
-            customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
-            customerPhone: selectedCustomer ? selectedCustomer.phone : '',
-            shopId: DEFAULT_SHOP_ID,
-            branchId: DEFAULT_BRANCH_ID,
-            status: paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : ORDER_STATUS.CONFIRMED,
-            totalAmount: total,
-            paidAmount: paymentMethod === 'credit' ? 0 : total,
-            dueAmount: paymentMethod === 'credit' ? total : 0,
-            paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
-            paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'bank' ? PAYMENT_METHODS.BANK : PAYMENT_METHODS.NOT_PAID),
-            items: cart,
-            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
-            expectedDeliveryDate: combinedExpectedDelivery,
-            specialInstructions
-          });
-        } catch (syncErr) {
+        // Sync to MongoDB Backend (Background invocation - non-blocking)
+        axios.post(`${API_BASE_URL}/orders`, {
+          id: orderId,
+          billNumber,
+          customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
+          customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+          customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+          shopId: DEFAULT_SHOP_ID,
+          branchId: DEFAULT_BRANCH_ID,
+          status: paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : ORDER_STATUS.CONFIRMED,
+          totalAmount: total,
+          paidAmount: paymentMethod === 'credit' ? 0 : total,
+          dueAmount: paymentMethod === 'credit' ? total : 0,
+          paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
+          paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'bank' ? PAYMENT_METHODS.BANK : PAYMENT_METHODS.NOT_PAID),
+          items: cart,
+          statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
+          expectedDeliveryDate: combinedExpectedDelivery,
+          specialInstructions
+        }).catch(syncErr => {
           console.warn('Backend sync failed, but local order saved:', syncErr);
-        }
+        });
 
         // Also trigger local sync event (for frontend components)
         window.dispatchEvent(new CustomEvent('order-created', {

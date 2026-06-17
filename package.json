@@ -17,9 +17,24 @@
   "license": "ISC",
   "build": {
     "appId": "com.laundry.app",
-    "productName": "Laundry Billing",
+    "productName": "Laundry Box",
+    "files": [
+      "main.js",
+      "preload.js",
+      "database.js",
+      "package.json",
+      "frontend/dist/**/*"
+    ],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
     },
     "extraResources": [
       {
@@ -29,7 +44,13 @@
           "**/*"
         ]
       },
-      "database.js"
+      {
+        "from": "backend/node_modules/",
+        "to": "backend/node_modules/",
+        "filter": [
+          "**/*"
+        ]
+      }
     ]
   },
   "devDependencies": {

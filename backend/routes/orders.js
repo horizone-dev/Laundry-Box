@@ -4,6 +4,19 @@ const Order = require('../models/Order');
 const Customer = require('../models/Customer');
 const Payment = require('../models/Payment');
 const DeletedOrder = require('../models/DeletedOrder');
+const mongoose = require('mongoose');
+
+// Fail-fast middleware to prevent hangs on orders endpoints when MongoDB is offline
+router.use((req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'MongoDB is offline. Operations are handled locally in SQLite.',
+      offline: true
+    });
+  }
+  next();
+});
 
 // GET /api/orders/deleted - Fetch all deleted orders
 router.get('/deleted', async (req, res) => {

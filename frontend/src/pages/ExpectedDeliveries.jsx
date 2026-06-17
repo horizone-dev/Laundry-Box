@@ -24,7 +24,7 @@ export default function ExpectedDeliveries() {
   const [searchTerm, setSearchTerm] = useState('');
   
   // Filters
-  const [dateFilter, setDateFilter] = useState('All Pending'); // Default to All Pending
+  const [dateFilter, setDateFilter] = useState('Today'); // Default to Today
   const [statusFilter, setStatusFilter] = useState('All'); // All, Confirmed, Picked Up, Washing, Drying, Ironing, Ready, Out for Delivery
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');

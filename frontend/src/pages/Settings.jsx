@@ -11,6 +11,7 @@ import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
 import InvoiceTemplate from '../components/InvoiceTemplate';
 import { useNavigate, useLocation } from 'react-router-dom';
+import defaultLogo from '../assets/logo.png';
 import styles from './Settings.module.css';
 
 export default function Settings() {
@@ -48,12 +49,30 @@ export default function Settings() {
 
   if (!isAuthorized) return null;
 
-  const tabs = ['General', 'Order Workflow', 'Company Info', 'Tax Settings', 'Bill Templates', 'Payment Gateways', 'Damage Notes', 'Maintenance', 'Software Update'];
+  const tabs = ['General', 'Order Workflow', 'Company Info', 'Tax Settings', 'Bill Templates', 'Payment Gateways', 'Damage Notes', 'Printers', 'Maintenance', 'Software Update'];
+
+  // Printer settings states
+  const [availablePrinters, setAvailablePrinters] = useState([]);
+
+  useEffect(() => {
+    const fetchPrinters = async () => {
+      if (window.electronAPI?.getPrinters) {
+        try {
+          const list = await window.electronAPI.getPrinters();
+          setAvailablePrinters(list || []);
+        } catch (err) {
+          console.error("Failed to load printers:", err);
+        }
+      }
+    };
+    fetchPrinters();
+  }, [activeTab]);
 
   // Software Update States
   const [updateStatus, setUpdateStatus] = useState({ type: 'idle' });
   const [lastCheckTime, setLastCheckTime] = useState(localStorage.getItem('update_last_check') || '');
   const [currentVersion, setCurrentVersion] = useState('1.0.0');
+
 
   useEffect(() => {
     if (tabParam) {
@@ -612,7 +631,7 @@ export default function Settings() {
                     {settings.logo ? (
                       <img src={settings.logo} alt="Preview" />
                     ) : (
-                      <ImageIcon size={24} color="#94A3B8" />
+                      <img src={defaultLogo} alt="Preview" onError={(e) => { e.target.style.display = 'none'; }} />
                     )}
                   </div>
                   <div className={styles.uploadActions}>
@@ -1218,11 +1237,12 @@ export default function Settings() {
               {/* Live Preview */}
               <div className={styles.card}>
                 <h3 style={{ marginBottom: '1rem', fontSize: '0.9rem', fontWeight: 800, color: '#64748B', letterSpacing: '0.5px' }}>LIVE PREVIEW</h3>
-                <div style={{ background: '#F1F5F9', padding: '2rem', borderRadius: '12px', display: 'flex', justifyContent: 'center', overflow: 'hidden' }}>
-                  <div style={{ transform: 'scale(0.72)', transformOrigin: 'top center', width: '140%', marginBottom: '-25%' }}>
+                <div style={{ background: '#F1F5F9', padding: '2rem', borderRadius: '12px', display: 'flex', justifyContent: 'center', overflowY: 'auto', maxHeight: '600px' }}>
+                  <div style={{ transform: 'scale(0.72)', transformOrigin: 'top center', width: '140%', marginBottom: '-15%' }}>
                     <InvoiceTemplate order={previewOrder} settings={settings} isPreview={true} />
                   </div>
                 </div>
+
               </div>
 
             </div>
@@ -1351,6 +1371,68 @@ export default function Settings() {
                   Please ensure all information is accurate to avoid payment delays.
                 </p>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'Printers' && (
+            <div className={styles.profileContainer}>
+              <div className={styles.card}>
+                <div>
+                  <h2 className={styles.cardTitle}>Printer Configuration</h2>
+                  <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.5rem' }}>
+                    Select specific printers for receipt printing and garment tags. Leave as default to show the native print dialog every time.
+                  </p>
+                </div>
+
+                <div className={styles.formGrid}>
+                  <div className={styles.formGroup}>
+                    <label>Billing & Receipt Printer</label>
+                    <div className={styles.inputWrapper}>
+                      <select
+                        className={styles.inputField}
+                        value={settings.billingPrinter || ''}
+                        onChange={(e) => updateSettings({ billingPrinter: e.target.value })}
+                      >
+                        <option value="">Show Print Dialog (Ask Every Time)</option>
+                        <option value="System Default Printer">System Default Printer (Silent)</option>
+                        {availablePrinters.map(p => (
+                          <option key={p.name} value={p.name}>{p.name} {p.isDefault ? '(Default)' : ''}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.5rem' }}>
+                      Printers configured here will be used when printing billing invoices and receipts.
+                    </p>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Garment Tag Printer</label>
+                    <div className={styles.inputWrapper}>
+                      <select
+                        className={styles.inputField}
+                        value={settings.tagPrinter || ''}
+                        onChange={(e) => updateSettings({ tagPrinter: e.target.value })}
+                      >
+                        <option value="">Show Print Dialog (Ask Every Time)</option>
+                        <option value="System Default Printer">System Default Printer (Silent)</option>
+                        {availablePrinters.map(p => (
+                          <option key={p.name} value={p.name}>{p.name} {p.isDefault ? '(Default)' : ''}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.5rem' }}>
+                      Printers configured here will be used when printing garment identification tags.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {!window.electronAPI && (
+                <div className={styles.warningBox}>
+                  <Info size={18} color="#92400E" />
+                  <p>Silent hardware printing options are only available when running in the Desktop App.</p>
+                </div>
+              )}
             </div>
           )}
 

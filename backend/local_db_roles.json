@@ -1,0 +1,56 @@
+[
+  {
+    "_id": "role_super_admin",
+    "name": "Super Admin",
+    "slug": "super_admin",
+    "isSystem": true,
+    "permissions": {
+      "dashboard": true,
+      "pos": true,
+      "orders": true,
+      "customers": true,
+      "services": true,
+      "reports": true,
+      "expenses": true,
+      "accounts": true,
+      "settings": true,
+      "users": true
+    }
+  },
+  {
+    "_id": "role_manager",
+    "name": "Manager",
+    "slug": "manager",
+    "isSystem": true,
+    "permissions": {
+      "dashboard": true,
+      "pos": true,
+      "orders": true,
+      "customers": true,
+      "services": true,
+      "reports": true,
+      "expenses": true,
+      "accounts": true,
+      "settings": true,
+      "users": true
+    }
+  },
+  {
+    "_id": "role_cashier",
+    "name": "Cashier",
+    "slug": "cashier",
+    "isSystem": true,
+    "permissions": {
+      "dashboard": false,
+      "pos": true,
+      "orders": true,
+      "customers": true,
+      "services": false,
+      "reports": false,
+      "expenses": false,
+      "accounts": false,
+      "settings": false,
+      "users": false
+    }
+  }
+]

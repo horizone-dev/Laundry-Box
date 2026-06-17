@@ -2,6 +2,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Activity, GripVertical, Pencil, Check, Plus, Trash2, X } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import CurrencySymbol from './CurrencySymbol';
+import defaultLogo from '../assets/logo.png';
 import styles from '../pages/Invoice.module.css';
 
 // ── Inline editable cell ──────────────────────────────────────────
@@ -225,9 +226,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               {settings.logo ? (
                 <img src={settings.logo} alt="Logo" className={styles.invoiceLogoCompact} />
               ) : (
-                <div className={styles.logoPlaceholderCompact}>
-                  <Activity size={18} />
-                </div>
+                <img src={defaultLogo} alt="Logo" className={styles.invoiceLogoCompact} onError={(e) => { e.target.style.display = 'none'; }} />
               )}
             </div>
           )}
@@ -252,9 +251,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               settings.logo ? (
                 <img src={settings.logo} alt="Logo" className={styles.invoiceLogo} />
               ) : (
-                <div className={styles.logoPlaceholder}>
-                  <Activity size={24} />
-                </div>
+                <img src={defaultLogo} alt="Logo" className={styles.invoiceLogo} onError={(e) => { e.target.style.display = 'none'; }} />
               )
             )}
             <div className={styles.companyInfoEn}>
