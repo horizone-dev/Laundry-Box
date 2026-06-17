@@ -13,7 +13,7 @@
     "dist": "npm run build:frontend && electron-builder"
   },
   "keywords": [],
-  "author": "",
+  "author": "Horizon",
   "license": "ISC",
   "build": {
     "appId": "com.laundry.app",
