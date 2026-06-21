@@ -231,7 +231,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             </div>
           )}
           <div className={styles.companyInfoCompact}>
-            <h2>{settings.companyName || 'Laundry Shop'}</h2>
+            <h2>{settings.companyName || 'Laundry Box'}</h2>
             <p>{settings.address || 'Address not set'}</p>
             {settings.phone && <p>Tel: {settings.phone}</p>}
             {settings.email && <p>Email: {settings.email}</p>}
@@ -255,7 +255,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               )
             )}
             <div className={styles.companyInfoEn}>
-              <h2>{settings.companyName || 'Laundry Shop'}</h2>
+              <h2>{settings.companyName || 'Laundry Box'}</h2>
               <p className={styles.companyAddress}>{settings.address || 'Address not set'}</p>
               {settings.phone && <p className={styles.companyContact}>Tel: {settings.phone}</p>}
               {settings.email && <p className={styles.companyContact}>Email: {settings.email}</p>}

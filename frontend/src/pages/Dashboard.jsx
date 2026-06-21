@@ -3,7 +3,7 @@ import {
   DollarSign, ShoppingBag, Users, Clock, TrendingUp, 
   TrendingDown, Calendar, Package, MoreHorizontal, CheckCircle, 
   AlertCircle, Truck, Plus, Printer, RefreshCw, Landmark, 
-  Activity, Trash2, Smartphone, Cpu, ShieldCheck
+  Activity, Trash2, Smartphone, Cpu, ShieldCheck, FileText
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -36,6 +36,7 @@ export default function Dashboard() {
     dueTrend: { val: '+0.0%', isUp: true }
   });
 
+  const [revenueGrowth, setRevenueGrowth] = useState({ val: '+0.0%', isUp: true });
   const [revenueData, setRevenueData] = useState([]);
   const [statusData, setStatusData] = useState({ data: [], total: 0, list: [] });
   const [operationsBoard, setOperationsBoard] = useState({ new: [], processing: [], ready: [], outForDelivery: [] });
@@ -67,6 +68,49 @@ export default function Dashboard() {
       // 2. Process KPIs and Trends
       const processedKPIs = processStats(allOrders, allPayments, dateRange);
       setStats(processedKPIs);
+
+      // 2.5 Calculate revenue growth (last 7 days vs previous 7 days)
+      const getDaysAgoLocal = (days) => {
+        const d = new Date();
+        d.setDate(d.getDate() - days);
+        return d;
+      };
+      
+      const current7DaysStrs = [];
+      for (let i = 0; i < 7; i++) {
+        const d = getDaysAgoLocal(i);
+        current7DaysStrs.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
+      }
+
+      const previous7DaysStrs = [];
+      for (let i = 7; i < 14; i++) {
+        const d = getDaysAgoLocal(i);
+        previous7DaysStrs.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
+      }
+
+      const curr7DaysRevenue = allOrders.reduce((sum, o) => {
+        if (o.status === 'Cancelled') return sum;
+        const hasMatch = current7DaysStrs.some(dateStr => o.createdAt.startsWith(dateStr));
+        return hasMatch ? sum + o.totalAmount : sum;
+      }, 0);
+
+      const prev7DaysRevenue = allOrders.reduce((sum, o) => {
+        if (o.status === 'Cancelled') return sum;
+        const hasMatch = previous7DaysStrs.some(dateStr => o.createdAt.startsWith(dateStr));
+        return hasMatch ? sum + o.totalAmount : sum;
+      }, 0);
+
+      let growthVal = '+0.0%';
+      let isGrowthUp = true;
+      if (prev7DaysRevenue > 0) {
+        const pct = ((curr7DaysRevenue - prev7DaysRevenue) / prev7DaysRevenue) * 100;
+        growthVal = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+        isGrowthUp = pct >= 0;
+      } else if (curr7DaysRevenue > 0) {
+        growthVal = '+100.0%';
+        isGrowthUp = true;
+      }
+      setRevenueGrowth({ val: growthVal, isUp: isGrowthUp });
 
       // 3. Process Revenue Trend (last 7 days)
       const formattedChart = generateRevenueTrend(allOrders);
@@ -178,6 +222,48 @@ export default function Dashboard() {
     const pendingYesterday = allOrders.filter(o => !['Delivered', 'Cancelled'].includes(o.status) && o.createdAt < todayStr).length;
     const pendingTrend = calculateTrend(totalPendingCount, pendingYesterday);
 
+    const yesterday = getDaysAgo(1);
+    const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
+
+    const getOrderStatusAtDate = (order, dateStr) => {
+      let history = [];
+      try {
+        history = typeof order.statusHistory === 'string'
+          ? JSON.parse(order.statusHistory || '[]')
+          : (order.statusHistory || []);
+      } catch (e) {}
+
+      if (!Array.isArray(history) || history.length === 0) {
+        const orderDate = new Date(order.createdAt);
+        const limitDate = new Date(dateStr + 'T23:59:59');
+        return orderDate <= limitDate ? order.status : null;
+      }
+
+      const limitDate = new Date(dateStr + 'T23:59:59');
+      const recordsBefore = history.filter(h => new Date(h.timestamp) <= limitDate);
+      if (recordsBefore.length === 0) return null;
+
+      recordsBefore.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      return recordsBefore[0].status;
+    };
+
+    const outForDeliveryYesterday = allOrders.filter(o => getOrderStatusAtDate(o, yesterdayStr) === 'Out for Delivery').length;
+    const deliveryTrend = calculateTrend(totalOutForDeliveryCount, outForDeliveryYesterday);
+
+    const dueAmountYesterday = allOrders.reduce((sum, o) => {
+      if (o.createdAt.startsWith(todayStr)) return sum;
+      
+      const statusYesterday = getOrderStatusAtDate(o, yesterdayStr);
+      if (statusYesterday === 'Cancelled' || !statusYesterday) return sum;
+      
+      const orderPaymentsBeforeToday = allPayments.filter(p => p.orderId === o.id && new Date(p.createdAt) <= new Date(yesterdayStr + 'T23:59:59'));
+      const paidBeforeToday = orderPaymentsBeforeToday.reduce((pSum, p) => pSum + p.amount, 0);
+      
+      const dueYesterday = Math.max(0, o.totalAmount - paidBeforeToday);
+      return sum + dueYesterday;
+    }, 0);
+    const dueTrend = calculateTrend(totalDueAmount, dueAmountYesterday);
+
     return {
       revenue: currRevenue,
       revenueTrend,
@@ -186,11 +272,11 @@ export default function Dashboard() {
       pendingCount: totalPendingCount,
       pendingTrend,
       outForDeliveryCount: totalOutForDeliveryCount,
-      deliveryTrend: { val: '+5.2%', isUp: true },
+      deliveryTrend,
       completedTodayCount: totalCompletedToday,
       completedTrend,
       dueAmount: totalDueAmount,
-      dueTrend: { val: '+9.7%', isUp: false }
+      dueTrend
     };
   };
 
@@ -461,7 +547,7 @@ export default function Dashboard() {
             </div>
             <div className={styles.chartStat}>
               <span className={styles.statLabel}>Growth</span>
-              <strong className={`${styles.statVal} ${styles.upText}`}>+18.6%</strong>
+              <strong className={`${styles.statVal} ${revenueGrowth.isUp ? styles.upText : styles.downText}`}>{revenueGrowth.val}</strong>
             </div>
           </div>
         </div>
@@ -520,11 +606,11 @@ export default function Dashboard() {
             <button className={styles.actionBtn} onClick={() => navigate('/pos')}>
               <Plus size={18} /> New Order
             </button>
-            <button className={styles.actionBtn} onClick={() => navigate('/pos')}>
-              <Users size={18} /> Walk-in Customer
+            <button className={styles.actionBtn} onClick={() => navigate('/orders/expected-delivery')}>
+              <Truck size={18} /> Today Delivery List
             </button>
-            <button className={styles.actionBtn} onClick={() => navigate('/orders')}>
-              <Truck size={18} /> Delivery Assign
+            <button className={styles.actionBtn} onClick={() => navigate('/reports/customer-statement')}>
+              <FileText size={18} /> Account Statement
             </button>
             <button className={styles.actionBtn} onClick={() => navigate('/expenses')}>
               <DollarSign size={18} /> Add Expense

@@ -20,7 +20,16 @@ export default function Settings() {
   const queryParams = new URLSearchParams(location.search);
   const tabParam = queryParams.get('tab');
 
-  const [activeTab, setActiveTab] = useState(tabParam || 'General');
+  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const isSuperAdmin = user.role === 'super_admin' || user.role === 'admin';
+  const isManager = user.role === 'manager';
+  const isAuthorized = isSuperAdmin || isManager;
+
+  const [activeTab, setActiveTab] = useState(
+    (tabParam === 'Maintenance' || tabParam === 'Software Update') && !isSuperAdmin
+      ? 'General'
+      : (tabParam || 'General')
+  );
   const { settings, updateSettings } = useSettings();
   const [isCreditLimitUnlocked, setIsCreditLimitUnlocked] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
@@ -30,11 +39,6 @@ export default function Settings() {
   const [newPinInput, setNewPinInput] = useState('');
   const [pinChangeError, setPinChangeError] = useState('');
   const [pinChangeSuccess, setPinChangeSuccess] = useState('');
-
-  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
-  const isSuperAdmin = user.role === 'super_admin' || user.role === 'admin';
-  const isManager = user.role === 'manager';
-  const isAuthorized = isSuperAdmin || isManager;
 
   useEffect(() => {
     if (!isAuthorized) {
@@ -49,7 +53,17 @@ export default function Settings() {
 
   if (!isAuthorized) return null;
 
-  const tabs = ['General', 'Order Workflow', 'Company Info', 'Tax Settings', 'Bill Templates', 'Payment Gateways', 'Damage Notes', 'Printers', 'Maintenance', 'Software Update'];
+  const tabs = [
+    'General', 
+    'Order Workflow', 
+    'Company Info', 
+    'Tax Settings', 
+    'Bill Templates', 
+    'Payment Gateways', 
+    'Damage Notes', 
+    'Printers', 
+    ...(isSuperAdmin ? ['Maintenance', 'Software Update'] : [])
+  ];
 
   // Printer settings states
   const [availablePrinters, setAvailablePrinters] = useState([]);
@@ -1472,6 +1486,37 @@ export default function Settings() {
                         }}
                       >
                         <Save size={18} /> Choose Path & Backup Now
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem', marginTop: '1.5rem' }}>
+                    <div className={styles.backupIcon} style={{ background: '#F3E8FF', padding: '1rem', borderRadius: '12px' }}>
+                      <Upload size={32} color="#7C3AED" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Import / Restore Database Backup</h3>
+                      <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                        Choose a previously exported backup file (`laundry_pos_backup.sqlite` or any `.sqlite`/`.db` backup) to restore all data.
+                        This will completely replace the active database and reload the application.
+                      </p>
+                      <button
+                        className={styles.saveBtn}
+                        style={{ background: '#7C3AED', padding: '0.75rem 1.5rem' }}
+                        onClick={async () => {
+                          if (window.electronAPI?.importDatabase) {
+                            if (confirm('WARNING: Importing a backup will completely replace your current database and restart the application view. Are you sure you want to proceed?')) {
+                              const result = await window.electronAPI.importDatabase();
+                              if (result.success) {
+                                alert('Database imported and restored successfully!');
+                              } else if (result.error !== 'Cancelled') {
+                                alert('Restore failed: ' + result.error);
+                              }
+                            }
+                          }
+                        }}
+                      >
+                        <Upload size={18} /> Choose Backup File & Restore
                       </button>
                     </div>
                   </div>

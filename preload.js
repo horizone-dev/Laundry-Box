@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url) => ipcRenderer.send('open-external', url),
   printToPDF: (options) => ipcRenderer.invoke('print-to-pdf', options),
   backupDatabase: () => ipcRenderer.invoke('backup-database'),
+  importDatabase: () => ipcRenderer.invoke('import-database'),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   silentBackup: (targetPath) => ipcRenderer.invoke('silent-backup', targetPath),
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),

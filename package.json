@@ -1,5 +1,5 @@
 {
-  "name": "lundry",
+  "name": "laundry-box",
   "version": "1.0.0",
   "description": "",
   "main": "main.js",
@@ -13,7 +13,7 @@
     "dist": "npm run build:frontend && electron-builder"
   },
   "keywords": [],
-  "author": "Horizon",
+  "author": "Horizon Innovations",
   "license": "ISC",
   "build": {
     "appId": "com.laundry.app",
@@ -30,8 +30,7 @@
         {
           "target": "nsis",
           "arch": [
-            "x64",
-            "arm64"
+            "x64"
           ]
         }
       ]

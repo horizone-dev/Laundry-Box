@@ -296,7 +296,7 @@ export default function Customers() {
       cleanPhone = countryCode + cleanPhone;
     }
 
-    const message = `Hello! This is from the laundry shop. We're reaching out regarding your account.`;
+    const message = `Hello! This is from the Laundry Box. We're reaching out regarding your account.`;
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
     if (window.electronAPI?.openExternal) {
       window.electronAPI.openExternal(url);

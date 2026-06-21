@@ -569,4 +569,12 @@ function getDB() {
   return db;
 }
 
-module.exports = { initDB, getDB, runDataHealer };
+function closeDB() {
+  if (db) {
+    db.close();
+    db = null;
+    console.log("Database connection closed.");
+  }
+}
+
+module.exports = { initDB, getDB, runDataHealer, closeDB };

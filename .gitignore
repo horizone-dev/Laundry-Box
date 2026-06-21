@@ -9,3 +9,5 @@ frontend/dist/
 backend/node_modules/
 *.sqlite
 data/
+frontend/.vite/
+.vite/

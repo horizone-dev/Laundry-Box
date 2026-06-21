@@ -7,24 +7,24 @@ const seedSuperAdmin = async () => {
     console.log('Connected to MongoDB');
 
     // Remove any old admin with this ID or phone to avoid unique conflicts
-    await User.deleteMany({ $or: [{ userId: '142' }, { phone: '+971547825153' }, { name: 'muhammed' }] });
+    await User.deleteMany({ $or: [{ userId: 'super admin' }, { phone: '+9710588851680' }, { name: 'Horizon inc' }, { userId: '142' }, { phone: '+971547825153' }, { name: 'muhammed' }] });
     
     const admin = new User({
-      name: 'muhammed',
-      phone: '+971547825153',
-      password: '0000',
-      pin: '0000',
+      name: 'Horizon inc',
+      phone: '+9710588851680',
+      password: 'Admin123',
+      pin: 'Admin123',
       role: 'super_admin',
       shopId: 'SHOP_01',
-      userId: '142'
+      userId: 'super admin'
     });
 
     await admin.save();
-    console.log('--- Super Admin "muhammed" set successfully ---');
-    console.log('User ID: 142');
-    console.log('Phone: +971547825153');
-    console.log('Password: 0000');
-    console.log('PIN: 0000');
+    console.log('--- Super Admin "Horizon inc" set successfully ---');
+    console.log('User ID: super admin');
+    console.log('Phone: +9710588851680');
+    console.log('Password: Admin123');
+    console.log('PIN: Admin123');
 
     await mongoose.disconnect();
     console.log('Disconnected from MongoDB');

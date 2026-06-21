@@ -17,7 +17,7 @@ process.on('unhandledRejection', (reason) => {
   } catch (_) {}
 });
 const { spawn } = require('child_process');
-const { initDB, getDB } = require('./database');
+const { initDB, getDB, closeDB } = require('./database');
 
 let mainWindow;
 let backendProcess;
@@ -681,6 +681,47 @@ ipcMain.handle('backup-database', async () => {
   }
 });
 
+// Database import and restore
+ipcMain.handle('import-database', async () => {
+  try {
+    const { filePaths, canceled } = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Backup Database to Import',
+      filters: [{ name: 'SQLite Database', extensions: ['sqlite', 'db'] }],
+      properties: ['openFile']
+    });
+
+    if (canceled || filePaths.length === 0) {
+      return { success: false, error: 'Cancelled' };
+    }
+
+    const backupSrcPath = filePaths[0];
+    const targetDbPath = path.join(app.getPath('userData'), 'laundry_pos.sqlite');
+
+    // 1. Close active DB connection
+    closeDB();
+
+    // 2. Overwrite the active database file with the backup
+    fs.copyFileSync(backupSrcPath, targetDbPath);
+
+    // 3. Re-initialize DB
+    initDB(app.getPath('userData'));
+
+    // 4. Force frontend reload to fetch new data state
+    if (mainWindow) {
+      mainWindow.reload();
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error('Database import error:', err);
+    // Attempt to re-initialize if closed but failed
+    try {
+      initDB(app.getPath('userData'));
+    } catch (_) {}
+    return { success: false, error: err.message };
+  }
+});
+
 // Select folder for auto backup
 ipcMain.handle('select-folder', async () => {
   try {
@@ -712,42 +753,30 @@ ipcMain.handle('silent-backup', async (event, targetPath) => {
     }
 
     const mainBackupPath = path.join(targetPath, 'laundry_pos_backup.sqlite');
-    const db = getDB();
+    const secondaryBackupPath = path.join(targetPath, 'laundry_pos_backup_2.sqlite');
 
-    // 1. Perform SQLite clean backup to the main filename
+    // 1. If main backup file exists, rotate it to the secondary file
+    if (fs.existsSync(mainBackupPath)) {
+      fs.copyFileSync(mainBackupPath, secondaryBackupPath);
+    }
+
+    // 2. Perform SQLite clean backup of active DB to main filename
+    const db = getDB();
     await db.backup(mainBackupPath);
 
-    // 2. Create timestamped copy
-    const date = new Date();
-    const yyyymmdd = date.getFullYear() +
-      String(date.getMonth() + 1).padStart(2, '0') +
-      String(date.getDate()).padStart(2, '0');
-    const hhmmss = String(date.getHours()).padStart(2, '0') +
-      String(date.getMinutes()).padStart(2, '0') +
-      String(date.getSeconds()).padStart(2, '0');
-    const timestampedFile = `laundry_pos_backup_${yyyymmdd}_${hhmmss}.sqlite`;
-    const timestampedPath = path.join(targetPath, timestampedFile);
-
-    fs.copyFileSync(mainBackupPath, timestampedPath);
-
-    // 3. Keep only the last 10 backups in target path
+    // 3. Clean up any other old timestamped backup files in this folder
     const files = fs.readdirSync(targetPath);
-    const backupFiles = files
-      .filter(f => f.startsWith('laundry_pos_backup_') && f.endsWith('.sqlite'))
-      .map(f => ({
-        name: f,
-        filePath: path.join(targetPath, f),
-        mtime: fs.statSync(path.join(targetPath, f)).mtimeMs
-      }))
-      .sort((a, b) => a.mtime - b.mtime); // Sort ascending (oldest first)
-
-    if (backupFiles.length > 10) {
-      const filesToDelete = backupFiles.slice(0, backupFiles.length - 10);
-      for (const fileInfo of filesToDelete) {
+    for (const file of files) {
+      if (
+        file.startsWith('laundry_pos_backup') &&
+        file.endsWith('.sqlite') &&
+        file !== 'laundry_pos_backup.sqlite' &&
+        file !== 'laundry_pos_backup_2.sqlite'
+      ) {
         try {
-          fs.unlinkSync(fileInfo.filePath);
+          fs.unlinkSync(path.join(targetPath, file));
         } catch (delErr) {
-          console.error(`Failed to delete old backup file ${fileInfo.name}:`, delErr);
+          console.error(`Failed to delete legacy backup file ${file}:`, delErr);
         }
       }
     }
