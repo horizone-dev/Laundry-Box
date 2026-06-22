@@ -857,6 +857,7 @@ ipcMain.on('install-update', (event) => {
 // Setup auto-updater listeners for production if electron-updater is installed
 try {
   const { autoUpdater } = require('electron-updater');
+  autoUpdater.autoDownload = false;
   autoUpdater.on('checking-for-update', () => {
     mainWindow?.webContents.send('update-status', { type: 'checking' });
   });
