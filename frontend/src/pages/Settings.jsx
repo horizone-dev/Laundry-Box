@@ -377,8 +377,49 @@ export default function Settings() {
                       onChange={(e) => updateSettings({ defaultPaymentMethod: e.target.value })}
                     >
                       <option value="Cash">Cash</option>
-                      <option value="Bank">Bank</option>
+                      <option value="Card">Card</option>
+                      <option value="UPI">UPI</option>
                       <option value="Not Paid">Not Paid</option>
+                    </select>
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>Card Commission (%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className={styles.inputField}
+                      value={settings.cardCommission ?? 0}
+                      onChange={(e) => updateSettings({ cardCommission: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>Card Default Account</label>
+                    <select
+                      className={styles.inputField}
+                      value={settings.cardDefaultAccountId || ''}
+                      onChange={(e) => updateSettings({ cardDefaultAccountId: e.target.value })}
+                    >
+                      <option value="">Select Account</option>
+                      {(settings.bankAccounts || []).map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.bankName} ({acc.accountNumber})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>UPI Default Account</label>
+                    <select
+                      className={styles.inputField}
+                      value={settings.upiDefaultAccountId || ''}
+                      onChange={(e) => updateSettings({ upiDefaultAccountId: e.target.value })}
+                    >
+                      <option value="">Select Account</option>
+                      {(settings.bankAccounts || []).map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.bankName} ({acc.accountNumber})
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>

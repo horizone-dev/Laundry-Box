@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Search, Filter, DollarSign, Clock, AlertCircle, 
-  ChevronRight, ArrowRight, Printer, MessageCircle,
+  ChevronRight, ArrowRight, Printer,
   CheckCircle, MoreHorizontal, Download, Eye, Calendar
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';

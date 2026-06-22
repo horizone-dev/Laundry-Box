@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Plus, Search, Scissors, Zap, Sparkles, Tag, X, Layout, 
   Shirt, Bed, Wind, Droplet, Heart, Layers, Camera, 
-  Image as ImageIcon, Trash2, Edit2, ChevronDown, ChevronUp 
+  Image as ImageIcon, Trash2, Edit2, ChevronDown, ChevronUp, Package 
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID, CATEGORIES } from '../constants';
@@ -10,7 +10,7 @@ import CurrencySymbol from '../components/CurrencySymbol';
 import styles from './Services.module.css';
 
 export default function Services({ defaultTab = 'list' }) {
-  const { settings } = useSettings();
+  const { settings, updateSettings } = useSettings();
   const [services, setServices] = useState([]);
   const [types, setTypes] = useState([]);
   const [addons, setAddons] = useState([]);
@@ -118,7 +118,7 @@ export default function Services({ defaultTab = 'list' }) {
 
   const handleOpenModal = (type) => {
     if (type === 'service') {
-      setFormData({ name: '', price: '', category: categories[0]?.name || CATEGORIES.LAUNDRY, taxRate: '', image: null });
+      setFormData({ name: '', price: '', category: categories[0]?.name || CATEGORIES.LAUNDRY, taxRate: '', image: null, defaultDeliveryMethod: 'Hanger' });
       // Pre-fill types pricing grid with empty values
       const defaultMap = {};
       types.forEach(t => {
@@ -271,11 +271,11 @@ export default function Services({ defaultTab = 'list' }) {
         const basePrice = pricingArray.length > 0 ? pricingArray[0].price : 0;
 
         if (editId) {
-          query = 'UPDATE services SET name=?, price=?, image=?, category=?, taxRate=?, pricing=?, updatedAt=? WHERE id=?';
-          params = [formData.name, basePrice, formData.image, formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, timestamp, editId];
+          query = 'UPDATE services SET name=?, price=?, image=?, category=?, taxRate=?, pricing=?, defaultDeliveryMethod=?, updatedAt=? WHERE id=?';
+          params = [formData.name, basePrice, formData.image, formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, formData.defaultDeliveryMethod || 'Hanger', timestamp, editId];
         } else {
-          query = 'INSERT INTO services (id, shopId, name, price, image, category, taxRate, pricing, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-          params = [id, shopId, formData.name, basePrice, formData.image, formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, timestamp];
+          query = 'INSERT INTO services (id, shopId, name, price, image, category, taxRate, pricing, defaultDeliveryMethod, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+          params = [id, shopId, formData.name, basePrice, formData.image, formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, formData.defaultDeliveryMethod || 'Hanger', timestamp];
         }
       } else if (showModal === 'category') {
         if (editId) {
@@ -332,7 +332,8 @@ export default function Services({ defaultTab = 'list' }) {
     { id: 'list', label: 'Base Services', icon: <Layers size={18} />, count: services.length, color: '#3B82F6' },
     { id: 'type', label: 'Service Treatments', icon: <Zap size={18} />, count: types.length, color: '#F59E0B' },
     { id: 'addons', label: 'Premium Add-ons', icon: <Sparkles size={18} />, count: addons.length, color: '#8B5CF6' },
-    { id: 'category', label: 'Categories', icon: <Layout size={18} />, count: categories.length, color: '#EC4899' }
+    { id: 'category', label: 'Categories', icon: <Layout size={18} />, count: categories.length, color: '#EC4899' },
+    { id: 'delivery', label: 'Packaging Methods', icon: <Package size={18} />, count: (settings.deliveryMethods || []).length, color: '#10B981' }
   ];
 
   return (
@@ -488,6 +489,9 @@ export default function Services({ defaultTab = 'list' }) {
                           <div className={styles.itemName}>{s.name}</div>
                           <div className={styles.listItemMeta}>
                             <span className={styles.badge}>{s.category}</span>
+                            <span className={styles.badge} style={{ background: '#ECFDF5', color: '#047857', border: '1px solid #A7F3D0' }}>
+                              📦 {s.defaultDeliveryMethod || 'Hanger'}
+                            </span>
                             <div className={styles.pricingInlineList}>
                               {pricingList.length > 0 ? (
                                 pricingList.map((p, pIdx) => {
@@ -651,6 +655,103 @@ export default function Services({ defaultTab = 'list' }) {
             </div>
           );
         }
+
+        /* TAB: PACKAGING METHODS */
+        if (activeTab === 'delivery') {
+          const methods = settings.deliveryMethods || [];
+          return (
+            <div className={styles.listItemWrapper}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: 'white', padding: '1.5rem', borderRadius: '12px', border: '1px solid #F1F5F9' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#0F172A', fontWeight: 800 }}>Manage Packaging Methods</h3>
+                    <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.82rem', color: '#64748B' }}>Configure dynamic options available for service packaging and receipts.</p>
+                  </div>
+                  <button 
+                    type="button" 
+                    className="btn btn-primary" 
+                    style={{ background: '#10B981' }} 
+                    onClick={() => {
+                      const name = prompt("Enter Packaging Method Name (English):", "");
+                      if (!name || !name.trim()) return;
+                      const nameAr = prompt("Enter Packaging Method Name (Arabic):", "");
+                      const updated = [...methods, { name: name.trim(), nameAr: (nameAr || '').trim(), isDefault: false }];
+                      updateSettings({ deliveryMethods: updated });
+                    }}
+                  >
+                    <Plus size={16} /> Add Method
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
+                  {methods.map((method, idx) => (
+                    <div key={idx} style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '0.75rem 1rem',
+                      background: '#F8FAFC',
+                      borderRadius: '10px',
+                      border: '1px solid #E2E8F0'
+                    }}>
+                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                         <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#1E293B' }}>{method.name}</span>
+                         {method.nameAr && <span style={{ fontSize: '0.85rem', color: '#64748B' }}>({method.nameAr})</span>}
+                         {method.isDefault && (
+                           <span style={{ fontSize: '0.7rem', color: '#047857', background: '#D1FAE5', padding: '0.15rem 0.4rem', borderRadius: '4px', fontWeight: 700 }}>DEFAULT</span>
+                         )}
+                       </div>
+                       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                         {!method.isDefault && (
+                           <button 
+                             type="button" 
+                             style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
+                             onClick={() => {
+                               const updated = methods.map((m, i) => ({ ...m, isDefault: i === idx }));
+                               updateSettings({ deliveryMethods: updated });
+                             }}
+                           >
+                             Set Default
+                           </button>
+                         )}
+                         <button 
+                           type="button" 
+                           style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
+                           onClick={() => {
+                             const name = prompt("Edit English Name:", method.name);
+                             if (!name || !name.trim()) return;
+                             const nameAr = prompt("Edit Arabic Name:", method.nameAr || '');
+                             const updated = [...methods];
+                             updated[idx] = { ...method, name: name.trim(), nameAr: (nameAr || '').trim() };
+                             updateSettings({ deliveryMethods: updated });
+                           }}
+                         >
+                           Rename
+                         </button>
+                         <button 
+                           type="button" 
+                           style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', padding: 0 }}
+                           onClick={() => {
+                             if (method.isDefault) {
+                               alert("Cannot delete the default packaging method. Set another option as default first!");
+                               return;
+                             }
+                             if (confirm(`Delete packaging method "${method.name}"?`)) {
+                               const updated = methods.filter((_, i) => i !== idx);
+                               updateSettings({ deliveryMethods: updated });
+                             }
+                           }}
+                         >
+                           <Trash2 size={16} />
+                         </button>
+                       </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        }
       })()}
 
       {/* Slide-over Drawer for Service */}
@@ -726,6 +827,21 @@ export default function Services({ defaultTab = 'list' }) {
                     value={formData.taxRate || ''} 
                     onChange={e => setFormData({...formData, taxRate: e.target.value})}
                   />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>Default Delivery / Packaging Method</label>
+                  <select 
+                    value={formData.defaultDeliveryMethod || (settings.deliveryMethods?.find(m => m.isDefault)?.name || 'Hanger')} 
+                    onChange={e => setFormData({...formData, defaultDeliveryMethod: e.target.value})}
+                  >
+                    {(settings.deliveryMethods || [
+                      { name: 'Hanger' },
+                      { name: 'Folded' }
+                    ]).map((method, mIdx) => (
+                      <option key={mIdx} value={method.name}>{method.name}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Dynamic Pricing Grid */}

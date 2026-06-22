@@ -357,19 +357,27 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
         <thead>
           <tr>
             <th style={{ width: '5%' }}></th>
-            <th style={{ width: editMode ? '34%' : '38%', textAlign: 'left' }}>
-              <div>ITEM DESCRIPTION</div>
-              {showBilingual && <div className={styles.thAr}>وصف الصنف</div>}
+            <th style={{ width: editMode ? '17%' : '20%', textAlign: 'left' }}>
+              <div>ITEM NAME</div>
+              {showBilingual && <div className={styles.thAr}>اسم الصنف</div>}
+            </th>
+            <th style={{ width: editMode ? '11%' : '12%', textAlign: 'left' }}>
+              <div>PACKAGE</div>
+              {showBilingual && <div className={styles.thAr}>التغليف</div>}
             </th>
             <th style={{ width: '18%', textAlign: 'left' }}>
-              <div>SERVICE</div>
-              {showBilingual && <div className={styles.thAr}>نوع الخدمة</div>}
+              <div>ADD-ONS</div>
+              {showBilingual && <div className={styles.thAr}>الإضافات</div>}
             </th>
-            <th style={{ width: '10%', textAlign: 'center' }}>
+            <th style={{ width: '14%', textAlign: 'left' }}>
+              <div>SERVICE</div>
+              {showBilingual && <div className={styles.thAr}>الخدمة</div>}
+            </th>
+            <th style={{ width: '6%', textAlign: 'center' }}>
               <div>QTY</div>
               {showBilingual && <div className={styles.thAr}>الكمية</div>}
             </th>
-            <th style={{ width: '14%', textAlign: 'center' }}>
+            <th style={{ width: '12%', textAlign: 'center' }}>
               <div>PRICE</div>
               {showBilingual && <div className={styles.thAr}>السعر</div>}
             </th>
@@ -401,7 +409,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                 <GripVertical size={14} style={{ cursor: 'grab' }} />
               </td>
 
-              {/* Name + Treatments */}
+              {/* Item Name */}
               <td>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   <EditableCell
@@ -410,49 +418,73 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                     onChange={(v) => updateItem(idx, 'name', v)}
                     className={styles.itemName}
                   />
-                  {/* Render treatments as bullet points */}
-                  {(() => {
-                    const typesList = item.types && item.types.length > 0
-                      ? item.types
-                      : item.sub
-                        ? item.sub.split(' + ').map(n => ({ name: n }))
-                        : [];
-                    return typesList.length > 0 ? (
-                      <div style={{ marginTop: '0.2rem' }}>
-                        {typesList.map((t, ti) => (
-                          <div key={ti} style={{ fontSize: '0.75rem', color: '#475569', fontWeight: 600, lineHeight: 1.4 }}>
-                            • {t.name}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null;
-                  })()}
-                  {/* Addons as blue bullets */}
-                  {item.addons && item.addons.length > 0 && (
-                    <div style={{ marginTop: '0.15rem' }}>
-                      {item.addons.map((a, ai) => (
-                        <div key={ai} style={{ fontSize: '0.72rem', color: '#2563EB', fontWeight: 700, lineHeight: 1.4 }}>
-                          + {a}
-                        </div>
-                      ))}
-                    </div>
-                  )}
                   {item.description && (
-                    <span style={{ fontSize: '0.75rem', color: '#DC2626', fontWeight: 600, marginTop: '0.15rem' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#DC2626', fontWeight: 600, marginTop: '0.15rem', display: 'block' }}>
                       ⚠️ {item.description}
-                    </span>
+                    </div>
                   )}
                 </div>
               </td>
 
-              {/* Service type / Category */}
+              {/* Package Column */}
               <td>
-                <EditableCell
-                  editing={editMode}
-                  value={item.category || item.sub}
-                  onChange={(v) => updateItem(idx, 'category', v)}
-                  className={styles.itemServiceType}
-                />
+                {item.deliveryMethod && (
+                  <div style={{ fontSize: '0.72rem', color: '#16A34A', fontWeight: 700, lineHeight: 1.4 }}>
+                    📦 {(() => {
+                      const matchedMethod = settings.deliveryMethods?.find(m => m.name === item.deliveryMethod);
+                      const arTranslation = matchedMethod ? matchedMethod.nameAr : (item.deliveryMethod === 'Hanger' ? 'علاقة' : (item.deliveryMethod === 'Folded' ? 'مطوي' : (item.deliveryMethod === 'Bagged' ? 'مكيس' : '')));
+                      return formatLabel(item.deliveryMethod, arTranslation || item.deliveryMethod);
+                    })()}
+                  </div>
+                )}
+              </td>
+
+              {/* Add-ons */}
+              <td>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+                  {item.addons && item.addons.length > 0 ? (
+                    item.addons.map((a, ai) => (
+                      <div key={ai} style={{ fontSize: '0.72rem', color: '#2563EB', fontWeight: 700, lineHeight: 1.4 }}>
+                        + {a}
+                      </div>
+                    ))
+                  ) : (
+                    <span style={{ color: '#94A3B8', fontSize: '0.75rem' }}>-</span>
+                  )}
+                </div>
+              </td>
+
+              {/* Service (Treatments / Service Types) */}
+              <td>
+                {editMode ? (
+                  <EditableCell
+                    editing={editMode}
+                    value={item.sub || item.category}
+                    onChange={(v) => updateItem(idx, 'sub', v)}
+                    className={styles.itemServiceType}
+                  />
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                    {(() => {
+                      const typesList = item.types && item.types.length > 0
+                        ? item.types
+                        : item.sub
+                          ? item.sub.split(' + ').map(n => ({ name: n }))
+                          : [];
+                      return typesList.length > 0 ? (
+                        <div>
+                          {typesList.map((t, ti) => (
+                            <div key={ti} style={{ fontSize: '0.75rem', color: '#1E293B', fontWeight: 600, lineHeight: 1.4 }} className={styles.itemServiceType}>
+                              {t.name}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ color: '#94A3B8', fontSize: '0.75rem' }}>-</span>
+                      );
+                    })()}
+                  </div>
+                )}
               </td>
 
               {/* Qty */}

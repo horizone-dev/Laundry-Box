@@ -134,7 +134,10 @@ const translations = {
     waStatusMessage: "Hello! This is regarding your laundry order #{id}. Your current status is: {status}.",
     orderDetails: "Order Details",
     recordPayment: "Record Payment",
-    whatsapp: "WhatsApp"
+    whatsapp: "WhatsApp",
+    card: "Card",
+    upi: "UPI",
+    cancelledorders: "Cancelled Orders"
   },
   Arabic: {
     dashboard: "لوحة القيادة",
@@ -271,7 +274,10 @@ const translations = {
     waStatusMessage: "مرحباً! هذا بخصوص طلب الغسيل الخاص بك #{id}. حالتك الحالية هي: {status}.",
     orderDetails: "تفاصيل الطلب",
     recordPayment: "تسجيل الدفع",
-    whatsapp: "واتساب"
+    whatsapp: "واتساب",
+    card: "بطاقة",
+    upi: "يو بي آي",
+    cancelledorders: "الطلبات الملغاة"
   },
   Hindi: {
     dashboard: "डैशबोर्ड",
@@ -408,7 +414,10 @@ const translations = {
     waStatusMessage: "नमस्ते! यह आपके लॉन्ड्री आदेश #{id} के बारे में है। आपकी वर्तमान स्थिति है: {status}。",
     orderDetails: "आदेश विवरण",
     recordPayment: "भुगतान दर्ज करें",
-    whatsapp: "व्हाट्सएप"
+    whatsapp: "व्हाट्सएप",
+    card: "कार्ड",
+    upi: "यूपीआई",
+    cancelledorders: "रद्द किए गए आदेश"
   }
 };
 

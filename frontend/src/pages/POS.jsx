@@ -4,10 +4,11 @@ import {
   Search, Plus, Minus, ShoppingBag, Trash2, CheckCircle,
   X, ChevronDown, Shirt, Bed, Wind, Layers, Package,
   Droplet, Zap, Heart, Sparkles, User, CreditCard, Wallet,
-  Gift, Printer, Receipt, Edit3, UserPlus, Phone, MapPin, MessageCircle, Landmark,
-  Calendar, FileText, AlertTriangle, AlertCircle, Info, Lock, Clock
+  Gift, Printer, Receipt, Edit3, UserPlus, Phone, MapPin, Landmark,
+  Calendar, FileText, AlertTriangle, AlertCircle, Info, Lock, Clock, QrCode
 } from 'lucide-react';
 import axios from 'axios';
+import WhatsAppIcon from '../components/WhatsAppIcon';
 import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { DEFAULT_SHOP_ID, DEFAULT_BRANCH_ID, API_BASE_URL, CATEGORIES, PAYMENT_STATUS, ORDER_STATUS, PAYMENT_METHODS } from '../constants';
@@ -27,7 +28,7 @@ export default function POS() {
   const [step, setStep] = useState('pos'); // pos, checkout
   const [cart, setCart] = useState([]);
   const [selectedService, setSelectedService] = useState(null);
-  const [serviceConfig, setServiceConfig] = useState({ selectedTypeIds: [], addons: [], qty: 1, customPrice: null, description: '' });
+  const [serviceConfig, setServiceConfig] = useState({ selectedTypeIds: [], addons: [], qty: 1, customPrice: null, description: '', deliveryMethod: 'Hanger' });
   const [editingCartIdx, setEditingCartIdx] = useState(null); // index of cart item being edited
 
   const servicePricing = React.useMemo(() => {
@@ -127,11 +128,23 @@ export default function POS() {
   const [printReceipt, setPrintReceipt] = useState(settings.autoPrint !== undefined ? settings.autoPrint : true);
 
   useEffect(() => {
-    if (settings.bankAccounts && settings.bankAccounts.length > 0 && !selectedBank) {
-      const defaultBank = settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || settings.bankAccounts[0];
-      setSelectedBank(defaultBank.bankName);
+    if (settings.bankAccounts && settings.bankAccounts.length > 0) {
+      if (paymentMethod === 'card') {
+        const cardBank = settings.bankAccounts.find(acc => acc.id === settings.cardDefaultAccountId) || 
+                         settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || 
+                         settings.bankAccounts[0];
+        setSelectedBank(cardBank.bankName);
+      } else if (paymentMethod === 'upi') {
+        const upiBank = settings.bankAccounts.find(acc => acc.id === settings.upiDefaultAccountId) || 
+                        settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || 
+                        settings.bankAccounts[0];
+        setSelectedBank(upiBank.bankName);
+      } else if (!selectedBank) {
+        const defaultBank = settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || settings.bankAccounts[0];
+        setSelectedBank(defaultBank.bankName);
+      }
     }
-  }, [settings.bankAccounts, settings.defaultBankId]);
+  }, [paymentMethod, settings.bankAccounts, settings.cardDefaultAccountId, settings.upiDefaultAccountId, settings.defaultBankId]);
 
   // Customer states
   const [customerSearch, setCustomerSearch] = useState('');
@@ -405,7 +418,7 @@ export default function POS() {
     } else if (serviceTypes.length > 0) {
       defaultTypeId = serviceTypes[0].id;
     }
-    setServiceConfig({ selectedTypeIds: defaultTypeId ? [defaultTypeId] : [], addons: [], qty: 1, customPrice: null, description: '' });
+    setServiceConfig({ selectedTypeIds: defaultTypeId ? [defaultTypeId] : [], addons: [], qty: 1, customPrice: null, description: '', deliveryMethod: service.defaultDeliveryMethod || 'Hanger' });
   };
 
   const addToCart = () => {
@@ -437,7 +450,8 @@ export default function POS() {
         qty: serviceConfig.qty,
         taxRate: selectedService.taxRate || settings.taxRate || 0,
         description: serviceConfig.description || '',
-        category: selectedService.category || 'Standard'
+        category: selectedService.category || 'Standard',
+        deliveryMethod: serviceConfig.deliveryMethod || 'Hanger'
       };
 
       if (editingCartIdx !== null) {
@@ -478,7 +492,8 @@ export default function POS() {
         qty: serviceConfig.qty,
         taxRate: selectedService.taxRate || settings.taxRate || 0,
         description: serviceConfig.description || '',
-        category: selectedService.category || 'Standard'
+        category: selectedService.category || 'Standard',
+        deliveryMethod: serviceConfig.deliveryMethod || 'Hanger'
       };
 
       if (editingCartIdx !== null) {
@@ -547,7 +562,8 @@ export default function POS() {
       addons: resolvedAddonIds,
       qty: item.qty,
       customPrice: item.price,
-      description: item.description || ''
+      description: item.description || '',
+      deliveryMethod: item.deliveryMethod || 'Hanger'
     });
   };
 
@@ -613,7 +629,7 @@ export default function POS() {
             getLocalISOString(),
             0,
             getLocalISOString(),
-            paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'bank' ? PAYMENT_METHODS.BANK : PAYMENT_METHODS.NOT_PAID),
+            paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'upi' ? PAYMENT_METHODS.UPI : PAYMENT_METHODS.NOT_PAID)),
             combinedExpectedDelivery,
             specialInstructions
           ]
@@ -661,7 +677,7 @@ export default function POS() {
           paidAmount: paymentMethod === 'credit' ? 0 : total,
           dueAmount: paymentMethod === 'credit' ? total : 0,
           paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
-          paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'bank' ? PAYMENT_METHODS.BANK : PAYMENT_METHODS.NOT_PAID),
+          paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'upi' ? PAYMENT_METHODS.UPI : PAYMENT_METHODS.NOT_PAID)),
           items: cart,
           statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
           expectedDeliveryDate: combinedExpectedDelivery,
@@ -684,7 +700,7 @@ export default function POS() {
             paidAmount: paymentMethod === 'credit' ? 0 : total,
             dueAmount: paymentMethod === 'credit' ? total : 0,
             paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
-            paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'bank' ? PAYMENT_METHODS.BANK : PAYMENT_METHODS.NOT_PAID),
+            paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'upi' ? PAYMENT_METHODS.UPI : PAYMENT_METHODS.NOT_PAID)),
             items: cart,
             statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
             expectedDeliveryDate: combinedExpectedDelivery,
@@ -703,7 +719,7 @@ export default function POS() {
         const txnId = `TXN-${Date.now()}`;
         const _nowP = new Date();
         const txnTimestamp = `${_nowP.getFullYear()}-${String(_nowP.getMonth()+1).padStart(2,'0')}-${String(_nowP.getDate()).padStart(2,'0')} ${String(_nowP.getHours()).padStart(2,'0')}:${String(_nowP.getMinutes()).padStart(2,'0')}`;
-        const accountType = paymentMethod === 'bank' ? 'BANK' : 'CASH';
+        const accountType = (paymentMethod === 'bank' || paymentMethod === 'card' || paymentMethod === 'upi') ? 'BANK' : 'CASH';
 
         if (paymentMethod !== 'credit') {
           const desc = `Order ${orderId}${accountType === 'BANK' ? ` via ${selectedBank}` : ''}`;
@@ -714,6 +730,20 @@ export default function POS() {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [txnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales', total, desc, txnTimestamp, 0, getLocalISOString(), 'ShoppingBag', mappedBankId]
           );
+
+          // Record card commission if applicable
+          if (paymentMethod === 'card' && settings.cardCommission > 0) {
+            const commissionRate = parseFloat(settings.cardCommission || 0);
+            const commissionAmount = total * (commissionRate / 100);
+            const commTxnId = `TXN-COMM-${Date.now()}`;
+            const commDesc = `Card Commission for Order ${orderId}`;
+            await window.electronAPI.dbQuery(
+              `INSERT INTO account_transactions 
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, 0, getLocalISOString(), 'Percent', mappedBankId]
+            );
+          }
         }
 
         setPendingOrderId(null);
@@ -961,7 +991,8 @@ export default function POS() {
                     {(() => {
                       const treatments = item.type || '';
                       const addonsList = (item.addons || []).join(' + ');
-                      return [treatments, addonsList].filter(Boolean).join(' + ').toUpperCase();
+                      const baseMeta = [treatments, addonsList].filter(Boolean).join(' + ').toUpperCase();
+                      return baseMeta + (item.deliveryMethod ? ` (${item.deliveryMethod.toUpperCase()})` : '');
                     })()}
                     {item.qty > 1 && (
                       <>
@@ -1011,16 +1042,19 @@ export default function POS() {
             <h3 className={styles.modalSectionTitle}>Payment Method</h3>
             <div className={styles.paymentMethods}>
               <MethodCard id="cash" label="Cash" icon={<Wallet />} active={paymentMethod === 'cash'} onClick={setPaymentMethod} />
-              <MethodCard id="bank" label="Bank" icon={<Landmark />} active={paymentMethod === 'bank'} onClick={setPaymentMethod} />
+              <MethodCard id="card" label="Card" icon={<CreditCard />} active={paymentMethod === 'card'} onClick={setPaymentMethod} />
+              <MethodCard id="upi" label="UPI" icon={<QrCode />} active={paymentMethod === 'upi'} onClick={setPaymentMethod} />
               <MethodCard id="credit" label="Store Credit" icon={<User />} active={paymentMethod === 'credit'} onClick={setPaymentMethod} />
             </div>
           </div>
 
-          {paymentMethod === 'bank' && settings.bankAccounts?.length > 0 && (
+          {(paymentMethod === 'card' || paymentMethod === 'upi') && settings.bankAccounts?.length > 0 && (
             <div style={{ marginTop: '1rem' }}>
-              <h3 className={styles.modalSectionTitle}>Select Bank Account</h3>
+              <h3 className={styles.modalSectionTitle}>
+                {paymentMethod === 'card' ? 'Select Card Account' : 'Select UPI Account'}
+              </h3>
               <div className={styles.inputWrapper} style={{ background: 'white', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.25rem 0.5rem' }}>
-                <Landmark size={18} color="#2563EB" />
+                {paymentMethod === 'card' ? <CreditCard size={18} color="#2563EB" /> : <QrCode size={18} color="#2563EB" />}
                 <select
                   className={styles.inputField}
                   style={{ border: 'none', width: '100%', outline: 'none' }}
@@ -1075,7 +1109,7 @@ export default function POS() {
                     handleWhatsApp(selectedCustomer.phone, msg);
                   }}
                 >
-                  <MessageCircle size={24} /> Send WhatsApp Receipt
+                  <WhatsAppIcon size={24} /> Send WhatsApp Receipt
                 </button>
               )}
             </div>
@@ -1188,7 +1222,7 @@ export default function POS() {
                     <span className={styles.selCustName}>{selectedCustomer.name}</span>
                     <div style={{ display: 'flex', alignItems: 'center' }}>
                       <span className={styles.selCustPhone}>{selectedCustomer.phone}</span>
-                      <MessageCircle
+                      <WhatsAppIcon
                         size={12}
                         className={styles.waIconMini}
                         onClick={() => handleWhatsApp(selectedCustomer.phone)}
@@ -1315,7 +1349,8 @@ export default function POS() {
                   {(() => {
                     const treatments = item.type || '';
                     const addonsList = (item.addons || []).join(' + ');
-                    return [treatments, addonsList].filter(Boolean).join(' + ');
+                    const baseMeta = [treatments, addonsList].filter(Boolean).join(' + ');
+                    return baseMeta + (item.deliveryMethod ? ` (${item.deliveryMethod})` : '');
                   })()}
                   {item.qty > 1 && (
                     <>
@@ -1483,6 +1518,31 @@ export default function POS() {
                   </div>
                 </>
               )}
+
+              <div className={styles.modalSection}>
+                <h3 className={styles.modalSectionTitle}>Delivery / Packaging Method</h3>
+                <div className={styles.addonChipsContainer} style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+                  {(settings.deliveryMethods || [
+                    { name: 'Hanger' },
+                    { name: 'Folded' }
+                  ]).map((method, mIdx) => {
+                    const isSelected = serviceConfig.deliveryMethod === method.name;
+                    return (
+                      <div
+                        key={mIdx}
+                        className={`${styles.addonChip} ${isSelected ? styles.active : ''}`}
+                        style={{ flex: 1, justifyContent: 'center', cursor: 'pointer', margin: 0 }}
+                        onClick={() => setServiceConfig(prev => ({ ...prev, deliveryMethod: method.name }))}
+                      >
+                        <div className={styles.addonCheckbox}>
+                          {isSelected && <CheckCircle size={12} className={styles.checkIconMini} />}
+                        </div>
+                        <span className={styles.addonChipName}>{method.name}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
 
               <div className={styles.gridTwoColumns}>
                 <div className={styles.modalSection}>
@@ -1867,7 +1927,7 @@ export default function POS() {
                     handleWhatsApp(lastOrderInfo.customerPhone, msg);
                   }}
                 >
-                  <MessageCircle size={20} /> Send via WhatsApp
+                  <WhatsAppIcon size={20} /> Send via WhatsApp
                 </button>
                 <button
                   className={styles.printSuccessBtn}

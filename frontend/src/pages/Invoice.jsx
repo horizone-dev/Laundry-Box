@@ -102,7 +102,8 @@ export default function Invoice() {
                   addons: item.addons || [],
                   description: item.description || '',
                   category: item.category || 'Standard',
-                  serviceId: item.serviceId || null
+                  serviceId: item.serviceId || null,
+                  deliveryMethod: item.deliveryMethod || 'Hanger'
                 })) : [];
               })(),
               subtotal: subtotal,
@@ -143,9 +144,9 @@ export default function Invoice() {
         status: 'PAID',
         paymentStatus: 'Paid',
         items: [
-          { name: 'Premium Suit Dry Clean', sub: 'Professional grade chemical cleaning & steaming', qty: 2, price: 25.00, total: 50.00 },
-          { name: 'Egyptian Cotton Shirts', sub: 'Gentle wash, starch, and custom pressing', qty: 5, price: 8.00, total: 40.00 },
-          { name: 'Silk Scarf Special Care', sub: 'Delicate hand-wash with eco-solvent treatment', qty: 1, price: 15.00, total: 15.00 },
+          { name: 'Premium Suit Dry Clean', sub: 'Professional grade chemical cleaning & steaming', qty: 2, price: 25.00, total: 50.00, deliveryMethod: 'Hanger' },
+          { name: 'Egyptian Cotton Shirts', sub: 'Gentle wash, starch, and custom pressing', qty: 5, price: 8.00, total: 40.00, deliveryMethod: 'Folded' },
+          { name: 'Silk Scarf Special Care', sub: 'Delicate hand-wash with eco-solvent treatment', qty: 1, price: 15.00, total: 15.00, deliveryMethod: 'Bagged' },
         ],
         subtotal: 105.00,
         tax: 8.40,

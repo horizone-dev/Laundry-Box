@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import {
-  Search, HelpCircle, Book, MessageCircle,
+  Search, HelpCircle, Book,
   Settings, ShoppingCart, Users, ChevronDown, ChevronUp
 } from 'lucide-react';
+import WhatsAppIcon from '../components/WhatsAppIcon';
 import styles from './HelpCenter.module.css';
 
 const categories = [
@@ -96,7 +97,7 @@ export default function HelpCenter() {
       </section>
 
       <footer className={styles.supportFooter}>
-        <MessageCircle size={40} color="#2563EB" />
+        <WhatsAppIcon size={40} color="#2563EB" />
         <h3>Still need help?</h3>
         <p>Our support team is available 24/7 to assist you with any technical issues.</p>
         <button className={styles.contactBtn}>Contact Support</button>

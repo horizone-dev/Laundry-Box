@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Printer, ChevronLeft, MessageCircle, Landmark } from 'lucide-react';
+import { Printer, ChevronLeft, Landmark } from 'lucide-react';
+import WhatsAppIcon from '../components/WhatsAppIcon';
 import { useSettings } from '../store/SettingsContext';
 import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
@@ -66,7 +67,7 @@ export default function OverdueStatement() {
         </button>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
           <button onClick={handleWhatsApp} className={styles.whatsappBtn}>
-            <MessageCircle size={18} /> WhatsApp Reminder
+            <WhatsAppIcon size={18} /> WhatsApp Reminder
           </button>
           <button onClick={handlePrint} className={styles.printBtn}>
             <Printer size={18} /> Print Statement

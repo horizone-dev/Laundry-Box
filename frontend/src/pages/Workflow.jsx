@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Zap, Search, RefreshCw, Clock, Phone, User, X, ChevronDown, 
   CheckCircle, AlertCircle, Trash2, Printer, QrCode, ArrowLeft, 
-  ArrowRight, Eye, MessageCircle, Wallet, CreditCard, ShoppingCart
+  ArrowRight, Eye, Wallet, CreditCard, ShoppingCart
 } from 'lucide-react';
 import axios from 'axios';
 import { useSettings } from '../store/SettingsContext';
@@ -14,6 +14,7 @@ import { t } from '../utils/translations';
 import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
 import { getLocalISOString } from '../utils/dateUtils';
 import styles from './Workflow.module.css';
+import WhatsAppIcon from '../components/WhatsAppIcon';
 
 // Status styling colors mapping matching Orders.jsx
 const STATUS_COLORS = {
@@ -270,13 +271,33 @@ export default function Workflow() {
         const txnId = `TXN-${Date.now()}`;
         const _now = new Date();
         const txnTimestamp = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')} ${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`;
-        const mappedBankId = payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null;
+        
+        const mappedBankId = payMethod === 'Card'
+          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+          : (payMethod === 'UPI'
+            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+            : (payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
+
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, payMethod === 'Bank' ? 'BANK' : 'CASH', 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${selectedOrder.id}`, txnTimestamp, 0, getLocalISOString(), 'DollarSign', mappedBankId]
+          [txnId, DEFAULT_SHOP_ID, (payMethod === 'Bank' || payMethod === 'Card' || payMethod === 'UPI') ? 'BANK' : 'CASH', 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${selectedOrder.id}${payMethod === 'Card' ? ' (Card)' : (payMethod === 'UPI' ? ' (UPI)' : '')}`, txnTimestamp, 0, getLocalISOString(), 'DollarSign', mappedBankId]
         );
+
+        // Record card commission if applicable
+        if (payMethod === 'Card' && settings.cardCommission > 0) {
+          const commissionRate = parseFloat(settings.cardCommission || 0);
+          const commissionAmount = amountToPay * (commissionRate / 100);
+          const commTxnId = `TXN-COMM-${Date.now()}`;
+          const commDesc = `Card Commission for Order ${selectedOrder.id}`;
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, 0, getLocalISOString(), 'Percent', mappedBankId]
+          );
+        }
 
         await window.electronAPI.dbQuery(
           `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
@@ -455,6 +476,8 @@ export default function Workflow() {
   const getPaymentMethodTranslation = (method) => {
     if (!method) return '';
     if (method === 'Cash' || method.toUpperCase() === 'CASH') return t('cashaccount', settings.language);
+    if (method === 'Card' || method.toUpperCase() === 'CARD') return t('card', settings.language);
+    if (method === 'UPI' || method.toUpperCase() === 'UPI') return t('upi', settings.language);
     if (method === 'Bank' || method.toUpperCase() === 'BANK') return t('bankaccount', settings.language);
     if (method === 'Not Paid') return t('notPaid', settings.language) || 'Not Paid';
     if (method === 'Mixed') return 'Mixed';
@@ -681,7 +704,7 @@ export default function Workflow() {
                               className={styles.waBtnMini}
                               onClick={() => handleWhatsApp(selectedOrder.customerPhone || selectedOrder.phone, selectedOrder.id)}
                             >
-                              <MessageCircle size={10} /> {t('whatsapp', settings.language)}
+                              <WhatsAppIcon size={10} /> {t('whatsapp', settings.language)}
                             </button>
                           )}
                         </div>
@@ -730,7 +753,7 @@ export default function Workflow() {
                           }
                           return (
                             <div key={i} className={styles.orderItem}>
-                              <span>{item.qty} x {item.name}{treatmentLabel ? ` (${treatmentLabel})` : ''}</span>
+                              <span>{item.qty} x {item.name}{treatmentLabel ? ` (${treatmentLabel})` : ''}{item.deliveryMethod ? ` [${item.deliveryMethod}]` : ''}</span>
                               <span><CurrencySymbol size={11} /> {((item.price || 0) * (item.qty || 1)).toFixed(2)}</span>
                             </div>
                           );
@@ -863,14 +886,21 @@ export default function Workflow() {
                 onClick={() => setPayMethod('Cash')}
               >
                 <Wallet size={20} />
-                <span>Cash Drawer</span>
+                <span>{t('cashaccount', settings.language)}</span>
               </div>
               <div 
-                className={`${styles.payOption} ${payMethod === 'Bank' ? styles.payOptionActive : ''}`}
-                onClick={() => setPayMethod('Bank')}
+                className={`${styles.payOption} ${payMethod === 'Card' ? styles.payOptionActive : ''}`}
+                onClick={() => setPayMethod('Card')}
               >
                 <CreditCard size={20} />
-                <span>Bank / Card</span>
+                <span>{t('card', settings.language)}</span>
+              </div>
+              <div 
+                className={`${styles.payOption} ${payMethod === 'UPI' ? styles.payOptionActive : ''}`}
+                onClick={() => setPayMethod('UPI')}
+              >
+                <QrCode size={20} />
+                <span>{t('upi', settings.language)}</span>
               </div>
             </div>
 

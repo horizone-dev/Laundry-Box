@@ -190,6 +190,7 @@
   height: 4px;
   background-color: currentColor;
   border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .sidebarFooter {

@@ -37,6 +37,11 @@ export default function DressTag({ order }) {
             <div className={styles.itemDetails}>
               <h3 className={styles.itemName}>{tag.name}</h3>
               <p className={styles.itemType}>{tag.type}</p>
+              {tag.deliveryMethod && (
+                <p className={styles.itemDelivery} style={{ fontWeight: 'bold', color: '#16A34A', fontSize: '0.75rem', margin: '2px 0 0 0' }}>
+                  📦 {tag.deliveryMethod}
+                </p>
+              )}
               <p className={styles.customerName}>{order.customerName}</p>
             </div>
           </div>

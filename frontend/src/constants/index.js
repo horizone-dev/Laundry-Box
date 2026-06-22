@@ -40,5 +40,7 @@ export const TRANSACTION_TYPES = {
 export const PAYMENT_METHODS = {
   NOT_PAID: 'Not Paid',
   CASH: 'Cash',
+  CARD: 'Card',
   BANK: 'Bank',
+  UPI: 'UPI',
 };

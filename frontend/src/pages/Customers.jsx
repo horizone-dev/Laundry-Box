@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Search, UserPlus, Download, Calendar, MoreHorizontal, 
-  TrendingUp, ChevronLeft, ChevronRight, X, Phone, MapPin, MessageCircle, CreditCard, Wallet, DollarSign, Trash2, Users, Edit2, Lock
+  TrendingUp, ChevronLeft, ChevronRight, X, Phone, MapPin, CreditCard, Wallet, DollarSign, Trash2, Users, Edit2, Lock
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import WhatsAppIcon from '../components/WhatsAppIcon';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
@@ -192,13 +193,32 @@ export default function Customers() {
         const _nowC = new Date();
         const txnTimestamp = `${_nowC.getFullYear()}-${String(_nowC.getMonth()+1).padStart(2,'0')}-${String(_nowC.getDate()).padStart(2,'0')} ${String(_nowC.getHours()).padStart(2,'0')}:${String(_nowC.getMinutes()).padStart(2,'0')}`;
         
-        const mappedBankId = paymentData.method === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null;
+        const mappedBankId = paymentData.method === 'Card'
+          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+          : (paymentData.method === 'UPI'
+            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+            : (paymentData.method === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
+
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, paymentData.method === 'Bank' ? 'BANK' : 'CASH', 'INCOME', 'Credit Settlement', totalPaid, `Settlement from ${selectedCustomer.name}`, txnTimestamp, 0, timestamp, 'DollarSign', mappedBankId]
+          [txnId, DEFAULT_SHOP_ID, (paymentData.method === 'Bank' || paymentData.method === 'Card' || paymentData.method === 'UPI') ? 'BANK' : 'CASH', 'INCOME', 'Credit Settlement', totalPaid, `Settlement from ${selectedCustomer.name}`, txnTimestamp, 0, timestamp, 'DollarSign', mappedBankId]
         );
+
+        // Record card commission if applicable
+        if (paymentData.method === 'Card' && settings.cardCommission > 0) {
+          const commissionRate = parseFloat(settings.cardCommission || 0);
+          const commissionAmount = totalPaid * (commissionRate / 100);
+          const commTxnId = `TXN-COMM-${Date.now()}`;
+          const commDesc = `Card Commission for Credit Settlement ${selectedCustomer.name}`;
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, 0, timestamp, 'Percent', mappedBankId]
+          );
+        }
 
         if (window.electronAPI?.runDataHealer) {
           await window.electronAPI.runDataHealer();
@@ -436,14 +456,7 @@ export default function Customers() {
                 </td>
 
                 <td>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    {customer.phone}
-                    <MessageCircle 
-                      size={14} 
-                      className={styles.waIcon} 
-                      onClick={() => handleWhatsApp(customer.phone)} 
-                    />
-                  </div>
+                  {customer.phone}
                 </td>
                 <td><span className={styles.balanceBadge} style={{ color: (customer.balance || 0) > 0 ? '#EF4444' : '#10B981' }}><CurrencySymbol size={16} /> {(customer.balance || 0).toFixed(2)}</span></td>
                 <td>
@@ -516,7 +529,7 @@ export default function Customers() {
                       onClick={() => handleWhatsApp(customer.phone)}
                       title="Send WhatsApp"
                     >
-                      <MessageCircle size={16} />
+                      <WhatsAppIcon size={16} />
                     </button>
                     <button 
                       className={styles.secondaryBtn} 
@@ -819,7 +832,8 @@ export default function Customers() {
                       onChange={(e) => setPaymentData({...paymentData, method: e.target.value})}
                     >
                       <option value="Cash">Cash Payment</option>
-                      <option value="Bank">Bank Transfer</option>
+                      <option value="Card">Card Payment</option>
+                      <option value="UPI">UPI Payment</option>
                     </select>
                   </div>
                 </div>

@@ -4,9 +4,10 @@ import {
   LayoutDashboard, ShoppingCart, Users, ClipboardList, Settings, Layers,
   BarChart3, Zap, Plus, Search, Bell, HelpCircle, LifeBuoy, Wifi, WifiOff, RefreshCw, Activity, LogOut, Wallet,
   DollarSign, X, CheckCircle, CreditCard, ShoppingBag, Trash2, Building2, Hash, FileText,
-  AlertTriangle, ShieldCheck, Clock, Package, Truck, MessageCircle, Phone, Cpu
+  AlertTriangle, ShieldCheck, Clock, Package, Truck, Phone, Cpu
 } from 'lucide-react';
 import axios from 'axios';
+import WhatsAppIcon from '../components/WhatsAppIcon';
 import { syncData } from '../services/syncService';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
@@ -41,16 +42,28 @@ export default function MainLayout() {
   const [quickSettleResults, setQuickSettleResults] = useState([]);
   const [isUpdating, setIsUpdating] = useState(false);
   const [settleAmount, setSettleAmount] = useState('');
-  const [settleMethod, setSettleMethod] = useState('CASH');
+  const [settleMethod, setSettleMethod] = useState('Cash');
   const [logoClicks, setLogoClicks] = useState(0);
   const [selectedBank, setSelectedBank] = useState('');
 
   useEffect(() => {
-    if (settings.bankAccounts && settings.bankAccounts.length > 0 && !selectedBank) {
-      const defaultBank = settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || settings.bankAccounts[0];
-      setSelectedBank(defaultBank.bankName);
+    if (settings.bankAccounts && settings.bankAccounts.length > 0) {
+      if (settleMethod === 'Card') {
+        const cardBank = settings.bankAccounts.find(acc => acc.id === settings.cardDefaultAccountId) || 
+                         settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || 
+                         settings.bankAccounts[0];
+        setSelectedBank(cardBank.bankName);
+      } else if (settleMethod === 'UPI') {
+        const upiBank = settings.bankAccounts.find(acc => acc.id === settings.upiDefaultAccountId) || 
+                        settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || 
+                        settings.bankAccounts[0];
+        setSelectedBank(upiBank.bankName);
+      } else if (!selectedBank) {
+        const defaultBank = settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || settings.bankAccounts[0];
+        setSelectedBank(defaultBank.bankName);
+      }
     }
-  }, [settings.bankAccounts, settings.defaultBankId, selectedBank]);
+  }, [settleMethod, settings.bankAccounts, settings.cardDefaultAccountId, settings.upiDefaultAccountId, settings.defaultBankId, selectedBank]);
 
   // Software Update States
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -509,13 +522,17 @@ export default function MainLayout() {
         await window.electronAPI.dbQuery(
           `INSERT INTO payments (id, customerId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-          [`PAY-QUICK-${Date.now()}`, customer.id, DEFAULT_SHOP_ID, amount, settleMethod, 'SUCCESS', timestamp, timestamp]
+          [`PAY-QUICK-${Date.now()}`, customer.id, DEFAULT_SHOP_ID, amount, (settleMethod === 'Card' || settleMethod === 'UPI') ? settleMethod : 'Cash', 'SUCCESS', timestamp, timestamp]
         );
 
         // Record Transaction in Accounts
         const txnId = `TXN-${Date.now()}`;
         const txnTimestamp = getLocalDateTime();
-        const mappedBankId = settleMethod === 'BANK' ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank) : null;
+        const mappedBankId = settleMethod === 'Card'
+          ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
+          : (settleMethod === 'UPI'
+            ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
+            : null);
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
@@ -523,17 +540,31 @@ export default function MainLayout() {
           [
             txnId,
             DEFAULT_SHOP_ID,
-            settleMethod,
+            (settleMethod === 'Card' || settleMethod === 'UPI') ? 'BANK' : 'CASH',
             'INCOME',
             'Credit Settlement',
             amount,
-            `Settlement from ${customer.name}${settleMethod === 'BANK' && selectedBank ? ` via ${selectedBank}` : ''}`,
+            `Settlement from ${customer.name}${settleMethod === 'Card' && selectedBank ? ` via Card (${selectedBank})` : (settleMethod === 'UPI' && selectedBank ? ` via UPI (${selectedBank})` : '')}`,
             txnTimestamp,
             timestamp,
             'DollarSign',
             mappedBankId
           ]
         );
+
+        // Record card commission if applicable
+        if (settleMethod === 'Card' && settings.cardCommission > 0) {
+          const commissionRate = parseFloat(settings.cardCommission || 0);
+          const commissionAmount = amount * (commissionRate / 100);
+          const commTxnId = `TXN-COMM-${Date.now()}`;
+          const commDesc = `Card Commission for Credit Settlement ${customer.name}`;
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, timestamp, 'Percent', mappedBankId]
+          );
+        }
 
         // 3. Try to settle orders (simplified FIFO)
         const billsRes = await window.electronAPI.dbQuery(
@@ -558,7 +589,7 @@ export default function MainLayout() {
 
             await window.electronAPI.dbQuery(
               'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-              [newPaid, newDue, newStatus, updatedOrderStatus, settleMethod, timestamp, bill.id]
+              [newPaid, newDue, newStatus, updatedOrderStatus, (settleMethod === 'Card' || settleMethod === 'UPI') ? settleMethod : 'Cash', timestamp, bill.id]
             );
             remaining -= allocate;
           }
@@ -581,14 +612,14 @@ export default function MainLayout() {
         // 1. Update the order
         await window.electronAPI.dbQuery(
           'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          [newPaid, newDue, newStatus, updatedOrderStatus, settleMethod, timestamp, bill.id]
+          [newPaid, newDue, newStatus, updatedOrderStatus, (settleMethod === 'Card' || settleMethod === 'UPI') ? settleMethod : 'Cash', timestamp, bill.id]
         );
 
         // 2. Record Payment linked to specific order
         await window.electronAPI.dbQuery(
           `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-          [`PAY-QUICK-${Date.now()}-${bill.id}`, bill.customerId, bill.id, DEFAULT_SHOP_ID, amount, settleMethod, 'SUCCESS', timestamp, timestamp]
+          [`PAY-QUICK-${Date.now()}-${bill.id}`, bill.customerId, bill.id, DEFAULT_SHOP_ID, amount, (settleMethod === 'Card' || settleMethod === 'UPI') ? settleMethod : 'Cash', 'SUCCESS', timestamp, timestamp]
         );
 
         // 3. Update Customer Balance
@@ -600,7 +631,11 @@ export default function MainLayout() {
         // Record Transaction in Accounts
         const txnId = `TXN-${Date.now()}`;
         const txnTimestamp = getLocalDateTime();
-        const mappedBankId = settleMethod === 'BANK' ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank) : null;
+        const mappedBankId = settleMethod === 'Card'
+          ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
+          : (settleMethod === 'UPI'
+            ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
+            : null);
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
@@ -608,17 +643,31 @@ export default function MainLayout() {
           [
             txnId,
             DEFAULT_SHOP_ID,
-            settleMethod,
+            (settleMethod === 'Card' || settleMethod === 'UPI') ? 'BANK' : 'CASH',
             'INCOME',
             'Sales Settlement',
             amount,
-            `Settlement for Bill #${bill.billNumber || bill.id}${settleMethod === 'BANK' && selectedBank ? ` via ${selectedBank}` : ''}`,
+            `Settlement for Bill #${bill.billNumber || bill.id}${settleMethod === 'Card' && selectedBank ? ` via Card (${selectedBank})` : (settleMethod === 'UPI' && selectedBank ? ` via UPI (${selectedBank})` : '')}`,
             txnTimestamp,
             timestamp,
             'DollarSign',
             mappedBankId
           ]
         );
+
+        // Record card commission if applicable
+        if (settleMethod === 'Card' && settings.cardCommission > 0) {
+          const commissionRate = parseFloat(settings.cardCommission || 0);
+          const commissionAmount = amount * (commissionRate / 100);
+          const commTxnId = `TXN-COMM-${Date.now()}`;
+          const commDesc = `Card Commission for Sales Settlement ${bill.id}`;
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, timestamp, 'Percent', mappedBankId]
+          );
+        }
 
         alert(`Successfully settled ${amount} for Bill #${bill.billNumber || bill.id}`);
       }
@@ -876,7 +925,7 @@ export default function MainLayout() {
                       <HelpCircle size={16} /> Help Center
                     </div>
                     <div className={styles.dropdownItem} onClick={() => window.open('https://wa.me/971588851680', '_blank')}>
-                      <MessageCircle size={16} /> WhatsApp Support
+                      <WhatsAppIcon size={16} /> WhatsApp Support
                     </div>
                     <div className={styles.dropdownItem} onClick={() => window.location.href = 'tel:+971588851680'}>
                       <Phone size={16} /> Call Support
@@ -1142,15 +1191,15 @@ export default function MainLayout() {
                         onChange={(e) => setSettleMethod(e.target.value)}
                         style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0' }}
                       >
-                        <option value="CASH">Cash</option>
-                        <option value="BANK">Bank Transfer</option>
-                        <option value="UPI">Digital (UPI)</option>
+                        <option value="Cash">Cash</option>
+                        <option value="Card">Card</option>
+                        <option value="UPI">UPI</option>
                       </select>
                     </div>
 
-                    {settleMethod === 'BANK' && settings.bankAccounts?.length > 0 && (
+                    {(settleMethod === 'Card' || settleMethod === 'UPI') && settings.bankAccounts?.length > 0 && (
                       <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
-                        <label>Select Bank Account</label>
+                        <label>{settleMethod === 'Card' ? 'Select Bank Account' : 'Select UPI Account'}</label>
                         <select
                           value={selectedBank}
                           onChange={(e) => setSelectedBank(e.target.value)}

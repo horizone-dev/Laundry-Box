@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, Filter, ChevronLeft, ChevronRight, Calendar,
   Clock, Package, CheckCircle, AlertCircle, ChevronDown, 
-  X, Printer, CreditCard, Wallet, User, History, QrCode, MessageCircle, Phone, DollarSign, Truck, Trash2, AlertTriangle, Info, Lock
+  X, Printer, CreditCard, Wallet, User, History, QrCode, Phone, DollarSign, Truck, Trash2, AlertTriangle, Info, Lock
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
+import WhatsAppIcon from '../components/WhatsAppIcon';
 import { QRCodeSVG } from 'qrcode.react';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
@@ -218,6 +219,8 @@ export default function Orders({ isPendingView = false }) {
     if (!method) return '';
     if (method === 'Cash' || method.toUpperCase() === 'CASH') return t('cashaccount', settings.language);
     if (method === 'Bank' || method.toUpperCase() === 'BANK') return t('bankaccount', settings.language);
+    if (method === 'Card' || method.toUpperCase() === 'CARD') return t('card', settings.language);
+    if (method === 'UPI' || method.toUpperCase() === 'UPI') return t('upi', settings.language);
     if (method === 'Not Paid') return t('notPaid', settings.language) || 'Not Paid';
     if (method === 'Mixed') return 'Mixed';
     return method;
@@ -727,12 +730,32 @@ export default function Orders({ isPendingView = false }) {
         const _now2 = new Date();
         const txnTimestamp = `${_now2.getFullYear()}-${String(_now2.getMonth()+1).padStart(2,'0')}-${String(_now2.getDate()).padStart(2,'0')} ${String(_now2.getHours()).padStart(2,'0')}:${String(_now2.getMinutes()).padStart(2,'0')}`;
         
+        const mappedBankId = payMethod === 'Card'
+          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+          : (payMethod === 'UPI'
+            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+            : (payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
+
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, payMethod === 'Bank' ? 'BANK' : 'CASH', 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${selectedOrder.id}`, txnTimestamp, 0, getLocalISOString(), 'DollarSign']
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [txnId, DEFAULT_SHOP_ID, (payMethod === 'Bank' || payMethod === 'Card' || payMethod === 'UPI') ? 'BANK' : 'CASH', 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${selectedOrder.id}${payMethod === 'Card' ? ' (Card)' : (payMethod === 'UPI' ? ' (UPI)' : '')}`, txnTimestamp, 0, getLocalISOString(), 'DollarSign', mappedBankId]
         );
+
+        // Record card commission if applicable
+        if (payMethod === 'Card' && settings.cardCommission > 0) {
+          const commissionRate = parseFloat(settings.cardCommission || 0);
+          const commissionAmount = amountToPay * (commissionRate / 100);
+          const commTxnId = `TXN-COMM-${Date.now()}`;
+          const commDesc = `Card Commission for Order ${selectedOrder.id}`;
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, 0, getLocalISOString(), 'Percent', mappedBankId]
+          );
+        }
 
         // Record Payment in payments table
         const currentTimestamp = getLocalISOString();
@@ -1117,7 +1140,7 @@ export default function Orders({ isPendingView = false }) {
                       className={styles.listReminderBtn}
                       onClick={() => handleWhatsApp(order.customerPhone || order.phone, order.id)}
                     >
-                      <MessageCircle size={16} />
+                      <WhatsAppIcon size={16} />
                     </button>
                   </div>
                 </div>
@@ -1185,7 +1208,7 @@ export default function Orders({ isPendingView = false }) {
                           }}
                           title={t('whatsapp', settings.language)}
                         >
-                          <MessageCircle size={16} />
+                          <WhatsAppIcon size={16} />
                         </button>
                       ) : (
                         <span className={styles.noWaText}>-</span>
@@ -1374,7 +1397,7 @@ export default function Orders({ isPendingView = false }) {
                             className={styles.waBtnMini}
                             onClick={() => handleWhatsApp(selectedOrder.customerPhone || selectedOrder.phone, selectedOrder.id)}
                           >
-                            <MessageCircle size={12} /> {t('whatsapp', settings.language)}
+                            <WhatsAppIcon size={12} /> {t('whatsapp', settings.language)}
                           </button>
                         </div>
                       </div>
@@ -1423,7 +1446,7 @@ export default function Orders({ isPendingView = false }) {
                           }
                           return (
                             <div key={i} className={styles.orderItem}>
-                              <span>{item.qty} x {item.name}{treatmentLabel ? ` (${treatmentLabel})` : ''}</span>
+                              <span>{item.qty} x {item.name}{treatmentLabel ? ` (${treatmentLabel})` : ''}{item.deliveryMethod ? ` [${item.deliveryMethod}]` : ''}</span>
                               <span><CurrencySymbol size={12} /> {((item.price || 0) * (item.qty || 1)).toFixed(2)}</span>
                             </div>
                           );
@@ -1615,11 +1638,18 @@ export default function Orders({ isPendingView = false }) {
                   <span>{t('cashaccount', settings.language)}</span>
                 </div>
                 <div 
-                  className={`${styles.payOption} ${payMethod === 'Bank' ? styles.payOptionActive : ''}`}
-                  onClick={() => setPayMethod('Bank')}
+                  className={`${styles.payOption} ${payMethod === 'Card' ? styles.payOptionActive : ''}`}
+                  onClick={() => setPayMethod('Card')}
                 >
                   <CreditCard size={24} />
-                  <span>{t('bankaccount', settings.language)}</span>
+                  <span>{t('card', settings.language)}</span>
+                </div>
+                <div 
+                  className={`${styles.payOption} ${payMethod === 'UPI' ? styles.payOptionActive : ''}`}
+                  onClick={() => setPayMethod('UPI')}
+                >
+                  <QrCode size={24} />
+                  <span>{t('upi', settings.language)}</span>
                 </div>
               </div>
 

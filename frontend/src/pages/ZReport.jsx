@@ -375,6 +375,7 @@ export default function ZReport() {
     // 3. Payment Breakdown
     let cashSales = 0;
     let cardSales = 0;
+    let upiSales = 0;
     let bankTransfer = 0;
     let creditUnpaid = 0;
     let partialPayments = 0;
@@ -388,6 +389,10 @@ export default function ZReport() {
       } else if (o.paymentStatus === 'Paid') {
         if (o.paymentMethod === 'Cash') {
           cashSales += o.paidAmount || 0;
+        } else if (o.paymentMethod === 'Card') {
+          cardSales += o.paidAmount || 0;
+        } else if (o.paymentMethod === 'UPI') {
+          upiSales += o.paidAmount || 0;
         } else if (o.paymentMethod === 'Bank') {
           // Best effort split Card vs Bank transfer
           cardSales += (o.paidAmount || 0) * 0.6;
@@ -615,10 +620,11 @@ export default function ZReport() {
       
       cashSales,
       cardSales,
+      upiSales,
       bankTransfer,
       creditUnpaid,
       partialPayments,
-      totalCollected: cashSales + cardSales + bankTransfer + partialPayments,
+      totalCollected: cashSales + cardSales + upiSales + bankTransfer + partialPayments,
       
       statusCounts,
       serviceSales,
@@ -687,6 +693,7 @@ export default function ZReport() {
       
       ["Collections", "Cash Sales", zStats.cashSales.toFixed(2)],
       ["Collections", "Card Sales", zStats.cardSales.toFixed(2)],
+      ["Collections", "UPI Sales", zStats.upiSales.toFixed(2)],
       ["Collections", "Bank Transfer", zStats.bankTransfer.toFixed(2)],
       ["Collections", "Credit Outstanding", zStats.creditUnpaid.toFixed(2)],
       ["Collections", "Partial Payments", zStats.partialPayments.toFixed(2)],
@@ -731,7 +738,7 @@ export default function ZReport() {
                  `• *Orders:* ${zStats.totalOrdersCount} (Completed: ${zStats.completedOrdersCount}, Pending: ${zStats.pendingOrdersCount})\n` +
                  `• *Revenue:* ${settings.currencySymbol || 'AED'} ${zStats.totalRevenue.toFixed(2)}\n` +
                  `• *Pieces:* ${zStats.totalPieces} (Delivered: ${zStats.deliveredPieces})\n` +
-                 `• *Collections:* Cash: ${zStats.cashSales.toFixed(2)}, Card: ${zStats.cardSales.toFixed(2)}, Bank: ${zStats.bankTransfer.toFixed(2)}\n` +
+                 `• *Collections:* Cash: ${zStats.cashSales.toFixed(2)}, Card: ${zStats.cardSales.toFixed(2)}, UPI: ${zStats.upiSales.toFixed(2)}, Bank: ${zStats.bankTransfer.toFixed(2)}\n` +
                  `• *Expenses:* ${settings.currencySymbol || 'AED'} ${zStats.totalExpenses.toFixed(2)}\n` +
                  `• *Cash Drawer Diff:* ${zStats.cashDiscrepancy >= 0 ? '+' : ''}${zStats.cashDiscrepancy.toFixed(2)}\n` +
                  `• *Floating Cash:* ${floatingCash.toFixed(2)}, *Withdrawn:* ${withdrawal.toFixed(2)}\n\n` +
@@ -944,6 +951,10 @@ export default function ZReport() {
                 <div className={styles.itemRow}>
                   <span>Card Sales</span>
                   <strong><CurrencySymbol /> {zStats.cardSales.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>UPI Sales</span>
+                  <strong><CurrencySymbol /> {zStats.upiSales.toFixed(2)}</strong>
                 </div>
                 <div className={styles.itemRow}>
                   <span>Bank Transfer</span>

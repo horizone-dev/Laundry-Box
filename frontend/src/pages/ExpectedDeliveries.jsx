@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Search, Filter, Calendar, Clock, Package, CheckCircle, 
-  AlertCircle, MessageCircle, Phone, DollarSign, Truck, 
+  AlertCircle, Phone, DollarSign, Truck, 
   Eye, Printer, ChevronDown, Check, ArrowRight
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import WhatsAppIcon from '../components/WhatsAppIcon';
 import axios from 'axios';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
@@ -297,13 +298,31 @@ export default function ExpectedDeliveries() {
         const txnId = `TXN-${Date.now()}`;
         const _nowEd = new Date();
         const txnTimestamp = `${_nowEd.getFullYear()}-${String(_nowEd.getMonth()+1).padStart(2,'0')}-${String(_nowEd.getDate()).padStart(2,'0')} ${String(_nowEd.getHours()).padStart(2,'0')}:${String(_nowEd.getMinutes()).padStart(2,'0')}`;
-        const mappedBankId = payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null;
+        const mappedBankId = payMethod === 'Card'
+          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+          : (payMethod === 'UPI'
+            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+            : (payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, payMethod === 'Bank' ? 'BANK' : 'CASH', 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${order.id}`, txnTimestamp, timestamp, 'DollarSign', mappedBankId]
+          [txnId, DEFAULT_SHOP_ID, (payMethod === 'Bank' || payMethod === 'Card' || payMethod === 'UPI') ? 'BANK' : 'CASH', 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${order.id}${payMethod === 'Card' ? ' (Card)' : (payMethod === 'UPI' ? ' (UPI)' : '')}`, txnTimestamp, timestamp, 'DollarSign', mappedBankId]
         );
+
+        // Record card commission if applicable
+        if (payMethod === 'Card' && settings.cardCommission > 0) {
+          const commissionRate = parseFloat(settings.cardCommission || 0);
+          const commissionAmount = amountToPay * (commissionRate / 100);
+          const commTxnId = `TXN-COMM-${Date.now()}`;
+          const commDesc = `Card Commission for Order ${order.id}`;
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, timestamp, 'Percent', mappedBankId]
+          );
+        }
 
         // Record payment
         await window.electronAPI.dbQuery(
@@ -630,7 +649,7 @@ export default function ExpectedDeliveries() {
                                 onClick={() => handleWhatsApp(order.customerPhone, order.billNumber || order.id, order.status, order.expectedDeliveryDate)}
                                 title="WhatsApp Reminder"
                               >
-                                <MessageCircle size={14} />
+                                <WhatsAppIcon size={14} />
                               </button>
                             )}
 
@@ -730,9 +749,13 @@ export default function ExpectedDeliveries() {
                   <input type="radio" name="payMethod" value="Cash" checked={payMethod === 'Cash'} onChange={() => setPayMethod('Cash')} />
                   <span>Cash Account</span>
                 </label>
-                <label className={`${styles.methodLabel} ${payMethod === 'Bank' ? styles.activeMethod : ''}`}>
-                  <input type="radio" name="payMethod" value="Bank" checked={payMethod === 'Bank'} onChange={() => setPayMethod('Bank')} />
-                  <span>Bank Account</span>
+                <label className={`${styles.methodLabel} ${payMethod === 'Card' ? styles.activeMethod : ''}`}>
+                  <input type="radio" name="payMethod" value="Card" checked={payMethod === 'Card'} onChange={() => setPayMethod('Card')} />
+                  <span>Card Account</span>
+                </label>
+                <label className={`${styles.methodLabel} ${payMethod === 'UPI' ? styles.activeMethod : ''}`}>
+                  <input type="radio" name="payMethod" value="UPI" checked={payMethod === 'UPI'} onChange={() => setPayMethod('UPI')} />
+                  <span>UPI Account</span>
                 </label>
               </div>
 

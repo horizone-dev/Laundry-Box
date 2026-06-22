@@ -156,6 +156,10 @@
 .itemName {
   font-weight: 700;
   color: #1E293B;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+  display: block;
 }
 
 .itemSub {
@@ -311,6 +315,12 @@
 .template_modern .itemsTable th {
   background: #F1F5F9;
   color: #1E293B;
+}
+
+.template_modern .itemsTableBilingual th {
+  background: #F1F5F9;
+  color: #1E293B;
+  border-bottom: 2px solid #CBD5E1;
 }
 
 /* Template: Compact (Thermal) */
@@ -569,6 +579,7 @@
   width: 100%;
   border-collapse: collapse;
   margin: 0.25rem 0;
+  table-layout: fixed;
 }
 
 .itemsTableBilingual th {
@@ -578,6 +589,10 @@
   color: #475569;
   border-bottom: 2px solid #E2E8F0;
   text-transform: uppercase;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .thAr {
@@ -589,6 +604,10 @@
 .itemsTableBilingual td {
   padding: 0.7rem 0.5rem;
   border-bottom: 1px solid #F1F5F9;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .itemServiceType {
@@ -598,6 +617,11 @@
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
   font-weight: 600;
+  display: inline-block;
+  max-width: 100%;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
 }
 
 .bottomBilingualSection {
@@ -1107,25 +1131,158 @@
 @media print {
   @page {
     size: 148mm 210mm;   /* Exact A5: Width 148mm × Height 210mm */
-    margin: 8mm;
+    margin: 5mm;        /* 5mm edge-to-edge layout margin */
+  }
+
+  .invoicePage {
+    padding: 0 !important;
+    margin: 0 !important;
+    gap: 0 !important;
+    background: transparent !important;
   }
 
   .topBar,
   .footerActions {
-    display: none;
+    display: none !important;
   }
 
   .invoiceCard {
-    box-shadow: none;
-    border: none;
-    padding: 0;
-    gap: 0.75rem;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    gap: 0.3rem !important; /* Extremely tight layout */
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Reduce logo sizing and alignment for compact printing */
+  .invoiceLogo {
+    width: 35px !important;
+    height: 35px !important;
+    border-radius: 6px !important;
+  }
+  
+  .invoiceLogoCompact {
+    max-height: 25px !important;
+    max-width: 40px !important;
+  }
+
+  /* Header compacting */
+  .invoiceHeaderBilingual {
+    gap: 0.75rem !important;
+  }
+  .companyInfoEn h2,
+  .companySideAr h2 {
+    font-size: 1rem !important;
+    margin-bottom: 0.15rem !important;
+  }
+  .companyAddress {
+    font-size: 0.68rem !important;
+    line-height: 1.2 !important;
+    margin-bottom: 0.05rem !important;
+  }
+  .companyContact {
+    font-size: 0.65rem !important;
+    margin-bottom: 0.02rem !important;
+  }
+
+  /* Title & TRN */
+  .titleAndTrnContainer {
+    gap: 0.1rem !important;
+    margin: 0.1rem 0 !important;
+  }
+  .titleTextContainer h1 {
+    font-size: 0.95rem !important;
+    letter-spacing: 0.5px !important;
+  }
+  .trnCenteredBlock {
+    font-size: 0.72rem !important;
+  }
+
+  /* Metadata and customer block */
+  .metaDataBlock {
+    padding: 0.3rem 0.5rem !important;
+    gap: 0.5rem !important;
+    border-radius: 6px !important;
+  }
+  .metaRow {
+    padding-bottom: 0.15rem !important;
+    font-size: 0.72rem !important;
+  }
+  .metaLabelEnAr {
+    font-size: 0.68rem !important;
+  }
+  .metaValue {
+    font-size: 0.72rem !important;
+  }
+
+  .customerBlockBilingual {
+    padding: 0.3rem 0.5rem !important;
+    border-radius: 6px !important;
+  }
+  .customerBlockBilingual h3 {
+    font-size: 0.72rem !important;
+    padding-bottom: 0.25rem !important;
+    margin-bottom: 0.25rem !important;
+  }
+  .customerGrid {
+    gap: 0.75rem !important;
+  }
+  .customerLabelEn {
+    font-size: 0.68rem !important;
+  }
+  .customerVal {
+    font-size: 0.72rem !important;
+  }
+
+  /* Special Instructions */
+  .specialInstructionsBlock {
+    margin-top: 0.15rem !important;
+    margin-bottom: 0.25rem !important;
+    padding: 0.3rem 0.5rem !important;
+    border-radius: 6px !important;
+    font-size: 0.72rem !important;
+  }
+
+  /* Items Table & cell sizing */
+  .itemsTableBilingual th {
+    padding: 0.25rem 0.2rem !important;
+    font-size: 0.68rem !important;
+    border-bottom-width: 1px !important;
+  }
+  .itemsTableBilingual td {
+    padding: 0.25rem 0.2rem !important;
+    font-size: 0.7rem !important;
+  }
+  
+  .thAr {
+    font-size: 0.58rem !important;
+    margin-top: 0.02rem !important;
+  }
+
+  .itemServiceType {
+    font-size: 0.65rem !important;
+    padding: 0.05rem 0.25rem !important;
+    border-radius: 2px !important;
+  }
+
+  /* Redefine column widths specifically for print to account for hidden grip column */
+  .itemsTableBilingual th:nth-child(2),
+  .itemsTableBilingual td:nth-child(2) {
+    width: 23% !important; /* Item name expanded from 20% */
+  }
+  .itemsTableBilingual th:nth-child(3),
+  .itemsTableBilingual td:nth-child(3) {
+    width: 14% !important; /* Package column expanded from 12% */
   }
 
   /* Hide drag grip column on print/PDF */
   .itemsTableBilingual tr td:first-child,
   .itemsTableBilingual tr th:first-child {
-    display: none;
+    display: none !important;
   }
 
   /* Hide all edit-mode UI on print */
@@ -1133,5 +1290,120 @@
   .addItemRowBtn,
   [data-noprint="true"] {
     display: none !important;
+  }
+
+  /* Bottom layout (Bank details + QR Code + Totals) */
+  .bottomBilingualSection {
+    gap: 0.5rem !important;
+  }
+
+  .complianceQrBox {
+    padding: 0.3rem !important;
+    border-radius: 6px !important;
+  }
+  .qrWrapper svg {
+    width: 55px !important;
+    height: 55px !important;
+  }
+
+  .bankTransferDetailsBox {
+    margin-top: 0.15rem !important;
+    padding: 0.3rem 0.5rem !important;
+    border-radius: 6px !important;
+  }
+  .bankTransferDetailsBox h4 {
+    font-size: 0.65rem !important;
+    margin-bottom: 0.15rem !important;
+    padding-bottom: 0.1rem !important;
+  }
+  .bankAccountRow {
+    padding: 0.15rem 0 !important;
+  }
+  .bankName {
+    font-size: 0.68rem !important;
+  }
+  .bankNumbers {
+    font-size: 0.62rem !important;
+  }
+  .defaultBankBadge {
+    font-size: 0.55rem !important;
+    padding: 0.02rem 0.15rem !important;
+  }
+  .defaultBankRow {
+    padding: 0.15rem 0.3rem !important;
+    margin: 1px -0.3rem !important;
+    border-radius: 3px !important;
+  }
+
+  .totalsBilingualBox {
+    gap: 0.5rem !important;
+  }
+  
+  .totalsSubCard {
+    padding: 0.3rem 0.5rem !important;
+    gap: 0.15rem !important;
+    border-radius: 6px !important;
+  }
+  .totalsSubCardHeader {
+    font-size: 0.65rem !important;
+    padding-bottom: 0.15rem !important;
+    margin-bottom: 0.1rem !important;
+  }
+  .totalRowBilingual {
+    font-size: 0.7rem !important;
+  }
+  .highlightRow {
+    padding: 0.2rem 0.3rem !important;
+    border-radius: 3px !important;
+  }
+  .grandTotalBilingualRow {
+    padding: 0.3rem 0.5rem !important;
+    border-radius: 6px !important;
+  }
+  .grandLabelEn {
+    font-size: 0.74rem !important;
+  }
+  .grandLabelAr {
+    font-size: 0.62rem !important;
+  }
+  .grandVal {
+    font-size: 1.05rem !important;
+  }
+
+  /* Compact layout bank transfer details and terms */
+  .bankDetailsCompact {
+    margin-top: 0.35rem !important;
+    padding-top: 0.25rem !important;
+  }
+  .bankDetailsTitleCompact {
+    font-size: 0.62rem !important;
+  }
+  .bankAccountRowCompact {
+    font-size: 0.6rem !important;
+    margin-bottom: 0.08rem !important;
+  }
+
+  .invoiceTermsBox {
+    margin-top: 0.25rem !important;
+    padding: 0.25rem !important;
+  }
+  .termsHeader {
+    font-size: 0.65rem !important;
+    margin-bottom: 0.15rem !important;
+  }
+  .termsTextContent {
+    font-size: 0.58rem !important;
+    line-height: 1.2 !important;
+  }
+  
+  .template_compact .invoiceTermsBox {
+    margin-top: 0.35rem !important;
+    padding-top: 0.25rem !important;
+  }
+  .template_compact .termsHeader {
+    font-size: 0.62rem !important;
+  }
+  .template_compact .termsTextContent {
+    font-size: 0.55rem !important;
   }
 }

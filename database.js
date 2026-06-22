@@ -326,6 +326,9 @@ function initDB(appPath) {
         console.error("Auto-migration of services failed:", migrateErr);
       }
     }
+    if (!serviceCols.some(col => col.name === 'defaultDeliveryMethod')) {
+      db.exec("ALTER TABLE services ADD COLUMN defaultDeliveryMethod TEXT DEFAULT 'Hanger';");
+    }
 
     const deletedOrderCols = db.prepare("PRAGMA table_info(deleted_orders)").all();
     if (!deletedOrderCols.some(col => col.name === 'originalPaymentStatus')) {

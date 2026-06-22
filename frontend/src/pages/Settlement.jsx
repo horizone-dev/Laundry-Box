@@ -5,7 +5,7 @@ import {
   AlertCircle, CreditCard, Wallet, FileText, Send, Printer,
   ChevronRight, ArrowRight, History, Trash2, Download, X,
   Filter, MoreVertical, Plus, Info, Eye, ArrowUpRight, TrendingUp,
-  Share2, MessageSquare, FileDown, Layers, ArrowLeft, Landmark, Check
+  Share2, FileDown, Layers, ArrowLeft, Landmark, Check, QrCode
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID } from '../constants';
@@ -51,11 +51,23 @@ export default function Settlement() {
   }, [selectedCustomer, workspaceTab]);
 
   useEffect(() => {
-    if (settings.bankAccounts && settings.bankAccounts.length > 0 && !selectedBank) {
-      const defaultBank = settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || settings.bankAccounts[0];
-      setSelectedBank(defaultBank.bankName);
+    if (settings.bankAccounts && settings.bankAccounts.length > 0) {
+      if (paymentMethod === 'Card') {
+        const cardBank = settings.bankAccounts.find(acc => acc.id === settings.cardDefaultAccountId) || 
+                         settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || 
+                         settings.bankAccounts[0];
+        setSelectedBank(cardBank.bankName);
+      } else if (paymentMethod === 'UPI') {
+        const upiBank = settings.bankAccounts.find(acc => acc.id === settings.upiDefaultAccountId) || 
+                        settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || 
+                        settings.bankAccounts[0];
+        setSelectedBank(upiBank.bankName);
+      } else if (!selectedBank) {
+        const defaultBank = settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || settings.bankAccounts[0];
+        setSelectedBank(defaultBank.bankName);
+      }
     }
-  }, [settings.bankAccounts, settings.defaultBankId, selectedBank]);
+  }, [paymentMethod, settings.bankAccounts, settings.cardDefaultAccountId, settings.upiDefaultAccountId, settings.defaultBankId, selectedBank]);
 
   // 1. Initial Load of Customer from query params
   useEffect(() => {
@@ -269,9 +281,11 @@ export default function Settlement() {
               const prevMethods = prevPayRes.success ? prevPayRes.data.map(p => p.method) : [];
               const allMethods = [...new Set([...prevMethods, paymentMethod])];
               const hasCash = allMethods.some(m => m === 'Cash');
-              const hasBank = allMethods.some(m => m === 'Bank');
-              if (hasCash && hasBank) newOrderPaymentMethod = 'Mixed';
-              else if (hasBank) newOrderPaymentMethod = 'Bank';
+              const hasCardOrBankOrUPI = allMethods.some(m => m === 'Card' || m === 'Bank' || m === 'UPI');
+              if (hasCash && hasCardOrBankOrUPI) newOrderPaymentMethod = 'Mixed';
+              else if (allMethods.includes('Card')) newOrderPaymentMethod = 'Card';
+              else if (allMethods.includes('UPI')) newOrderPaymentMethod = 'UPI';
+              else if (allMethods.includes('Bank')) newOrderPaymentMethod = 'Bank';
               else newOrderPaymentMethod = 'Cash';
             }
 
@@ -305,7 +319,12 @@ export default function Settlement() {
         // 3. Record Transaction in Accounts
         const txnId = `TXN-${Date.now()}`;
         const txnTimestamp = getLocalDateTime();
-        const mappedBankId = paymentMethod === 'Bank' ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank) : null;
+        const mappedBankId = paymentMethod === 'Card'
+          ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
+          : (paymentMethod === 'UPI'
+            ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
+            : (paymentMethod === 'Bank' ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank) : null));
+
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
@@ -313,17 +332,31 @@ export default function Settlement() {
           [
             txnId,
             DEFAULT_SHOP_ID,
-            paymentMethod === 'Bank' ? 'BANK' : 'CASH',
+            (paymentMethod === 'Bank' || paymentMethod === 'Card' || paymentMethod === 'UPI') ? 'BANK' : 'CASH',
             'INCOME',
             'Credit Settlement',
             amount,
-            `Settlement from ${selectedCustomer.name}${paymentMethod === 'Bank' && selectedBank ? ` via ${selectedBank}` : ''}`,
+            `Settlement from ${selectedCustomer.name}${paymentMethod === 'Card' && selectedBank ? ` via Card (${selectedBank})` : (paymentMethod === 'UPI' && selectedBank ? ` via UPI (${selectedBank})` : (paymentMethod === 'Bank' && selectedBank ? ` via ${selectedBank}` : ''))}`,
             txnTimestamp,
             timestamp,
             'DollarSign',
             mappedBankId
           ]
         );
+
+        // Record card commission if applicable
+        if (paymentMethod === 'Card' && settings.cardCommission > 0) {
+          const commissionRate = parseFloat(settings.cardCommission || 0);
+          const commissionAmount = amount * (commissionRate / 100);
+          const commTxnId = `TXN-COMM-${Date.now()}`;
+          const commDesc = `Card Commission for Credit Settlement ${selectedCustomer.name}`;
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, timestamp, 'Percent', mappedBankId]
+          );
+        }
 
         if (window.electronAPI?.runDataHealer) {
           await window.electronAPI.runDataHealer();
@@ -935,7 +968,8 @@ export default function Settlement() {
                 <div className={styles.methodCardsGrid}>
                   {[
                     { id: 'Cash', label: 'Cash', icon: <Wallet size={20} /> },
-                    { id: 'Bank', label: 'Bank Transfer', icon: <Landmark size={20} /> }
+                    { id: 'Card', label: 'Card Payment', icon: <CreditCard size={20} /> },
+                    { id: 'UPI', label: 'UPI Payment', icon: <QrCode size={20} /> }
                   ].map(method => {
                     const isSelected = paymentMethod === method.id;
                     
@@ -954,9 +988,9 @@ export default function Settlement() {
                 </div>
               </div>
 
-              {paymentMethod === 'BANK' && settings.bankAccounts?.length > 0 && (
+              {(paymentMethod === 'Card' || paymentMethod === 'UPI') && settings.bankAccounts?.length > 0 && (
                 <div className={styles.modalInputGroup} style={{ marginTop: '0.5rem' }}>
-                  <label>Select Bank Account</label>
+                  <label>{paymentMethod === 'Card' ? 'Select Card Account' : 'Select UPI Account'}</label>
                   <div className={styles.largeInputBox} style={{ padding: '0.5rem 1rem' }}>
                     <Landmark size={18} color="#2563EB" />
                     <select
