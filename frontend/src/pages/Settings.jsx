@@ -1769,8 +1769,8 @@ export default function Settings() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', background: '#ECFDF5', border: '1px solid #A7F3D0', padding: '1.5rem', borderRadius: '12px' }}>
                         <CheckCircle size={24} color="#10B981" />
                         <div>
-                          <h4 style={{ color: '#065F46', margin: 0 }}>You are up to date!</h4>
-                          <p style={{ color: '#059669', fontSize: '0.85rem', margin: '0.25rem 0 0 0' }}>This application is currently running the latest version.</p>
+                          <h4 style={{ color: '#065F46', margin: 0 }}>Application is up to date</h4>
+                          <p style={{ color: '#059669', fontSize: '0.85rem', margin: '0.25rem 0 0 0' }}>You are using the latest version.</p>
                         </div>
                       </div>
                       <button

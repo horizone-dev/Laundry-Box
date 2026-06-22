@@ -721,6 +721,7 @@
   flex: 1;
   height: 6px;
   -webkit-appearance: none;
+  appearance: none;
   background: #E2E8F0;
   border-radius: 3px;
   outline: none;

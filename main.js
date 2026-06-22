@@ -789,26 +789,83 @@ ipcMain.handle('silent-backup', async (event, targetPath) => {
 });
 
 // Software Update Handlers
-ipcMain.on('check-for-updates', (event) => {
+function getGitHubToken() {
+  try {
+    const { execSync } = require('child_process');
+    const input = "protocol=https\nhost=github.com\n\n";
+    const output = execSync('git credential fill', { input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+    const match = output.match(/password=(.+)/);
+    return match ? match[1].trim() : null;
+  } catch (err) {
+    console.error('Failed to retrieve git credentials:', err);
+    return null;
+  }
+}
+
+ipcMain.on('check-for-updates', async (event) => {
   const isDev = !app.isPackaged;
   event.reply('update-status', { type: 'checking' });
   
-  setTimeout(() => {
-    if (isDev) {
-      event.reply('update-status', { 
-        type: 'available', 
-        version: '1.1.0', 
-        releaseNotes: '• Added premium Software Update screen.\n• Bidirectional payment synchronization with duplicate protection.\n• General performance optimizations and layout fixes.'
-      });
-    } else {
-      try {
-        const { autoUpdater } = require('electron-updater');
-        autoUpdater.checkForUpdatesAndNotify();
-      } catch (err) {
-        event.reply('update-status', { type: 'error', message: 'Auto-updater not configured or available.' });
+  if (isDev) {
+    try {
+      console.log('Update Check [DEV]: Fetching latest release from GitHub API...');
+      const token = getGitHubToken();
+      const headers = { 'User-Agent': 'Laundry-Box-Updater' };
+      if (token) {
+        headers['Authorization'] = `token ${token}`;
       }
+      
+      const response = await fetch('https://api.github.com/repos/horizone-dev/Laundry-Box/releases/latest', {
+        headers
+      });
+      
+      if (!response.ok) {
+        throw new Error(`GitHub API returned status ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const latestVersion = data.tag_name; // e.g., "v1.0.0"
+      const currentVersion = app.getVersion(); // e.g., "1.0.0"
+      
+      console.log(`Update Check [DEV]: Current Version = v${currentVersion}, Latest GitHub Release = ${latestVersion}`);
+      
+      const cleanVersion = (v) => v.replace(/^v/, '').trim();
+      const currentParsed = cleanVersion(currentVersion).split('.').map(Number);
+      const latestParsed = cleanVersion(latestVersion).split('.').map(Number);
+      
+      let isNewer = false;
+      for (let i = 0; i < 3; i++) {
+        const c = currentParsed[i] || 0;
+        const l = latestParsed[i] || 0;
+        if (l !== c) {
+          isNewer = l > c;
+          break;
+        }
+      }
+      
+      if (isNewer) {
+        console.log(`Update Check [DEV]: Update available! v${cleanVersion(latestVersion)}`);
+        event.reply('update-status', { 
+          type: 'available', 
+          version: cleanVersion(latestVersion), 
+          releaseNotes: data.body || 'No release notes provided.'
+        });
+      } else {
+        console.log(`Update Check [DEV]: No updates available. Application is up to date.`);
+        event.reply('update-status', { type: 'not-available' });
+      }
+    } catch (err) {
+      console.error('Failed to check for updates in dev mode:', err);
+      event.reply('update-status', { type: 'error', message: `Failed to check updates: ${err.message}` });
     }
-  }, 1500);
+  } else {
+    try {
+      const { autoUpdater } = require('electron-updater');
+      autoUpdater.checkForUpdates();
+    } catch (err) {
+      event.reply('update-status', { type: 'error', message: 'Auto-updater not configured or available.' });
+    }
+  }
 });
 
 let downloadInterval = null;
