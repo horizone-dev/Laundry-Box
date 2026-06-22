@@ -31,14 +31,94 @@
 }
 
 /* Tabs */
+.tabsContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-top: 1rem;
+}
+
+.tabsContainer::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 48px;
+  background: linear-gradient(90deg, #F8FAFC 0%, rgba(248, 250, 252, 0) 100%);
+  z-index: 4;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.tabsContainer.hasScrollLeft::before {
+  opacity: 1;
+}
+
+.tabsContainer::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 48px;
+  background: linear-gradient(270deg, #F8FAFC 0%, rgba(248, 250, 252, 0) 100%);
+  z-index: 4;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.tabsContainer.hasScrollRight::after {
+  opacity: 1;
+}
+
+.scrollArrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #E2E8F0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748B;
+  cursor: pointer;
+  z-index: 5;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.scrollArrow:hover {
+  background: #FFFFFF;
+  color: #2563EB;
+  border-color: #BFDBFE;
+  transform: translateY(-50%) scale(1.08);
+  box-shadow: 0 6px 12px rgba(37, 99, 235, 0.15);
+}
+
+.scrollArrowLeft {
+  left: 0;
+}
+
+.scrollArrowRight {
+  right: 0;
+}
+
 .tabs {
   display: flex;
   border-bottom: 1px solid #E2E8F0;
   gap: 2rem;
-  margin-top: 1rem;
   overflow-x: auto;
   white-space: nowrap;
   -webkit-overflow-scrolling: touch;
+  width: 100%;
 }
 
 .tabs::-webkit-scrollbar {

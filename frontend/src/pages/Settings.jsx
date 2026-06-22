@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Upload, CheckCircle, Image as ImageIcon, X, Sliders, Scissors,
   Mail, Phone, Globe, Building2, MapPin, CreditCard, Hash, FileText,
-  Percent, Settings2, Info, Plus, Trash2, Star, DollarSign, Clock, Database, Save, AlertCircle, RefreshCw, Lock, Unlock, Download, Cpu
+  Percent, Settings2, Info, Plus, Trash2, Star, DollarSign, Clock, Database, Save, AlertCircle, RefreshCw, Lock, Unlock, Download, Cpu,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 import getCroppedImg from '../utils/cropImage';
@@ -86,6 +87,36 @@ export default function Settings() {
   const [updateStatus, setUpdateStatus] = useState({ type: 'idle' });
   const [lastCheckTime, setLastCheckTime] = useState(localStorage.getItem('update_last_check') || '');
   const [currentVersion, setCurrentVersion] = useState('1.0.0');
+
+  // Scrollable Tabs State & Logic
+  const tabsRef = useRef(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkScroll = () => {
+    const el = tabsRef.current;
+    if (el) {
+      setCanScrollLeft(el.scrollLeft > 5);
+      setCanScrollRight(el.scrollWidth - el.scrollLeft - el.clientWidth > 5);
+    }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(checkScroll, 150);
+    window.addEventListener('resize', checkScroll);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', checkScroll);
+    };
+  }, [activeTab]);
+
+  const scrollTabs = (direction) => {
+    const el = tabsRef.current;
+    if (el) {
+      const scrollAmount = direction === 'left' ? -200 : 200;
+      el.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
 
 
   useEffect(() => {
@@ -279,16 +310,40 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className={styles.tabs}>
-        {tabs.map(tab => (
-          <div
-            key={tab}
-            className={`${styles.tab} ${activeTab === tab ? styles.active : ''}`}
-            onClick={() => setActiveTab(tab)}
+      <div className={`${styles.tabsContainer} ${canScrollLeft ? styles.hasScrollLeft : ''} ${canScrollRight ? styles.hasScrollRight : ''}`}>
+        {canScrollLeft && (
+          <button 
+            type="button"
+            className={`${styles.scrollArrow} ${styles.scrollArrowLeft}`} 
+            onClick={() => scrollTabs('left')}
+            aria-label="Scroll tabs left"
           >
-            {tab}
-          </div>
-        ))}
+            <ChevronLeft size={20} />
+          </button>
+        )}
+
+        <div className={styles.tabs} ref={tabsRef} onScroll={checkScroll}>
+          {tabs.map(tab => (
+            <div
+              key={tab}
+              className={`${styles.tab} ${activeTab === tab ? styles.active : ''}`}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab}
+            </div>
+          ))}
+        </div>
+
+        {canScrollRight && (
+          <button 
+            type="button"
+            className={`${styles.scrollArrow} ${styles.scrollArrowRight}`} 
+            onClick={() => scrollTabs('right')}
+            aria-label="Scroll tabs right"
+          >
+            <ChevronRight size={20} />
+          </button>
+        )}
       </div>
 
       <div className={styles.settingsGrid}>
