@@ -27,7 +27,7 @@ export default function Settings() {
   const isAuthorized = isSuperAdmin || isManager;
 
   const [activeTab, setActiveTab] = useState(
-    (tabParam === 'Maintenance' || tabParam === 'Software Update') && !isSuperAdmin
+    (tabParam === 'Maintenance' && !(isSuperAdmin || isManager)) || (tabParam === 'Software Update' && !isSuperAdmin)
       ? 'General'
       : (tabParam || 'General')
   );
@@ -41,47 +41,25 @@ export default function Settings() {
   const [pinChangeError, setPinChangeError] = useState('');
   const [pinChangeSuccess, setPinChangeSuccess] = useState('');
 
-  useEffect(() => {
-    if (!isAuthorized) {
-      navigate('/');
-    }
-  }, [isAuthorized, navigate]);
+  // Cropper States
+  const [imageToCrop, setImageToCrop] = useState(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+  const [isCropping, setIsCropping] = useState(false);
 
-  // Sync local credit limit input when settings load
-  useEffect(() => {
-    setCreditLimitInput(String(settings.defaultCreditLimit ?? 500));
-  }, [settings.defaultCreditLimit]);
+  // Workflow Status States
+  const [newStatusInput, setNewStatusInput] = useState('');
+  const [editingStatusIdx, setEditingStatusIdx] = useState(-1);
+  const [editingStatusVal, setEditingStatusVal] = useState('');
 
-  if (!isAuthorized) return null;
-
-  const tabs = [
-    'General', 
-    'Order Workflow', 
-    'Company Info', 
-    'Tax Settings', 
-    'Bill Templates', 
-    'Payment Gateways', 
-    'Damage Notes', 
-    'Printers', 
-    ...(isSuperAdmin ? ['Maintenance', 'Software Update'] : [])
-  ];
+  // Damage Notes States
+  const [newDamageNoteInput, setNewDamageNoteInput] = useState('');
+  const [editingDamageNoteIdx, setEditingDamageNoteIdx] = useState(-1);
+  const [editingDamageNoteVal, setEditingDamageNoteVal] = useState('');
 
   // Printer settings states
   const [availablePrinters, setAvailablePrinters] = useState([]);
-
-  useEffect(() => {
-    const fetchPrinters = async () => {
-      if (window.electronAPI?.getPrinters) {
-        try {
-          const list = await window.electronAPI.getPrinters();
-          setAvailablePrinters(list || []);
-        } catch (err) {
-          console.error("Failed to load printers:", err);
-        }
-      }
-    };
-    fetchPrinters();
-  }, [activeTab]);
 
   // Software Update States
   const [updateStatus, setUpdateStatus] = useState({ type: 'idle' });
@@ -101,15 +79,6 @@ export default function Settings() {
     }
   };
 
-  useEffect(() => {
-    const timer = setTimeout(checkScroll, 150);
-    window.addEventListener('resize', checkScroll);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('resize', checkScroll);
-    };
-  }, [activeTab]);
-
   const scrollTabs = (direction) => {
     const el = tabsRef.current;
     if (el) {
@@ -118,6 +87,25 @@ export default function Settings() {
     }
   };
 
+  useEffect(() => {
+    if (!isAuthorized) {
+      navigate('/');
+    }
+  }, [isAuthorized, navigate]);
+
+  // Sync local credit limit input when settings load
+  useEffect(() => {
+    setCreditLimitInput(String(settings.defaultCreditLimit ?? 500));
+  }, [settings.defaultCreditLimit]);
+
+  useEffect(() => {
+    const timer = setTimeout(checkScroll, 150);
+    window.addEventListener('resize', checkScroll);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', checkScroll);
+    };
+  }, [activeTab]);
 
   useEffect(() => {
     if (tabParam) {
@@ -155,22 +143,60 @@ export default function Settings() {
     };
   }, []);
 
-  // Cropper States
-  const [imageToCrop, setImageToCrop] = useState(null);
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
-  const [isCropping, setIsCropping] = useState(false);
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsCropping(false);
+        setShowPinModal(false);
+        setEnteredPin('');
+        setPinError('');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
-  // Workflow Status States
-  const [newStatusInput, setNewStatusInput] = useState('');
-  const [editingStatusIdx, setEditingStatusIdx] = useState(-1);
-  const [editingStatusVal, setEditingStatusVal] = useState('');
+  useEffect(() => {
+    const isAnyOpen = isCropping || showPinModal;
+    if (isAnyOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [isCropping, showPinModal]);
 
-  // Damage Notes States
-  const [newDamageNoteInput, setNewDamageNoteInput] = useState('');
-  const [editingDamageNoteIdx, setEditingDamageNoteIdx] = useState(-1);
-  const [editingDamageNoteVal, setEditingDamageNoteVal] = useState('');
+  useEffect(() => {
+    const fetchPrinters = async () => {
+      if (window.electronAPI?.getPrinters) {
+        try {
+          const list = await window.electronAPI.getPrinters();
+          setAvailablePrinters(list || []);
+        } catch (err) {
+          console.error("Failed to load printers:", err);
+        }
+      }
+    };
+    fetchPrinters();
+  }, [activeTab]);
+
+  if (!isAuthorized) return null;
+
+  const tabs = [
+    'General', 
+    'Order Workflow', 
+    'Company Info', 
+    'Tax Settings', 
+    'Bill Templates', 
+    'Payment Gateways', 
+    'WhatsApp Config',
+    'Damage Notes', 
+    'Printers', 
+    ...(isSuperAdmin || isManager ? ['Maintenance'] : []),
+    ...(isSuperAdmin ? ['Software Update'] : [])
+  ];
 
   const onCropComplete = (croppedArea, croppedAreaPixels) => {
     setCroppedAreaPixels(croppedAreaPixels);
@@ -443,8 +469,8 @@ export default function Settings() {
                       type="number"
                       step="0.01"
                       className={styles.inputField}
-                      value={settings.cardCommission ?? 0}
-                      onChange={(e) => updateSettings({ cardCommission: parseFloat(e.target.value) || 0 })}
+                      value={settings.cardCommission ?? ''}
+                      onChange={(e) => updateSettings({ cardCommission: e.target.value })}
                     />
                   </div>
                   <div className={styles.formGroup}>
@@ -490,8 +516,9 @@ export default function Settings() {
                       <input
                         type="number"
                         className={styles.inputField}
-                        value={settings.overdueDays || 7}
-                        onChange={(e) => updateSettings({ overdueDays: parseInt(e.target.value) })}
+                        placeholder="7"
+                        value={settings.overdueDays ?? ''}
+                        onChange={(e) => updateSettings({ overdueDays: e.target.value })}
                       />
                     </div>
                   </div>
@@ -539,8 +566,9 @@ export default function Settings() {
                       <input
                         type="number"
                         className={styles.inputField}
-                        value={settings.lateDeliveryDays || 3}
-                        onChange={(e) => updateSettings({ lateDeliveryDays: parseInt(e.target.value) || 0 })}
+                        placeholder="3"
+                        value={settings.lateDeliveryDays ?? ''}
+                        onChange={(e) => updateSettings({ lateDeliveryDays: e.target.value })}
                       />
                     </div>
                   </div>
@@ -1091,8 +1119,8 @@ export default function Settings() {
                         step="0.01"
                         disabled={!settings.isTaxEnabled}
                         placeholder="5.00"
-                        value={settings.taxRate}
-                        onChange={(e) => updateSettings({ taxRate: parseFloat(e.target.value) || 0 })}
+                        value={settings.taxRate ?? ''}
+                        onChange={(e) => updateSettings({ taxRate: e.target.value })}
                       />
                     </div>
                     <div className={styles.presets}>
@@ -1154,12 +1182,12 @@ export default function Settings() {
                     <span className={styles.statValue}><CurrencySymbol size={14} /> 100.00</span>
                   </div>
                   <div className={styles.statItem}>
-                    <span className={styles.statLabel}>{settings.taxName} ({settings.taxRate}%)</span>
+                    <span className={styles.statLabel}>{settings.taxName} ({(parseFloat(settings.taxRate) || 0)}%)</span>
                     <span className={styles.statValue}>
                       {settings.isTaxEnabled ? (
                         settings.taxMethod === 'inclusive'
-                          ? <><CurrencySymbol size={14} /> {(100 - (100 / (1 + (settings.taxRate / 100)))).toFixed(2)}</>
-                          : <><CurrencySymbol size={14} /> {(100 * settings.taxRate / 100).toFixed(2)}</>
+                          ? <><CurrencySymbol size={14} /> {(100 - (100 / (1 + ((parseFloat(settings.taxRate) || 0) / 100)))).toFixed(2)}</>
+                          : <><CurrencySymbol size={14} /> {(100 * (parseFloat(settings.taxRate) || 0) / 100).toFixed(2)}</>
                       ) : <><CurrencySymbol size={14} /> 0.00</>}
                     </span>
                   </div>
@@ -1171,8 +1199,8 @@ export default function Settings() {
                     <span className={styles.statValue} style={{ fontWeight: 800, color: '#2563EB' }}>
                       {settings.isTaxEnabled ? (
                         settings.taxMethod === 'inclusive'
-                          ? <><CurrencySymbol size={14} /> {(100 / (1 + (settings.taxRate / 100))).toFixed(2)}</>
-                          : <><CurrencySymbol size={14} /> {(100 + (100 * settings.taxRate / 100)).toFixed(2)}</>
+                          ? <><CurrencySymbol size={14} /> {(100 / (1 + ((parseFloat(settings.taxRate) || 0) / 100))).toFixed(2)}</>
+                          : <><CurrencySymbol size={14} /> {(100 + (100 * (parseFloat(settings.taxRate) || 0) / 100)).toFixed(2)}</>
                       ) : <><CurrencySymbol size={14} /> 100.00</>}
                     </span>
                   </div>
@@ -1484,6 +1512,102 @@ export default function Settings() {
             </div>
           )}
 
+          {activeTab === 'WhatsApp Config' && (
+            <div className={styles.profileContainer}>
+              <div className={styles.card}>
+                <h2 className={styles.cardTitle}>WhatsApp Integration Preferences</h2>
+                <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.5rem' }}>
+                  Configure your default country prefix and customizable messaging templates for customer communications.
+                </p>
+
+                <div className={styles.formGrid}>
+                  <div className={styles.formGroup}>
+                    <label>WhatsApp Default Country Code</label>
+                    <div className={styles.inputWrapper}>
+                      <Globe size={18} color="#94A3B8" />
+                      <input
+                        type="text"
+                        className={styles.inputField}
+                        placeholder="e.g. 971 for UAE, 91 for India"
+                        value={settings.waCountryCode || ''}
+                        onChange={(e) => updateSettings({ waCountryCode: e.target.value.replace(/\D/g, '') })}
+                      />
+                    </div>
+                    <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Automatically prepends this prefix to phone numbers when initiating chats.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Messaging templates */}
+              <div className={styles.card}>
+                <h2 className={styles.cardTitle}>WhatsApp Message Templates</h2>
+                <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.5rem' }}>
+                  Define custom content templates for automated text notifications. Use placeholders like <code>{"{customerName}"}</code>, <code>{"{orderId}"}</code>, <code>{"{total}"}</code>, <code>{"{dueAmount}"}</code>, and <code>{"{deliveryDate}"}</code>.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                  <div className={styles.formGroup}>
+                    <label>New Order / Invoice Confirmation Message</label>
+                    <textarea
+                      className={styles.inputField}
+                      style={{ minHeight: '100px', padding: '0.75rem', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box', border: '1px solid #CBD5E1', borderRadius: '8px' }}
+                      placeholder="e.g. Hello {customerName}! Your laundry bill for {orderId} of {total} has been saved. Thank you!"
+                      value={settings.waNewOrderTemplate || ''}
+                      onChange={(e) => updateSettings({ waNewOrderTemplate: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Sent right after recording a new POS transaction.
+                    </p>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Order Ready / Pick-up Message</label>
+                    <textarea
+                      className={styles.inputField}
+                      style={{ minHeight: '100px', padding: '0.75rem', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box', border: '1px solid #CBD5E1', borderRadius: '8px' }}
+                      placeholder="e.g. Dear {customerName}, your order {orderId} is now ready for pick-up! Total due is {dueAmount}. Thank you!"
+                      value={settings.waOrderReadyTemplate || ''}
+                      onChange={(e) => updateSettings({ waOrderReadyTemplate: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Sent when updating the workflow stage to "Ready" or "Ready to Pick up".
+                    </p>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Payment / Overdue Outstanding Reminder</label>
+                    <textarea
+                      className={styles.inputField}
+                      style={{ minHeight: '100px', padding: '0.75rem', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box', border: '1px solid #CBD5E1', borderRadius: '8px' }}
+                      placeholder="e.g. Hello {customerName}, this is a gentle reminder that an amount of {dueAmount} is pending for order {orderId}. Kindly settle at your earliest convenience."
+                      value={settings.waReminderTemplate || ''}
+                      onChange={(e) => updateSettings({ waReminderTemplate: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Sent from the Order Management screen or Statement page.
+                    </p>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Statement / Credit Notification Template</label>
+                    <textarea
+                      className={styles.inputField}
+                      style={{ minHeight: '100px', padding: '0.75rem', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box', border: '1px solid #CBD5E1', borderRadius: '8px' }}
+                      placeholder="e.g. Hello {customerName}, your current outstanding balance is {dueAmount}. Please find your statement attached."
+                      value={settings.waStatementTemplate || ''}
+                      onChange={(e) => updateSettings({ waStatementTemplate: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Sent from the Customer Statements page.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'Printers' && (
             <div className={styles.profileContainer}>
               <div className={styles.card}>
@@ -1586,36 +1710,38 @@ export default function Settings() {
                     </div>
                   </div>
 
-                  <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem', marginTop: '1.5rem' }}>
-                    <div className={styles.backupIcon} style={{ background: '#F3E8FF', padding: '1rem', borderRadius: '12px' }}>
-                      <Upload size={32} color="#7C3AED" />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Import / Restore Database Backup</h3>
-                      <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
-                        Choose a previously exported backup file (`laundry_pos_backup.sqlite` or any `.sqlite`/`.db` backup) to restore all data.
-                        This will completely replace the active database and reload the application.
-                      </p>
-                      <button
-                        className={styles.saveBtn}
-                        style={{ background: '#7C3AED', padding: '0.75rem 1.5rem' }}
-                        onClick={async () => {
-                          if (window.electronAPI?.importDatabase) {
-                            if (confirm('WARNING: Importing a backup will completely replace your current database and restart the application view. Are you sure you want to proceed?')) {
-                              const result = await window.electronAPI.importDatabase();
-                              if (result.success) {
-                                alert('Database imported and restored successfully!');
-                              } else if (result.error !== 'Cancelled') {
-                                alert('Restore failed: ' + result.error);
+                  {isSuperAdmin && (
+                    <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem', marginTop: '1.5rem' }}>
+                      <div className={styles.backupIcon} style={{ background: '#F3E8FF', padding: '1rem', borderRadius: '12px' }}>
+                        <Upload size={32} color="#7C3AED" />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Import / Restore Database Backup</h3>
+                        <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                          Choose a previously exported backup file (`laundry_pos_backup.sqlite` or any `.sqlite`/`.db` backup) to restore all data.
+                          This will completely replace the active database and reload the application.
+                        </p>
+                        <button
+                          className={styles.saveBtn}
+                          style={{ background: '#7C3AED', padding: '0.75rem 1.5rem' }}
+                          onClick={async () => {
+                            if (window.electronAPI?.importDatabase) {
+                              if (confirm('WARNING: Importing a backup will completely replace your current database and restart the application view. Are you sure you want to proceed?')) {
+                                const result = await window.electronAPI.importDatabase();
+                                if (result.success) {
+                                  alert('Database imported and restored successfully!');
+                                } else if (result.error !== 'Cancelled') {
+                                  alert('Restore failed: ' + result.error);
+                                }
                               }
                             }
-                          }
-                        }}
-                      >
-                        <Upload size={18} /> Choose Backup File & Restore
-                      </button>
+                          }}
+                        >
+                          <Upload size={18} /> Choose Backup File & Restore
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem', marginTop: '1.5rem' }}>
                     <div className={styles.backupIcon} style={{ background: '#ECFDF5', padding: '1rem', borderRadius: '12px' }}>
@@ -1894,8 +2020,8 @@ export default function Settings() {
       </div>
       {/* Cropper Modal */}
       {isCropping && (
-        <div className={styles.cropperModalOverlay}>
-          <div className={styles.cropperModal}>
+        <div className={styles.cropperModalOverlay} onClick={() => setIsCropping(false)}>
+          <div className={styles.cropperModal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.cropperHeader}>
               <div className={styles.modalTitle}>
                 <Scissors size={20} color="#2563EB" />
@@ -1941,8 +2067,8 @@ export default function Settings() {
 
       {/* PIN Verification Modal */}
       {showPinModal && (
-        <div className={styles.cropperModalOverlay}>
-          <div className={styles.cropperModal} style={{ width: '380px' }}>
+        <div className={styles.cropperModalOverlay} onClick={() => { setShowPinModal(false); setEnteredPin(''); setPinError(''); }}>
+          <div className={styles.cropperModal} style={{ width: '380px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.cropperHeader}>
               <div className={styles.modalTitle}>
                 <Lock size={20} color="#2563EB" />

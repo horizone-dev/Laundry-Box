@@ -8,6 +8,7 @@ import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { getLocalDateBounds, isWithinBounds } from '../utils/dateFilters';
+import Pagination from '../components/Pagination';
 import styles from './CancelledOrdersReport.module.css';
 
 const containerVariants = {
@@ -309,48 +310,14 @@ export default function CancelledOrdersReport() {
               </tfoot>
             </table>
 
-            {filteredOrders.length > 0 && (() => {
-              const totalPages = Math.ceil(filteredOrders.length / 20);
-              if (totalPages <= 1) return null;
-              return (
-                <div className={styles.pagination} data-noprint="true">
-                  <span className={styles.paginationInfo}>
-                    Showing {Math.min(filteredOrders.length, (currentPage - 1) * 20 + 1)}-{Math.min(filteredOrders.length, currentPage * 20)} of {filteredOrders.length} orders
-                  </span>
-                  <div className={styles.paginationButtons}>
-                    <button 
-                      type="button"
-                      className={styles.pageBtn} 
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                    >
-                      Previous
-                    </button>
-                    {[...Array(totalPages)].map((_, idx) => {
-                      const pageNum = idx + 1;
-                      return (
-                        <button 
-                          type="button"
-                          key={pageNum}
-                          className={`${styles.pageBtn} ${currentPage === pageNum ? styles.active : ''}`}
-                          onClick={() => setCurrentPage(pageNum)}
-                        >
-                          {pageNum}
-                        </button>
-                      );
-                    })}
-                    <button 
-                      type="button"
-                      className={styles.pageBtn} 
-                      disabled={currentPage === totalPages}
-                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
+            <Pagination
+              currentPage={currentPage}
+              totalPages={Math.ceil(filteredOrders.length / 20)}
+              onPageChange={setCurrentPage}
+              totalItems={filteredOrders.length}
+              pageSize={20}
+              itemLabel="orders"
+            />
           </>
         )}
       </motion.div>

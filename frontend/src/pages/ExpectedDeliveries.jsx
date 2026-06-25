@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import WhatsAppIcon from '../components/WhatsAppIcon';
+import Pagination from '../components/Pagination';
 import axios from 'axios';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
@@ -48,6 +49,28 @@ export default function ExpectedDeliveries() {
     fetchOrders();
   }, [searchTerm]);
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowPayModal(false);
+        setSelectedOrderForPay(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (showPayModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showPayModal]);
+
   const fetchOrders = async () => {
     try {
       setLoading(true);
@@ -59,9 +82,9 @@ export default function ExpectedDeliveries() {
         `;
         let params = [];
         if (searchTerm) {
-          query += ' WHERE orders.id LIKE ? OR orders.billNumber LIKE ? OR customers.name LIKE ? OR customers.phone LIKE ?';
+          query += ' WHERE orders.id LIKE ? OR orders.billNumber LIKE ? OR customers.name LIKE ? OR customers.phone LIKE ? OR orders.status LIKE ? OR orders.paymentStatus LIKE ?';
           const term = `%${searchTerm}%`;
-          params = [term, term, term, term];
+          params = [term, term, term, term, term, term];
         }
         query += " ORDER BY CASE WHEN orders.expectedDeliveryDate IS NULL OR orders.expectedDeliveryDate = '' THEN 1 ELSE 0 END, orders.expectedDeliveryDate ASC, orders.createdAt DESC";
         
@@ -238,9 +261,14 @@ export default function ExpectedDeliveries() {
     }
 
     let cleanPhone = phone.toString().replace(/\D/g, '');
-    const countryCode = settings.waCountryCode || '971';
-    if (countryCode && !cleanPhone.startsWith(countryCode)) {
-      cleanPhone = countryCode + cleanPhone;
+    
+    // Prepend country code if original phone doesn't start with '+'
+    if (!phone.toString().trim().startsWith('+')) {
+      const countryCode = settings.waCountryCode || '971';
+      const cleanCountryCode = countryCode.replace(/\D/g, '');
+      if (cleanCountryCode && !cleanPhone.startsWith(cleanCountryCode)) {
+        cleanPhone = cleanCountryCode + cleanPhone;
+      }
     }
 
     let formattedExp = 'Not Scheduled';
@@ -252,7 +280,13 @@ export default function ExpectedDeliveries() {
         formattedExp = formatDate(expDate);
       }
     }
-    const message = `Hello! Regarding your laundry order #${id}, the current status is "${status}". Expected delivery date is ${formattedExp}. Thank you!`;
+    let message = `Hello! Regarding your laundry order #${id}, the current status is "${status}". Expected delivery date is ${formattedExp}. Thank you!`;
+
+    const orderMatch = orders.find(o => o.id === id || o.billNumber === id);
+    if (orderMatch && orderMatch.dueAmount > 0) {
+      message += `\n\nFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${orderMatch.dueAmount.toFixed(2)}.`;
+    }
+
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
 
     if (window.electronAPI?.openExternal) {
@@ -281,17 +315,19 @@ export default function ExpectedDeliveries() {
 
       if (window.electronAPI?.dbQuery) {
         // Update order
-        await window.electronAPI.dbQuery(
+        const r1 = await window.electronAPI.dbQuery(
           'UPDATE orders SET status = ?, paymentStatus = ?, paidAmount = ?, dueAmount = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
           [nextStatus, 'Paid', order.totalAmount, 0, payMethod, timestamp, order.id]
         );
+        if (!r1.success) throw new Error(r1.error || 'Failed to update order status');
 
         // Update customer balance
         if (order.customerId && order.customerId !== 'Walk-in') {
-          await window.electronAPI.dbQuery(
+          const r2 = await window.electronAPI.dbQuery(
             'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
             [amountToPay, timestamp, order.customerId]
           );
+          if (!r2.success) throw new Error(r2.error || 'Failed to update customer balance');
         }
 
         // Record account transaction
@@ -303,12 +339,13 @@ export default function ExpectedDeliveries() {
           : (payMethod === 'UPI'
             ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
             : (payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
-        await window.electronAPI.dbQuery(
+        const r3 = await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
           [txnId, DEFAULT_SHOP_ID, (payMethod === 'Bank' || payMethod === 'Card' || payMethod === 'UPI') ? 'BANK' : 'CASH', 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${order.id}${payMethod === 'Card' ? ' (Card)' : (payMethod === 'UPI' ? ' (UPI)' : '')}`, txnTimestamp, timestamp, 'DollarSign', mappedBankId]
         );
+        if (!r3.success) throw new Error(r3.error || 'Failed to insert account transaction');
 
         // Record card commission if applicable
         if (payMethod === 'Card' && settings.cardCommission > 0) {
@@ -316,20 +353,22 @@ export default function ExpectedDeliveries() {
           const commissionAmount = amountToPay * (commissionRate / 100);
           const commTxnId = `TXN-COMM-${Date.now()}`;
           const commDesc = `Card Commission for Order ${order.id}`;
-          await window.electronAPI.dbQuery(
+          const r4 = await window.electronAPI.dbQuery(
             `INSERT INTO account_transactions 
              (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
             [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, timestamp, 'Percent', mappedBankId]
           );
+          if (!r4.success) throw new Error(r4.error || 'Failed to insert card commission');
         }
 
         // Record payment
-        await window.electronAPI.dbQuery(
+        const r5 = await window.electronAPI.dbQuery(
           `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
           [`PAY-DELIV-${order.id}`, order.customerId || 'Walk-in', order.id, DEFAULT_SHOP_ID, amountToPay, payMethod, 'SUCCESS', timestamp, timestamp]
         );
+        if (!r5.success) throw new Error(r5.error || 'Failed to insert payment record');
 
         // Run data healer
         if (window.electronAPI?.runDataHealer) {
@@ -632,16 +671,7 @@ export default function ExpectedDeliveries() {
                                 <Truck size={14} /> Deliver
                               </button>
                             )}
-                            
-                            {order.dueAmount > 0 && order.status !== 'Cancelled' && (
-                              <button 
-                                className={styles.settleBtn}
-                                onClick={() => openPaymentModal(order)}
-                                title="Settle Dues"
-                              >
-                                <DollarSign size={14} /> Settle
-                              </button>
-                            )}
+
 
                             {order.customerPhone && (
                               <button 
@@ -690,53 +720,22 @@ export default function ExpectedDeliveries() {
           </tbody>
         </table>
 
-        {/* Pagination controls at the bottom of the card */}
-        {(() => {
-          const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
-          if (totalPages <= 1) return null;
-
-          return (
-            <div className={styles.paginationRow}>
-              <span className={styles.paginationInfo}>
-                Showing {Math.min(filteredOrders.length, (currentPage - 1) * itemsPerPage + 1)}-{Math.min(filteredOrders.length, currentPage * itemsPerPage)} of {filteredOrders.length} orders
-              </span>
-              <div className={styles.paginationBtns}>
-                <button 
-                  className={styles.paginationBtn} 
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                >
-                  Previous
-                </button>
-                {[...Array(totalPages)].map((_, idx) => {
-                  const pageNum = idx + 1;
-                  return (
-                    <button 
-                      key={pageNum}
-                      className={`${styles.paginationBtn} ${currentPage === pageNum ? styles.paginationActiveBtn : ''}`}
-                      onClick={() => setCurrentPage(pageNum)}
-                    >
-                      {pageNum}
-                    </button>
-                  );
-                })}
-                <button 
-                  className={styles.paginationBtn} 
-                  disabled={currentPage === totalPages}
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          );
-        })()}
+        {!loading && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={Math.ceil(filteredOrders.length / itemsPerPage)}
+            onPageChange={setCurrentPage}
+            totalItems={filteredOrders.length}
+            pageSize={itemsPerPage}
+            itemLabel="orders"
+          />
+        )}
       </div>
 
       {/* Settle Payment Modal */}
       {showPayModal && selectedOrderForPay && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
+        <div className={styles.modalOverlay} onClick={() => { setShowPayModal(false); setSelectedOrderForPay(null); }}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h3>Record Payment for #{selectedOrderForPay.billNumber || selectedOrderForPay.id}</h3>
               <button className={styles.closeBtn} onClick={() => { setShowPayModal(false); setSelectedOrderForPay(null); }}>&times;</button>

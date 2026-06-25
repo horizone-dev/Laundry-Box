@@ -64,6 +64,7 @@ export default function ZReport() {
   const [modalActualCash, setModalActualCash] = useState(0);
   const [modalFloatingCash, setModalFloatingCash] = useState(200);
   const [modalWithdrawal, setModalWithdrawal] = useState(0);
+  const [modalOpeningCash, setModalOpeningCash] = useState(200);
 
   // Timezone-aware date/time formatter for shift close
   const formatShiftTime = (date) => {
@@ -96,6 +97,29 @@ export default function ZReport() {
     return dateTimeStr;
   };
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowCloseModal(false);
+        setShowReopenModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const isAnyOpen = showCloseModal || showReopenModal;
+    if (isAnyOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showCloseModal, showReopenModal]);
+
   // Load shift state from localStorage or initialize with defaults
   useEffect(() => {
     const key = `shift_state_${selectedDate}`;
@@ -107,24 +131,24 @@ export default function ZReport() {
         const parsed = JSON.parse(stored);
         setShiftState(parsed);
         if (parsed.openingCash !== undefined) {
-          setOpeningCash(parsed.openingCash);
+          setOpeningCash(Number(parsed.openingCash) || 0);
         }
         if (parsed.actualCash !== undefined) {
-          setActualCash(parsed.actualCash);
+          setActualCash(Number(parsed.actualCash) || 0);
           setUserEditedActualCash(true);
         } else {
           setUserEditedActualCash(false);
         }
         if (parsed.floatingCash !== undefined) {
-          setFloatingCash(parsed.floatingCash);
+          setFloatingCash(Number(parsed.floatingCash) || 0);
         } else {
-          setFloatingCash(parsed.openingCash !== undefined ? parsed.openingCash : 200);
+          setFloatingCash(parsed.openingCash !== undefined ? Number(parsed.openingCash) : 200);
         }
         if (parsed.withdrawal !== undefined) {
-          setWithdrawal(parsed.withdrawal);
+          setWithdrawal(Number(parsed.withdrawal) || 0);
         } else {
-          const act = parsed.actualCash !== undefined ? parsed.actualCash : 200;
-          const fl = parsed.floatingCash !== undefined ? parsed.floatingCash : (parsed.openingCash !== undefined ? parsed.openingCash : 200);
+          const act = parsed.actualCash !== undefined ? Number(parsed.actualCash) : 200;
+          const fl = parsed.floatingCash !== undefined ? Number(parsed.floatingCash) : (parsed.openingCash !== undefined ? Number(parsed.openingCash) : 200);
           setWithdrawal(Math.max(0, act - fl));
         }
       } catch (e) {
@@ -155,6 +179,7 @@ export default function ZReport() {
   }, [selectedDate, user.name]);
 
   const handleOpenShiftClick = () => {
+    setModalOpeningCash(openingCash);
     setShowReopenModal(true);
   };
 
@@ -163,14 +188,17 @@ export default function ZReport() {
     const key = `shift_state_${selectedDate}`;
     const now = new Date();
     const formattedTime = formatShiftTime(now);
+    const opCash = parseFloat(modalOpeningCash) || 0;
     const updated = {
       ...shiftState,
       status: 'ACTIVE',
       openingTime: formattedTime,
       closingTime: 'N/A',
-      closedBy: 'N/A'
+      closedBy: 'N/A',
+      openingCash: opCash
     };
     setShiftState(updated);
+    setOpeningCash(opCash);
     localStorage.setItem(key, JSON.stringify(updated));
     setShowReopenModal(false);
   };
@@ -187,19 +215,23 @@ export default function ZReport() {
     const key = `shift_state_${selectedDate}`;
     const now = new Date();
     const formattedTime = formatShiftTime(now);
+    const actCashNum = Number(modalActualCash) || 0;
+    const floatCashNum = Number(modalFloatingCash) || 0;
+    const withdrawNum = Number(modalWithdrawal) || 0;
+
     const updated = {
       ...shiftState,
       status: 'CLOSED',
       closingTime: formattedTime,
       closedBy: user.name || 'Admin',
-      actualCash: modalActualCash,
-      floatingCash: modalFloatingCash,
-      withdrawal: modalWithdrawal
+      actualCash: actCashNum,
+      floatingCash: floatCashNum,
+      withdrawal: withdrawNum
     };
     setShiftState(updated);
-    setActualCash(modalActualCash);
-    setFloatingCash(modalFloatingCash);
-    setWithdrawal(modalWithdrawal);
+    setActualCash(actCashNum);
+    setFloatingCash(floatCashNum);
+    setWithdrawal(withdrawNum);
     setUserEditedActualCash(true);
     localStorage.setItem(key, JSON.stringify(updated));
     setShowCloseModal(false);
@@ -275,6 +307,75 @@ export default function ZReport() {
         });
       } else {
         setTopCustomer({ name: 'N/A', amount: 0 });
+      }
+
+      // Calculate actual opening and closing time based on activities of that day
+      let earliestTime = null;
+      let latestTime = null;
+      
+      const checkTime = (dateStr) => {
+        if (!dateStr) return;
+        try {
+          // Normalize SQLite timestamps if needed, new Date handles most formats
+          const t = new Date(dateStr).getTime();
+          if (!isNaN(t)) {
+            if (earliestTime === null || t < earliestTime) earliestTime = t;
+            if (latestTime === null || t > latestTime) latestTime = t;
+          }
+        } catch (e) {}
+      };
+      
+      const fetchedOrders = ordersRes.success ? ordersRes.data : [];
+      const fetchedExpenses = expensesRes.success ? expensesRes.data : [];
+      const fetchedTxns = txnsRes.success ? txnsRes.data : [];
+
+      fetchedOrders.forEach(o => checkTime(o.createdAt));
+      fetchedExpenses.forEach(e => checkTime(e.date));
+      fetchedTxns.forEach(t => checkTime(t.date));
+
+      const isToday = selectedDate === new Date().toISOString().split('T')[0];
+      const defaultOpTime = earliestTime ? formatShiftTime(new Date(earliestTime)) : `${selectedDate} 08:00 AM`;
+      const defaultClTime = isToday ? 'N/A' : (latestTime ? formatShiftTime(new Date(latestTime)) : `${selectedDate} 10:15 PM`);
+
+      // Update shiftState if it exists in local storage or is currently active
+      const shiftKey = `shift_state_${selectedDate}`;
+      const storedShift = localStorage.getItem(shiftKey);
+      if (storedShift) {
+        try {
+          const parsed = JSON.parse(storedShift);
+          let updated = false;
+          
+          // Only update if current times are the default hardcoded placeholders or empty
+          if ((parsed.openingTime === `${selectedDate} 08:00 AM` || !parsed.openingTime) && earliestTime) {
+            parsed.openingTime = defaultOpTime;
+            updated = true;
+          }
+          if (parsed.status !== 'ACTIVE') {
+            if ((parsed.closingTime === `${selectedDate} 10:15 PM` || !parsed.closingTime || parsed.closingTime === 'N/A') && latestTime) {
+              parsed.closingTime = defaultClTime;
+              updated = true;
+            }
+          }
+          
+          if (updated) {
+            localStorage.setItem(shiftKey, JSON.stringify(parsed));
+            setShiftState(parsed);
+            
+            if (parsed.openingCash !== undefined) setOpeningCash(Number(parsed.openingCash) || 0);
+            if (parsed.actualCash !== undefined) {
+              setActualCash(Number(parsed.actualCash) || 0);
+              setUserEditedActualCash(true);
+            }
+            if (parsed.floatingCash !== undefined) {
+              setFloatingCash(Number(parsed.floatingCash) || 0);
+            }
+            if (parsed.withdrawal !== undefined) {
+              setWithdrawal(Number(parsed.withdrawal) || 0);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to update shift times:", e);
+        }
       }
 
     } catch (err) {
@@ -353,7 +454,7 @@ export default function ZReport() {
     const completedOrdersCount = activeOrders.filter(o => o.status === 'Delivered').length;
     const pendingOrdersCount = totalOrdersCount - completedOrdersCount;
     
-    const totalRevenue = activeOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+    const totalRevenue = activeOrders.reduce((sum, o) => sum + (parseFloat(o.totalAmount) || 0), 0);
     const avgOrderValue = totalOrdersCount > 0 ? totalRevenue / totalOrdersCount : 0;
     
     let totalPieces = 0;
@@ -381,24 +482,29 @@ export default function ZReport() {
     let partialPayments = 0;
 
     activeOrders.forEach(o => {
-      if (o.paymentStatus === 'Credit') {
-        creditUnpaid += o.dueAmount || 0;
-      } else if (o.paymentStatus === 'Partial') {
-        partialPayments += o.paidAmount || 0;
-        creditUnpaid += o.dueAmount || 0;
-      } else if (o.paymentStatus === 'Paid') {
-        if (o.paymentMethod === 'Cash') {
-          cashSales += o.paidAmount || 0;
-        } else if (o.paymentMethod === 'Card') {
-          cardSales += o.paidAmount || 0;
-        } else if (o.paymentMethod === 'UPI') {
-          upiSales += o.paidAmount || 0;
-        } else if (o.paymentMethod === 'Bank') {
+      const payStatusLower = (o.paymentStatus || '').toLowerCase();
+      const payMethodLower = (o.paymentMethod || '').toLowerCase();
+      const paid = parseFloat(o.paidAmount) || 0;
+      const due = parseFloat(o.dueAmount) || 0;
+
+      if (payStatusLower === 'credit') {
+        creditUnpaid += due;
+      } else if (payStatusLower === 'partial') {
+        partialPayments += paid;
+        creditUnpaid += due;
+      } else if (payStatusLower === 'paid') {
+        if (payMethodLower === 'cash') {
+          cashSales += paid;
+        } else if (payMethodLower === 'card') {
+          cardSales += paid;
+        } else if (payMethodLower === 'upi') {
+          upiSales += paid;
+        } else if (payMethodLower === 'bank') {
           // Best effort split Card vs Bank transfer
-          cardSales += (o.paidAmount || 0) * 0.6;
-          bankTransfer += (o.paidAmount || 0) * 0.4;
+          cardSales += paid * 0.6;
+          bankTransfer += paid * 0.4;
         } else {
-          cashSales += o.paidAmount || 0;
+          cashSales += paid;
         }
       }
     });
@@ -459,21 +565,12 @@ export default function ZReport() {
     });
 
     // 6. Expense Summary
-    let staffExpenses = 0;
-    let deliveryExpenses = 0;
-    let miscExpenses = 0;
-
+    const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const expensesByCategory = {};
     expenses.forEach(e => {
-      const cat = (e.category || '').toLowerCase();
-      if (cat.includes('staff') || cat.includes('salary') || cat.includes('labor')) {
-        staffExpenses += e.amount || 0;
-      } else if (cat.includes('delivery') || cat.includes('fuel') || cat.includes('transport')) {
-        deliveryExpenses += e.amount || 0;
-      } else {
-        miscExpenses += e.amount || 0;
-      }
+      const cat = e.category || 'Other';
+      expensesByCategory[cat] = (expensesByCategory[cat] || 0) + (e.amount || 0);
     });
-    const totalExpenses = staffExpenses + deliveryExpenses + miscExpenses;
 
     // 7. Discount Summary
     let totalDiscount = 0;
@@ -496,28 +593,23 @@ export default function ZReport() {
     });
 
     // 8. Credit Summary
-    const creditOrdersCount = activeOrders.filter(o => o.paymentStatus === 'Credit').length;
-    const creditAmountOutstanding = activeOrders.reduce((sum, o) => sum + (o.dueAmount || 0), 0);
+    const creditOrdersCount = activeOrders.filter(o => {
+      const due = parseFloat(o.dueAmount) || 0;
+      const payStatusLower = (o.paymentStatus || '').toLowerCase();
+      return due > 0 || payStatusLower === 'credit' || payStatusLower === 'partial';
+    }).length;
+    const creditAmountOutstanding = activeOrders.reduce((sum, o) => sum + (parseFloat(o.dueAmount) || 0), 0);
     
     // Credit collections from transactions table category 'Credit Settlement' / 'Sales Settlement'
     let creditAmountCollected = 0;
     transactions.forEach(t => {
-      if (t.type === 'INCOME' && ['Credit Settlement', 'Sales Settlement'].includes(t.category)) {
-        creditAmountCollected += t.amount || 0;
+      const cat = (t.category || '').toLowerCase();
+      if (t.type === 'INCOME' && (cat === 'credit settlement' || cat === 'sales settlement')) {
+        creditAmountCollected += parseFloat(t.amount) || 0;
       }
     });
 
-    // 9. Delivery Summary
-    let homeDeliveries = 0;
-    activeOrders.forEach(o => {
-      const instruction = (o.specialInstructions || '').toLowerCase();
-      if (instruction.includes('deliver') || instruction.includes('home') || instruction.includes('address')) {
-        homeDeliveries++;
-      }
-    });
-    const pickupOrders = Math.max(0, totalOrdersCount - homeDeliveries);
-    const deliveredOrders = completedOrdersCount;
-    const pendingDeliveries = pendingOrdersCount;
+
 
     // 10. Employee Performance
     const employeePerf = {};
@@ -581,10 +673,11 @@ export default function ZReport() {
 
     transactions.forEach(t => {
       if (t.accountType === 'CASH') {
-        const amt = t.amount || 0;
+        const amt = parseFloat(t.amount) || 0;
+        const cat = (t.category || '').toLowerCase();
         if (t.type === 'INCOME') {
-          if (t.category === 'Sales') cashSalesCollected += amt;
-          if (['Credit Settlement', 'Sales Settlement'].includes(t.category)) cashCreditCollections += amt;
+          if (cat === 'sales') cashSalesCollected += amt;
+          if (cat === 'credit settlement' || cat === 'sales settlement') cashCreditCollections += amt;
         } else if (t.type === 'EXPENSE') {
           cashExpensesPaid += amt;
         }
@@ -629,10 +722,8 @@ export default function ZReport() {
       statusCounts,
       serviceSales,
       
-      staffExpenses,
-      deliveryExpenses,
-      miscExpenses,
       totalExpenses,
+      expensesByCategory,
       
       totalDiscount,
       couponDiscount: totalDiscount * 0.3, // simulated split
@@ -641,11 +732,7 @@ export default function ZReport() {
       creditOrdersCount,
       creditAmountOutstanding,
       creditAmountCollected,
-      
-      homeDeliveries,
-      pickupOrders,
-      deliveredOrders,
-      pendingDeliveries,
+
       
       employeePerf,
       piecesSummary,
@@ -699,9 +786,9 @@ export default function ZReport() {
       ["Collections", "Partial Payments", zStats.partialPayments.toFixed(2)],
       ["Collections", "Total Collected", zStats.totalCollected.toFixed(2)],
       
-      ["Expenses", "Staff Expenses", zStats.staffExpenses.toFixed(2)],
-      ["Expenses", "Delivery Expenses", zStats.deliveryExpenses.toFixed(2)],
-      ["Expenses", "Misc Expenses", zStats.miscExpenses.toFixed(2)],
+      ...Object.entries(zStats.expensesByCategory || {}).map(([category, amount]) => (
+        ["Expenses", `${category} Expenses`, amount.toFixed(2)]
+      )),
       ["Expenses", "Total Expenses", zStats.totalExpenses.toFixed(2)],
       
       ["Discounts", "Total Discounts", zStats.totalDiscount.toFixed(2)],
@@ -709,11 +796,11 @@ export default function ZReport() {
       ["Taxation", "Taxable Amount", zStats.taxableAmount.toFixed(2)],
       ["Taxation", "VAT Output", zStats.outputTax.toFixed(2)],
       
-      ["Drawer Reconciliation", "Opening Cash", openingCash.toFixed(2)],
+      ["Drawer Reconciliation", "Opening Cash", (Number(openingCash) || 0).toFixed(2)],
       ["Drawer Reconciliation", "Expected Drawer Cash", zStats.expectedCashInDrawer.toFixed(2)],
-      ["Drawer Reconciliation", "Actual Drawer Cash", actualCash.toFixed(2)],
-      ["Drawer Reconciliation", "Floating Cash", floatingCash.toFixed(2)],
-      ["Drawer Reconciliation", "Withdrawn Cash", withdrawal.toFixed(2)],
+      ["Drawer Reconciliation", "Actual Drawer Cash", (Number(actualCash) || 0).toFixed(2)],
+      ["Drawer Reconciliation", "Floating Cash", (Number(floatingCash) || 0).toFixed(2)],
+      ["Drawer Reconciliation", "Withdrawn Cash", (Number(withdrawal) || 0).toFixed(2)],
       ["Drawer Reconciliation", "Difference", zStats.cashDiscrepancy.toFixed(2)],
     ];
 
@@ -741,7 +828,7 @@ export default function ZReport() {
                  `• *Collections:* Cash: ${zStats.cashSales.toFixed(2)}, Card: ${zStats.cardSales.toFixed(2)}, UPI: ${zStats.upiSales.toFixed(2)}, Bank: ${zStats.bankTransfer.toFixed(2)}\n` +
                  `• *Expenses:* ${settings.currencySymbol || 'AED'} ${zStats.totalExpenses.toFixed(2)}\n` +
                  `• *Cash Drawer Diff:* ${zStats.cashDiscrepancy >= 0 ? '+' : ''}${zStats.cashDiscrepancy.toFixed(2)}\n` +
-                 `• *Floating Cash:* ${floatingCash.toFixed(2)}, *Withdrawn:* ${withdrawal.toFixed(2)}\n\n` +
+                 `• *Floating Cash:* ${(Number(floatingCash) || 0).toFixed(2)}, *Withdrawn:* ${(Number(withdrawal) || 0).toFixed(2)}\n\n` +
                  `Report generated by POS System.`;
     const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
     if (window.electronAPI?.openExternal) {
@@ -1040,19 +1127,13 @@ export default function ZReport() {
             <div className={styles.statCard}>
               <h4>Expense Summary</h4>
               <div className={styles.cardContent}>
-                <div className={styles.itemRow}>
-                  <span>Staff Expenses</span>
-                  <strong><CurrencySymbol /> {zStats.staffExpenses.toFixed(2)}</strong>
-                </div>
-                <div className={styles.itemRow}>
-                  <span>Delivery Expenses</span>
-                  <strong><CurrencySymbol /> {zStats.deliveryExpenses.toFixed(2)}</strong>
-                </div>
-                <div className={styles.itemRow}>
-                  <span>Miscellaneous Expenses</span>
-                  <strong><CurrencySymbol /> {zStats.miscExpenses.toFixed(2)}</strong>
-                </div>
-                <hr className={styles.cardDivider} />
+                {Object.entries(zStats.expensesByCategory || {}).map(([category, amount]) => (
+                  <div className={styles.itemRow} key={category}>
+                    <span>{category} Expenses</span>
+                    <strong><CurrencySymbol /> {amount.toFixed(2)}</strong>
+                  </div>
+                ))}
+                {Object.keys(zStats.expensesByCategory || {}).length > 0 && <hr className={styles.cardDivider} />}
                 <div className={`${styles.itemRow} ${styles.rowTotal} ${styles.dangerText}`}>
                   <span>Total Expenses</span>
                   <strong><CurrencySymbol /> {zStats.totalExpenses.toFixed(2)}</strong>
@@ -1120,28 +1201,7 @@ export default function ZReport() {
               </div>
             </div>
 
-            {/* 8. Delivery Summary */}
-            <div className={styles.statCard}>
-              <h4>Delivery Summary</h4>
-              <div className={styles.cardContent}>
-                <div className={styles.itemRow}>
-                  <span>Home Delivery Orders</span>
-                  <strong>{zStats.homeDeliveries}</strong>
-                </div>
-                <div className={styles.itemRow}>
-                  <span>Pickup Orders</span>
-                  <strong>{zStats.pickupOrders}</strong>
-                </div>
-                <div className={styles.itemRow}>
-                  <span>Delivered Orders</span>
-                  <strong>{zStats.deliveredOrders}</strong>
-                </div>
-                <div className={styles.itemRow}>
-                  <span>Pending Deliveries</span>
-                  <strong>{zStats.pendingDeliveries}</strong>
-                </div>
-              </div>
-            </div>
+
 
             {/* 9. Employee Performance */}
             <div className={styles.statCard}>
@@ -1227,10 +1287,11 @@ export default function ZReport() {
                         value={openingCash} 
                         disabled={shiftState?.status === 'CLOSED'}
                         onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setOpeningCash(val);
+                          const valStr = e.target.value;
+                          setOpeningCash(valStr);
+                          const valNum = valStr === '' ? 0 : (parseFloat(valStr) || 0);
                           if (shiftState) {
-                            const updated = { ...shiftState, openingCash: val };
+                            const updated = { ...shiftState, openingCash: valNum };
                             setShiftState(updated);
                             localStorage.setItem(`shift_state_${selectedDate}`, JSON.stringify(updated));
                           }
@@ -1248,25 +1309,28 @@ export default function ZReport() {
                         value={actualCash} 
                         disabled={shiftState?.status === 'CLOSED'}
                         onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setActualCash(val);
+                          const valStr = e.target.value;
+                          setActualCash(valStr);
                           setUserEditedActualCash(true);
                           
-                          let newFloating = floatingCash;
-                          if (val < floatingCash) {
-                            newFloating = val;
-                          }
-                          const newWithdrawal = Math.max(0, val - newFloating);
+                          const valNum = valStr === '' ? 0 : (parseFloat(valStr) || 0);
+                          const floatingCashNum = floatingCash === '' ? 0 : (parseFloat(floatingCash) || 0);
                           
-                          setFloatingCash(newFloating);
-                          setWithdrawal(newWithdrawal);
+                          let newFloatingNum = floatingCashNum;
+                          if (valNum < floatingCashNum) {
+                            newFloatingNum = valNum;
+                          }
+                          const newWithdrawalNum = Math.max(0, valNum - newFloatingNum);
+                          
+                          setFloatingCash(newFloatingNum);
+                          setWithdrawal(newWithdrawalNum);
                           
                           if (shiftState) {
                             const updated = { 
                               ...shiftState, 
-                              actualCash: val,
-                              floatingCash: newFloating,
-                              withdrawal: newWithdrawal
+                              actualCash: valNum,
+                              floatingCash: newFloatingNum,
+                              withdrawal: newWithdrawalNum
                             };
                             setShiftState(updated);
                             localStorage.setItem(`shift_state_${selectedDate}`, JSON.stringify(updated));
@@ -1287,15 +1351,17 @@ export default function ZReport() {
                         value={floatingCash} 
                         disabled={shiftState?.status === 'CLOSED'}
                         onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setFloatingCash(val);
-                          const newWithdrawal = Math.max(0, actualCash - val);
-                          setWithdrawal(newWithdrawal);
+                          const valStr = e.target.value;
+                          setFloatingCash(valStr);
+                          const valNum = valStr === '' ? 0 : (parseFloat(valStr) || 0);
+                          const actualCashNum = actualCash === '' ? 0 : (parseFloat(actualCash) || 0);
+                          const newWithdrawalNum = Math.max(0, actualCashNum - valNum);
+                          setWithdrawal(newWithdrawalNum);
                           if (shiftState) {
                             const updated = { 
                               ...shiftState, 
-                              floatingCash: val,
-                              withdrawal: newWithdrawal
+                              floatingCash: valNum,
+                              withdrawal: newWithdrawalNum
                             };
                             setShiftState(updated);
                             localStorage.setItem(`shift_state_${selectedDate}`, JSON.stringify(updated));
@@ -1314,15 +1380,17 @@ export default function ZReport() {
                         value={withdrawal} 
                         disabled={shiftState?.status === 'CLOSED'}
                         onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setWithdrawal(val);
-                          const newFloating = Math.max(0, actualCash - val);
-                          setFloatingCash(newFloating);
+                          const valStr = e.target.value;
+                          setWithdrawal(valStr);
+                          const valNum = valStr === '' ? 0 : (parseFloat(valStr) || 0);
+                          const actualCashNum = actualCash === '' ? 0 : (parseFloat(actualCash) || 0);
+                          const newFloatingNum = Math.max(0, actualCashNum - valNum);
+                          setFloatingCash(newFloatingNum);
                           if (shiftState) {
                             const updated = { 
                               ...shiftState, 
-                              withdrawal: val,
-                              floatingCash: newFloating
+                              withdrawal: valNum,
+                              floatingCash: newFloatingNum
                             };
                             setShiftState(updated);
                             localStorage.setItem(`shift_state_${selectedDate}`, JSON.stringify(updated));
@@ -1335,7 +1403,7 @@ export default function ZReport() {
 
                 <div className={styles.reconcileLine}>
                   <span>Opening Cash</span>
-                  <span><CurrencySymbol /> {openingCash.toFixed(2)}</span>
+                  <span><CurrencySymbol /> {(Number(openingCash) || 0).toFixed(2)}</span>
                 </div>
                 <div className={styles.reconcileLine}>
                   <span className={styles.successText}>+ Cash Sales Collected</span>
@@ -1356,15 +1424,15 @@ export default function ZReport() {
                 </div>
                 <div className={`${styles.reconcileLine} ${styles.rowHeader}`}>
                   <span>Actual Cash</span>
-                  <span><CurrencySymbol /> {actualCash.toFixed(2)}</span>
+                  <span><CurrencySymbol /> {(Number(actualCash) || 0).toFixed(2)}</span>
                 </div>
                 <div className={styles.reconcileLine}>
                   <span>Floating Cash (Next Shift)</span>
-                  <span><CurrencySymbol /> {floatingCash.toFixed(2)}</span>
+                  <span><CurrencySymbol /> {(Number(floatingCash) || 0).toFixed(2)}</span>
                 </div>
                 <div className={styles.reconcileLine}>
                   <span>Withdrawn Cash (Cash Out)</span>
-                  <span><CurrencySymbol /> {withdrawal.toFixed(2)}</span>
+                  <span><CurrencySymbol /> {(Number(withdrawal) || 0).toFixed(2)}</span>
                 </div>
 
                 <div className={`${styles.reconcileBadge} ${zStats.cashDiscrepancy === 0 ? styles.badgeGreen : styles.badgeRed}`}>
@@ -1426,7 +1494,11 @@ export default function ZReport() {
               <div className={styles.cardContent}>
                 <div className={styles.itemRow}>
                   <span>Report Generated Time</span>
-                  <span className={styles.subtext}>{new Date().toLocaleString()}</span>
+                  <span className={styles.subtext}>{formatDateTimeString(formatShiftTime(new Date()))}</span>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Generated By</span>
+                  <span className={styles.subtext}>{user.name || 'Admin'}</span>
                 </div>
                 <div className={styles.itemRow}>
                   <span>Device Name</span>
@@ -1434,7 +1506,7 @@ export default function ZReport() {
                 </div>
                 <div className={styles.itemRow}>
                   <span>Branch Name</span>
-                  <span className={styles.subtext}>{settings.branchName || 'Al Nahda, Dubai'}</span>
+                  <span className={styles.subtext}>{settings.city ? `${settings.city}, ${settings.emirate}` : 'Al Nahda, Dubai'}</span>
                 </div>
                 <div className={styles.itemRow}>
                   <span>Software Version</span>
@@ -1497,27 +1569,13 @@ export default function ZReport() {
                       : 'N/A'}
                   </span>
                 </div>
-                <div className={styles.ticketRow}>
-                  <span>Orders Placed:</span>
-                  <span>{zStats.totalOrdersCount}</span>
-                </div>
-                <div className={styles.ticketRow}>
-                  <span>Total Pieces:</span>
-                  <span>{zStats.totalPieces}</span>
-                </div>
-                <div className={styles.ticketRow}>
-                  <span>Total Customers:</span>
-                  <span>{zStats.totalCustomers}</span>
-                </div>
               </div>
-
-              <div className={styles.ticketDivider}>- - - - - - - - - - - - - - - - -</div>
 
               <div className={styles.ticketSection}>
                 <h3>CASH DRAWER RECONCILIATION</h3>
                 <div className={styles.ticketRow}>
                   <span>Opening Cash:</span>
-                  <span>{openingCash.toFixed(2)}</span>
+                  <span>{(Number(openingCash) || 0).toFixed(2)}</span>
                 </div>
                 <div className={styles.ticketRow}>
                   <span>+ Cash Payments:</span>
@@ -1537,15 +1595,15 @@ export default function ZReport() {
                 </div>
                 <div className={styles.ticketRow} style={{ fontWeight: 'bold' }}>
                   <span>Actual Cash:</span>
-                  <span>{actualCash.toFixed(2)}</span>
+                  <span>{(Number(actualCash) || 0).toFixed(2)}</span>
                 </div>
                 <div className={styles.ticketRow}>
                   <span>Floating Cash:</span>
-                  <span>{floatingCash.toFixed(2)}</span>
+                  <span>{(Number(floatingCash) || 0).toFixed(2)}</span>
                 </div>
                 <div className={styles.ticketRow}>
                   <span>Withdrawn Cash:</span>
-                  <span>{withdrawal.toFixed(2)}</span>
+                  <span>{(Number(withdrawal) || 0).toFixed(2)}</span>
                 </div>
                 <div className={styles.ticketRow} style={{ fontWeight: 'bold' }}>
                   <span>Discrepancy:</span>
@@ -1607,8 +1665,8 @@ export default function ZReport() {
 
           {/* Shift Close Confirmation Modal */}
           {showCloseModal && (
-            <div className={styles.modalOverlay}>
-              <div className={styles.modalContainer}>
+            <div className={styles.modalOverlay} onClick={() => setShowCloseModal(false)}>
+              <div className={styles.modalContainer} onClick={(e) => e.stopPropagation()}>
                 <div className={styles.modalHeader}>
                   <h3>Close Register / Shift</h3>
                   <button className={styles.closeModalBtn} onClick={() => setShowCloseModal(false)}>
@@ -1622,7 +1680,7 @@ export default function ZReport() {
                       <div className={styles.summaryItem}>
                         <span className={styles.summaryLabel}>Opening Cash</span>
                         <span className={styles.summaryValue}>
-                          {settings.currencySymbol || 'AED'} {openingCash.toFixed(2)}
+                          {settings.currencySymbol || 'AED'} {(Number(openingCash) || 0).toFixed(2)}
                         </span>
                       </div>
                       <div className={styles.summaryItem}>
@@ -1642,14 +1700,18 @@ export default function ZReport() {
                         type="number"
                         value={modalActualCash}
                         onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setModalActualCash(val);
-                          let newFloating = modalFloatingCash;
-                          if (val < modalFloatingCash) {
-                            newFloating = val;
+                          const valStr = e.target.value;
+                          setModalActualCash(valStr);
+                          
+                          const valNum = valStr === '' ? 0 : (parseFloat(valStr) || 0);
+                          const modalFloatingCashNum = modalFloatingCash === '' ? 0 : (parseFloat(modalFloatingCash) || 0);
+                          
+                          let newFloatingNum = modalFloatingCashNum;
+                          if (valNum < modalFloatingCashNum) {
+                            newFloatingNum = valNum;
                           }
-                          setModalFloatingCash(newFloating);
-                          setModalWithdrawal(Math.max(0, val - newFloating));
+                          setModalFloatingCash(newFloatingNum);
+                          setModalWithdrawal(Math.max(0, valNum - newFloatingNum));
                         }}
                         autoFocus
                       />
@@ -1665,9 +1727,11 @@ export default function ZReport() {
                           type="number"
                           value={modalFloatingCash}
                           onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setModalFloatingCash(val);
-                            setModalWithdrawal(Math.max(0, modalActualCash - val));
+                            const valStr = e.target.value;
+                            setModalFloatingCash(valStr);
+                            const valNum = valStr === '' ? 0 : (parseFloat(valStr) || 0);
+                            const modalActualCashNum = modalActualCash === '' ? 0 : (parseFloat(modalActualCash) || 0);
+                            setModalWithdrawal(Math.max(0, modalActualCashNum - valNum));
                           }}
                         />
                       </div>
@@ -1681,19 +1745,21 @@ export default function ZReport() {
                           type="number"
                           value={modalWithdrawal}
                           onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setModalWithdrawal(val);
-                            setModalFloatingCash(Math.max(0, modalActualCash - val));
+                            const valStr = e.target.value;
+                            setModalWithdrawal(valStr);
+                            const valNum = valStr === '' ? 0 : (parseFloat(valStr) || 0);
+                            const modalActualCashNum = modalActualCash === '' ? 0 : (parseFloat(modalActualCash) || 0);
+                            setModalFloatingCash(Math.max(0, modalActualCashNum - valNum));
                           }}
                         />
                       </div>
                     </div>
                   </div>
 
-                  <div className={`${styles.discrepancyBox} ${(modalActualCash - zStats.expectedCashInDrawer) === 0 ? styles.badgeGreen : styles.badgeRed}`}>
+                  <div className={`${styles.discrepancyBox} ${((parseFloat(modalActualCash) || 0) - zStats.expectedCashInDrawer) === 0 ? styles.badgeGreen : styles.badgeRed}`}>
                     <span>Difference:</span>
                     <strong>
-                      {settings.currencySymbol || 'AED'} {(modalActualCash - zStats.expectedCashInDrawer).toFixed(2)}
+                      {settings.currencySymbol || 'AED'} {((parseFloat(modalActualCash) || 0) - zStats.expectedCashInDrawer).toFixed(2)}
                     </strong>
                   </div>
                 </div>
@@ -1710,8 +1776,8 @@ export default function ZReport() {
           )}
           {/* Shift Reopen Confirmation Modal */}
           {showReopenModal && (
-            <div className={styles.modalOverlay}>
-              <div className={styles.modalContainer}>
+            <div className={styles.modalOverlay} onClick={() => setShowReopenModal(false)}>
+              <div className={styles.modalContainer} onClick={(e) => e.stopPropagation()}>
                 <div className={styles.modalHeader}>
                   <h3>Reopen Register / Shift</h3>
                   <button className={styles.closeModalBtn} onClick={() => setShowReopenModal(false)}>
@@ -1725,6 +1791,19 @@ export default function ZReport() {
                   <p style={{ fontSize: '0.875rem', color: '#475569', lineHeight: '1.5', margin: '0.5rem 0 0 0', fontWeight: '600' }}>
                     Are you sure you want to proceed?
                   </p>
+                  
+                  <div className={styles.modalInputWrapper} style={{ marginTop: '1.25rem' }}>
+                    <label>Opening Cash (Confirm / Update Amount)</label>
+                    <div className={styles.modalInputArea}>
+                      <span>{settings.currencySymbol || 'AED'}</span>
+                      <input
+                        type="number"
+                        value={modalOpeningCash}
+                        onChange={(e) => setModalOpeningCash(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                  </div>
                 </div>
                 <div className={styles.modalFooter}>
                   <button className={styles.cancelBtn} onClick={() => setShowReopenModal(false)}>

@@ -51,6 +51,7 @@ function initDB(appPath) {
       image TEXT,
       category TEXT,
       taxRate REAL DEFAULT NULL,
+      sortOrder INTEGER DEFAULT 0,
       isSynced INTEGER DEFAULT 0,
       updatedAt TEXT
     );
@@ -61,6 +62,7 @@ function initDB(appPath) {
       name TEXT,
       price REAL,
       icon TEXT,
+      sortOrder INTEGER DEFAULT 0,
       isSynced INTEGER DEFAULT 0,
       updatedAt TEXT
     );
@@ -71,6 +73,7 @@ function initDB(appPath) {
       name TEXT,
       price REAL,
       icon TEXT,
+      sortOrder INTEGER DEFAULT 0,
       isSynced INTEGER DEFAULT 0,
       updatedAt TEXT
     );
@@ -80,6 +83,7 @@ function initDB(appPath) {
       shopId TEXT,
       name TEXT,
       icon TEXT,
+      sortOrder INTEGER DEFAULT 0,
       isSynced INTEGER DEFAULT 0,
       updatedAt TEXT
     );
@@ -203,9 +207,11 @@ function initDB(appPath) {
     CREATE INDEX IF NOT EXISTS idx_customers_synced ON customers(isSynced);
     
     CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(orderId);
+    CREATE INDEX IF NOT EXISTS idx_payments_customer ON payments(customerId);
     CREATE INDEX IF NOT EXISTS idx_payments_created ON payments(createdAt DESC);
     CREATE INDEX IF NOT EXISTS idx_payments_synced ON payments(isSynced);
     
+    CREATE INDEX IF NOT EXISTS idx_deleted_orders_customer ON deleted_orders(customerId);
     CREATE INDEX IF NOT EXISTS idx_account_txn_date ON account_transactions(date);
     CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
   `);
@@ -223,6 +229,25 @@ function initDB(appPath) {
     if (!servicesCols.some(col => col.name === 'taxRate')) {
       db.exec("ALTER TABLE services ADD COLUMN taxRate REAL DEFAULT NULL;");
     }
+    if (!servicesCols.some(col => col.name === 'sortOrder')) {
+      db.exec("ALTER TABLE services ADD COLUMN sortOrder INTEGER DEFAULT 0;");
+    }
+
+    const serviceTypesCols = db.prepare("PRAGMA table_info(service_types)").all();
+    if (!serviceTypesCols.some(col => col.name === 'sortOrder')) {
+      db.exec("ALTER TABLE service_types ADD COLUMN sortOrder INTEGER DEFAULT 0;");
+    }
+
+    const addonsCols = db.prepare("PRAGMA table_info(addons)").all();
+    if (!addonsCols.some(col => col.name === 'sortOrder')) {
+      db.exec("ALTER TABLE addons ADD COLUMN sortOrder INTEGER DEFAULT 0;");
+    }
+
+    const categoriesCols = db.prepare("PRAGMA table_info(service_categories)").all();
+    if (!categoriesCols.some(col => col.name === 'sortOrder')) {
+      db.exec("ALTER TABLE service_categories ADD COLUMN sortOrder INTEGER DEFAULT 0;");
+    }
+
 
     const shopCols = db.prepare("PRAGMA table_info(shops)").all();
     if (!shopCols.some(col => col.name === 'isActivated')) {
@@ -437,26 +462,29 @@ function runDataHealer(db) {
 
     // Heal already-corrupted credit/partial orders against payments table
     console.log("Healing mismatched order paid/due amounts against payments table...");
-    const nonPaidOrders = db.prepare("SELECT id, totalAmount, paidAmount, paymentStatus FROM orders WHERE paymentStatus IN ('Credit', 'Partial')").all();
-    for (const order of nonPaidOrders) {
-      const paymentSumRes = db.prepare("SELECT IFNULL(SUM(amount), 0) as totalPaid FROM payments WHERE orderId = ?").get(order.id);
-      const actualPaid = paymentSumRes ? paymentSumRes.totalPaid : 0;
+    const mismatchedOrders = db.prepare(`
+      SELECT o.id, o.totalAmount, o.paidAmount, o.paymentStatus, IFNULL(SUM(p.amount), 0) as actualPaid
+      FROM orders o
+      LEFT JOIN payments p ON o.id = p.orderId
+      WHERE o.paymentStatus IN ('Credit', 'Partial')
+      GROUP BY o.id
+      HAVING ABS(o.paidAmount - actualPaid) > 0.01
+    `).all();
+
+    for (const order of mismatchedOrders) {
+      console.log(`Data Healer: Healing order ${order.id}. DB paidAmount: ${order.paidAmount}, actual payments: ${order.actualPaid}.`);
+      const newPaid = order.actualPaid;
+      const newDue = Math.max(0, order.totalAmount - newPaid);
+      const newStatus = newDue <= 0 ? 'Paid' : (newPaid > 0 ? 'Partial' : 'Credit');
       
-      if (Math.abs(order.paidAmount - actualPaid) > 0.01) {
-        console.log(`Data Healer: Healing order ${order.id}. DB paidAmount: ${order.paidAmount}, actual payments: ${actualPaid}.`);
-        const newPaid = actualPaid;
-        const newDue = Math.max(0, order.totalAmount - newPaid);
-        const newStatus = newDue <= 0 ? 'Paid' : (newPaid > 0 ? 'Partial' : 'Credit');
-        
-        let updateQuery = `UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, isSynced = 0, updatedAt = ?`;
-        const params = [newPaid, newDue, newStatus, timestamp];
-        if (newStatus === 'Credit') {
-          updateQuery += `, paymentMethod = 'Not Paid'`;
-        }
-        updateQuery += ` WHERE id = ?`;
-        params.push(order.id);
-        db.prepare(updateQuery).run(params);
+      let updateQuery = `UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, isSynced = 0, updatedAt = ?`;
+      const params = [newPaid, newDue, newStatus, timestamp];
+      if (newStatus === 'Credit') {
+        updateQuery += `, paymentMethod = 'Not Paid'`;
       }
+      updateQuery += ` WHERE id = ?`;
+      params.push(order.id);
+      db.prepare(updateQuery).run(params);
     }
 
     // Normalize legacy paymentMethod values to the 3-option system: Not Paid, Cash, Bank
@@ -473,9 +501,12 @@ function runDataHealer(db) {
 
     // For fully-paid orders that came from settlements, recalculate paymentMethod from payments table
     console.log("Recalculating paymentMethod for settled credit orders from payment history...");
-    const paidOrdersFromCredit = db.prepare(
-      "SELECT id FROM orders WHERE paymentStatus = 'Paid' AND dueAmount <= 0 AND paidAmount > 0"
-    ).all();
+    const paidOrdersFromCredit = db.prepare(`
+      SELECT id, paymentMethod 
+      FROM orders 
+      WHERE paymentStatus = 'Paid' AND dueAmount <= 0 AND paidAmount > 0
+        AND (paymentMethod IS NULL OR paymentMethod = '' OR paymentMethod = 'Not Paid' OR paymentMethod NOT IN ('Cash', 'Bank', 'Mixed'))
+    `).all();
     for (const order of paidOrdersFromCredit) {
       const payRows = db.prepare("SELECT DISTINCT method FROM payments WHERE orderId = ?").all(order.id);
       if (payRows.length === 0) continue; // No payment records — skip (direct POS sale, keep its method)
@@ -487,7 +518,9 @@ function runDataHealer(db) {
       if (hasCash && hasBank) newMethod = 'Mixed';
       else if (hasBank) newMethod = 'Bank';
       else newMethod = 'Cash';
-      db.prepare(`UPDATE orders SET paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?`).run(newMethod, timestamp, order.id);
+      if (order.paymentMethod !== newMethod) {
+        db.prepare(`UPDATE orders SET paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?`).run(newMethod, timestamp, order.id);
+      }
     }
 
     // Recalculate customer balances from actual orders and payments before smart advance/unapplied payments logic
@@ -521,27 +554,6 @@ function runDataHealer(db) {
 
     // Auto-application of customer advances and unapplied payments has been disabled to prevent mutating historical order statuses without explicit action.
 
-
-    // 4. Final Sync: Ensure customer balance matches the sum of remaining dueAmounts minus any remaining unlinked payments
-    // Only update and mark isSynced = 0 if the balance has actually changed
-    db.exec(`UPDATE customers SET balance = (
-              SELECT IFNULL(SUM(dueAmount), 0) 
-              FROM orders 
-              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-            ) - IFNULL((
-              SELECT SUM(amount) 
-              FROM payments 
-              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
-            ), 0), isSynced = 0, updatedAt = '${timestamp}'
-            WHERE balance != (
-              SELECT IFNULL(SUM(dueAmount), 0) 
-              FROM orders 
-              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-            ) - IFNULL((
-              SELECT SUM(amount) 
-              FROM payments 
-              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
-            ), 0);`);
 
     // 4. Pre-populate Categories if empty
     const catCheck = db.prepare("SELECT COUNT(*) as count FROM service_categories").get();

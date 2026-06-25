@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
+import Pagination from '../components/Pagination';
 import styles from './CustomerStatement.module.css';
 
 export default function CustomerStatement() {
@@ -190,7 +191,7 @@ export default function CustomerStatement() {
     const rows = [];
 
     orders.forEach(o => {
-      const cleanRef = o.id.startsWith('#') ? o.id : `#${o.id}`;
+      const cleanRef = `${settings.invoicePrefix || '#'}${o.id}`;
       
       if (o.isDeleted) {
         if (filterType !== 'Payments') {
@@ -250,7 +251,7 @@ export default function CustomerStatement() {
       } else {
         // Active Order
         if (filterType !== 'Payments') {
-          const displayDesc = o.id.startsWith('#') ? `Order ${o.id}` : `Order #${o.id}`;
+          const displayDesc = `Order ${settings.invoicePrefix || ''}${o.id}`;
           let itemSummary = '';
           try {
             const itemsList = typeof o.items === 'string' ? JSON.parse(o.items || '[]') : (o.items || []);
@@ -279,7 +280,7 @@ export default function CustomerStatement() {
 
     // Map table payments and group by order ID to prevent double counting
     const paymentsFromTable = payments.map(p => {
-      const cleanOrderRef = p.orderId ? (p.orderId.startsWith('#') ? p.orderId : `#${p.orderId}`) : '';
+      const cleanOrderRef = p.orderId ? `${settings.invoicePrefix || '#'}${p.orderId}` : '';
       return {
         date: p.createdAt,
         type: 'payment',
@@ -309,7 +310,7 @@ export default function CustomerStatement() {
         const tablePaySum = tablePaymentsByOrder[o.id] || 0;
         const initialPay = (o.paidAmount || 0) - tablePaySum;
         if (initialPay > 0.01) {
-          const cleanRef = o.id.startsWith('#') ? o.id : `#${o.id}`;
+          const cleanRef = `${settings.invoicePrefix || '#'}${o.id}`;
           initialPaymentsFromOrders.push({
             date: o.createdAt,
             type: 'payment',
@@ -429,6 +430,51 @@ export default function CustomerStatement() {
 
         {selectedCustomer && (
           <div className={styles.headerActions}>
+            <button
+              className={styles.btnSecondary}
+              style={{ background: '#10B981', color: 'white', border: '1px solid #10B981', display: 'flex', gap: '0.4rem', alignItems: 'center' }}
+              onClick={() => {
+                if (!selectedCustomer.phone) {
+                  alert('Customer phone number not found!');
+                  return;
+                }
+                const origPhone = selectedCustomer.phone.toString();
+                const cleanPhone = origPhone.replace(/\D/g, '');
+                if (!cleanPhone) {
+                  alert('Customer phone number not found!');
+                  return;
+                }
+                let formattedPhone = cleanPhone;
+                
+                // Prepend country code if original phone doesn't start with '+'
+                if (!origPhone.trim().startsWith('+')) {
+                  const countryCode = settings.waCountryCode || '971';
+                  const cleanCountryCode = countryCode.replace(/\D/g, '');
+                  if (cleanCountryCode && !formattedPhone.startsWith(cleanCountryCode)) {
+                    formattedPhone = cleanCountryCode + formattedPhone;
+                  }
+                }
+                
+                let message = '';
+                const totalDue = selectedCustomer.balance || 0;
+                if (settings.waStatementTemplate) {
+                  message = settings.waStatementTemplate
+                    .replace(/{customerName}/g, selectedCustomer.name)
+                    .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${totalDue.toFixed(2)}`);
+                } else {
+                  message = `Hello ${selectedCustomer.name}, your current outstanding balance is ${settings.currencySymbol || 'AED'} ${totalDue.toFixed(2)}. Please settle it at your earliest convenience. Thank you!`;
+                }
+
+                const url = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
+                if (window.electronAPI?.openExternal) {
+                  window.electronAPI.openExternal(url);
+                } else {
+                  window.open(url, '_blank');
+                }
+              }}
+            >
+              Share Statement
+            </button>
             <button className={styles.btnSecondary} onClick={exportCSV}>
               <Download size={16} /> Export CSV
             </button>
@@ -691,46 +737,14 @@ export default function CustomerStatement() {
               </table>
             )}
             {/* Pagination Controls */}
-            {(() => {
-              const totalPages = Math.ceil(ledgerRows.length / 20);
-              if (totalPages <= 1 || loading) return null;
-
-              return (
-                <div className={styles.paginationRow} data-noprint="true">
-                  <span className={styles.paginationInfo}>
-                    Showing {Math.min(ledgerRows.length, (currentPage - 1) * 20 + 1)}-{Math.min(ledgerRows.length, currentPage * 20)} of {ledgerRows.length} transactions
-                  </span>
-                  <div className={styles.paginationBtns}>
-                    <button 
-                      className={styles.paginationBtn} 
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                    >
-                      Previous
-                    </button>
-                    {[...Array(totalPages)].map((_, idx) => {
-                      const pageNum = idx + 1;
-                      return (
-                        <button 
-                          key={pageNum}
-                          className={`${styles.paginationBtn} ${currentPage === pageNum ? styles.paginationActiveBtn : ''}`}
-                          onClick={() => setCurrentPage(pageNum)}
-                        >
-                          {pageNum}
-                        </button>
-                      );
-                    })}
-                    <button 
-                      className={styles.paginationBtn} 
-                      disabled={currentPage === totalPages}
-                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
+            <Pagination
+              currentPage={currentPage}
+              totalPages={Math.ceil(ledgerRows.length / 20)}
+              onPageChange={setCurrentPage}
+              totalItems={ledgerRows.length}
+              pageSize={20}
+              itemLabel="transactions"
+            />
           </div>
 
           {/* Print Footer */}

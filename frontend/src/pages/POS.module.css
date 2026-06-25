@@ -122,10 +122,10 @@
 }
 
 .itemIcon {
-  width: 44px;
-  height: 44px;
+  width: 72px;
+  height: 72px;
   background: #F8FAFC;
-  border-radius: 10px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1088,7 +1088,18 @@
   color: #0F172A;
   outline: none;
   -moz-appearance: textfield;
+  appearance: textfield; /* Standard appearance for compatibility */
 }
+
+/* Standard line-clamp utility */
+.lineClamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3; /* Number of lines to show */
+  line-clamp: 3;
+  overflow: hidden;
+}
+
 
 .qtyLargeInput::-webkit-outer-spin-button,
 .qtyLargeInput::-webkit-inner-spin-button {

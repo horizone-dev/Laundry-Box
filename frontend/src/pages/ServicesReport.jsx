@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { getLocalDateBounds, localStrIsWithinBounds } from '../utils/dateFilters';
 import { t } from '../utils/translations';
+import Pagination from '../components/Pagination';
 import styles from './ServicesReport.module.css';
 
 const containerVariants = {
@@ -543,45 +544,16 @@ export default function ServicesReport() {
           </div>
         )}
 
-        {(() => {
-          const totalPages = Math.ceil(sortedAndSearchedServices.length / 20);
-          if (totalPages <= 1 || loading) return null;
-          return (
-            <div className={styles.paginationRow} data-noprint="true" style={{ marginTop: '1.5rem' }}>
-              <span className={styles.paginationInfo}>
-                Showing {Math.min(sortedAndSearchedServices.length, (currentPage - 1) * 20 + 1)}-{Math.min(sortedAndSearchedServices.length, currentPage * 20)} of {sortedAndSearchedServices.length} services
-              </span>
-              <div className={styles.paginationBtns}>
-                <button 
-                  className={styles.paginationBtn} 
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                >
-                  Previous
-                </button>
-                {[...Array(totalPages)].map((_, idx) => {
-                  const pageNum = idx + 1;
-                  return (
-                    <button 
-                      key={pageNum}
-                      className={`${styles.paginationBtn} ${currentPage === pageNum ? styles.paginationActiveBtn : ''}`}
-                      onClick={() => setCurrentPage(pageNum)}
-                    >
-                      {pageNum}
-                    </button>
-                  );
-                })}
-                <button 
-                  className={styles.paginationBtn} 
-                  disabled={currentPage === totalPages}
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          );
-        })()}
+        {!loading && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={Math.ceil(sortedAndSearchedServices.length / 20)}
+            onPageChange={setCurrentPage}
+            totalItems={sortedAndSearchedServices.length}
+            pageSize={20}
+            itemLabel="services"
+          />
+        )}
       </motion.div>
     </motion.div>
   );

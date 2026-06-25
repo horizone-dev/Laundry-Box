@@ -189,16 +189,20 @@ export default function MainLayout() {
   const handleSync = async () => {
     if (!isOnline || isSyncing) return;
     setIsSyncing(true);
-    await syncData();
+    try {
+      await syncData();
 
-    // Auto-backup to USB/Folder if configured (read from settingsRef to avoid stale path)
-    const currentSettings = settingsRef.current;
-    if (currentSettings.autoBackupPath && window.electronAPI?.silentBackup) {
-      console.log('Performing auto-backup to:', currentSettings.autoBackupPath);
-      await window.electronAPI.silentBackup(currentSettings.autoBackupPath);
+      // Auto-backup to USB/Folder if configured (read from settingsRef to avoid stale path)
+      const currentSettings = settingsRef.current;
+      if (currentSettings.autoBackupPath && window.electronAPI?.silentBackup) {
+        console.log('Performing auto-backup to:', currentSettings.autoBackupPath);
+        await window.electronAPI.silentBackup(currentSettings.autoBackupPath);
+      }
+    } catch (err) {
+      console.error('handleSync error:', err);
+    } finally {
+      setIsSyncing(false);
     }
-
-    setIsSyncing(false);
   };
 
   const handleLogoClick = () => {
@@ -220,7 +224,7 @@ export default function MainLayout() {
   } catch (e) {
     console.error("Failed to parse user data", e);
   }
-  let role = user.role || 'super_admin';
+  let role = user.role || '';
 
   // Backward compatibility for old roles
   if (role === 'admin') role = 'super_admin';
@@ -231,6 +235,12 @@ export default function MainLayout() {
   useEffect(() => {
     fetchPermissions();
   }, [role]);
+
+  useEffect(() => {
+    if (role === 'super_admin' && location.pathname !== '/activation') {
+      navigate('/activation', { replace: true });
+    }
+  }, [role, location.pathname, navigate]);
 
   const fetchPermissions = async () => {
     try {
@@ -687,7 +697,7 @@ export default function MainLayout() {
 
   const filteredNavItems = navItems
     .filter(item => {
-      if (role === 'super_admin') return true;
+      if (role === 'super_admin') return item.path === '/activation';
       if (item.roleOnly) {
         if (Array.isArray(item.roleOnly)) return item.roleOnly.includes(role);
         return item.roleOnly === role;
@@ -835,105 +845,111 @@ export default function MainLayout() {
           </div>
         </nav>
 
-        <div className={styles.sidebarFooter}>
-          <NavLink to="/help" className={styles.helpLink}>
-            <HelpCircle size={18} /> <span className={styles.sidebarText}>Help Center</span>
-          </NavLink>
-        </div>
+        {role !== 'super_admin' && (
+          <div className={styles.sidebarFooter}>
+            <NavLink to="/help" className={styles.helpLink}>
+              <HelpCircle size={18} /> <span className={styles.sidebarText}>Help Center</span>
+            </NavLink>
+          </div>
+        )}
       </aside>
 
       {/* Main Area */}
       <main className={styles.main}>
         <header className={styles.header}>
-          <div className={styles.searchBar}>
-            <Search size={18} color="#94A3B8" />
-            <input
-              type="text"
-              placeholder="Search orders, customers, or services..."
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  navigate(`/orders?search=${e.target.value}`);
-                }
-              }}
-            />
-          </div>
-
-          <div className={styles.headerRight}>
-            <div className={styles.headerIcons}>
-              <button
-                className={styles.headerNewOrderBtn}
-                onClick={() => navigate('/pos')}
-                title="New Order"
-              >
-                <Plus size={18} /> New Order
-              </button>
-              <button
-                className={styles.headerDeliverBtn}
-                onClick={() => setShowQuickDeliver(true)}
-                title="Quick Delivery"
-              >
-                <Truck size={18} /> Deliver
-              </button>
-              <button className={styles.headerSettleBtn} onClick={() => setShowQuickSettle(true)}>
-                <DollarSign size={18} /> Settle Bill
-              </button>
-              <div
-                ref={notificationRef}
-                className={styles.iconBtn}
-                onClick={() => { setIsNotificationsOpen(!isNotificationsOpen); setIsSupportOpen(false); setIsProfileOpen(false); }}
-              >
-                <Bell size={20} />
-                {notifications.length > 0 && <span className={styles.badge}></span>}
-
-                {isNotificationsOpen && (
-                  <div className={styles.dropdownMenu}>
-                    <div className={styles.dropdownHeader}>
-                      <strong>Recent Notifications</strong>
-                      <span>You have {notifications.length} recent events</span>
-                    </div>
-                    <div className={styles.dropdownDivider} />
-                    <div className={styles.notificationList}>
-                      {notifications.map(n => (
-                        <div key={n.id} className={styles.notificationItem} onClick={() => navigate('/orders')}>
-                          <div className={styles.notifIcon}><ShoppingBag size={14} /></div>
-                          <div className={styles.notifContent}>
-                            <p>Order <strong>{n.id}</strong> updated to <strong>{n.status}</strong></p>
-                            <span>{new Date(n.createdAt).toLocaleTimeString()}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div
-                ref={supportRef}
-                className={styles.iconBtn}
-                onClick={() => { setIsSupportOpen(!isSupportOpen); setIsNotificationsOpen(false); setIsProfileOpen(false); }}
-              >
-                <HelpCircle size={20} />
-                <span>Support</span>
-
-                {isSupportOpen && (
-                  <div className={styles.dropdownMenu} style={{ width: '200px' }}>
-                    <div className={styles.dropdownHeader}>
-                      <strong>Need Help?</strong>
-                    </div>
-                    <div className={styles.dropdownDivider} />
-                    <div className={styles.dropdownItem} onClick={() => navigate('/help')}>
-                      <HelpCircle size={16} /> Help Center
-                    </div>
-                    <div className={styles.dropdownItem} onClick={() => window.open('https://wa.me/971588851680', '_blank')}>
-                      <WhatsAppIcon size={16} /> WhatsApp Support
-                    </div>
-                    <div className={styles.dropdownItem} onClick={() => window.location.href = 'tel:+971588851680'}>
-                      <Phone size={16} /> Call Support
-                    </div>
-                  </div>
-                )}
-              </div>
+          {role !== 'super_admin' && (
+            <div className={styles.searchBar}>
+              <Search size={18} color="#94A3B8" />
+              <input
+                type="text"
+                placeholder="Search orders, customers, or services..."
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    navigate(`/orders?search=${e.target.value}`);
+                  }
+                }}
+              />
             </div>
+          )}
+
+          <div className={styles.headerRight} style={role === 'super_admin' ? { marginLeft: 'auto' } : {}}>
+            {role !== 'super_admin' && (
+              <div className={styles.headerIcons}>
+                <button
+                  className={styles.headerNewOrderBtn}
+                  onClick={() => navigate('/pos')}
+                  title="New Order"
+                >
+                  <Plus size={18} /> New Order
+                </button>
+                <button
+                  className={styles.headerDeliverBtn}
+                  onClick={() => setShowQuickDeliver(true)}
+                  title="Quick Delivery"
+                >
+                  <Truck size={18} /> Deliver
+                </button>
+                <button className={styles.headerSettleBtn} onClick={() => setShowQuickSettle(true)}>
+                  <DollarSign size={18} /> Settle Bill
+                </button>
+                <div
+                  ref={notificationRef}
+                  className={styles.iconBtn}
+                  onClick={() => { setIsNotificationsOpen(!isNotificationsOpen); setIsSupportOpen(false); setIsProfileOpen(false); }}
+                >
+                  <Bell size={20} />
+                  {notifications.length > 0 && <span className={styles.badge}></span>}
+
+                  {isNotificationsOpen && (
+                    <div className={styles.dropdownMenu}>
+                      <div className={styles.dropdownHeader}>
+                        <strong>Recent Notifications</strong>
+                        <span>You have {notifications.length} recent events</span>
+                      </div>
+                      <div className={styles.dropdownDivider} />
+                      <div className={styles.notificationList}>
+                        {notifications.map(n => (
+                          <div key={n.id} className={styles.notificationItem} onClick={() => navigate('/orders')}>
+                            <div className={styles.notifIcon}><ShoppingBag size={14} /></div>
+                            <div className={styles.notifContent}>
+                              <p>Order <strong>{settings.invoicePrefix || ''}{n.id}</strong> updated to <strong>{n.status}</strong></p>
+                              <span>{new Date(n.createdAt).toLocaleTimeString()}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  ref={supportRef}
+                  className={styles.iconBtn}
+                  onClick={() => { setIsSupportOpen(!isSupportOpen); setIsNotificationsOpen(false); setIsProfileOpen(false); }}
+                >
+                  <HelpCircle size={20} />
+                  <span>Support</span>
+
+                  {isSupportOpen && (
+                    <div className={styles.dropdownMenu} style={{ width: '200px' }}>
+                      <div className={styles.dropdownHeader}>
+                        <strong>Need Help?</strong>
+                      </div>
+                      <div className={styles.dropdownDivider} />
+                      <div className={styles.dropdownItem} onClick={() => navigate('/help')}>
+                        <HelpCircle size={16} /> Help Center
+                      </div>
+                      <div className={styles.dropdownItem} onClick={() => window.open('https://wa.me/971588851680', '_blank')}>
+                        <WhatsAppIcon size={16} /> WhatsApp Support
+                      </div>
+                      <div className={styles.dropdownItem} onClick={() => window.location.href = 'tel:+971588851680'}>
+                        <Phone size={16} /> Call Support
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div
               ref={profileRef}
@@ -1022,7 +1038,7 @@ export default function MainLayout() {
                   <Search size={18} className={styles.searchIcon} />
                   <input
                     type="text"
-                    placeholder="e.g. #AG-50504"
+                    placeholder={`e.g. ${settings.invoicePrefix || '#'}${settings.invoicePrefix ? '0001' : '50504'}`}
                     value={quickSearch}
                     onChange={(e) => handleQuickDeliverSearch(e.target.value)}
                     autoFocus
@@ -1033,7 +1049,7 @@ export default function MainLayout() {
               {foundOrder ? (
                 <div className={styles.orderResult}>
                   <div className={styles.resultHeader}>
-                    <span className={styles.orderId}>{foundOrder.id}</span>
+                    <span className={styles.orderId}>{settings.invoicePrefix || ''}{foundOrder.id}</span>
                     <span className={`${styles.statusBadge} ${foundOrder.status === 'Delivered' ? styles.statusDone : ''}`}>
                       {foundOrder.status}
                     </span>
@@ -1121,7 +1137,7 @@ export default function MainLayout() {
                         </div>
                         <div className={styles.resultItemText}>
                           <span className={styles.resultItemTitle}>
-                            {result.type === 'customer' ? result.data.name : `Bill #${result.data.billNumber || result.data.id}`}
+                            {result.type === 'customer' ? result.data.name : `Bill #${result.data.billNumber || `${settings.invoicePrefix || ''}${result.data.id}`}`}
                           </span>
                           <span className={styles.resultItemSub}>
                             {result.type === 'customer'
@@ -1149,7 +1165,7 @@ export default function MainLayout() {
                     <span className={styles.orderId}>
                       {selectedSettleTarget.type === 'customer'
                         ? selectedSettleTarget.data.name
-                        : `Bill #${selectedSettleTarget.data.billNumber || selectedSettleTarget.data.id}`}
+                        : `Bill #${selectedSettleTarget.data.billNumber || `${settings.invoicePrefix || ''}${selectedSettleTarget.data.id}`}`}
                     </span>
                     <span className={`${styles.statusBadge} ${styles.statusPending}`}>
                       Due: {(settings.currencySymbol || 'AED')} {(selectedSettleTarget.type === 'customer' ? selectedSettleTarget.data.balance : selectedSettleTarget.data.dueAmount).toFixed(2)}

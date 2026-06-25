@@ -69,7 +69,8 @@ export default function Login({ onLogin }) {
         sessionStorage.setItem('user', JSON.stringify(response.data.user));
         sessionStorage.setItem('isAuthenticated', 'true');
         onLogin(true);
-        navigate('/pos', { replace: true });
+        const destination = response.data.user?.role === 'super_admin' ? '/activation' : '/pos';
+        navigate(destination, { replace: true });
       }
     } catch (err) {
       console.error("Login failed:", err);

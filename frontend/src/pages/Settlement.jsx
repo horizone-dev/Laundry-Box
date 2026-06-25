@@ -11,6 +11,7 @@ import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID } from '../constants';
 import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
+import Pagination from '../components/Pagination';
 import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
 import styles from './Settlement.module.css';
 
@@ -49,6 +50,27 @@ export default function Settlement() {
     setPendingPage(1);
     setHistoryPage(1);
   }, [selectedCustomer, workspaceTab]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowPayModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (showPayModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showPayModal]);
 
   useEffect(() => {
     if (settings.bankAccounts && settings.bankAccounts.length > 0) {
@@ -779,48 +801,14 @@ export default function Settlement() {
                       </tbody>
                     </table>
 
-                    {(() => {
-                      const totalPages = Math.ceil(globalData.pending.length / 20);
-                      if (totalPages <= 1 || loading) return null;
-                      return (
-                        <div className={styles.paginationRow} data-noprint="true">
-                          <span className={styles.paginationInfo}>
-                            Showing {Math.min(globalData.pending.length, (pendingPage - 1) * 20 + 1)}-{Math.min(globalData.pending.length, pendingPage * 20)} of {globalData.pending.length} pending bills
-                          </span>
-                          <div className={styles.paginationBtns}>
-                            <button 
-                              type="button"
-                              className={styles.paginationBtn} 
-                              disabled={pendingPage === 1}
-                              onClick={() => setPendingPage(prev => Math.max(prev - 1, 1))}
-                            >
-                              Previous
-                            </button>
-                            {[...Array(totalPages)].map((_, idx) => {
-                              const pageNum = idx + 1;
-                              return (
-                                <button 
-                                  type="button"
-                                  key={pageNum}
-                                  className={`${styles.paginationBtn} ${pendingPage === pageNum ? styles.paginationActiveBtn : ''}`}
-                                  onClick={() => setPendingPage(pageNum)}
-                                >
-                                  {pageNum}
-                                </button>
-                              );
-                            })}
-                            <button 
-                              type="button"
-                              className={styles.paginationBtn} 
-                              disabled={pendingPage === totalPages}
-                              onClick={() => setPendingPage(prev => Math.min(prev + 1, totalPages))}
-                            >
-                              Next
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })()}
+                    <Pagination
+                      currentPage={pendingPage}
+                      totalPages={Math.ceil(globalData.pending.length / 20)}
+                      onPageChange={setPendingPage}
+                      totalItems={globalData.pending.length}
+                      pageSize={20}
+                      itemLabel="pending bills"
+                    />
                   </div>
                 ) : (
                   <div className={styles.tableWrapper}>
@@ -866,48 +854,14 @@ export default function Settlement() {
                       </tbody>
                     </table>
 
-                    {(() => {
-                      const totalPages = Math.ceil(globalData.history.length / 20);
-                      if (totalPages <= 1 || loading) return null;
-                      return (
-                        <div className={styles.paginationRow} data-noprint="true">
-                          <span className={styles.paginationInfo}>
-                            Showing {Math.min(globalData.history.length, (historyPage - 1) * 20 + 1)}-{Math.min(globalData.history.length, historyPage * 20)} of {globalData.history.length} settlements
-                          </span>
-                          <div className={styles.paginationBtns}>
-                            <button 
-                              type="button"
-                              className={styles.paginationBtn} 
-                              disabled={historyPage === 1}
-                              onClick={() => setHistoryPage(prev => Math.max(prev - 1, 1))}
-                            >
-                              Previous
-                            </button>
-                            {[...Array(totalPages)].map((_, idx) => {
-                              const pageNum = idx + 1;
-                              return (
-                                <button 
-                                  type="button"
-                                  key={pageNum}
-                                  className={`${styles.paginationBtn} ${historyPage === pageNum ? styles.paginationActiveBtn : ''}`}
-                                  onClick={() => setHistoryPage(pageNum)}
-                                >
-                                  {pageNum}
-                                </button>
-                              );
-                            })}
-                            <button 
-                              type="button"
-                              className={styles.paginationBtn} 
-                              disabled={historyPage === totalPages}
-                              onClick={() => setHistoryPage(prev => Math.min(prev + 1, totalPages))}
-                            >
-                              Next
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })()}
+                    <Pagination
+                      currentPage={historyPage}
+                      totalPages={Math.ceil(globalData.history.length / 20)}
+                      onPageChange={setHistoryPage}
+                      totalItems={globalData.history.length}
+                      pageSize={20}
+                      itemLabel="settlements"
+                    />
                   </div>
                 )}
               </div>
@@ -918,8 +872,8 @@ export default function Settlement() {
 
       {/* ── REDESIGNED PAYMENT MODAL ── */}
       {showPayModal && selectedCustomer && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.payModalCard}>
+        <div className={styles.modalOverlay} onClick={() => setShowPayModal(false)}>
+          <div className={styles.payModalCard} onClick={(e) => e.stopPropagation()}>
             
             <div className={styles.modalHeaderRow}>
               <div>

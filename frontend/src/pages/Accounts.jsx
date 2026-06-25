@@ -12,6 +12,7 @@ import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID } from '../constants';
 import { getLocalDateBounds, localStrIsWithinBounds } from '../utils/dateFilters';
 import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
+import Pagination from '../components/Pagination';
 import styles from './Accounts.module.css';
 
 const ICON_OPTIONS = [
@@ -149,6 +150,32 @@ export default function Accounts() {
     setCurrentPage(1);
     setRefundsPage(1);
   }, [searchTerm, dateRange, customStart, customEnd, activeAccountType, activeBankAccountId, activeTab]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowAddModal(false);
+        setShowTransferModal(false);
+        setShowAddAccountModal(false);
+        setShowPayslipModal(false);
+        setActivePayslip(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const isAnyOpen = showAddModal || showTransferModal || showAddAccountModal || showPayslipModal;
+    if (isAnyOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showAddModal, showTransferModal, showAddAccountModal, showPayslipModal]);
 
   useEffect(() => {
     const list = settings.bankAccounts || [];
@@ -421,6 +448,23 @@ export default function Accounts() {
           ]
         );
         
+        if (formData.type === 'EXPENSE') {
+          await window.electronAPI.dbQuery(
+            `INSERT INTO expenses 
+             (id, shopId, title, amount, taxAmount, isTaxEnabled, taxMethod, category, date, updatedAt) 
+             VALUES (?, ?, ?, ?, 0, 0, 'inclusive', ?, ?, ?)`,
+            [
+              id,
+              DEFAULT_SHOP_ID,
+              formData.description,
+              parseFloat(formData.amount),
+              formData.category,
+              timestamp,
+              nowIso
+            ]
+          );
+        }
+        
         setShowAddModal(false);
         fetchData();
       } catch (err) {
@@ -573,6 +617,7 @@ export default function Accounts() {
     if (window.electronAPI?.dbQuery) {
       try {
         await window.electronAPI.dbQuery('DELETE FROM account_transactions WHERE id = ?', [id]);
+        await window.electronAPI.dbQuery('DELETE FROM expenses WHERE id = ?', [id]);
         fetchData();
       } catch (err) {
         console.error("Delete transaction error:", err);
@@ -827,6 +872,21 @@ export default function Accounts() {
             payrollInputData.paymentAccount === 'CASH' ? null : payrollInputData.paymentAccount
           ]
         );
+        const expenseId = `EXP-PR-${Date.now()}`;
+        await window.electronAPI.dbQuery(
+          `INSERT INTO expenses 
+           (id, shopId, title, amount, taxAmount, isTaxEnabled, taxMethod, category, date, updatedAt) 
+           VALUES (?, ?, ?, ?, 0, 0, 'inclusive', 'Salaries', ?, ?)`,
+          [
+            expenseId,
+            DEFAULT_SHOP_ID,
+            `Salary Payment for ${activePayslip.employeeName} - June 2026`,
+            activePayslip.net,
+            timestamp,
+            nowIso
+          ]
+        );
+
         fetchData();
       } catch (err) {
         console.error("Database salary payment insertion failed:", err);
@@ -1200,46 +1260,16 @@ export default function Accounts() {
               </tfoot>
             </table>
             {/* Pagination Controls */}
-            {(() => {
-              const totalPages = Math.ceil(filteredTransactions.length / 20);
-              if (totalPages <= 1 || loading) return null;
-
-              return (
-                <div className={styles.paginationRow} data-noprint="true">
-                  <span className={styles.paginationInfo}>
-                    Showing {Math.min(filteredTransactions.length, (currentPage - 1) * 20 + 1)}-{Math.min(filteredTransactions.length, currentPage * 20)} of {filteredTransactions.length} transactions
-                  </span>
-                  <div className={styles.paginationBtns}>
-                    <button 
-                      className={styles.paginationBtn} 
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                    >
-                      Previous
-                    </button>
-                    {[...Array(totalPages)].map((_, idx) => {
-                      const pageNum = idx + 1;
-                      return (
-                        <button 
-                          key={pageNum}
-                          className={`${styles.paginationBtn} ${currentPage === pageNum ? styles.paginationActiveBtn : ''}`}
-                          onClick={() => setCurrentPage(pageNum)}
-                        >
-                          {pageNum}
-                        </button>
-                      );
-                    })}
-                    <button 
-                      className={styles.paginationBtn} 
-                      disabled={currentPage === totalPages}
-                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
+            {!loading && (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={Math.ceil(filteredTransactions.length / 20)}
+                onPageChange={setCurrentPage}
+                totalItems={filteredTransactions.length}
+                pageSize={20}
+                itemLabel="transactions"
+              />
+            )}
           </div>
 
         </div>
@@ -1391,54 +1421,24 @@ export default function Accounts() {
               </tbody>
             </table>
             {/* Pagination Controls */}
-            {(() => {
-              const totalPages = Math.ceil(refunds.length / 20);
-              if (totalPages <= 1 || loading) return null;
-
-              return (
-                <div className={styles.paginationRow} data-noprint="true">
-                  <span className={styles.paginationInfo}>
-                    Showing {Math.min(refunds.length, (refundsPage - 1) * 20 + 1)}-{Math.min(refunds.length, refundsPage * 20)} of {refunds.length} refunds
-                  </span>
-                  <div className={styles.paginationBtns}>
-                    <button 
-                      className={styles.paginationBtn} 
-                      disabled={refundsPage === 1}
-                      onClick={() => setRefundsPage(prev => Math.max(prev - 1, 1))}
-                    >
-                      Previous
-                    </button>
-                    {[...Array(totalPages)].map((_, idx) => {
-                      const pageNum = idx + 1;
-                      return (
-                        <button 
-                          key={pageNum}
-                          className={`${styles.paginationBtn} ${refundsPage === pageNum ? styles.paginationActiveBtn : ''}`}
-                          onClick={() => setRefundsPage(pageNum)}
-                        >
-                          {pageNum}
-                        </button>
-                      );
-                    })}
-                    <button 
-                      className={styles.paginationBtn} 
-                      disabled={refundsPage === totalPages}
-                      onClick={() => setRefundsPage(prev => Math.min(prev + 1, totalPages))}
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
+            {!loading && (
+              <Pagination
+                currentPage={refundsPage}
+                totalPages={Math.ceil(refunds.length / 20)}
+                onPageChange={setRefundsPage}
+                totalItems={refunds.length}
+                pageSize={20}
+                itemLabel="refunds"
+              />
+            )}
           </div>
         </div>
       )}
 
       {/* ── Modal: Add Transaction ────────────────────── */}
       {showAddModal && (
-        <div className={styles.modalOverlay} data-noprint="true">
-          <div className={styles.modalCard}>
+        <div className={styles.modalOverlay} data-noprint="true" onClick={() => setShowAddModal(false)}>
+          <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>Add New {formData.type === 'INCOME' ? 'Income' : 'Expense'} Entry ({activeAccountType})</h2>
               <button className={styles.closeBtn} onClick={() => setShowAddModal(false)}>&times;</button>
@@ -1463,9 +1463,11 @@ export default function Accounts() {
                     ) : (
                       <>
                         <option value="Supplies">Supplies (Detergents, bags)</option>
-                        <option value="Rent">Shop Rent</option>
-                        <option value="Electricity">Electricity / Water Utility</option>
                         <option value="Salaries">Staff Salaries</option>
+                        <option value="Rent">Shop Rent</option>
+                        <option value="Utilities">Utilities (Internet, Gas)</option>
+                        <option value="Electricity">Electricity / Water Utility</option>
+                        <option value="Maintenance">Maintenance & Repairs</option>
                         <option value="Return">Return Refund</option>
                         <option value="Other Expense">Other Expense</option>
                       </>
@@ -1509,8 +1511,8 @@ export default function Accounts() {
 
       {/* ── Modal: Transfer Funds ─────────────────────── */}
       {showTransferModal && (
-        <div className={styles.modalOverlay} data-noprint="true">
-          <div className={styles.modalCard}>
+        <div className={styles.modalOverlay} data-noprint="true" onClick={() => setShowTransferModal(false)}>
+          <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>Transfer Funds</h2>
               <button className={styles.closeBtn} onClick={() => setShowTransferModal(false)}>&times;</button>
@@ -1599,8 +1601,8 @@ export default function Accounts() {
 
       {/* ── Modal: Add Bank Account ────────────────────── */}
       {showAddAccountModal && (
-        <div className={styles.modalOverlay} data-noprint="true">
-          <div className={styles.modalCard}>
+        <div className={styles.modalOverlay} data-noprint="true" onClick={() => setShowAddAccountModal(false)}>
+          <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>Add New Bank Account</h2>
               <button className={styles.closeBtn} onClick={() => setShowAddAccountModal(false)}>&times;</button>
@@ -1678,8 +1680,8 @@ export default function Accounts() {
 
       {/* ── Modal: Payslip Preview ───────────────────── */}
       {showPayslipModal && activePayslip && (
-        <div className={styles.payslipOverlay} data-noprint="true">
-          <div className={styles.payslipCard}>
+        <div className={styles.payslipOverlay} data-noprint="true" onClick={() => { setShowPayslipModal(false); setActivePayslip(null); }}>
+          <div className={styles.payslipCard} onClick={(e) => e.stopPropagation()}>
             <div className={styles.payslipHeader}>
               <h2>STAFF PAY SLIP</h2>
               <p>LAUNDRY BILLING SOFTWARE</p>

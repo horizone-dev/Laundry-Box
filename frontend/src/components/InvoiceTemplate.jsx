@@ -16,7 +16,7 @@ function EditableCell({ value, onChange, type = 'text', align = 'left', classNam
       value={value}
       min={type === 'number' ? 0 : undefined}
       step={type === 'number' ? 'any' : undefined}
-      onChange={(e) => onChange(type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value)}
+      onChange={(e) => onChange(type === 'number' ? (e.target.value === '' ? '' : parseFloat(e.target.value)) : e.target.value)}
       onClick={(e) => e.stopPropagation()}
       style={{
         width: '100%',
@@ -52,7 +52,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
   }, [order.items, order.id]);
 
   // ── Computed totals from items ──
-  const itemsTotal = items.reduce((s, i) => s + (i.qty * i.price), 0);
+  const itemsTotal = items.reduce((s, i) => s + ((parseFloat(i.qty) || 0) * (parseFloat(i.price) || 0)), 0);
   const taxRate = settings.isTaxEnabled ? (settings.taxRate || 0) / 100 : 0;
   const computedSubtotal = taxRate > 0 ? itemsTotal / (1 + taxRate) : itemsTotal;
   const computedTax = itemsTotal - computedSubtotal;
@@ -63,7 +63,9 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
     setItems(prev => {
       const next = [...prev];
       next[idx] = { ...next[idx], [field]: value };
-      next[idx].total = next[idx].qty * next[idx].price;
+      const qtyNum = parseFloat(next[idx].qty) || 0;
+      const priceNum = parseFloat(next[idx].price) || 0;
+      next[idx].total = qtyNum * priceNum;
       return next;
     });
   };
@@ -98,6 +100,8 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           const { sub, ...rest } = item;
           return {
             ...rest,
+            qty: parseFloat(item.qty) || 0,
+            price: parseFloat(item.price) || 0,
             type: sub || item.type || 'Standard Treatment',
             types: item.types || (sub ? [{ id: 'legacy', name: sub, price: 0 }] : [])
           };
@@ -121,13 +125,15 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
 
         // 3. Trigger local update in parent state
         if (onOrderUpdate) {
+          const diff = newTotal - (order.total || 0);
           onOrderUpdate({
             ...order,
             items: items,
             total: newTotal,
             subtotal: computedSubtotal,
             tax: computedTax,
-            dueAmount: Math.max(0, newTotal - (order.paidAmount || 0))
+            dueAmount: Math.max(0, newTotal - (order.paidAmount || 0)),
+            totalBalance: (order.totalBalance || 0) + diff
           });
         }
       } catch (err) {
@@ -239,7 +245,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           {showQrCode && (
             <div className={styles.compactHeaderRight}>
               <div className={styles.qrWrapperCompact}>
-                <QRCodeSVG value={`ORDER:${order.id}`} size={55} />
+                <QRCodeSVG value={order.id.toString()} size={55} />
               </div>
             </div>
           )}
@@ -293,7 +299,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
         <div className={styles.metaLeftColumn}>
           <div className={styles.metaRow}>
             <span className={styles.metaLabelEnAr}>{formatLabel('Invoice No', 'رقم الفاتورة')}:</span>
-            <span className={styles.metaValue}>{order.id}</span>
+            <span className={styles.metaValue}>{settings.invoicePrefix || ''}{order.id}</span>
           </div>
           {order.billNumber && (
             <div className={styles.metaRow}>
@@ -351,6 +357,8 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           <span>{order.specialInstructions}</span>
         </div>
       )}
+
+
 
       {/* 5. Items Table */}
       <table className={styles.itemsTableBilingual}>
@@ -515,7 +523,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
 
               {/* Total (auto-calculated) */}
               <td style={{ textAlign: 'right' }} className={styles.cellTotal}>
-                <CurrencySymbol size={11} /> {(item.qty * item.price).toFixed(2)}
+                <CurrencySymbol size={11} /> {((parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0)).toFixed(2)}
               </td>
 
               {/* Delete row button (edit mode only) */}
@@ -561,7 +569,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             {showQrCode && (
               <div className={styles.complianceQrBox}>
                 <div className={styles.qrWrapper}>
-                  <QRCodeSVG value={`ORDER:${order.id}`} size={85} />
+                  <QRCodeSVG value={order.id.toString()} size={85} />
                 </div>
               </div>
             )}

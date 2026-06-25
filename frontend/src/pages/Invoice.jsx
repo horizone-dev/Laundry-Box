@@ -18,9 +18,6 @@ export default function Invoice() {
 
   useEffect(() => {
     const fetchOrder = async () => {
-      const cleanId = id.replace('AG-', '').replace('#', '');
-      const fullId = `#AG-${cleanId}`;
-      
       if (window.electronAPI?.dbQuery) {
         try {
           // Try multiple ID formats for robustness
@@ -28,8 +25,8 @@ export default function Invoice() {
             id,
             `#${id}`,
             id.startsWith('#') ? id.substring(1) : `#${id}`,
-            id.replace('#', '').replace('AG-', '#AG-'),
-            id.replace('#', '').replace('AG-', '')
+            id.replace('#', '').replace('AG-', ''),
+            id.replace('#', '').replace(settings.invoicePrefix || '', '')
           ];
           
           let rawOrder = null;
@@ -63,19 +60,44 @@ export default function Invoice() {
             let previousBalance = 0;
 
             if (rawOrder.customerId && rawOrder.customerId !== 'Walk-in') {
-              totalBalance = customerBalance;
-              previousBalance = totalBalance - dueAmount;
+               totalBalance = customerBalance;
+               previousBalance = totalBalance - dueAmount;
             } else {
-              totalBalance = dueAmount;
-              previousBalance = 0;
+               totalBalance = dueAmount;
+               previousBalance = 0;
             }
+
+            const formatDateTime = (dateVal) => {
+              if (!dateVal) return 'N/A';
+              const formattedDate = formatDate(dateVal);
+              if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return formattedDate;
+              
+              let d;
+              try {
+                d = new Date(dateVal);
+              } catch(e) {
+                return formattedDate;
+              }
+              if (isNaN(d.getTime())) return formattedDate;
+
+              let hours = d.getHours();
+              const minutes = String(d.getMinutes()).padStart(2, '0');
+              let ampm = '';
+              if (settings.timeFormat === '12h') {
+                ampm = hours >= 12 ? ' PM' : ' AM';
+                hours = hours % 12;
+                hours = hours ? hours : 12;
+              }
+              const formattedTime = `${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
+              return `${formattedDate} ${formattedTime}`;
+            };
 
             const taxRate = settings.isTaxEnabled ? (settings.taxRate || 0) / 100 : 0;
             const subtotal = rawOrder.totalAmount / (1 + taxRate);
             setOrder({
               id: rawOrder.id,
               billNumber: rawOrder.billNumber || '',
-              date: formatDate(rawOrder.createdAt),
+              date: formatDateTime(rawOrder.createdAt),
               createdAt: rawOrder.createdAt,
               customer: rawOrder.customerName || rawOrder.customerId,
               customerId: rawOrder.customerId,
@@ -111,6 +133,7 @@ export default function Invoice() {
               total: rawOrder.totalAmount,
               paidAmount: paidAmount,
               previousBalance: previousBalance,
+              totalBalance: totalBalance,
               expectedDeliveryDate: (() => {
                 const rawDate = rawOrder.expectedDeliveryDate || '';
                 if (rawDate.includes(' ')) {
@@ -134,7 +157,7 @@ export default function Invoice() {
 
     const useFallback = () => {
       setOrder({
-        id: `#AG-${id.replace('AG-', '')}`,
+        id: id,
         billNumber: `BN-${Date.now().toString().slice(-6)}`,
         date: 'Oct 24, 2023, 10:00 AM',
         createdAt: new Date().toISOString(),
@@ -213,16 +236,32 @@ export default function Invoice() {
     const pdfSuccess = await generatePDF();
 
     // 2. Format WhatsApp Message
-    const cleanPhone = (order.customerPhone || '').replace(/\D/g, '');
-    const countryCode = settings.waCountryCode || '';
+    const origPhone = order.customerPhone || '';
+    const cleanPhone = origPhone.replace(/\D/g, '');
     let finalPhone = cleanPhone;
-    if (countryCode && !finalPhone.startsWith(countryCode)) {
-      finalPhone = countryCode + finalPhone;
+    
+    // Prepend country code if original phone doesn't start with '+'
+    if (cleanPhone && !origPhone.trim().startsWith('+')) {
+      const countryCode = settings.waCountryCode || '971';
+      const cleanCountryCode = countryCode.replace(/\D/g, '');
+      if (cleanCountryCode && !finalPhone.startsWith(cleanCountryCode)) {
+        finalPhone = cleanCountryCode + finalPhone;
+      }
     }
 
     const itemsSummary = order.items.map(item => `- ${item.qty} x ${item.name} (${settings.currencySymbol || 'AED'} ${item.total.toFixed(2)})`).join('%0A');
-    const message = `*INVOICE RECEIVED* %0A%0AHello! Here is your bill for order *${order.id}*.%0A%0A*Items:*%0A${itemsSummary}%0A%0A*Total Amount: ${settings.currencySymbol || 'AED'} ${order.total.toFixed(2)}*%0A%0A_Your PDF invoice has been generated and downloaded. Please attach it here to share._`;
+    let message = `*INVOICE RECEIVED* %0A%0AHello! Here is your bill for order *${order.id}*.%0A%0A*Items:*%0A${itemsSummary}%0A%0A*Total Amount: ${settings.currencySymbol || 'AED'} ${order.total.toFixed(2)}*`;
     
+    if (order.expectedDeliveryDate) {
+      message += `%0A%0A*Expected Delivery Date:* ${order.expectedDeliveryDate}`;
+    }
+    
+    message += `%0A%0A_Your PDF invoice has been generated and downloaded. Please attach it here to share._`;
+    
+    if (order.dueAmount !== undefined && order.dueAmount > 0) {
+      message += `%0A%0AFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${order.dueAmount.toFixed(2)}.`;
+    }
+
     const url = `https://wa.me/${finalPhone}?text=${message}`;
     if (window.electronAPI?.openExternal) {
       window.electronAPI.openExternal(url);

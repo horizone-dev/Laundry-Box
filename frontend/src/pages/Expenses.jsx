@@ -41,6 +41,27 @@ export default function Expenses() {
     fetchExpenses();
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (showModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showModal]);
+
   // Safe date parser to avoid timezone shifts
   const parseLocalDate = (dateStr) => {
     if (!dateStr) return null;
@@ -60,7 +81,7 @@ export default function Expenses() {
           setExpenses(res.data);
           
           // Parse unique custom categories from DB
-          const defaultCategories = ['Supplies', 'Salaries', 'Rent', 'Utilities', 'Maintenance'];
+          const defaultCategories = ['Supplies', 'Salaries', 'Rent', 'Utilities', 'Electricity', 'Maintenance', 'Return', 'Other Expense'];
           const foundCustom = res.data
             .map(e => e.category)
             .filter(cat => cat && !defaultCategories.includes(cat));
@@ -121,7 +142,7 @@ export default function Expenses() {
       try {
         await window.electronAPI.dbQuery('DELETE FROM expenses WHERE id = ?', [id]);
         // Also delete from transactions
-        await window.electronAPI.dbQuery('DELETE FROM account_transactions WHERE description LIKE ?', [`%${id}%`]);
+        await window.electronAPI.dbQuery('DELETE FROM account_transactions WHERE id = ? OR description LIKE ?', [id, `%${id}%`]);
         fetchExpenses();
       } catch (err) {
         console.error("Delete expense error:", err);
@@ -155,15 +176,14 @@ export default function Expenses() {
           [id, DEFAULT_SHOP_ID, formData.title, totalAmount, taxAmount, formData.isTaxEnabled ? 1 : 0, formData.taxMethod, categoryToSave, formData.date, getLocalISOString()]
         );
 
-        // Also record in Accounts
-        const txnId = `TXN-${Date.now()}`;
+        // Also record in Accounts (using the same ID for linking)
         const _nowE = new Date();
         const txnTimestamp = `${_nowE.getFullYear()}-${String(_nowE.getMonth()+1).padStart(2,'0')}-${String(_nowE.getDate()).padStart(2,'0')} ${String(_nowE.getHours()).padStart(2,'0')}:${String(_nowE.getMinutes()).padStart(2,'0')}`;
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, formData.paymentSource, 'EXPENSE', categoryToSave, totalAmount, formData.title, txnTimestamp, 0, getLocalISOString(), 'Zap']
+          [id, DEFAULT_SHOP_ID, formData.paymentSource, 'EXPENSE', categoryToSave, totalAmount, formData.title, txnTimestamp, 0, getLocalISOString(), 'Zap']
         );
 
         fetchExpenses();
@@ -288,7 +308,10 @@ export default function Expenses() {
                 <option value="Salaries">Salaries</option>
                 <option value="Rent">Rent</option>
                 <option value="Utilities">Utilities</option>
+                <option value="Electricity">Electricity</option>
                 <option value="Maintenance">Maintenance</option>
+                <option value="Return">Return</option>
+                <option value="Other Expense">Other Expense</option>
                 {customCategories.map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
@@ -390,8 +413,8 @@ export default function Expenses() {
       </div>
 
       {showModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
+        <div className={styles.modalOverlay} onClick={() => setShowModal(false)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>Add New Expense</h2>
               <X size={24} className={styles.closeBtn} onClick={() => setShowModal(false)} />
@@ -457,7 +480,10 @@ export default function Expenses() {
                         <option value="Salaries">Salaries</option>
                         <option value="Rent">Rent</option>
                         <option value="Utilities">Utilities</option>
+                        <option value="Electricity">Electricity</option>
                         <option value="Maintenance">Maintenance</option>
+                        <option value="Return">Return</option>
+                        <option value="Other Expense">Other Expense</option>
                         {customCategories.map(cat => (
                           <option key={cat} value={cat}>{cat}</option>
                         ))}

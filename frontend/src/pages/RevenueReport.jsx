@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
+import Pagination from '../components/Pagination';
 import styles from './Reports.module.css';
 
 export default function RevenueReport() {
@@ -74,7 +75,7 @@ export default function RevenueReport() {
   const stats = [
     { label: 'Total Collected', value: totalRevenue, icon: DollarSign, color: '#10B981', bg: '#ECFDF5' },
     { label: 'Cash Payments', value: filteredPayments.filter(p => p.method === 'Cash' || p.method === 'CASH').reduce((s, p) => s + p.amount, 0), icon: Wallet, color: '#3B82F6', bg: '#EFF6FF' },
-    { label: 'Bank/Card', value: filteredPayments.filter(p => p.method === 'Bank' || p.method === 'BANK').reduce((s, p) => s + p.amount, 0), icon: Landmark, color: '#8B5CF6', bg: '#F5F3FF' },
+    { label: 'Bank/Card', value: filteredPayments.filter(p => ['BANK', 'BANK TRANSFER', 'CARD'].includes(p.method?.toUpperCase())).reduce((s, p) => s + p.amount, 0), icon: Landmark, color: '#8B5CF6', bg: '#F5F3FF' },
     { label: 'Digital/Other', value: filteredPayments.filter(p => ['UPI', 'WALLET', 'ONLINE'].includes(p.method?.toUpperCase())).reduce((s, p) => s + p.amount, 0), icon: Smartphone, color: '#F59E0B', bg: '#FFFBEB' },
   ];
 
@@ -173,6 +174,8 @@ export default function RevenueReport() {
                <option value="All">All Methods</option>
                <option value="Cash">Cash</option>
                <option value="Bank">Bank Transfer</option>
+               <option value="Card">Card</option>
+               <option value="UPI">UPI</option>
              </select>
           </div>
         </div>
@@ -196,7 +199,13 @@ export default function RevenueReport() {
                 <td style={{ padding: '1.25rem 1rem', fontWeight: 700, color: '#1E293B' }}>{p.orderId || 'Direct Payment'}</td>
                 <td style={{ padding: '1.25rem 1rem' }}>
                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                     {p.method?.toUpperCase() === 'CASH' ? <Wallet size={14} color="#3B82F6" /> : <Landmark size={14} color="#8B5CF6" />}
+                     {(() => {
+                       const m = p.method?.toUpperCase();
+                       if (m === 'CASH') return <Wallet size={14} color="#3B82F6" />;
+                       if (m === 'CARD') return <CreditCard size={14} color="#8B5CF6" />;
+                       if (m === 'UPI') return <Smartphone size={14} color="#F59E0B" />;
+                       return <Landmark size={14} color="#10B981" />;
+                     })()}
                      <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{p.method}</span>
                    </div>
                 </td>
@@ -220,45 +229,16 @@ export default function RevenueReport() {
           </tbody>
         </table>
 
-        {(() => {
-          const totalPages = Math.ceil(filteredPayments.length / 20);
-          if (totalPages <= 1 || loading) return null;
-          return (
-            <div className={styles.paginationRow} data-noprint="true" style={{ marginTop: '1.5rem' }}>
-              <span className={styles.paginationInfo}>
-                Showing {Math.min(filteredPayments.length, (currentPage - 1) * 20 + 1)}-{Math.min(filteredPayments.length, currentPage * 20)} of {filteredPayments.length} transactions
-              </span>
-              <div className={styles.paginationBtns}>
-                <button 
-                  className={styles.paginationBtn} 
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                >
-                  Previous
-                </button>
-                {[...Array(totalPages)].map((_, idx) => {
-                  const pageNum = idx + 1;
-                  return (
-                    <button 
-                      key={pageNum}
-                      className={`${styles.paginationBtn} ${currentPage === pageNum ? styles.paginationActiveBtn : ''}`}
-                      onClick={() => setCurrentPage(pageNum)}
-                    >
-                      {pageNum}
-                    </button>
-                  );
-                })}
-                <button 
-                  className={styles.paginationBtn} 
-                  disabled={currentPage === totalPages}
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          );
-        })()}
+        {!loading && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={Math.ceil(filteredPayments.length / 20)}
+            onPageChange={setCurrentPage}
+            totalItems={filteredPayments.length}
+            pageSize={20}
+            itemLabel="transactions"
+          />
+        )}
       </div>
     </div>
   );

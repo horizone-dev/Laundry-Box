@@ -50,10 +50,25 @@ export default function OverdueStatement() {
   };
 
   const handleWhatsApp = () => {
-    if (!customer) return;
+    if (!customer || !customer.phone) return;
+    const origPhone = customer.phone.toString();
+    let cleanPhone = origPhone.replace(/\D/g, '');
+    
+    // Prepend country code if original phone doesn't start with '+'
+    if (cleanPhone && !origPhone.trim().startsWith('+')) {
+      const countryCode = settings.waCountryCode || '971';
+      const cleanCountryCode = countryCode.replace(/\D/g, '');
+      if (cleanCountryCode && !cleanPhone.startsWith(cleanCountryCode)) {
+        cleanPhone = cleanCountryCode + cleanPhone;
+      }
+    }
     const message = `Hello ${customer.name}! This is a friendly reminder regarding your outstanding balance of ${settings.currencySymbol || 'AED'} ${totalOverdue.toFixed(2)} at ${settings.shopName || 'our laundry'}. Please visit us to settle the payment. Thank you!`;
-    const url = `https://wa.me/${customer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank');
+    const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+    if (window.electronAPI?.openExternal) {
+      window.electronAPI.openExternal(url);
+    } else {
+      window.open(url, '_blank');
+    }
   };
 
   if (loading) return <div className={styles.container}>Generating Statement...</div>;

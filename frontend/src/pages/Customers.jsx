@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Search, UserPlus, Download, Calendar, MoreHorizontal, 
-  TrendingUp, ChevronLeft, ChevronRight, X, Phone, MapPin, CreditCard, Wallet, DollarSign, Trash2, Users, Edit2, Lock
+  TrendingUp, ChevronLeft, ChevronRight, X, Phone, MapPin, CreditCard, Wallet, DollarSign, Trash2, Users, Edit2, Lock,
+  Printer
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import WhatsAppIcon from '../components/WhatsAppIcon';
+import Pagination from '../components/Pagination';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
@@ -32,6 +34,7 @@ export default function Customers() {
     address: ''
   });
   const [showEditCreditLimitModal, setShowEditCreditLimitModal] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState(null);
   const [editCreditLimitValue, setEditCreditLimitValue] = useState('0');
   const [managerPinValue, setManagerPinValue] = useState('');
   const [managerPinError, setManagerPinError] = useState('');
@@ -41,6 +44,32 @@ export default function Customers() {
     fetchCustomers();
     setCurrentPage(1);
   }, [searchTerm]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowModal(false);
+        setShowBillsModal(false);
+        setShowPaymentModal(false);
+        setShowQuickSettleModal(false);
+        setShowEditCreditLimitModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const isAnyOpen = showModal || showBillsModal || showPaymentModal || showQuickSettleModal || showEditCreditLimitModal;
+    if (isAnyOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showModal, showBillsModal, showPaymentModal, showQuickSettleModal, showEditCreditLimitModal]);
 
   const fetchCustomers = async () => {
     if (window.electronAPI?.dbQuery) {
@@ -77,33 +106,48 @@ export default function Customers() {
 
     if (window.electronAPI?.dbQuery) {
       try {
-        const res = await window.electronAPI.dbQuery('SELECT id FROM customers');
-        let nextNum = 1;
-        if (res.success && res.data) {
-          const numbers = res.data.map(c => {
-            const parts = c.id.split('-');
-            const num = parseInt(parts[1]);
-            return isNaN(num) || num > 999999 ? 0 : num;
-          });
-          nextNum = Math.max(0, ...numbers) + 1;
-        }
-        const id = `CUST-${nextNum}`;
+        if (editingCustomer) {
+          await window.electronAPI.dbQuery(
+            'UPDATE customers SET name = ?, phone = ?, address = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+            [formData.name, formData.phone, formData.address, timestamp, editingCustomer.id]
+          );
+          alert('Customer updated successfully!');
+        } else {
+          const res = await window.electronAPI.dbQuery('SELECT id FROM customers');
+          let nextNum = 1;
+          if (res.success && res.data) {
+            const numbers = res.data.map(c => {
+              const parts = c.id.split('-');
+              const num = parseInt(parts[1]);
+              return isNaN(num) || num > 999999 ? 0 : num;
+            });
+            nextNum = Math.max(0, ...numbers) + 1;
+          }
+          const id = `CUST-${nextNum}`;
 
-        await window.electronAPI.dbQuery(
-          'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, DEFAULT_SHOP_ID, formData.name, formData.phone, '', formData.address, 0, 0, timestamp]
-        );
+          await window.electronAPI.dbQuery(
+            'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [id, DEFAULT_SHOP_ID, formData.name, formData.phone, '', formData.address, 0, 0, timestamp]
+          );
+          alert('Customer created successfully!');
+        }
         fetchCustomers();
         setShowModal(false);
+        setEditingCustomer(null);
         setFormData({ name: '', phone: '', address: '' });
       } catch (err) {
         console.error("Failed to save customer:", err);
       }
     } else {
       // Web demo
-      const id = `CUST-${customers.length + 1}`;
-      setCustomers([{ ...formData, id, orders: 0, lastDate: 'Just now', tag: 'New' }, ...customers]);
+      if (editingCustomer) {
+        setCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
+      } else {
+        const id = `CUST-${customers.length + 1}`;
+        setCustomers([{ ...formData, id, orders: 0, lastDate: 'Just now', tag: 'New', balance: 0, creditLimit: 0 }, ...customers]);
+      }
       setShowModal(false);
+      setEditingCustomer(null);
       setFormData({ name: '', phone: '', address: '' });
     }
   };
@@ -307,17 +351,23 @@ export default function Customers() {
     }
   };
 
-  const handleWhatsApp = (phone) => {
-    let cleanPhone = phone.replace(/\D/g, '');
-    
-    // Prepend country code if not present
-    const countryCode = settings.waCountryCode || '';
-    if (countryCode && !cleanPhone.startsWith(countryCode)) {
-      cleanPhone = countryCode + cleanPhone;
+  const handleWhatsApp = (phone, balance) => {
+    if (!phone) return;
+    let cleanPhone = phone.toString().replace(/\D/g, '');
+    let finalPhone = cleanPhone;
+    if (cleanPhone && !phone.toString().trim().startsWith('+')) {
+      const countryCode = settings.waCountryCode || '971';
+      const cleanCountryCode = countryCode.replace(/\D/g, '');
+      if (cleanCountryCode && !finalPhone.startsWith(cleanCountryCode)) {
+        finalPhone = cleanCountryCode + finalPhone;
+      }
     }
 
-    const message = `Hello! This is from the Laundry Box. We're reaching out regarding your account.`;
-    const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+    let message = `Hello! This is from the Laundry Box. We're reaching out regarding your account.`;
+    if (balance > 0) {
+      message += `\n\nFriendly reminder: Your outstanding balance is ${settings.currencySymbol || 'AED'} ${balance.toFixed(2)}. Please visit us to settle the payment. Thank you!`;
+    }
+    const url = `https://wa.me/${finalPhone}?text=${encodeURIComponent(message)}`;
     if (window.electronAPI?.openExternal) {
       window.electronAPI.openExternal(url);
     } else {
@@ -344,7 +394,11 @@ export default function Customers() {
           <button className={styles.headerSettleBtn} onClick={() => navigate('/settlement')}>
             <DollarSign size={18} /> Settle Bill
           </button>
-          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+          <button className="btn btn-primary" onClick={() => {
+            setEditingCustomer(null);
+            setFormData({ name: '', phone: settings.waCountryCode ? `+${settings.waCountryCode.replace(/\+/g, '')}` : '+971', address: '' });
+            setShowModal(true);
+          }}>
             <UserPlus size={18} /> Add Customer
           </button>
         </div>
@@ -381,7 +435,7 @@ export default function Customers() {
       </div>
 
       {/* Filters */}
-      <div className={styles.filtersCard}>
+      <div className={styles.filtersCard} data-noprint="true">
         <div className={styles.searchBox}>
           <Search size={18} color="#94A3B8" />
           <input 
@@ -421,7 +475,9 @@ export default function Customers() {
           }}>
             <Download size={18} /> Export
           </button>
-          <button className={styles.secondaryBtn}><Calendar size={18} /> This Month</button>
+          <button className={styles.secondaryBtn} onClick={() => window.print()}>
+            <Printer size={18} /> Print PDF
+          </button>
         </div>
       </div>
 
@@ -436,7 +492,7 @@ export default function Customers() {
               <th>Balance</th>
               <th>Credit Limit</th>
               <th>Last Order Date</th>
-              <th>Actions</th>
+              <th data-noprint="true">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -490,7 +546,7 @@ export default function Customers() {
                   })()}
                 </td>
                 <td>{customer.lastDate ? formatDate(customer.lastDate) : customer.updatedAt ? formatDate(customer.updatedAt) : 'N/A'}</td>
-                <td>
+                <td data-noprint="true">
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button 
                       className={styles.settleRowBtn}
@@ -511,6 +567,19 @@ export default function Customers() {
                     </button>
                      <button 
                       className={styles.secondaryBtn} 
+                      style={{ padding: '0.4rem 0.6rem', color: '#4F46E5', borderColor: '#4F46E5' }}
+                      onClick={() => {
+                        setSelectedCustomer(customer);
+                        setEditingCustomer(customer);
+                        setFormData({ name: customer.name, phone: customer.phone, address: customer.address || '' });
+                        setShowModal(true);
+                      }}
+                      title="Edit Customer Details"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button 
+                      className={styles.secondaryBtn} 
                       style={{ padding: '0.4rem 0.6rem', color: '#2563EB', borderColor: '#2563EB' }}
                       onClick={() => {
                         setSelectedCustomer(customer);
@@ -521,12 +590,12 @@ export default function Customers() {
                       }}
                       title="Edit Credit Limit"
                     >
-                      <Edit2 size={16} />
+                      <Lock size={16} />
                     </button>
                     <button 
                       className={styles.secondaryBtn} 
                       style={{ padding: '0.4rem 0.6rem', color: '#10B981', borderColor: '#10B981' }}
-                      onClick={() => handleWhatsApp(customer.phone)}
+                      onClick={() => handleWhatsApp(customer.phone, customer.balance)}
                       title="Send WhatsApp"
                     >
                       <WhatsAppIcon size={16} />
@@ -552,58 +621,29 @@ export default function Customers() {
           </tbody>
         </table>
 
-        {(() => {
-          const totalPages = Math.ceil(customers.length / 20);
-          if (totalPages <= 1 || loading) return null;
-          return (
-            <div className={styles.pagination} data-noprint="true">
-              <span className={styles.paginationInfo}>
-                Showing {Math.min(customers.length, (currentPage - 1) * 20 + 1)}-{Math.min(customers.length, currentPage * 20)} of {customers.length} customers
-              </span>
-              <div className={styles.paginationBtns}>
-                <button 
-                  className={styles.pageBtn} 
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                >
-                  Previous
-                </button>
-                {[...Array(totalPages)].map((_, idx) => {
-                  const pageNum = idx + 1;
-                  return (
-                    <button 
-                      key={pageNum}
-                      className={`${styles.pageBtn} ${currentPage === pageNum ? styles.active : ''}`}
-                      onClick={() => setCurrentPage(pageNum)}
-                    >
-                      {pageNum}
-                    </button>
-                  );
-                })}
-                <button 
-                  className={styles.pageBtn} 
-                  disabled={currentPage === totalPages}
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          );
-        })()}
+        {!loading && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={Math.ceil(customers.length / 20)}
+            onPageChange={setCurrentPage}
+            totalItems={customers.length}
+            pageSize={20}
+            itemLabel="customers"
+          />
+        )}
       </div>
 
 
-      {/* Add Customer Modal */}
+      {/* Add/Edit Customer Modal */}
       {showModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
+        <div className={styles.modalOverlay} onClick={() => { setShowModal(false); setEditingCustomer(null); }}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div>
-                <h2>Add New Customer</h2>
-                <p>Register a new customer to your database</p>
+                <h2>{editingCustomer ? 'Edit Customer Info' : 'Add New Customer'}</h2>
+                <p>{editingCustomer ? 'Update details for this customer' : 'Register a new customer to your database'}</p>
               </div>
-              <X size={24} className={styles.closeBtn} onClick={() => setShowModal(false)} />
+              <X size={24} className={styles.closeBtn} onClick={() => { setShowModal(false); setEditingCustomer(null); }} />
             </div>
 
             <form onSubmit={handleSaveCustomer}>
@@ -651,8 +691,8 @@ export default function Customers() {
                 </div>
 
               <div className={styles.modalFooter}>
-                <button type="button" className={styles.secondaryBtn} onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className={styles.primaryBtn}>Create Customer</button>
+                <button type="button" className={styles.secondaryBtn} onClick={() => { setShowModal(false); setEditingCustomer(null); }}>Cancel</button>
+                <button type="submit" className={styles.primaryBtn}>{editingCustomer ? 'Save Changes' : 'Create Customer'}</button>
               </div>
             </form>
           </div>
@@ -661,8 +701,8 @@ export default function Customers() {
 
       {/* Bills Modal */}
       {showBillsModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal} style={{ width: '800px', maxWidth: '95vw' }}>
+        <div className={styles.modalOverlay} onClick={() => setShowBillsModal(false)}>
+          <div className={styles.modal} style={{ width: '800px', maxWidth: '95vw' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div>
                 <h2>Billing History - {selectedCustomer?.name}</h2>
@@ -749,8 +789,8 @@ export default function Customers() {
         </div>
       )}
       {showPaymentModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal} style={{ maxWidth: '450px' }}>
+        <div className={styles.modalOverlay} onClick={() => setShowPaymentModal(false)}>
+          <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
               <div>
                 <h2 style={{ color: '#0F172A' }}>Settle Customer Bill</h2>
@@ -850,8 +890,8 @@ export default function Customers() {
         </div>
       )}
       {showQuickSettleModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal} style={{ maxWidth: '450px' }}>
+        <div className={styles.modalOverlay} onClick={() => { setShowQuickSettleModal(false); setQuickSettleSearch(''); }}>
+          <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div>
                 <h2>Quick Settle</h2>
@@ -910,8 +950,8 @@ export default function Customers() {
 
       {/* Edit Credit Limit Modal */}
       {showEditCreditLimitModal && selectedCustomer && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal} style={{ maxWidth: '420px' }}>
+        <div className={styles.modalOverlay} onClick={() => { setShowEditCreditLimitModal(false); setSelectedCustomer(null); }}>
+          <div className={styles.modal} style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div>
                 <h2>Edit Credit Limit</h2>

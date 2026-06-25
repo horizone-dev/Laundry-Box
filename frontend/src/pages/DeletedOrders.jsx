@@ -196,6 +196,28 @@ export default function DeletedOrders() {
     if (pinVerified) fetchData();
   }, [pinVerified, dateRange, customStart, customEnd]);
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowRefundModal(false);
+        setOrderToRefund(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (showRefundModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showRefundModal]);
+
   const filteredOrders = useMemo(() => {
     return orders.filter(o => {
       // Remote date filtering (since backend doesn't filter by date range yet)
@@ -504,8 +526,8 @@ export default function DeletedOrders() {
 
       {/* Refund Method Selection Modal */}
       {showRefundModal && orderToRefund && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.pinCard} style={{ maxWidth: '400px', textAlign: 'left', alignItems: 'stretch' }}>
+        <div className={styles.modalOverlay} onClick={() => { setShowRefundModal(false); setOrderToRefund(null); }}>
+          <div className={styles.pinCard} style={{ maxWidth: '400px', textAlign: 'left', alignItems: 'stretch' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.pinIconBox} style={{ alignSelf: 'center' }}>
               <DollarSign size={32} />
             </div>

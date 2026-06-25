@@ -4,7 +4,7 @@ import { useSettings } from '../store/SettingsContext';
 import styles from './DressTag.module.css';
 
 export default function DressTag({ order }) {
-  const { formatDate } = useSettings();
+  const { settings, formatDate } = useSettings();
   if (!order || !order.items) return null;
 
   // Flatten items so if there are 3 shirts, we get 3 tags
@@ -26,13 +26,13 @@ export default function DressTag({ order }) {
       {tags.map((tag, idx) => (
         <div key={idx} className={styles.dressTag}>
           <div className={styles.tagHeader}>
-            <span className={styles.orderId}>{order.id}</span>
+            <span className={styles.orderId}>{settings?.invoicePrefix || ''}{order.id}</span>
             <span className={styles.tagCount}>{tag.tagIndex}/{tag.totalInGroup}</span>
           </div>
           
           <div className={styles.tagBody}>
             <div className={styles.qrWrapper}>
-              <QRCodeSVG value={`ORDER:${order.id}`} size={60} />
+              <QRCodeSVG value={order.id.toString()} size={60} />
             </div>
             <div className={styles.itemDetails}>
               <h3 className={styles.itemName}>{tag.name}</h3>

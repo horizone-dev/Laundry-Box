@@ -40,6 +40,23 @@ body {
   background-color: var(--background);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* UI items that should not be selectable to preserve native app feel */
+button,
+.btn,
+a,
+nav,
+aside,
+header,
+svg,
+img,
+input[type="checkbox"],
+input[type="radio"] {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Utilities */

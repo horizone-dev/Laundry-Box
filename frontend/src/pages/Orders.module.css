@@ -283,7 +283,8 @@
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   display: flex;
   justify-content: flex-end; /* Align sheet to the right edge */
   align-items: stretch;     /* Full height */
@@ -294,7 +295,7 @@
 
 /* Redesigned Sliding Drawer */
 .detailsModal {
-  background: #f8fafc; /* Subtle grey canvas for contrast with white cards */
+  background: white;
   width: 100%;
   max-width: 580px;    /* Perfectly sized modern side sheet */
   height: 100vh;
@@ -317,12 +318,12 @@
 
 .modalHeader {
   padding: 1.5rem 2rem;
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-  color: white;
+  background: white;
+  color: #0F172A;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid #E2E8F0;
   flex-shrink: 0;
 }
 

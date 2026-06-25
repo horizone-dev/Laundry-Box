@@ -85,6 +85,77 @@
   transform: translateY(-1px);
 }
 
+.loadMoreBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 38px;
+  padding: 0 1.25rem;
+  background: #EFF6FF;
+  border: 1.5px solid #BFDBFE;
+  border-radius: 10px;
+  color: #2563EB;
+  font-weight: 700;
+  font-size: 0.84rem;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+}
+
+.loadMoreBtn:hover {
+  background: #DBEAFE;
+  border-color: #3B82F6;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
+}
+
+/* ── Kanban Board Wrapper ───────────────────────── */
+.boardWrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  width: 100%;
+}
+
+.scrollArrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #E2E8F0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748B;
+  cursor: pointer;
+  z-index: 10;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.scrollArrow:hover {
+  background: #FFFFFF;
+  color: #2563EB;
+  border-color: #BFDBFE;
+  transform: translateY(-50%) scale(1.08);
+  box-shadow: 0 6px 12px rgba(37, 99, 235, 0.15);
+}
+
+.scrollArrowLeft {
+  left: 0.5rem;
+}
+
+.scrollArrowRight {
+  right: 0.5rem;
+}
+
 /* ── Kanban Board Container ─────────────────────── */
 .boardContainer {
   display: flex;
@@ -470,7 +541,7 @@
   align-items: center;
   padding: 1.25rem 1.75rem;
   border-bottom: 1px solid #E2E8F0;
-  background: #F8FAFC;
+  background: white;
 }
 
 .modalHeader h2 {

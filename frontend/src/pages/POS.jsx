@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search, Plus, Minus, ShoppingBag, Trash2, CheckCircle,
   X, ChevronDown, Shirt, Bed, Wind, Layers, Package,
@@ -19,11 +19,13 @@ import styles from './POS.module.css';
 
 export default function POS() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { settings } = useSettings();
   const [services, setServices] = useState([]);
   const [serviceTypes, setServiceTypes] = useState([]);
   const [addons, setAddons] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [editOrderId, setEditOrderId] = useState(null);
 
   const [step, setStep] = useState('pos'); // pos, checkout
   const [cart, setCart] = useState([]);
@@ -74,10 +76,10 @@ export default function POS() {
   const fetchPOSData = async () => {
     if (window.electronAPI?.dbQuery) {
       try {
-        const sRes = await window.electronAPI.dbQuery('SELECT * FROM services', []);
-        const tRes = await window.electronAPI.dbQuery('SELECT * FROM service_types', []);
-        const aRes = await window.electronAPI.dbQuery('SELECT * FROM addons', []);
-        const cRes = await window.electronAPI.dbQuery('SELECT * FROM service_categories', []);
+        const sRes = await window.electronAPI.dbQuery('SELECT * FROM services ORDER BY sortOrder ASC, id ASC', []);
+        const tRes = await window.electronAPI.dbQuery('SELECT * FROM service_types ORDER BY sortOrder ASC, id ASC', []);
+        const aRes = await window.electronAPI.dbQuery('SELECT * FROM addons ORDER BY sortOrder ASC, id ASC', []);
+        const cRes = await window.electronAPI.dbQuery('SELECT * FROM service_categories ORDER BY sortOrder ASC, id ASC', []);
 
         if (sRes.success) setServices(sRes.data);
         if (tRes.success) setServiceTypes(tRes.data);
@@ -91,6 +93,69 @@ export default function POS() {
       } catch (err) {
         console.error("Failed to fetch POS data:", err);
       }
+    }
+  };
+
+  const paramEditOrderId = searchParams.get('editOrderId');
+
+  useEffect(() => {
+    if (paramEditOrderId && services.length > 0 && serviceTypes.length > 0) {
+      loadOrderForEditing(paramEditOrderId);
+    }
+  }, [paramEditOrderId, services, serviceTypes]);
+
+  const loadOrderForEditing = async (orderId) => {
+    if (!window.electronAPI?.dbQuery) return;
+    try {
+      const res = await window.electronAPI.dbQuery('SELECT * FROM orders WHERE id = ?', [orderId]);
+      if (res.success && res.data.length > 0) {
+        const order = res.data[0];
+        setEditOrderId(orderId);
+
+        let parsedItems = [];
+        try {
+          parsedItems = typeof order.items === 'string' ? JSON.parse(order.items || '[]') : (order.items || []);
+        } catch (e) {
+          console.error("Failed to parse items:", e);
+        }
+        setCart(parsedItems);
+
+        if (order.customerId && order.customerId !== 'Walk-in') {
+          const custRes = await window.electronAPI.dbQuery('SELECT * FROM customers WHERE id = ?', [order.customerId]);
+          if (custRes.success && custRes.data.length > 0) {
+            setSelectedCustomer(custRes.data[0]);
+          } else {
+            setSelectedCustomer({ id: order.customerId, name: 'Customer (' + order.customerId + ')', phone: '' });
+          }
+        } else {
+          setSelectedCustomer(null);
+        }
+
+        if (order.expectedDeliveryDate) {
+          const parts = order.expectedDeliveryDate.split(' ');
+          if (parts.length >= 2) {
+            setExpectedDeliveryDate(parts[0]);
+            setExpectedDeliveryTime(parts[1].substring(0, 5));
+          } else {
+            setExpectedDeliveryDate(order.expectedDeliveryDate);
+          }
+        }
+
+        setSpecialInstructions(order.specialInstructions || '');
+
+        const methodMap = {
+          'CASH': 'cash',
+          'BANK': 'bank',
+          'CARD': 'card',
+          'UPI': 'upi',
+          'Mixed': 'cash',
+          'Not Paid': 'credit'
+        };
+        const prevMethod = methodMap[order.paymentMethod] || 'cash';
+        setPaymentMethod(prevMethod);
+      }
+    } catch (err) {
+      console.error("Failed to load order for editing:", err);
     }
   };
 
@@ -164,6 +229,38 @@ export default function POS() {
   const [pendingOrderAction, setPendingOrderAction] = useState(null); // 'completePayment' or 'saveOrder'
   const [pendingOrderId, setPendingOrderId] = useState(null);
 
+  const fetchNextOrderId = async () => {
+    if (window.electronAPI?.dbQuery) {
+      try {
+        const res = await window.electronAPI.dbQuery('SELECT id FROM orders');
+        if (res.success && res.data.length > 0) {
+          let maxNum = 0;
+          res.data.forEach(row => {
+            const cleanId = row.id.replace('#', '').replace('AG-', '');
+            const num = parseInt(cleanId.replace(/\D/g, ''));
+            if (!isNaN(num) && num > maxNum) {
+              maxNum = num;
+            }
+          });
+          const nextNum = maxNum + 1;
+          const formatted = String(nextNum).padStart(4, '0');
+          setPendingOrderId(formatted);
+        } else {
+          setPendingOrderId('0001');
+        }
+      } catch (err) {
+        console.error("Failed to fetch next order ID:", err);
+        setPendingOrderId('0001');
+      }
+    } else {
+      setPendingOrderId('0001');
+    }
+  };
+
+  useEffect(() => {
+    fetchNextOrderId();
+  }, []);
+
   const checkCreditLimitBeforeAction = (actionType) => {
     if (!selectedCustomer || selectedCustomer.id === 'Walk-in') return false;
     if (!settings.enableCreditLimitProtection) return false;
@@ -184,7 +281,7 @@ export default function POS() {
         const overrideAllowed = true;
 
         // Pre-generate orderId if not already generated
-        const generatedId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
+        const generatedId = pendingOrderId || '0001';
         setPendingOrderId(generatedId);
 
         setCreditWarningDetails({
@@ -329,7 +426,11 @@ export default function POS() {
         );
         handleSelectCustomer({ id, ...customerFormData });
         setShowCustomerModal(false);
-        setCustomerFormData({ name: '', phone: '', address: '' });
+        setCustomerFormData({
+          name: '',
+          phone: settings.waCountryCode ? `+${settings.waCountryCode.replace(/\+/g, '')}` : '+971',
+          address: ''
+        });
       } catch (err) {
         console.error("Failed to save customer:", err);
       }
@@ -347,6 +448,38 @@ export default function POS() {
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [discountType, setDiscountType] = useState('flat'); // 'flat' or 'percent'
   const [discountInput, setDiscountInput] = useState('');
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setSelectedService(null);
+        setEditingCartIdx(null);
+        setShowItemPresets(false);
+        setShowCustomerModal(false);
+        setShowDiscountModal(false);
+        setShowSuccessModal(false);
+        setSelectedCustomer(null);
+        setShowCreditWarning(false);
+        setShowManagerPinModal(false);
+        setManagerPinValue('');
+        setManagerPinError('');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const isAnyOpen = selectedService || showCustomerModal || showDiscountModal || showSuccessModal || showCreditWarning || showManagerPinModal;
+    if (isAnyOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [selectedService, showCustomerModal, showDiscountModal, showSuccessModal, showCreditWarning, showManagerPinModal]);
 
   const handleDiscount = () => {
     setDiscountInput(discount > 0 ? discount.toString() : '');
@@ -389,16 +522,21 @@ export default function POS() {
   const changeDue = parseFloat(tenderedAmount || 0) - total;
 
   const handleWhatsApp = (phone, text = null) => {
-    let cleanPhone = phone.replace(/\D/g, '');
-
-    // Prepend country code if not present
-    const countryCode = settings.waCountryCode || '';
-    if (countryCode && !cleanPhone.startsWith(countryCode)) {
-      cleanPhone = countryCode + cleanPhone;
+    if (!phone) return;
+    let cleanPhone = phone.toString().replace(/\D/g, '');
+    let finalPhone = cleanPhone;
+    
+    // Prepend country code if not starting with '+'
+    if (cleanPhone && !phone.toString().trim().startsWith('+')) {
+      const countryCode = settings.waCountryCode || '971';
+      const cleanCountryCode = countryCode.replace(/\D/g, '');
+      if (cleanCountryCode && !finalPhone.startsWith(cleanCountryCode)) {
+        finalPhone = cleanCountryCode + finalPhone;
+      }
     }
 
     const message = text || `Hello! This is from the Laundry Box. We're reaching out regarding your order.`;
-    const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+    const url = `https://wa.me/${finalPhone}?text=${encodeURIComponent(message)}`;
     if (window.electronAPI?.openExternal) {
       window.electronAPI.openExternal(url);
     } else {
@@ -447,7 +585,7 @@ export default function POS() {
         type: 'Custom',
         types: [{ id: 'custom', name: 'Custom', price: unitPrice }],
         addons: [],
-        qty: serviceConfig.qty,
+        qty: parseInt(serviceConfig.qty, 10) || 1,
         taxRate: selectedService.taxRate || settings.taxRate || 0,
         description: serviceConfig.description || '',
         category: selectedService.category || 'Standard',
@@ -489,7 +627,7 @@ export default function POS() {
         type: joinedTypeName, // legacy fallback type string
         types: selectedTypes,  // new types array
         addons: activeSelectedAddons.map(a => a.name),
-        qty: serviceConfig.qty,
+        qty: parseInt(serviceConfig.qty, 10) || 1,
         taxRate: selectedService.taxRate || settings.taxRate || 0,
         description: serviceConfig.description || '',
         category: selectedService.category || 'Standard',
@@ -516,7 +654,7 @@ export default function POS() {
     const unitPrice = serviceConfig.customPrice !== null && serviceConfig.customPrice !== ''
       ? parseFloat(serviceConfig.customPrice)
       : activeCalculatedPrice;
-    return unitPrice * serviceConfig.qty;
+    return unitPrice * (parseInt(serviceConfig.qty, 10) || 1);
   };
 
   // Helper to format currency
@@ -604,12 +742,116 @@ export default function POS() {
     if (!isOverridden && checkCreditLimitBeforeAction('completePayment')) {
       return;
     }
-    const orderId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
+    const orderId = pendingOrderId || '0001';
     const billNumber = `BN-${Date.now().toString().slice(-6)}`;
     const combinedExpectedDelivery = expectedDeliveryDate ? `${expectedDeliveryDate} ${expectedDeliveryTime || '17:00'}` : '';
 
     if (window.electronAPI?.dbQuery) {
       try {
+        if (editOrderId) {
+          const oldOrderRes = await window.electronAPI.dbQuery('SELECT * FROM orders WHERE id = ?', [editOrderId]);
+          if (oldOrderRes.success && oldOrderRes.data.length > 0) {
+            const oldOrder = oldOrderRes.data[0];
+
+            if (oldOrder.paymentStatus === 'Credit' || oldOrder.paymentStatus === 'Partial') {
+              await window.electronAPI.dbQuery(
+                'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+                [oldOrder.dueAmount, getLocalISOString(), oldOrder.customerId]
+              );
+            }
+
+            const newStatus = paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : oldOrder.status;
+            const newPaidAmount = paymentMethod === 'credit' ? 0 : total;
+            const newDueAmount = paymentMethod === 'credit' ? total : 0;
+            const newPayStatus = paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID;
+            const newPayMethod = paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'upi' ? PAYMENT_METHODS.UPI : PAYMENT_METHODS.NOT_PAID));
+
+            const updateResult = await window.electronAPI.dbQuery(
+              `UPDATE orders SET 
+               customerId = ?, status = ?, totalAmount = ?, paidAmount = ?, dueAmount = ?, 
+               paymentStatus = ?, items = ?, expectedDeliveryDate = ?, specialInstructions = ?, 
+               updatedAt = ?, paymentMethod = ?, isSynced = 0 
+               WHERE id = ?`,
+              [
+                selectedCustomer ? selectedCustomer.id : 'Walk-in',
+                newStatus,
+                total,
+                newPaidAmount,
+                newDueAmount,
+                newPayStatus,
+                JSON.stringify(cart),
+                combinedExpectedDelivery,
+                specialInstructions,
+                getLocalISOString(),
+                newPayMethod,
+                editOrderId
+              ]
+            );
+
+            if (!updateResult || !updateResult.success) {
+              if (oldOrder.paymentStatus === 'Credit' || oldOrder.paymentStatus === 'Partial') {
+                await window.electronAPI.dbQuery(
+                  'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+                  [oldOrder.dueAmount, getLocalISOString(), oldOrder.customerId]
+                );
+              }
+              alert('Failed to update order: ' + (updateResult?.error || 'Unknown error'));
+              return;
+            }
+
+            if ((newPayStatus === 'Credit' || newPayStatus === 'Partial') && selectedCustomer) {
+              await window.electronAPI.dbQuery(
+                'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+                [newDueAmount, getLocalISOString(), selectedCustomer.id]
+              );
+            }
+
+            axios.post(`${API_BASE_URL}/orders`, {
+              id: editOrderId,
+              billNumber: oldOrder.billNumber,
+              customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
+              customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+              customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+              shopId: DEFAULT_SHOP_ID,
+              branchId: DEFAULT_BRANCH_ID,
+              status: newStatus,
+              totalAmount: total,
+              paidAmount: newPaidAmount,
+              dueAmount: newDueAmount,
+              paymentStatus: newPayStatus,
+              paymentMethod: newPayMethod,
+              items: cart,
+              expectedDeliveryDate: combinedExpectedDelivery,
+              specialInstructions
+            }).catch(e => console.warn(e));
+
+            const txnId = `TXN-${Date.now()}`;
+            const _nowP = new Date();
+            const txnTimestamp = `${_nowP.getFullYear()}-${String(_nowP.getMonth()+1).padStart(2,'0')}-${String(_nowP.getDate()).padStart(2,'0')} ${String(_nowP.getHours()).padStart(2,'0')}:${String(_nowP.getMinutes()).padStart(2,'0')}`;
+            const accountType = (paymentMethod === 'bank' || paymentMethod === 'card' || paymentMethod === 'upi') ? 'BANK' : 'CASH';
+
+            if (paymentMethod !== 'credit') {
+              const desc = `Updated Order ${editOrderId}${accountType === 'BANK' ? ` via ${selectedBank}` : ''}`;
+              const mappedBankId = accountType === 'BANK' ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank) : null;
+              await window.electronAPI.dbQuery(
+                `INSERT INTO account_transactions 
+                 (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [txnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales', total, desc, txnTimestamp, 0, getLocalISOString(), 'ShoppingBag', mappedBankId]
+              );
+            }
+
+            setEditOrderId(null);
+            setCart([]);
+            setSelectedCustomer(null);
+            setExpectedDeliveryDate(getTomorrowDateString());
+            setExpectedDeliveryTime('17:00');
+            setSpecialInstructions('');
+            navigate(`/invoice/${editOrderId.replace('#', '')}?print=true`);
+            return;
+          }
+        }
+
         const insertResult = await window.electronAPI.dbQuery(
           `INSERT INTO orders (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, statusHistory, createdAt, isSynced, updatedAt, paymentMethod, expectedDeliveryDate, specialInstructions) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -758,7 +1000,7 @@ export default function POS() {
             : (settings.defaultCreditLimit ?? 500);
           const orderAmount = total;
           const newOutstanding = currentOutstanding + orderAmount;
-          const generatedId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
+          const generatedId = pendingOrderId || '0001';
           setPendingOrderId(generatedId);
           setCreditWarningDetails({
             orderId: generatedId,
@@ -793,12 +1035,98 @@ export default function POS() {
       return;
     }
 
-    const orderId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
+    const orderId = pendingOrderId || '0001';
     const billNumber = `BN-${Date.now().toString().slice(-6)}`;
     const combinedExpectedDelivery = expectedDeliveryDate ? `${expectedDeliveryDate} ${expectedDeliveryTime || '17:00'}` : '';
 
     if (window.electronAPI?.dbQuery) {
       try {
+        if (editOrderId) {
+          const oldOrderRes = await window.electronAPI.dbQuery('SELECT * FROM orders WHERE id = ?', [editOrderId]);
+          if (oldOrderRes.success && oldOrderRes.data.length > 0) {
+            const oldOrder = oldOrderRes.data[0];
+
+            if (oldOrder.paymentStatus === 'Credit' || oldOrder.paymentStatus === 'Partial') {
+              await window.electronAPI.dbQuery(
+                'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+                [oldOrder.dueAmount, getLocalISOString(), oldOrder.customerId]
+              );
+            }
+
+            const newStatus = ORDER_STATUS.PAYMENT_PENDING;
+            const newPaidAmount = 0;
+            const newDueAmount = total;
+            const newPayStatus = PAYMENT_STATUS.CREDIT;
+            const newPayMethod = PAYMENT_METHODS.NOT_PAID;
+
+            const updateResult = await window.electronAPI.dbQuery(
+              `UPDATE orders SET 
+               customerId = ?, status = ?, totalAmount = ?, paidAmount = ?, dueAmount = ?, 
+               paymentStatus = ?, items = ?, expectedDeliveryDate = ?, specialInstructions = ?, 
+               updatedAt = ?, paymentMethod = ?, isSynced = 0 
+               WHERE id = ?`,
+              [
+                selectedCustomer ? selectedCustomer.id : 'Walk-in',
+                newStatus,
+                total,
+                newPaidAmount,
+                newDueAmount,
+                newPayStatus,
+                JSON.stringify(cart),
+                combinedExpectedDelivery,
+                specialInstructions,
+                getLocalISOString(),
+                newPayMethod,
+                editOrderId
+              ]
+            );
+
+            if (!updateResult || !updateResult.success) {
+              if (oldOrder.paymentStatus === 'Credit' || oldOrder.paymentStatus === 'Partial') {
+                await window.electronAPI.dbQuery(
+                  'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+                  [oldOrder.dueAmount, getLocalISOString(), oldOrder.customerId]
+                );
+              }
+              alert('Failed to update order: ' + (updateResult?.error || 'Unknown error'));
+              return;
+            }
+
+            await window.electronAPI.dbQuery(
+              'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+              [newDueAmount, getLocalISOString(), selectedCustomer.id]
+            );
+
+            axios.post(`${API_BASE_URL}/orders`, {
+              id: editOrderId,
+              billNumber: oldOrder.billNumber,
+              customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
+              customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+              customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+              shopId: DEFAULT_SHOP_ID,
+              branchId: DEFAULT_BRANCH_ID,
+              status: newStatus,
+              totalAmount: total,
+              paidAmount: newPaidAmount,
+              dueAmount: newDueAmount,
+              paymentStatus: newPayStatus,
+              paymentMethod: newPayMethod,
+              items: cart,
+              expectedDeliveryDate: combinedExpectedDelivery,
+              specialInstructions
+            }).catch(e => console.warn(e));
+
+            setEditOrderId(null);
+            setCart([]);
+            setSelectedCustomer(null);
+            setExpectedDeliveryDate(getTomorrowDateString());
+            setExpectedDeliveryTime('17:00');
+            setSpecialInstructions('');
+            navigate('/orders');
+            return;
+          }
+        }
+
         const insertResult = await window.electronAPI.dbQuery(
           `INSERT INTO orders 
            (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, items, statusHistory, createdAt, updatedAt, paymentStatus, isSynced, paymentMethod, expectedDeliveryDate, specialInstructions) 
@@ -930,7 +1258,7 @@ export default function POS() {
         setExpectedDeliveryDate(getTomorrowDateString());
         setExpectedDeliveryTime('17:00');
         setSpecialInstructions('');
-        setPendingOrderId(null);
+        await fetchNextOrderId();
       } catch (err) {
         console.error("Failed to save order:", err);
         // If DB-level credit limit check blocked the order, show the override modal
@@ -941,7 +1269,7 @@ export default function POS() {
             : (settings.defaultCreditLimit ?? 500);
           const orderAmount = total;
           const newOutstanding = currentOutstanding + orderAmount;
-          const generatedId = pendingOrderId || `#AG-${Math.floor(10000 + Math.random() * 90000)}`;
+          const generatedId = pendingOrderId || '0001';
           setPendingOrderId(generatedId);
           setCreditWarningDetails({
             orderId: generatedId,
@@ -1123,6 +1451,25 @@ export default function POS() {
     <div className={styles.posContainer}>
       {/* Left: Service Selection */}
       <div className={styles.mainSection}>
+        {editOrderId && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#FEF3C7', border: '1px solid #F59E0B', color: '#B45309', padding: '0.75rem 1rem', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+            <span>⚠️ Editing Order #{editOrderId} (Customer: {selectedCustomer ? selectedCustomer.name : 'Walk-in'})</span>
+            <button
+              onClick={() => {
+                setEditOrderId(null);
+                setCart([]);
+                setSelectedCustomer(null);
+                setExpectedDeliveryDate(getTomorrowDateString());
+                setExpectedDeliveryTime('17:00');
+                setSpecialInstructions('');
+                navigate('/orders');
+              }}
+              style={{ background: 'transparent', border: 'none', color: '#B45309', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontWeight: 700 }}
+            >
+              <X size={16} /> Cancel Edit
+            </button>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: '1rem', width: '100%' }}>
           <div className={styles.searchBar} style={{ flex: 1 }}>
             <Search size={20} color="#94A3B8" />
@@ -1174,7 +1521,7 @@ export default function POS() {
                 <div className={styles.itemIcon}>
                   {service.image ? (
                     <img src={service.image} alt={service.name} className={styles.itemImg} />
-                  ) : getIcon(service.icon)}
+                  ) : getIcon(service.icon, 36)}
                 </div>
                 <span className={styles.itemName}>{service.name}</span>
                 <span className={styles.itemPrice}><CurrencySymbol size={16} /> {service.price.toFixed(2)}</span>
@@ -1209,7 +1556,14 @@ export default function POS() {
                   </div>
                   <button
                     className={styles.sidebarAddBtn}
-                    onClick={() => setShowCustomerModal(true)}
+                    onClick={() => {
+                      setCustomerFormData({
+                        name: '',
+                        phone: settings.waCountryCode ? `+${settings.waCountryCode.replace(/\+/g, '')}` : '+971',
+                        address: ''
+                      });
+                      setShowCustomerModal(true);
+                    }}
                     title="Add New Customer"
                   >
                     <UserPlus size={16} />
@@ -1251,7 +1605,14 @@ export default function POS() {
                   ) : (
                     <div className={styles.noRes}>
                       <span>No results</span>
-                      <button className={styles.addNewBtn} onClick={() => setShowCustomerModal(true)}>
+                      <button className={styles.addNewBtn} onClick={() => {
+                        setCustomerFormData({
+                          name: '',
+                          phone: settings.waCountryCode ? `+${settings.waCountryCode.replace(/\+/g, '')}` : '+971',
+                          address: ''
+                        });
+                        setShowCustomerModal(true);
+                      }}>
                         <UserPlus size={14} /> Add New
                       </button>
                     </div>
@@ -1433,8 +1794,8 @@ export default function POS() {
 
       {/* Service Modal */}
       {selectedService && (
-        <div className={styles.modalOverlay}>
-          <div className={`${styles.modal} ${selectedService.isTemporary ? styles.tempModal : ''}`}>
+        <div className={styles.modalOverlay} onClick={() => { setSelectedService(null); setEditingCartIdx(null); setShowItemPresets(false); }}>
+          <div className={`${styles.modal} ${selectedService.isTemporary ? styles.tempModal : ''}`} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div className={styles.modalTitle}>
                 <div className={styles.modalHeaderIcon}>
@@ -1581,7 +1942,7 @@ export default function POS() {
                     <button
                       type="button"
                       className={styles.qtyLargeBtn}
-                      onClick={() => setServiceConfig(prev => ({ ...prev, qty: Math.max(1, prev.qty - 1) }))}
+                      onClick={() => setServiceConfig(prev => ({ ...prev, qty: Math.max(1, (parseInt(prev.qty, 10) || 1) - 1) }))}
                     >
                       <Minus size={16} />
                     </button>
@@ -1590,15 +1951,15 @@ export default function POS() {
                       type="number"
                       value={serviceConfig.qty}
                       onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setServiceConfig(prev => ({ ...prev, qty: isNaN(val) || val < 1 ? 1 : val }));
+                        const val = e.target.value;
+                        setServiceConfig(prev => ({ ...prev, qty: val }));
                       }}
                       className={styles.qtyLargeInput}
                     />
                     <button
                       type="button"
                       className={`${styles.qtyLargeBtn} ${styles.primary}`}
-                      onClick={() => setServiceConfig(prev => ({ ...prev, qty: prev.qty + 1 }))}
+                      onClick={() => setServiceConfig(prev => ({ ...prev, qty: (parseInt(prev.qty, 10) || 1) + 1 }))}
                     >
                       <Plus size={16} />
                     </button>
@@ -1668,8 +2029,8 @@ export default function POS() {
       )}
       {/* Customer Modal */}
       {showCustomerModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal} style={{ width: '450px' }}>
+        <div className={styles.modalOverlay} onClick={() => setShowCustomerModal(false)}>
+          <div className={styles.modal} style={{ width: '450px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div className={styles.modalTitle}>
                 <h2>Add New Customer</h2>
@@ -1730,8 +2091,8 @@ export default function POS() {
 
       {/* Discount Modal */}
       {showDiscountModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal} style={{ width: '400px' }}>
+        <div className={styles.modalOverlay} onClick={() => setShowDiscountModal(false)}>
+          <div className={styles.modal} style={{ width: '400px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div className={styles.modalTitle}>
                 <div className={styles.modalHeaderIcon} style={{ background: '#EFF6FF', color: '#2563EB', borderColor: '#DBEAFE' }}>
@@ -1871,8 +2232,8 @@ export default function POS() {
 
       {/* Success Modal */}
       {showSuccessModal && lastOrderInfo && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.successModal}>
+        <div className={styles.modalOverlay} onClick={() => { setShowSuccessModal(false); setSelectedCustomer(null); }}>
+          <div className={styles.successModal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.successHeader}>
               <div className={styles.checkIcon}>
                 <CheckCircle size={40} />
@@ -1923,7 +2284,18 @@ export default function POS() {
                       : lastOrderInfo.newBalance < 0
                         ? `Your prepaid advance is ${formatCurrency(Math.abs(lastOrderInfo.newBalance))}`
                         : `Your balance is settled`;
-                    const msg = `Hello ${lastOrderInfo.customerName}! Your laundry bill for ${lastOrderInfo.orderId} of ${formatCurrency(lastOrderInfo.total)} has been saved. ${balMsg}. Thank you!`;
+                    
+                    let msg = '';
+                    if (settings.waNewOrderTemplate) {
+                      msg = settings.waNewOrderTemplate
+                        .replace(/{customerName}/g, lastOrderInfo.customerName)
+                        .replace(/{orderId}/g, lastOrderInfo.orderId)
+                        .replace(/{total}/g, formatCurrency(lastOrderInfo.total))
+                        .replace(/{dueAmount}/g, formatCurrency(Math.max(0, lastOrderInfo.newBalance)))
+                        .replace(/{deliveryDate}/g, expectedDeliveryDate ? `${expectedDeliveryDate} ${expectedDeliveryTime || ''}` : '');
+                    } else {
+                      msg = `Hello ${lastOrderInfo.customerName}! Your laundry bill for ${lastOrderInfo.orderId} of ${formatCurrency(lastOrderInfo.total)} has been saved. ${balMsg}. Thank you!`;
+                    }
                     handleWhatsApp(lastOrderInfo.customerPhone, msg);
                   }}
                 >
@@ -1954,8 +2326,8 @@ export default function POS() {
 
       {/* Credit Limit Warning Modal */}
       {showCreditWarning && creditWarningDetails && (
-        <div className={styles.modalOverlay}>
-          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '500px' }}>
+        <div className={styles.modalOverlay} onClick={handleCancelOverride}>
+          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ background: '#FEF2F2', borderBottom: '1px solid #FEE2E2' }}>
               <div className={styles.modalTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <AlertTriangle size={24} color="#EF4444" />
@@ -2032,8 +2404,8 @@ export default function POS() {
 
       {/* Manager PIN Modal */}
       {showManagerPinModal && (
-        <div className={styles.modalOverlay}>
-          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '400px' }}>
+        <div className={styles.modalOverlay} onClick={() => { setShowManagerPinModal(false); setManagerPinValue(''); setManagerPinError(''); }}>
+          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div className={styles.modalTitle}>
                 <h2>Manager Verification</h2>

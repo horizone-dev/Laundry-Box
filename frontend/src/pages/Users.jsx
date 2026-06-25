@@ -57,6 +57,29 @@ const Users = () => {
     else setActiveTab('users');
   }, [location.search]);
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowModal(false);
+        setShowPermissionModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const isAnyOpen = showModal || showPermissionModal;
+    if (isAnyOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showModal, showPermissionModal]);
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -310,8 +333,8 @@ const Users = () => {
       </div>
 
       {showPermissionModal && editingRole && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
+        <div className={styles.modalOverlay} onClick={() => setShowPermissionModal(false)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>Edit Permissions: {editingRole.name}</h2>
               <button className={styles.closeBtn} onClick={() => setShowPermissionModal(false)}>
@@ -339,8 +362,8 @@ const Users = () => {
       )}
 
       {showModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
+        <div className={styles.modalOverlay} onClick={() => setShowModal(false)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>{editingUser ? 'Edit User' : 'Add New User'}</h2>
               <button className={styles.closeBtn} onClick={() => setShowModal(false)}>

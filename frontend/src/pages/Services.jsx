@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, Search, Scissors, Zap, Sparkles, Tag, X, Layout, 
-  Shirt, Bed, Wind, Droplet, Heart, Layers, Camera, 
-  Image as ImageIcon, Trash2, Edit2, ChevronDown, ChevronUp, Package 
+import {
+  Plus, Search, Scissors, Zap, Sparkles, Tag, X, Layout,
+  Shirt, Bed, Wind, Droplet, Heart, Layers, Camera,
+  Image as ImageIcon, Trash2, Edit2, ChevronDown, ChevronUp, Package
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID, CATEGORIES } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
+import Pagination from '../components/Pagination';
 import styles from './Services.module.css';
 
 export default function Services({ defaultTab = 'list' }) {
@@ -20,6 +21,7 @@ export default function Services({ defaultTab = 'list' }) {
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('All');
   const [currentPage, setCurrentPage] = useState(1);
+  const [showModal, setShowModal] = useState(null); // 'service', 'type', 'addon', 'category'
 
   useEffect(() => {
     setCurrentPage(1);
@@ -29,55 +31,46 @@ export default function Services({ defaultTab = 'list' }) {
     setActiveTab(defaultTab);
   }, [defaultTab]);
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowModal(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (showModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showModal]);
+
   const renderPagination = (items, page, setPage, label) => {
-    const totalPages = Math.ceil(items.length / 20);
-    if (totalPages <= 1 || loading) return null;
+    if (loading) return null;
     return (
-      <div className={styles.paginationRow} data-noprint="true" style={{ marginTop: '1.5rem' }}>
-        <span className={styles.paginationInfo}>
-          Showing {Math.min(items.length, (page - 1) * 20 + 1)}-{Math.min(items.length, page * 20)} of {items.length} {label}
-        </span>
-        <div className={styles.paginationBtns}>
-          <button 
-            type="button"
-            className={styles.paginationBtn} 
-            disabled={page === 1}
-            onClick={() => setPage(prev => Math.max(prev - 1, 1))}
-          >
-            Previous
-          </button>
-          {[...Array(totalPages)].map((_, idx) => {
-            const pageNum = idx + 1;
-            return (
-              <button 
-                type="button"
-                key={pageNum}
-                className={`${styles.paginationBtn} ${page === pageNum ? styles.paginationActiveBtn : ''}`}
-                onClick={() => setPage(pageNum)}
-              >
-                {pageNum}
-              </button>
-            );
-          })}
-          <button 
-            type="button"
-            className={styles.paginationBtn} 
-            disabled={page === totalPages}
-            onClick={() => setPage(prev => Math.min(prev + 1, totalPages))}
-          >
-            Next
-          </button>
-        </div>
-      </div>
+      <Pagination
+        currentPage={page}
+        totalPages={Math.ceil(items.length / 20)}
+        onPageChange={setPage}
+        totalItems={items.length}
+        pageSize={20}
+        itemLabel={label}
+      />
     );
   };
 
   // Form & view states
-  const [showModal, setShowModal] = useState(null); // 'service', 'type', 'addon', 'category'
   const [formData, setFormData] = useState({});
   const [editId, setEditId] = useState(null);
   const [dragActive, setDragActive] = useState(false);
-  
+
   // Custom states for Multiple Pricing
   const [selectedTypesList, setSelectedTypesList] = useState([]);
   const [typePricingMap, setTypePricingMap] = useState({}); // { typeId: price }
@@ -91,11 +84,11 @@ export default function Services({ defaultTab = 'list' }) {
     if (window.electronAPI?.dbQuery) {
       try {
         setLoading(true);
-        const sRes = await window.electronAPI.dbQuery('SELECT * FROM services', []);
-        const tRes = await window.electronAPI.dbQuery('SELECT * FROM service_types', []);
-        const aRes = await window.electronAPI.dbQuery('SELECT * FROM addons', []);
-        const cRes = await window.electronAPI.dbQuery('SELECT * FROM service_categories', []);
-        
+        const sRes = await window.electronAPI.dbQuery('SELECT * FROM services ORDER BY sortOrder ASC, id ASC', []);
+        const tRes = await window.electronAPI.dbQuery('SELECT * FROM service_types ORDER BY sortOrder ASC, id ASC', []);
+        const aRes = await window.electronAPI.dbQuery('SELECT * FROM addons ORDER BY sortOrder ASC, id ASC', []);
+        const cRes = await window.electronAPI.dbQuery('SELECT * FROM service_categories ORDER BY sortOrder ASC, id ASC', []);
+
         if (sRes.success) setServices(sRes.data);
         if (tRes.success) setTypes(tRes.data);
         if (aRes.success) setAddons(aRes.data);
@@ -111,7 +104,7 @@ export default function Services({ defaultTab = 'list' }) {
   };
 
   const toggleExpandService = (id) => {
-    setExpandedServices(prev => 
+    setExpandedServices(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
   };
@@ -140,13 +133,13 @@ export default function Services({ defaultTab = 'list' }) {
   const handleEdit = (item, type) => {
     setEditId(item.id);
     setFormData({ ...item });
-    
+
     if (type === 'service') {
       let parsedPricing = [];
       try {
         parsedPricing = typeof item.pricing === 'string' ? JSON.parse(item.pricing || '[]') : (item.pricing || []);
-      } catch (e) {}
-      
+      } catch (e) { }
+
       const selectedList = parsedPricing.map(p => p.serviceTypeId);
       const priceMap = {};
       // Initialize with empty prices for all types first
@@ -160,7 +153,7 @@ export default function Services({ defaultTab = 'list' }) {
       setSelectedTypesList(selectedList);
       setTypePricingMap(priceMap);
     }
-    
+
     setShowModal(type);
   };
 
@@ -180,13 +173,63 @@ export default function Services({ defaultTab = 'list' }) {
     }
   };
 
+  const handleMoveOrder = async (item, direction, table) => {
+    if (!window.electronAPI?.dbQuery) return;
+
+    let itemsList = [];
+    if (table === 'services') itemsList = [...services];
+    else if (table === 'service_types') itemsList = [...types];
+    else if (table === 'addons') itemsList = [...addons];
+    else if (table === 'service_categories') itemsList = [...categories];
+
+    itemsList.sort((a, b) => {
+      if ((a.sortOrder || 0) !== (b.sortOrder || 0)) {
+        return (a.sortOrder || 0) - (b.sortOrder || 0);
+      }
+      return String(a.id).localeCompare(String(b.id));
+    });
+
+    const index = itemsList.findIndex(x => x.id === item.id);
+    if (index === -1) return;
+
+    let targetIndex = -1;
+    if (direction === 'up' && index > 0) {
+      targetIndex = index - 1;
+    } else if (direction === 'down' && index < itemsList.length - 1) {
+      targetIndex = index + 1;
+    }
+
+    if (targetIndex !== -1) {
+      const currentItem = itemsList[index];
+      const targetItem = itemsList[targetIndex];
+
+      const currentSort = currentItem.sortOrder || 0;
+      const targetSort = targetItem.sortOrder || 0;
+
+      let newCurrentSort = targetSort;
+      let newTargetSort = currentSort;
+
+      if (currentSort === targetSort) {
+        newCurrentSort = direction === 'up' ? currentSort - 1 : currentSort + 1;
+      }
+
+      try {
+        await window.electronAPI.dbQuery(`UPDATE ${table} SET sortOrder = ?, updatedAt = ? WHERE id = ?`, [newCurrentSort, new Date().toISOString(), currentItem.id]);
+        await window.electronAPI.dbQuery(`UPDATE ${table} SET sortOrder = ?, updatedAt = ? WHERE id = ?`, [newTargetSort, new Date().toISOString(), targetItem.id]);
+        fetchData();
+      } catch (err) {
+        console.error("Failed to reorder:", err);
+      }
+    }
+  };
+
   const processImage = (file) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       alert('Please upload an image file (PNG, JPG, or WEBP).');
       return;
     }
-    
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
@@ -349,8 +392,8 @@ export default function Services({ defaultTab = 'list' }) {
       {/* 2. Interactive Navigation Tabs */}
       <div className={styles.tabsContainer}>
         {tabs.map(tab => (
-          <button 
-            key={tab.id} 
+          <button
+            key={tab.id}
             className={`${styles.tabBtn} ${activeTab === tab.id ? styles.tabBtnActive : ''}`}
             onClick={() => setActiveTab(tab.id)}
           >
@@ -365,15 +408,15 @@ export default function Services({ defaultTab = 'list' }) {
       <div className={styles.toolbar}>
         <div className={styles.searchWrapper}>
           <Search size={18} className={styles.searchIcon} />
-          <input 
-            type="text" 
-            placeholder={`Search ${activeTab === 'list' ? 'services' : activeTab === 'type' ? 'treatments' : activeTab === 'addons' ? 'add-ons' : 'categories'}...`} 
+          <input
+            type="text"
+            placeholder={`Search ${activeTab === 'list' ? 'services' : activeTab === 'type' ? 'treatments' : activeTab === 'addons' ? 'add-ons' : 'categories'}...`}
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             className={styles.searchInput}
           />
         </div>
-        
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           {activeTab === 'list' && (
             <button className="btn btn-primary" onClick={() => handleOpenModal('service')}>
@@ -401,14 +444,14 @@ export default function Services({ defaultTab = 'list' }) {
       {/* 4. Category Filter Chips (Only for Base Services) */}
       {activeTab === 'list' && (
         <div className={styles.categoryChips}>
-          <button 
+          <button
             className={`${styles.chip} ${selectedCategoryFilter === 'All' ? styles.chipActive : ''}`}
             onClick={() => setSelectedCategoryFilter('All')}
           >
             All Categories
           </button>
           {categories.map(cat => (
-            <button 
+            <button
               key={cat.id}
               className={`${styles.chip} ${selectedCategoryFilter === cat.name ? styles.chipActive : ''}`}
               onClick={() => setSelectedCategoryFilter(cat.name)}
@@ -471,7 +514,7 @@ export default function Services({ defaultTab = 'list' }) {
                   let pricingList = [];
                   try {
                     pricingList = typeof s.pricing === 'string' ? JSON.parse(s.pricing || '[]') : (s.pricing || []);
-                  } catch (e) {}
+                  } catch (e) { }
 
                   return (
                     <div key={s.id} className={styles.listItem}>
@@ -515,6 +558,8 @@ export default function Services({ defaultTab = 'list' }) {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
                         <div className={styles.itemActions}>
+                          <button className={styles.actionBtn} onClick={() => handleMoveOrder(s, 'up', 'services')} title="Move Up"><ChevronUp size={16} /></button>
+                          <button className={styles.actionBtn} onClick={() => handleMoveOrder(s, 'down', 'services')} title="Move Down"><ChevronDown size={16} /></button>
                           <button className={styles.actionBtn} onClick={() => handleEdit(s, 'service')}><Edit2 size={16} /></button>
                           <button className={`${styles.actionBtn} ${styles.deleteBtn}`} onClick={() => handleDelete(s.id, 'services')}><Trash2 size={16} /></button>
                         </div>
@@ -558,6 +603,8 @@ export default function Services({ defaultTab = 'list' }) {
                       <span className={styles.treatmentMeta}>Active treatment model</span>
                     </div>
                     <div className={styles.treatmentActions}>
+                      <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(t, 'up', 'service_types')} title="Move Up"><ChevronUp size={15} /></button>
+                      <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(t, 'down', 'service_types')} title="Move Down"><ChevronDown size={15} /></button>
                       <button className={styles.iconActionBtn} onClick={() => handleEdit(t, 'type')} title="Edit"><Edit2 size={15} /></button>
                       <button className={`${styles.iconActionBtn} ${styles.delete}`} onClick={() => handleDelete(t.id, 'service_types')} title="Delete"><Trash2 size={15} /></button>
                     </div>
@@ -601,6 +648,8 @@ export default function Services({ defaultTab = 'list' }) {
                       </span>
                     </div>
                     <div className={styles.addonActions}>
+                      <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(a, 'up', 'addons')} title="Move Up"><ChevronUp size={15} /></button>
+                      <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(a, 'down', 'addons')} title="Move Down"><ChevronDown size={15} /></button>
                       <button className={styles.iconActionBtn} onClick={() => handleEdit(a, 'addon')} title="Edit"><Edit2 size={15} /></button>
                       <button className={`${styles.iconActionBtn} ${styles.delete}`} onClick={() => handleDelete(a.id, 'addons')} title="Delete"><Trash2 size={15} /></button>
                     </div>
@@ -644,6 +693,8 @@ export default function Services({ defaultTab = 'list' }) {
                         <span className={styles.categoryCount}>{serviceCount} Service{serviceCount !== 1 ? 's' : ''}</span>
                       </div>
                       <div className={styles.categoryActions}>
+                        <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(c, 'up', 'service_categories')} title="Move Up"><ChevronUp size={15} /></button>
+                        <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(c, 'down', 'service_categories')} title="Move Down"><ChevronDown size={15} /></button>
                         <button className={styles.iconActionBtn} onClick={() => handleEdit(c, 'category')} title="Edit"><Edit2 size={15} /></button>
                         <button className={`${styles.iconActionBtn} ${styles.delete}`} onClick={() => handleDelete(c.id, 'service_categories')} title="Delete"><Trash2 size={15} /></button>
                       </div>
@@ -667,10 +718,10 @@ export default function Services({ defaultTab = 'list' }) {
                     <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#0F172A', fontWeight: 800 }}>Manage Packaging Methods</h3>
                     <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.82rem', color: '#64748B' }}>Configure dynamic options available for service packaging and receipts.</p>
                   </div>
-                  <button 
-                    type="button" 
-                    className="btn btn-primary" 
-                    style={{ background: '#10B981' }} 
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ background: '#10B981' }}
                     onClick={() => {
                       const name = prompt("Enter Packaging Method Name (English):", "");
                       if (!name || !name.trim()) return;
@@ -694,57 +745,57 @@ export default function Services({ defaultTab = 'list' }) {
                       borderRadius: '10px',
                       border: '1px solid #E2E8F0'
                     }}>
-                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                         <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#1E293B' }}>{method.name}</span>
-                         {method.nameAr && <span style={{ fontSize: '0.85rem', color: '#64748B' }}>({method.nameAr})</span>}
-                         {method.isDefault && (
-                           <span style={{ fontSize: '0.7rem', color: '#047857', background: '#D1FAE5', padding: '0.15rem 0.4rem', borderRadius: '4px', fontWeight: 700 }}>DEFAULT</span>
-                         )}
-                       </div>
-                       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                         {!method.isDefault && (
-                           <button 
-                             type="button" 
-                             style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
-                             onClick={() => {
-                               const updated = methods.map((m, i) => ({ ...m, isDefault: i === idx }));
-                               updateSettings({ deliveryMethods: updated });
-                             }}
-                           >
-                             Set Default
-                           </button>
-                         )}
-                         <button 
-                           type="button" 
-                           style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
-                           onClick={() => {
-                             const name = prompt("Edit English Name:", method.name);
-                             if (!name || !name.trim()) return;
-                             const nameAr = prompt("Edit Arabic Name:", method.nameAr || '');
-                             const updated = [...methods];
-                             updated[idx] = { ...method, name: name.trim(), nameAr: (nameAr || '').trim() };
-                             updateSettings({ deliveryMethods: updated });
-                           }}
-                         >
-                           Rename
-                         </button>
-                         <button 
-                           type="button" 
-                           style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', padding: 0 }}
-                           onClick={() => {
-                             if (method.isDefault) {
-                               alert("Cannot delete the default packaging method. Set another option as default first!");
-                               return;
-                             }
-                             if (confirm(`Delete packaging method "${method.name}"?`)) {
-                               const updated = methods.filter((_, i) => i !== idx);
-                               updateSettings({ deliveryMethods: updated });
-                             }
-                           }}
-                         >
-                           <Trash2 size={16} />
-                         </button>
-                       </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#1E293B' }}>{method.name}</span>
+                        {method.nameAr && <span style={{ fontSize: '0.85rem', color: '#64748B' }}>({method.nameAr})</span>}
+                        {method.isDefault && (
+                          <span style={{ fontSize: '0.7rem', color: '#047857', background: '#D1FAE5', padding: '0.15rem 0.4rem', borderRadius: '4px', fontWeight: 700 }}>DEFAULT</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                        {!method.isDefault && (
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
+                            onClick={() => {
+                              const updated = methods.map((m, i) => ({ ...m, isDefault: i === idx }));
+                              updateSettings({ deliveryMethods: updated });
+                            }}
+                          >
+                            Set Default
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
+                          onClick={() => {
+                            const name = prompt("Edit English Name:", method.name);
+                            if (!name || !name.trim()) return;
+                            const nameAr = prompt("Edit Arabic Name:", method.nameAr || '');
+                            const updated = [...methods];
+                            updated[idx] = { ...method, name: name.trim(), nameAr: (nameAr || '').trim() };
+                            updateSettings({ deliveryMethods: updated });
+                          }}
+                        >
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', padding: 0 }}
+                          onClick={() => {
+                            if (method.isDefault) {
+                              alert("Cannot delete the default packaging method. Set another option as default first!");
+                              return;
+                            }
+                            if (confirm(`Delete packaging method "${method.name}"?`)) {
+                              const updated = methods.filter((_, i) => i !== idx);
+                              updateSettings({ deliveryMethods: updated });
+                            }
+                          }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -756,8 +807,8 @@ export default function Services({ defaultTab = 'list' }) {
 
       {/* Slide-over Drawer for Service */}
       {showModal === 'service' && (
-        <div className={styles.slideOverOverlay}>
-          <div className={styles.slideOver}>
+        <div className={styles.slideOverOverlay} onClick={() => setShowModal(null)}>
+          <div className={styles.slideOver} onClick={(e) => e.stopPropagation()}>
             <div className={styles.slideOverHeader}>
               <h2>{editId ? 'Edit' : 'Add New'} Service</h2>
               <X size={24} className={styles.closeBtn} onClick={() => setShowModal(null)} />
@@ -765,7 +816,7 @@ export default function Services({ defaultTab = 'list' }) {
             <form onSubmit={handleSave}>
               <div className={styles.slideOverBody}>
                 <div className={styles.imageUploadSection}>
-                  <div 
+                  <div
                     className={`${styles.imagePreview} ${dragActive ? styles.dragActive : ''} ${formData.image ? styles.hasImage : ''}`}
                     onDragEnter={handleDrag}
                     onDragOver={handleDrag}
@@ -798,19 +849,19 @@ export default function Services({ defaultTab = 'list' }) {
 
                 <div className={styles.formGroup}>
                   <label>Name</label>
-                  <input 
-                    type="text" 
-                    required 
-                    value={formData.name || ''} 
-                    onChange={e => setFormData({...formData, name: e.target.value})}
+                  <input
+                    type="text"
+                    required
+                    value={formData.name || ''}
+                    onChange={e => setFormData({ ...formData, name: e.target.value })}
                   />
                 </div>
 
                 <div className={styles.formGroup}>
                   <label>Category</label>
-                  <select 
-                    value={formData.category || ''} 
-                    onChange={e => setFormData({...formData, category: e.target.value})}
+                  <select
+                    value={formData.category || ''}
+                    onChange={e => setFormData({ ...formData, category: e.target.value })}
                   >
                     {categories.map(cat => (
                       <option key={cat.id} value={cat.name}>{cat.name}</option>
@@ -819,21 +870,10 @@ export default function Services({ defaultTab = 'list' }) {
                 </div>
 
                 <div className={styles.formGroup}>
-                  <label>Tax Rate (%) <span style={{ fontSize: '0.7rem', fontWeight: 400, color: '#64748B' }}>(Leave blank for default)</span></label>
-                  <input 
-                    type="number" 
-                    step="0.01" 
-                    placeholder="e.g. 5.00"
-                    value={formData.taxRate || ''} 
-                    onChange={e => setFormData({...formData, taxRate: e.target.value})}
-                  />
-                </div>
-
-                <div className={styles.formGroup}>
                   <label>Default Delivery / Packaging Method</label>
-                  <select 
-                    value={formData.defaultDeliveryMethod || (settings.deliveryMethods?.find(m => m.isDefault)?.name || 'Hanger')} 
-                    onChange={e => setFormData({...formData, defaultDeliveryMethod: e.target.value})}
+                  <select
+                    value={formData.defaultDeliveryMethod || (settings.deliveryMethods?.find(m => m.isDefault)?.name || 'Hanger')}
+                    onChange={e => setFormData({ ...formData, defaultDeliveryMethod: e.target.value })}
                   >
                     {(settings.deliveryMethods || [
                       { name: 'Hanger' },
@@ -853,7 +893,7 @@ export default function Services({ defaultTab = 'list' }) {
                     return (
                       <div key={type.id} className={styles.pricingGridRow}>
                         <label className={styles.gridCheckLabel}>
-                          <input 
+                          <input
                             type="checkbox"
                             className={styles.gridCheckInput}
                             checked={isChecked}
@@ -871,7 +911,7 @@ export default function Services({ defaultTab = 'list' }) {
                         {isChecked && (
                           <div className={styles.gridPriceInputWrapper}>
                             <span className={styles.gridCurrency}>{settings.currencySymbol || 'AED'}</span>
-                            <input 
+                            <input
                               type="number"
                               step="0.01"
                               required
@@ -901,8 +941,8 @@ export default function Services({ defaultTab = 'list' }) {
 
       {/* Standard Modal for Category/Type/Addon */}
       {showModal && showModal !== 'service' && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
+        <div className={styles.modalOverlay} onClick={() => setShowModal(null)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>{editId ? 'Edit' : 'Add New'} {showModal.charAt(0).toUpperCase() + showModal.slice(1)}</h2>
               <X size={24} className={styles.closeBtn} onClick={() => setShowModal(null)} />
@@ -912,32 +952,32 @@ export default function Services({ defaultTab = 'list' }) {
                 {showModal === 'category' || showModal === 'type' ? (
                   <div className={styles.formGroup}>
                     <label>Name</label>
-                    <input 
-                      type="text" 
-                      required 
-                      value={formData.name || ''} 
-                      onChange={e => setFormData({...formData, name: e.target.value})}
+                    <input
+                      type="text"
+                      required
+                      value={formData.name || ''}
+                      onChange={e => setFormData({ ...formData, name: e.target.value })}
                     />
                   </div>
                 ) : (
                   <>
                     <div className={styles.formGroup}>
                       <label>Name</label>
-                      <input 
-                        type="text" 
-                        required 
-                        value={formData.name || ''} 
-                        onChange={e => setFormData({...formData, name: e.target.value})}
+                      <input
+                        type="text"
+                        required
+                        value={formData.name || ''}
+                        onChange={e => setFormData({ ...formData, name: e.target.value })}
                       />
                     </div>
                     <div className={styles.formGroup}>
                       <label>Add-on Price ({settings.currencySymbol || 'AED'})</label>
-                      <input 
-                        type="number" 
-                        step="0.01" 
-                        required 
-                        value={formData.price || ''} 
-                        onChange={e => setFormData({...formData, price: e.target.value})}
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={formData.price || ''}
+                        onChange={e => setFormData({ ...formData, price: e.target.value })}
                       />
                     </div>
                   </>

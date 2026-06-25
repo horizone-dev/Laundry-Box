@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Zap, Search, RefreshCw, Clock, Phone, User, X, ChevronDown, 
   CheckCircle, AlertCircle, Trash2, Printer, QrCode, ArrowLeft, 
-  ArrowRight, Eye, Wallet, CreditCard, ShoppingCart
+  ArrowRight, Eye, Wallet, CreditCard, ShoppingCart,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import axios from 'axios';
 import { useSettings } from '../store/SettingsContext';
@@ -36,9 +37,37 @@ export default function Workflow() {
   const navigate = useNavigate();
   const { settings, formatDate } = useSettings();
 
+  const formatDateTime = (dateVal) => {
+    if (!dateVal) return 'N/A';
+    const formattedDate = formatDate(dateVal);
+    if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return formattedDate;
+    
+    let d;
+    try {
+      d = new Date(dateVal);
+    } catch(e) {
+      return formattedDate;
+    }
+    if (isNaN(d.getTime())) return formattedDate;
+
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    let ampm = '';
+    if (settings.timeFormat === '12h') {
+      ampm = hours >= 12 ? ' PM' : ' AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+    }
+    const formattedTime = `${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
+    return `${formattedDate} ${formattedTime}`;
+  };
+
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [limit, setLimit] = useState(20);
+  const [hasMore, setHasMore] = useState(true);
+  const isFetchingRef = useRef(false);
   
   // Drag and drop states
   const [draggedOrderId, setDraggedOrderId] = useState(null);
@@ -61,46 +90,132 @@ export default function Workflow() {
     return rawStatuses.filter(status => status !== 'Delivered' && status !== 'Cancelled');
   }, [settings.workflowStatuses]);
 
-  // Fetch active orders from database
-  const fetchOrders = async () => {
-    if (!window.electronAPI?.dbQuery) return;
-    setLoading(true);
-    try {
-      const query = `
-        SELECT orders.*, customers.name AS customerName, customers.phone AS customerPhone 
-        FROM orders 
-        LEFT JOIN customers ON orders.customerId = customers.id
-        WHERE orders.status NOT IN ('Delivered', 'Cancelled')
-        ORDER BY orders.createdAt ASC
-      `;
-      const res = await window.electronAPI.dbQuery(query, []);
-      if (res.success) {
-        setOrders(res.data);
-      }
-    } catch (err) {
-      console.error("Failed to fetch active orders:", err);
-    } finally {
-      setLoading(false);
+  // Scrollable Board State & Logic
+  const boardRef = useRef(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkScroll = () => {
+    const el = boardRef.current;
+    if (el) {
+      setCanScrollLeft(el.scrollLeft > 5);
+      setCanScrollRight(el.scrollWidth - el.scrollLeft - el.clientWidth > 5);
     }
   };
 
   useEffect(() => {
-    fetchOrders();
-  }, []);
+    const timer = setTimeout(checkScroll, 200);
+    window.addEventListener('resize', checkScroll);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', checkScroll);
+    };
+  }, [orders, columns, searchTerm]);
 
-  // Filter orders by search term
-  const filteredOrders = useMemo(() => {
-    if (!searchTerm.trim()) return orders;
-    const term = searchTerm.toLowerCase();
-    return orders.filter(order => {
-      const orderId = (order.id || '').toLowerCase();
-      const billNo = (order.billNumber || '').toLowerCase();
-      const custName = (order.customerName || '').toLowerCase();
-      const custPhone = (order.customerPhone || order.phone || '').toLowerCase();
-      const items = (order.items || '').toLowerCase();
-      return orderId.includes(term) || billNo.includes(term) || custName.includes(term) || custPhone.includes(term) || items.includes(term);
-    });
-  }, [orders, searchTerm]);
+  const scrollBoard = (direction) => {
+    const el = boardRef.current;
+    if (el) {
+      const scrollAmount = direction === 'left' ? -350 : 350;
+      el.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  // Fetch active orders from database
+  const fetchOrders = async (currentLimit = limit, isNewSearch = false, isBackground = false) => {
+    if (!window.electronAPI?.dbQuery) return;
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
+    if (!isBackground) {
+      setLoading(true);
+    }
+    try {
+      let query = `
+        SELECT orders.*, customers.name AS customerName, customers.phone AS customerPhone 
+        FROM orders 
+        LEFT JOIN customers ON orders.customerId = customers.id
+        WHERE orders.status NOT IN ('Delivered', 'Cancelled')
+      `;
+      let params = [];
+      
+      const trimmedSearch = searchTerm.trim();
+      if (trimmedSearch) {
+        query += `
+          AND (
+            orders.id LIKE ? 
+            OR orders.billNumber LIKE ? 
+            OR customers.name LIKE ? 
+            OR customers.phone LIKE ? 
+            OR orders.items LIKE ?
+          )
+        `;
+        const term = `%${trimmedSearch}%`;
+        params = [term, term, term, term, term];
+      }
+      
+      query += ` ORDER BY orders.createdAt ASC LIMIT ?`;
+      params.push(isNewSearch ? 20 : currentLimit);
+
+      const res = await window.electronAPI.dbQuery(query, params);
+      if (res.success) {
+        setOrders(res.data);
+        const actualLimit = isNewSearch ? 20 : currentLimit;
+        setHasMore(res.data.length === actualLimit);
+        if (isNewSearch) {
+          setLimit(20);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch active orders:", err);
+    } finally {
+      isFetchingRef.current = false;
+      if (!isBackground) {
+        setLoading(false);
+      }
+    }
+  };
+
+  // Debounced search trigger
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      fetchOrders(20, true);
+    }, 300);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm]);
+
+  const loadMoreData = () => {
+    if (loading || !hasMore || isFetchingRef.current) return;
+    const newLimit = limit + 20;
+    setLimit(newLimit);
+    fetchOrders(newLimit, false, true);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setSelectedOrder(null);
+        setShowPayModal(false);
+        if (originalPayStatus) {
+          setSelectedOrder(prev => prev ? ({ ...prev, paymentStatus: originalPayStatus }) : null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [originalPayStatus]);
+
+  useEffect(() => {
+    const isAnyOpen = selectedOrder || showPayModal;
+    if (isAnyOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [selectedOrder, showPayModal]);
 
   // Group orders by their workflow status
   const ordersByStatus = useMemo(() => {
@@ -109,7 +224,7 @@ export default function Workflow() {
       groups[col] = [];
     });
     
-    filteredOrders.forEach(order => {
+    orders.forEach(order => {
       // Map legacy statuses like 'Pending', 'Payment Pending' to 'Confirmed' if not explicitly in workflowStatuses
       let status = order.status;
       if (['Payment Pending', 'Credit', 'Pending'].includes(status)) {
@@ -126,7 +241,7 @@ export default function Workflow() {
       }
     });
     return groups;
-  }, [filteredOrders, columns]);
+  }, [orders, columns]);
 
   // Update order status in Local DB & background sync to Cloud
   const handleUpdateStatus = async (orderId, newStatus) => {
@@ -439,23 +554,47 @@ export default function Workflow() {
       alert(t('invalidPhoneFormat', settings.language));
       return;
     }
-    const countryCode = settings.waCountryCode || '971';
-    if (countryCode && !cleanPhone.startsWith(countryCode)) {
-      cleanPhone = countryCode + cleanPhone;
+    
+    // Prepend country code if original phone doesn't start with '+'
+    if (!phone.toString().trim().startsWith('+')) {
+      const countryCode = settings.waCountryCode || '971';
+      const cleanCountryCode = countryCode.replace(/\D/g, '');
+      if (cleanCountryCode && !cleanPhone.startsWith(cleanCountryCode)) {
+        cleanPhone = cleanCountryCode + cleanPhone;
+      }
     }
     
-    let message = t('waGeneralMessage', settings.language);
-    if (id) {
-      const orderMatch = orders.find(o => o.id === id);
-      const translateOrderSt = (st) => {
-        if (!st) return '';
-        if (['Payment Pending', 'Credit', 'Pending'].includes(st)) return t('confirmed', settings.language);
-        const key = st.charAt(0).toLowerCase() + st.slice(1).replace(/\s+(.)/g, (_, c) => c.toUpperCase());
-        const trans = t(key, settings.language);
-        return trans === key ? st : trans;
-      };
-      const statusText = orderMatch ? translateOrderSt(orderMatch.status) : t('confirmed', settings.language);
-      message = t('waStatusMessage', settings.language).replace('{id}', id).replace('{status}', statusText);
+    let message = '';
+    const orderMatch = orders.find(o => o.id === id) || selectedOrder;
+    const isReadyStatus = orderMatch && ['Ready', 'Ready to Pick up'].includes(orderMatch.status);
+
+    if (isReadyStatus && settings.waOrderReadyTemplate) {
+      message = settings.waOrderReadyTemplate
+        .replace(/{customerName}/g, orderMatch.customerName || orderMatch.customer || 'Customer')
+        .replace(/{orderId}/g, orderMatch.id)
+        .replace(/{total}/g, `${settings.currencySymbol || 'AED'} ${(orderMatch.totalAmount || orderMatch.total || 0).toFixed(2)}`)
+        .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${(orderMatch.dueAmount ?? 0).toFixed(2)}`)
+        .replace(/{deliveryDate}/g, orderMatch.expectedDeliveryDate || '');
+    } else if (id && settings.waReminderTemplate) {
+      message = settings.waReminderTemplate
+        .replace(/{customerName}/g, orderMatch ? (orderMatch.customerName || orderMatch.customer || 'Customer') : 'Customer')
+        .replace(/{orderId}/g, id)
+        .replace(/{total}/g, orderMatch ? `${settings.currencySymbol || 'AED'} ${(orderMatch.totalAmount || orderMatch.total || 0).toFixed(2)}` : '')
+        .replace(/{dueAmount}/g, orderMatch ? `${settings.currencySymbol || 'AED'} ${(orderMatch.dueAmount ?? 0).toFixed(2)}` : '')
+        .replace(/{deliveryDate}/g, orderMatch ? (orderMatch.expectedDeliveryDate || '') : '');
+    } else {
+      message = t('waGeneralMessage', settings.language);
+      if (id) {
+        const translateOrderSt = (st) => {
+          if (!st) return '';
+          if (['Payment Pending', 'Credit', 'Pending'].includes(st)) return t('confirmed', settings.language);
+          const key = st.charAt(0).toLowerCase() + st.slice(1).replace(/\s+(.)/g, (_, c) => c.toUpperCase());
+          const trans = t(key, settings.language);
+          return trans === key ? st : trans;
+        };
+        const statusText = orderMatch ? translateOrderSt(orderMatch.status) : t('confirmed', settings.language);
+        message = t('waStatusMessage', settings.language).replace('{id}', id).replace('{status}', statusText);
+      }
     }
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
     if (window.electronAPI?.openExternal) {
@@ -527,9 +666,18 @@ export default function Workflow() {
               />
             )}
           </div>
+          {hasMore && (
+            <button 
+              className={styles.loadMoreBtn} 
+              onClick={() => loadMoreData()} 
+              title="Load Next 20 Orders"
+            >
+              <Zap size={16} /> Load More
+            </button>
+          )}
           <button 
             className={styles.refreshBtn} 
-            onClick={fetchOrders} 
+            onClick={() => fetchOrders(limit, false)} 
             title="Refresh Board"
           >
             <RefreshCw size={18} />
@@ -549,8 +697,20 @@ export default function Workflow() {
           <p className={styles.emptyBoardText}>All orders have been delivered or cancelled. Create a new order to track its status.</p>
         </div>
       ) : (
-        /* Kanban Lane Grid */
-        <div className={styles.boardContainer}>
+        /* Kanban Lane Grid Wrapper */
+        <div className={`${styles.boardWrapper} ${canScrollLeft ? styles.hasScrollLeft : ''} ${canScrollRight ? styles.hasScrollRight : ''}`}>
+          {canScrollLeft && (
+            <button 
+              type="button"
+              className={`${styles.scrollArrow} ${styles.scrollArrowLeft}`} 
+              onClick={() => scrollBoard('left')}
+              aria-label="Scroll board left"
+            >
+              <ChevronLeft size={20} />
+            </button>
+          )}
+
+          <div className={styles.boardContainer} ref={boardRef} onScroll={checkScroll}>
           {columns.map(col => {
             const laneOrders = ordersByStatus[col] || [];
             const isDragOver = dragOverColumn === col;
@@ -571,7 +731,16 @@ export default function Workflow() {
                   <span className={styles.countBadge}>{laneOrders.length}</span>
                 </div>
 
-                <div className={styles.cardsContainer} onDragLeave={() => setDragOverColumn(null)}>
+                <div 
+                  className={styles.cardsContainer} 
+                  onDragLeave={() => setDragOverColumn(null)}
+                  onScroll={(e) => {
+                    const { scrollTop, scrollHeight, clientHeight } = e.target;
+                    if (scrollHeight - scrollTop - clientHeight < 20) {
+                      loadMoreData();
+                    }
+                  }}
+                >
                   {laneOrders.length > 0 ? (
                     laneOrders.map(order => {
                       const delivery = getDeliveryStatus(order.expectedDeliveryDate);
@@ -588,7 +757,7 @@ export default function Workflow() {
                         >
                           <div className={styles.cardHeader}>
                             <div>
-                              <span className={styles.orderId}>{order.id}</span>
+                              <span className={styles.orderId}>{settings.invoicePrefix || ''}{order.id}</span>
                               <span className={styles.billNum}>{t('bill', settings.language)}: {order.billNumber || 'N/A'}</span>
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-end' }}>
@@ -668,17 +837,29 @@ export default function Workflow() {
               </div>
             );
           })}
+          </div>
+
+          {canScrollRight && (
+            <button 
+              type="button"
+              className={`${styles.scrollArrow} ${styles.scrollArrowRight}`} 
+              onClick={() => scrollBoard('right')}
+              aria-label="Scroll board right"
+            >
+              <ChevronRight size={20} />
+            </button>
+          )}
         </div>
       )}
 
       {/* Details Dialog Modal */}
       {selectedOrder && (
-        <div className={styles.modalOverlay} onClick={() => setSelectedOrder(null)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.detailsModal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div>
-                <h2>{t('order', settings.language)} {selectedOrder.id}</h2>
-                <p>{t('createdOn', settings.language)} {formatDate(selectedOrder.createdAt)}</p>
+                <h2>{t('order', settings.language)} {settings.invoicePrefix || ''}{selectedOrder.id}</h2>
+                <p>{t('createdOn', settings.language)} {formatDateTime(selectedOrder.createdAt)}</p>
               </div>
               <X size={24} className={styles.closeBtn} onClick={() => setSelectedOrder(null)} />
             </div>
@@ -788,7 +969,7 @@ export default function Workflow() {
                             <div className={styles.timelineContent}>
                               <p className={styles.timelineStatus}>{translateStatus(h.status)}</p>
                               <p className={styles.timelineMeta}>
-                                {h.updatedBy || 'Staff'} • {h.timestamp ? formatDate(h.timestamp) : 'N/A'}
+                                {h.updatedBy || 'Staff'} • {h.timestamp ? formatDateTime(h.timestamp) : 'N/A'}
                               </p>
                             </div>
                           </div>
@@ -800,10 +981,6 @@ export default function Workflow() {
 
                 {/* Right side controls */}
                 <div className={styles.actionCol}>
-                  <div className={styles.qrCard}>
-                    <QRCodeSVG value={`ORDER:${selectedOrder.id}`} size={110} />
-                    <p>Scan to verify order status</p>
-                  </div>
 
                   <div className={styles.statusAction}>
                     <label>Workflow Stage</label>
@@ -821,23 +998,7 @@ export default function Workflow() {
                     </div>
                   </div>
 
-                  <div className={styles.statusAction}>
-                    <label>{t('paymentStatus', settings.language)}</label>
-                    <div className={styles.statusSelectWrapper}>
-                      <select 
-                        value={selectedOrder.paymentStatus || 'Pending'} 
-                        onChange={(e) => handleUpdatePaymentStatus(e.target.value)}
-                        className={styles.statusSelect}
-                        style={{ borderLeftColor: selectedOrder.paymentStatus === 'Paid' ? '#10B981' : '#F59E0B' }}
-                      >
-                        <option value="Pending">{t('pending', settings.language)}</option>
-                        <option value="Paid">{t('paid', settings.language)}</option>
-                        <option value="Credit">{t('credit', settings.language)}</option>
-                        <option value="Partial">{t('partial', settings.language)}</option>
-                      </select>
-                      <ChevronDown size={18} />
-                    </div>
-                  </div>
+
 
                   <div className={styles.actionBtns}>
                     <button 
@@ -869,15 +1030,15 @@ export default function Workflow() {
 
       {/* Settle payment selection modal */}
       {showPayModal && (
-        <div className={styles.payModalOverlay}>
-          <div className={styles.payModal}>
+        <div className={styles.payModalOverlay} onClick={() => { setShowPayModal(false); if (originalPayStatus) setSelectedOrder(prev => ({ ...prev, paymentStatus: originalPayStatus })); }}>
+          <div className={styles.payModal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ padding: '0 0 1rem 0' }}>
               <h2 style={{ fontSize: '1.15rem' }}>{t('confirmPayment', settings.language)}</h2>
               <X size={20} className={styles.closeBtn} onClick={() => { setShowPayModal(false); if (originalPayStatus) setSelectedOrder(prev => ({ ...prev, paymentStatus: originalPayStatus })); }} />
             </div>
             
             <p style={{ fontSize: '0.85rem', color: '#64748B', margin: '0.5rem 0 1.5rem' }}>
-              Select transaction account for Order <strong>#{selectedOrder.id}</strong> payment:
+              Select transaction account for Order <strong>#{settings.invoicePrefix || ''}{selectedOrder.id}</strong> payment:
             </p>
 
             <div className={styles.payOptionGrid}>
