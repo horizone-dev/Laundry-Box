@@ -872,7 +872,7 @@ export default function Orders({ isPendingView = false }) {
     }
   };
 
-  const handleWhatsApp = (phone, id = null) => {
+  const handleWhatsApp = async (phone, id = null) => {
     if (!phone) {
       alert(t('noPhoneFound', settings.language));
       return;
@@ -893,10 +893,50 @@ export default function Orders({ isPendingView = false }) {
       }
     }
 
-    let message = '';
     const orderMatch = orders.find(o => o.id === id || o.billNumber === id) || selectedOrder;
     const isReadyStatus = orderMatch && ['Ready', 'Ready to Pick up'].includes(orderMatch.status);
 
+    // Auto generate / retrieve payment link if there is a due balance
+    let paymentLinkUrl = '';
+    const due = orderMatch ? (orderMatch.dueAmount ?? (orderMatch.totalAmount - (orderMatch.paidAmount || 0))) : 0;
+    if (due > 0 && orderMatch) {
+      if (window.electronAPI?.dbQuery) {
+        try {
+          const searchRes = await window.electronAPI.dbQuery(
+            `SELECT * FROM payment_links WHERE (description LIKE ? OR id = ?) AND status = 'Active' LIMIT 1`,
+            [`%${orderMatch.id}%`, `LNK-${orderMatch.billNumber}`]
+          );
+          if (searchRes.success && searchRes.data.length > 0) {
+            paymentLinkUrl = searchRes.data[0].url;
+          } else {
+            const linkId = `LNK-${orderMatch.billNumber || Date.now().toString().slice(-4)}`;
+            const url = `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`;
+            const dateStr = getLocalDateTime();
+            await window.electronAPI.dbQuery(
+              `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
+              [
+                linkId,
+                orderMatch.customerId || 'Walk-in',
+                orderMatch.customerName || orderMatch.customer || 'Walk-in Customer',
+                `Order #${orderMatch.billNumber || orderMatch.id}`,
+                due,
+                'Apple Pay',
+                dateStr,
+                url
+              ]
+            );
+            paymentLinkUrl = url;
+          }
+        } catch (err) {
+          console.error("Failed to query or create payment link in database:", err);
+        }
+      } else {
+        paymentLinkUrl = `https://pay.lundry.ae/lnk/lnk-${(orderMatch.billNumber || 'mock').toLowerCase()}`;
+      }
+    }
+
+    let message = '';
     if (isReadyStatus && settings.waOrderReadyTemplate) {
       message = settings.waOrderReadyTemplate
         .replace(/{customerName}/g, orderMatch.customerName || orderMatch.customer || 'Customer')
@@ -904,6 +944,9 @@ export default function Orders({ isPendingView = false }) {
         .replace(/{total}/g, `${settings.currencySymbol || 'AED'} ${(orderMatch.totalAmount || orderMatch.total || 0).toFixed(2)}`)
         .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${(orderMatch.dueAmount ?? 0).toFixed(2)}`)
         .replace(/{deliveryDate}/g, orderMatch.expectedDeliveryDate || '');
+      if (due > 0 && paymentLinkUrl) {
+        message += `\n\nPay online: ${paymentLinkUrl}`;
+      }
     } else if (id && settings.waReminderTemplate) {
       message = settings.waReminderTemplate
         .replace(/{customerName}/g, orderMatch ? (orderMatch.customerName || orderMatch.customer || 'Customer') : 'Customer')
@@ -911,6 +954,9 @@ export default function Orders({ isPendingView = false }) {
         .replace(/{total}/g, orderMatch ? `${settings.currencySymbol || 'AED'} ${(orderMatch.totalAmount || orderMatch.total || 0).toFixed(2)}` : '')
         .replace(/{dueAmount}/g, orderMatch ? `${settings.currencySymbol || 'AED'} ${(orderMatch.dueAmount ?? 0).toFixed(2)}` : '')
         .replace(/{deliveryDate}/g, orderMatch ? (orderMatch.expectedDeliveryDate || '') : '');
+      if (due > 0 && paymentLinkUrl) {
+        message += `\n\nPay online: ${paymentLinkUrl}`;
+      }
     } else {
       message = t('waGeneralMessage', settings.language);
       if (id) {
@@ -931,6 +977,9 @@ export default function Orders({ isPendingView = false }) {
           
         if (orderMatch && orderMatch.dueAmount > 0) {
           message += `\n\nFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${orderMatch.dueAmount.toFixed(2)}.`;
+          if (paymentLinkUrl) {
+            message += `\n\nPay online: ${paymentLinkUrl}`;
+          }
         }
       }
     }
