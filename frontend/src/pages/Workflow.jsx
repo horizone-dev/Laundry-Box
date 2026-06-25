@@ -570,7 +570,7 @@ export default function Workflow() {
     // Auto generate / retrieve payment link if there is a due balance
     let paymentLinkUrl = '';
     const due = orderMatch ? (orderMatch.dueAmount ?? (orderMatch.totalAmount - (orderMatch.paidAmount || 0))) : 0;
-    if (due > 0 && orderMatch) {
+    if (due > 0 && orderMatch && settings.enablePaymentLinks !== false) {
       if (window.electronAPI?.dbQuery) {
         try {
           const searchRes = await window.electronAPI.dbQuery(

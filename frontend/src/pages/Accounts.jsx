@@ -43,7 +43,11 @@ export default function Accounts() {
   /* ─── State ──────────────────────────────────────── */
   const [activeTab, setActiveTab] = useState('Payments');
   const [notified, setNotified] = useState(false);
-  const tabs = ['Payments', 'Payment links', 'Refunds'];
+  const tabs = useMemo(() => {
+    return settings.enablePaymentLinks !== false
+      ? ['Payments', 'Payment links', 'Refunds']
+      : ['Payments', 'Refunds'];
+  }, [settings.enablePaymentLinks]);
   const [transactions, setTransactions] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [refundsPage, setRefundsPage] = useState(1);
@@ -128,6 +132,12 @@ export default function Accounts() {
     setCurrentPage(1);
     setRefundsPage(1);
   }, [searchTerm, dateRange, customStart, customEnd, activeAccountType, activeBankAccountId, activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'Payment links' && settings.enablePaymentLinks === false) {
+      setActiveTab('Payments');
+    }
+  }, [settings.enablePaymentLinks, activeTab]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {

@@ -1389,6 +1389,29 @@ export default function Settings() {
 
           {activeTab === 'Payment Gateways' && (
             <div className={styles.profileContainer}>
+              
+              {user.role === 'super_admin' && (
+                <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
+                  <h2 className={styles.cardTitle}>Online Payment Links</h2>
+                  <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.25rem' }}>Configure online payment link status.</p>
+                  
+                  <div className={styles.toggleWrapper} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0' }}>
+                    <div>
+                      <label style={{ fontWeight: 600, fontSize: '0.95rem' }}>Enable Online Payment Links</label>
+                      <p style={{ fontSize: '0.8rem', color: '#64748B', margin: 0 }}>Allows creating and sending payment links to customers.</p>
+                    </div>
+                    <label className={styles.switch}>
+                      <input
+                        type="checkbox"
+                        checked={settings.enablePaymentLinks ?? true}
+                        onChange={(e) => updateSettings({ enablePaymentLinks: e.target.checked })}
+                      />
+                      <span className={`${styles.slider} ${styles.round}`}></span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
               <div className={styles.card}>
                 <div className={styles.cardHeader}>
                   <div>
@@ -1710,7 +1733,7 @@ export default function Settings() {
                     </div>
                   </div>
 
-                  {isSuperAdmin && (
+                  {user.role === 'super_admin' && (
                     <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem', marginTop: '1.5rem' }}>
                       <div className={styles.backupIcon} style={{ background: '#F3E8FF', padding: '1rem', borderRadius: '12px' }}>
                         <Upload size={32} color="#7C3AED" />

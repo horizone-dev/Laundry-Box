@@ -263,45 +263,47 @@ export default function Invoice() {
     if (due > 0) {
       message += `%0A%0AFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${due.toFixed(2)}.`;
       
-      // Auto generate / retrieve payment link
-      let paymentLinkUrl = '';
-      if (window.electronAPI?.dbQuery) {
-        try {
-          const searchRes = await window.electronAPI.dbQuery(
-            `SELECT * FROM payment_links WHERE (description LIKE ? OR id = ?) AND status = 'Active' LIMIT 1`,
-            [`%${order.id}%`, `LNK-${order.billNumber}`]
-          );
-          if (searchRes.success && searchRes.data.length > 0) {
-            paymentLinkUrl = searchRes.data[0].url;
-          } else {
-            const linkId = `LNK-${order.billNumber || Date.now().toString().slice(-4)}`;
-            const url = `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`;
-            const dateStr = getLocalDateTime();
-            await window.electronAPI.dbQuery(
-              `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
-              [
-                linkId,
-                order.customerId || 'Walk-in',
-                order.customer || 'Walk-in Customer',
-                `Order #${order.billNumber || order.id}`,
-                due,
-                'Apple Pay',
-                dateStr,
-                url
-              ]
+      if (settings.enablePaymentLinks !== false) {
+        // Auto generate / retrieve payment link
+        let paymentLinkUrl = '';
+        if (window.electronAPI?.dbQuery) {
+          try {
+            const searchRes = await window.electronAPI.dbQuery(
+              `SELECT * FROM payment_links WHERE (description LIKE ? OR id = ?) AND status = 'Active' LIMIT 1`,
+              [`%${order.id}%`, `LNK-${order.billNumber}`]
             );
-            paymentLinkUrl = url;
+            if (searchRes.success && searchRes.data.length > 0) {
+              paymentLinkUrl = searchRes.data[0].url;
+            } else {
+              const linkId = `LNK-${order.billNumber || Date.now().toString().slice(-4)}`;
+              const url = `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`;
+              const dateStr = getLocalDateTime();
+              await window.electronAPI.dbQuery(
+                `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
+                [
+                  linkId,
+                  order.customerId || 'Walk-in',
+                  order.customer || 'Walk-in Customer',
+                  `Order #${order.billNumber || order.id}`,
+                  due,
+                  'Apple Pay',
+                  dateStr,
+                  url
+                ]
+              );
+              paymentLinkUrl = url;
+            }
+          } catch (err) {
+            console.error("Failed to query or create payment link in database:", err);
           }
-        } catch (err) {
-          console.error("Failed to query or create payment link in database:", err);
+        } else {
+          paymentLinkUrl = `https://pay.lundry.ae/lnk/lnk-${(order.billNumber || 'mock').toLowerCase()}`;
         }
-      } else {
-        paymentLinkUrl = `https://pay.lundry.ae/lnk/lnk-${(order.billNumber || 'mock').toLowerCase()}`;
-      }
-      
-      if (paymentLinkUrl) {
-        message += `%0A%0APlease pay online using this link: ${paymentLinkUrl}`;
+        
+        if (paymentLinkUrl) {
+          message += `%0A%0APlease pay online using this link: ${paymentLinkUrl}`;
+        }
       }
     }
 

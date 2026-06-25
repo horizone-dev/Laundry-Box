@@ -72,7 +72,8 @@ export function SettingsProvider({ children }) {
     invoiceShowBilingual: true,
     invoiceTermsText: '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.',
     billingPrinter: '',
-    tagPrinter: ''
+    tagPrinter: '',
+    enablePaymentLinks: true
   });
 
   const settingsRef = useRef(settings);
@@ -158,7 +159,8 @@ export function SettingsProvider({ children }) {
             invoiceShowBilingual: shopSettings?.invoiceShowBilingual ?? true,
             invoiceTermsText: shopSettings?.invoiceTermsText ?? '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.',
             billingPrinter: shopSettings?.billingPrinter || '',
-            tagPrinter: shopSettings?.tagPrinter || ''
+            tagPrinter: shopSettings?.tagPrinter || '',
+            enablePaymentLinks: shopSettings?.enablePaymentLinks ?? true
           });
           window.localStorage.setItem('billingPrinter', shopSettings?.billingPrinter || '');
           window.localStorage.setItem('tagPrinter', shopSettings?.tagPrinter || '');
@@ -237,7 +239,8 @@ export function SettingsProvider({ children }) {
           invoiceShowBilingual: updated.invoiceShowBilingual,
           invoiceTermsText: updated.invoiceTermsText,
           billingPrinter: updated.billingPrinter,
-          tagPrinter: updated.tagPrinter
+          tagPrinter: updated.tagPrinter,
+          enablePaymentLinks: updated.enablePaymentLinks
         });
 
         await window.electronAPI.dbQuery(
