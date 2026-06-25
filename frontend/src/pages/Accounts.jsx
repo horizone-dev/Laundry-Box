@@ -1380,35 +1380,221 @@ export default function Accounts() {
 
       </div>
       ) : activeTab === 'Payment links' ? (
-        <div className={styles.upcomingPageWrapper}>
-          <div className={styles.upcomingHeader}>
-            <div className={styles.upcomingIconWrapper}><Zap size={40} className={styles.upcomingIconAnim} /></div>
-            <h2>Payment Links</h2>
-            <span className={styles.upcomingBadge}>UPCOMING CLOUD FEATURE</span>
+        <div className={styles.detailCol}>
+          <div className={styles.tabContentHeader}>
+            <h2 className={styles.tabTitle}>Online Payment Links</h2>
+            <button className={styles.btnPrimary} onClick={() => setShowNewLinkCard(!showNewLinkCard)}>
+              <Plus size={16} /> Create Payment Link
+            </button>
           </div>
-          
-          <p className={styles.upcomingSubtitle}>
-            Accept online payments from anywhere. Send instant payment links to your customers via WhatsApp, SMS, or Email, and track collections in real-time.
-          </p>
 
-          <div className={styles.featurePreviewGrid}>
-            <div className={styles.featurePreviewCard}>
-              <CreditCard size={20} className={styles.featureIconBlue} />
-              <h3>Multi-Channel Accept</h3>
-              <p>Customers can pay via Visa, Mastercard, Apple Pay, or Google Pay with one-click checkouts.</p>
-            </div>
-            
-            <div className={styles.featurePreviewCard}>
-              <Share2 size={20} className={styles.featureIconGreen} />
-              <h3>Instant Sharing</h3>
-              <p>Auto-generate and text direct checkout links to outstanding bills or new POS invoices.</p>
-            </div>
-            
-            <div className={styles.featurePreviewCard}>
-              <ArrowLeftRight size={20} className={styles.featureIconPurple} />
-              <h3>Ledger Reconciliation</h3>
-              <p>Payments are reconciled instantly and recorded as Income in your active bank ledger card.</p>
-            </div>
+          {showNewLinkCard && (
+            <form onSubmit={handleCreatePaymentLink} className={styles.tabFormCard}>
+              <div className={styles.formGrid}>
+                <div className={styles.formGroup}>
+                  <label>Select Customer</label>
+                  <select
+                    value={linkFormData.customerId}
+                    onChange={(e) => setLinkFormData({...linkFormData, customerId: e.target.value})}
+                    className={styles.modalSelect}
+                    required
+                  >
+                    <option value="">-- Choose Customer --</option>
+                    {dbCustomers.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className={styles.formGroup}>
+                  <label>Amount ({settings.currencySymbol || 'AED'})</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={linkFormData.amount}
+                    onChange={(e) => setLinkFormData({...linkFormData, amount: e.target.value})}
+                    className={styles.modalInput}
+                    required
+                  />
+                </div>
+                <div className={styles.formGroup}>
+                  <label>Description / Order Ref</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Order #105103"
+                    value={linkFormData.description}
+                    onChange={(e) => setLinkFormData({...linkFormData, description: e.target.value})}
+                    className={styles.modalInput}
+                  />
+                </div>
+                <div className={styles.formGroup}>
+                  <label>Payment Channel</label>
+                  <select
+                    value={linkFormData.channel}
+                    onChange={(e) => setLinkFormData({...linkFormData, channel: e.target.value})}
+                    className={styles.modalSelect}
+                  >
+                    <option value="Apple Pay">Apple Pay</option>
+                    <option value="Visa">Visa</option>
+                    <option value="Mastercard">Mastercard</option>
+                    <option value="Google Pay">Google Pay</option>
+                  </select>
+                </div>
+              </div>
+              <div className={styles.formActions}>
+                <button type="button" className={styles.btnSecondary} onClick={() => setShowNewLinkCard(false)}>Cancel</button>
+                <button type="submit" className={styles.btnPrimary}>Generate Link</button>
+              </div>
+            </form>
+          )}
+
+          <div className={styles.tabTableContainer}>
+            <table className={styles.tabTable}>
+              <thead>
+                <tr>
+                  <th>LINK ID</th>
+                  <th>DATE</th>
+                  <th>CUSTOMER</th>
+                  <th>DESCRIPTION</th>
+                  <th className={styles.numCol}>AMOUNT</th>
+                  <th>METHOD</th>
+                  <th>STATUS</th>
+                  <th className={styles.actionCol}>ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paymentLinks.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" className={styles.emptyRow}>No payment links generated yet.</td>
+                  </tr>
+                ) : (
+                  paymentLinks.map(link => (
+                    <tr key={link.id} className={styles.tabTableRow}>
+                      <td><span className={styles.boldId}>{link.id}</span></td>
+                      <td>{link.date ? link.date.split(' ')[0] : 'N/A'}</td>
+                      <td>{link.customerName}</td>
+                      <td>{link.description}</td>
+                      <td className={`${styles.numCol} ${styles.incomeAmt}`}>
+                        {link.amount.toFixed(2)} <span className={styles.currencyMini}>{settings.currencySymbol || 'AED'}</span>
+                      </td>
+                      <td><span className={styles.tagBadge}>{link.channel}</span></td>
+                      <td>
+                        <span className={`${
+                          link.status === 'Paid' ? styles.badgePaid : 
+                          link.status === 'Active' ? styles.badgeActive : styles.badgeExpired
+                        }`}>
+                          {link.status}
+                        </span>
+                      </td>
+                      <td className={styles.actionCol}>
+                        <div className={styles.linkActionButtons} style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                          <button 
+                            className={styles.shareBtn} 
+                            onClick={() => {
+                              const customer = dbCustomers.find(c => c.name === link.customerName);
+                              const phoneNum = customer ? customer.phone : '';
+                              const text = `Dear ${link.customerName},\n\n` +
+                                           `Here is your payment link of *${(settings.currencySymbol || 'AED')} ${link.amount.toFixed(2)}* for *${link.description}*.\n\n` +
+                                           `Please pay online using this link: ${link.url}\n\n` +
+                                           `Thank you!\n*${(settings.shopName || 'Laundry Box')}*`;
+                              
+                              let cleanPhone = phoneNum;
+                              if (cleanPhone) {
+                                if (cleanPhone.startsWith('+')) {
+                                  cleanPhone = cleanPhone.replace(/[^\d+]/g, '');
+                                } else {
+                                  const code = (settings.waCountryCode || '971').replace(/[^\d]/g, '');
+                                  cleanPhone = code + cleanPhone.replace(/[^\d]/g, '');
+                                }
+                              }
+                              
+                              const url = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(text)}`;
+                              if (window.electronAPI?.openExternal) {
+                                window.electronAPI.openExternal(url);
+                              } else {
+                                window.open(url, '_blank');
+                              }
+                            }}
+                            title="Share via WhatsApp"
+                            style={{ 
+                              background: '#10b981', 
+                              color: 'white', 
+                              border: 'none', 
+                              padding: '5px 10px', 
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '0.75rem',
+                              fontWeight: '600'
+                            }}
+                          >
+                            <Share2 size={12} /> Share WhatsApp
+                          </button>
+                          
+                          {link.status === 'Active' && (
+                            <button
+                              onClick={async () => {
+                                if (window.confirm('Mark this payment link as PAID?')) {
+                                  if (window.electronAPI?.dbQuery) {
+                                    try {
+                                      await window.electronAPI.dbQuery("UPDATE payment_links SET status = 'Paid' WHERE id = ?", [link.id]);
+                                      
+                                      const txnId = `TXN-LNK-PAY-${Date.now()}`;
+                                      const timestamp = getLocalDateTime();
+                                      const nowIso = getLocalISOString();
+                                      
+                                      await window.electronAPI.dbQuery(
+                                        `INSERT INTO account_transactions 
+                                         (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+                                        [
+                                          txnId, 
+                                          DEFAULT_SHOP_ID, 
+                                          'BANK', 
+                                          'INCOME', 
+                                          'Service Payment', 
+                                          link.amount, 
+                                          `Online Payment - ${link.customerName} - ${link.description} (Link ${link.id})`, 
+                                          timestamp, 
+                                          nowIso,
+                                          'CreditCard',
+                                          settings.bankAccounts && settings.bankAccounts.length > 0 ? settings.bankAccounts[0].id : null
+                                        ]
+                                      );
+                                      
+                                      fetchData();
+                                    } catch (err) {
+                                      console.error('Failed to mark payment link as paid:', err);
+                                    }
+                                  } else {
+                                    setPaymentLinks(prev => prev.map(l => l.id === link.id ? { ...l, status: 'Paid' } : l));
+                                  }
+                                }
+                              }}
+                              title="Mark as Paid"
+                              style={{
+                                background: '#3b82f6',
+                                color: 'white',
+                                border: 'none',
+                                padding: '5px 10px',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontSize: '0.75rem',
+                                fontWeight: '600'
+                              }}
+                            >
+                              Mark Paid
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       ) : (
