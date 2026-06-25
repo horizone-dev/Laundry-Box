@@ -193,6 +193,59 @@ function initDB(appPath) {
       actionType TEXT,
       timestamp TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS payment_links (
+      id TEXT PRIMARY KEY,
+      customerId TEXT,
+      customerName TEXT,
+      description TEXT,
+      amount REAL,
+      channel TEXT,
+      date TEXT,
+      status TEXT,
+      url TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS reconciliations (
+      id TEXT PRIMARY KEY,
+      date TEXT,
+      cashCounted REAL,
+      cashExpected REAL,
+      status TEXT,
+      verifiedBy TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS payroll_employees (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      role TEXT,
+      baseSalary REAL
+    );
+
+    CREATE TABLE IF NOT EXISTS payroll_payments (
+      id TEXT PRIMARY KEY,
+      month TEXT,
+      employeeName TEXT,
+      role TEXT,
+      base REAL,
+      daysWorked INTEGER,
+      overtime REAL,
+      bonus REAL,
+      deduction REAL,
+      net REAL,
+      status TEXT,
+      date TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS accrual_logs (
+      id TEXT PRIMARY KEY,
+      date TEXT,
+      employeeName TEXT,
+      type TEXT,
+      monthYear TEXT,
+      amount REAL,
+      status TEXT
+    );
   `);
 
   // Create indexes for search, filters, sorting, and synchronization performance
@@ -568,6 +621,80 @@ function runDataHealer(db) {
       const stmt = db.prepare("INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)");
       defaultCats.forEach(cat => {
         stmt.run(cat.id, 'SHOP_01', cat.name, cat.icon, new Date().toISOString());
+      });
+    }
+
+    // 5. Pre-populate Payroll Employees if empty
+    const empCheck = db.prepare("SELECT COUNT(*) as count FROM payroll_employees").get();
+    if (empCheck.count === 0) {
+      console.log("Pre-populating default payroll employees...");
+      const defaultEmps = [
+        { id: 'EMP-1', name: 'John Doe', role: 'Cashier', baseSalary: 3500 },
+        { id: 'EMP-2', name: 'Alice Smith', role: 'Washer', baseSalary: 4000 },
+        { id: 'EMP-3', name: 'Bob Jones', role: 'Delivery Agent', baseSalary: 3200 },
+        { id: 'EMP-4', name: 'Emily Rose', role: 'Ironer', baseSalary: 3800 }
+      ];
+      const stmt = db.prepare("INSERT INTO payroll_employees (id, name, role, baseSalary) VALUES (?, ?, ?, ?)");
+      defaultEmps.forEach(emp => {
+        stmt.run(emp.id, emp.name, emp.role, emp.baseSalary);
+      });
+    }
+
+    // 6. Pre-populate Payment Links if empty
+    const linkCheck = db.prepare("SELECT COUNT(*) as count FROM payment_links").get();
+    if (linkCheck.count === 0) {
+      console.log("Pre-populating default payment links...");
+      const defaultLinks = [
+        { id: 'LNK-1001', customerId: 'CUST-001', customerName: 'Muhammed Ali', description: 'Order #AG-44280', amount: 350.00, channel: 'Apple Pay', date: '2026-06-16 10:15', status: 'Active', url: 'https://pay.lundry.ae/lnk/AG-44280' },
+        { id: 'LNK-1002', customerId: 'CUST-002', customerName: 'Sarah Connor', description: 'Order #AG-44281', amount: 125.00, channel: 'Visa', date: '2026-06-15 14:20', status: 'Paid', url: 'https://pay.lundry.ae/lnk/AG-44281' },
+        { id: 'LNK-1003', customerId: 'CUST-003', customerName: 'John Doe', description: 'Outstanding Balance', amount: 480.00, channel: 'Google Pay', date: '2026-06-14 09:00', status: 'Expired', url: 'https://pay.lundry.ae/lnk/AG-JD02' }
+      ];
+      const stmt = db.prepare("INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      defaultLinks.forEach(link => {
+        stmt.run(link.id, link.customerId, link.customerName, link.description, link.amount, link.channel, link.date, link.status, link.url);
+      });
+    }
+
+    // 7. Pre-populate Reconciliations if empty
+    const recCheck = db.prepare("SELECT COUNT(*) as count FROM reconciliations").get();
+    if (recCheck.count === 0) {
+      console.log("Pre-populating default reconciliations...");
+      const defaultRecs = [
+        { id: 'REC-1001', date: '2026-06-15 22:00', cashCounted: 450.00, cashExpected: 450.00, status: 'Matched', verifiedBy: 'Super Admin' },
+        { id: 'REC-1002', date: '2026-06-14 22:00', cashCounted: 320.00, cashExpected: 325.00, status: 'Discrepancy (-5.00)', verifiedBy: 'Super Admin' }
+      ];
+      const stmt = db.prepare("INSERT INTO reconciliations (id, date, cashCounted, cashExpected, status, verifiedBy) VALUES (?, ?, ?, ?, ?, ?)");
+      defaultRecs.forEach(rec => {
+        stmt.run(rec.id, rec.date, rec.cashCounted, rec.cashExpected, rec.status, rec.verifiedBy);
+      });
+    }
+
+    // 8. Pre-populate Payroll Payments if empty
+    const payCheck = db.prepare("SELECT COUNT(*) as count FROM payroll_payments").get();
+    if (payCheck.count === 0) {
+      console.log("Pre-populating default payroll payments...");
+      const defaultPayPayments = [
+        { id: 'PR-1001', month: 'May 2026', employeeName: 'John Doe', role: 'Cashier', base: 3500, daysWorked: 30, overtime: 12, bonus: 150, deduction: 0, net: 3770, status: 'Paid', date: '2026-05-31' },
+        { id: 'PR-1002', month: 'May 2026', employeeName: 'Alice Smith', role: 'Washer', base: 4000, daysWorked: 28, overtime: 5, bonus: 0, deduction: 100, net: 3733, status: 'Paid', date: '2026-05-31' }
+      ];
+      const stmt = db.prepare("INSERT INTO payroll_payments (id, month, employeeName, role, base, daysWorked, overtime, bonus, deduction, net, status, date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      defaultPayPayments.forEach(p => {
+        stmt.run(p.id, p.month, p.employeeName, p.role, p.base, p.daysWorked, p.overtime, p.bonus, p.deduction, p.net, p.status, p.date);
+      });
+    }
+
+    // 9. Pre-populate Accrual Logs if empty
+    const accCheck = db.prepare("SELECT COUNT(*) as count FROM accrual_logs").get();
+    if (accCheck.count === 0) {
+      console.log("Pre-populating default accrual logs...");
+      const defaultAccs = [
+        { id: 'ACR-1001', date: '2026-06-15', employeeName: 'John Doe', type: 'Leave Salary Accrual', monthYear: 'June 2026', amount: 291.67, status: 'Accrued' },
+        { id: 'ACR-1002', date: '2026-06-15', employeeName: 'Alice Smith', type: 'Gratuity / End of Service Accrual', monthYear: 'June 2026', amount: 333.33, status: 'Accrued' },
+        { id: 'ACR-1003', date: '2026-06-15', employeeName: 'Bob Jones', type: 'Leave Salary Accrual', monthYear: 'June 2026', amount: 266.67, status: 'Accrued' }
+      ];
+      const stmt = db.prepare("INSERT INTO accrual_logs (id, date, employeeName, type, monthYear, amount, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      defaultAccs.forEach(acc => {
+        stmt.run(acc.id, acc.date, acc.employeeName, acc.type, acc.monthYear, acc.amount, acc.status);
       });
     }
 

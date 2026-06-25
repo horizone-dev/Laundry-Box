@@ -52,11 +52,7 @@ export default function Accounts() {
   const [dbOrders, setDbOrders] = useState([]);
 
   // Payment Links State
-  const [paymentLinks, setPaymentLinks] = useState([
-    { id: 'LNK-1001', customerName: 'Muhammed Ali', description: 'Order #AG-44280', amount: 350.00, channel: 'Apple Pay', date: '2026-06-16 10:15', status: 'Active', url: 'https://pay.lundry.ae/lnk/AG-44280' },
-    { id: 'LNK-1002', customerName: 'Sarah Connor', description: 'Order #AG-44281', amount: 125.00, channel: 'Visa', date: '2026-06-15 14:20', status: 'Paid', url: 'https://pay.lundry.ae/lnk/AG-44281' },
-    { id: 'LNK-1003', customerName: 'John Doe', description: 'Outstanding Balance', amount: 480.00, channel: 'Google Pay', date: '2026-06-14 09:00', status: 'Expired', url: 'https://pay.lundry.ae/lnk/AG-JD02' }
-  ]);
+  const [paymentLinks, setPaymentLinks] = useState([]);
   const [showNewLinkCard, setShowNewLinkCard] = useState(false);
   const [linkFormData, setLinkFormData] = useState({
     customerId: '',
@@ -66,10 +62,7 @@ export default function Accounts() {
   });
 
   // Refunds State
-  const [refunds, setRefunds] = useState([
-    { id: 'RFD-1001', date: '2026-06-15 11:30', orderId: 'AG-44282', customerName: 'David Miller', amount: 75.00, reason: 'Damaged Garment', account: 'Cash', status: 'Processed' },
-    { id: 'RFD-1002', date: '2026-06-14 15:40', orderId: 'AG-44283', customerName: 'Emily Watson', amount: 110.00, reason: 'Customer Dissatisfied', account: 'Emirates NBD', status: 'Processed' }
-  ]);
+  const [refunds, setRefunds] = useState([]);
   const [showNewRefundCard, setShowNewRefundCard] = useState(false);
   const [refundFormData, setRefundFormData] = useState({
     orderId: '',
@@ -79,26 +72,15 @@ export default function Accounts() {
   });
 
   // Balances Tab Reconciliations
-  const [reconciliations, setReconciliations] = useState([
-    { id: 'REC-1001', date: '2026-06-15 22:00', cashCounted: 450.00, cashExpected: 450.00, status: 'Matched', verifiedBy: 'Super Admin' },
-    { id: 'REC-1002', date: '2026-06-14 22:00', cashCounted: 320.00, cashExpected: 325.00, status: 'Discrepancy (-5.00)', verifiedBy: 'Super Admin' }
-  ]);
+  const [reconciliations, setReconciliations] = useState([]);
   const [showReconcileCard, setShowReconcileCard] = useState(false);
   const [reconcileFormData, setReconcileFormData] = useState({
     cashCounted: ''
   });
 
   // Payroll Calculation State
-  const [payrollEmployees, setPayrollEmployees] = useState([
-    { id: 'EMP-1', name: 'John Doe', role: 'Cashier', baseSalary: 3500 },
-    { id: 'EMP-2', name: 'Alice Smith', role: 'Washer', baseSalary: 4000 },
-    { id: 'EMP-3', name: 'Bob Jones', role: 'Delivery Agent', baseSalary: 3200 },
-    { id: 'EMP-4', name: 'Emily Rose', role: 'Ironer', baseSalary: 3800 }
-  ]);
-  const [payrollPayments, setPayrollPayments] = useState([
-    { id: 'PR-1001', month: 'May 2026', employeeName: 'John Doe', role: 'Cashier', base: 3500, daysWorked: 30, overtime: 12, bonus: 150, deduction: 0, net: 3770, status: 'Paid', date: '2026-05-31' },
-    { id: 'PR-1002', month: 'May 2026', employeeName: 'Alice Smith', role: 'Washer', base: 4000, daysWorked: 28, overtime: 5, bonus: 0, deduction: 100, net: 3733, status: 'Paid', date: '2026-05-31' }
-  ]);
+  const [payrollEmployees, setPayrollEmployees] = useState([]);
+  const [payrollPayments, setPayrollPayments] = useState([]);
   const [showPayrollCalcCard, setShowPayrollCalcCard] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('EMP-1');
   const [payrollInputData, setPayrollInputData] = useState({
@@ -112,11 +94,7 @@ export default function Accounts() {
   const [activePayslip, setActivePayslip] = useState(null);
 
   // Payroll Accruals State
-  const [accrualLogs, setAccrualLogs] = useState([
-    { id: 'ACR-1001', date: '2026-06-15', employeeName: 'John Doe', type: 'Leave Salary Accrual', monthYear: 'June 2026', amount: 291.67, status: 'Accrued' },
-    { id: 'ACR-1002', date: '2026-06-15', employeeName: 'Alice Smith', type: 'Gratuity / End of Service Accrual', monthYear: 'June 2026', amount: 333.33, status: 'Accrued' },
-    { id: 'ACR-1003', date: '2026-06-15', employeeName: 'Bob Jones', type: 'Leave Salary Accrual', monthYear: 'June 2026', amount: 266.67, status: 'Accrued' }
-  ]);
+  const [accrualLogs, setAccrualLogs] = useState([]);
   const [showNewAccrualCard, setShowNewAccrualCard] = useState(false);
   const [accrualFormData, setAccrualFormData] = useState({
     employeeName: 'John Doe',
@@ -318,6 +296,36 @@ export default function Accounts() {
         if (advRes.success && advRes.data[0]?.total !== null) {
           setAdvancesTotal(advRes.data[0].total);
         }
+
+        // Load Payment Links
+        const paymentLinksRes = await window.electronAPI.dbQuery("SELECT * FROM payment_links ORDER BY date DESC", []);
+        if (paymentLinksRes.success) {
+          setPaymentLinks(paymentLinksRes.data);
+        }
+
+        // Load Reconciliations
+        const reconciliationsRes = await window.electronAPI.dbQuery("SELECT * FROM reconciliations ORDER BY date DESC", []);
+        if (reconciliationsRes.success) {
+          setReconciliations(reconciliationsRes.data);
+        }
+
+        // Load Payroll Employees
+        const payrollEmployeesRes = await window.electronAPI.dbQuery("SELECT * FROM payroll_employees ORDER BY name ASC", []);
+        if (payrollEmployeesRes.success) {
+          setPayrollEmployees(payrollEmployeesRes.data);
+        }
+
+        // Load Payroll Payments
+        const payrollPaymentsRes = await window.electronAPI.dbQuery("SELECT * FROM payroll_payments ORDER BY date DESC", []);
+        if (payrollPaymentsRes.success) {
+          setPayrollPayments(payrollPaymentsRes.data);
+        }
+
+        // Load Accrual Logs
+        const accrualLogsRes = await window.electronAPI.dbQuery("SELECT * FROM accrual_logs ORDER BY date DESC", []);
+        if (accrualLogsRes.success) {
+          setAccrualLogs(accrualLogsRes.data);
+        }
       } catch (err) {
         console.error("Fetch account data error:", err);
       } finally {
@@ -351,6 +359,41 @@ export default function Accounts() {
         { id: 'AG-44282', billNumber: '44282', customerId: 'CUST-003', totalAmount: 480.00, paidAmount: 480.00, dueAmount: 0.00, paymentStatus: 'Paid', createdAt: '2026-06-14' }
       ];
       setDbOrders(mockOrders);
+
+      const mockPaymentLinks = [
+        { id: 'LNK-1001', customerName: 'Muhammed Ali', description: 'Order #AG-44280', amount: 350.00, channel: 'Apple Pay', date: '2026-06-16 10:15', status: 'Active', url: 'https://pay.lundry.ae/lnk/AG-44280' },
+        { id: 'LNK-1002', customerName: 'Sarah Connor', description: 'Order #AG-44281', amount: 125.00, channel: 'Visa', date: '2026-06-15 14:20', status: 'Paid', url: 'https://pay.lundry.ae/lnk/AG-44281' },
+        { id: 'LNK-1003', customerName: 'John Doe', description: 'Outstanding Balance', amount: 480.00, channel: 'Google Pay', date: '2026-06-14 09:00', status: 'Expired', url: 'https://pay.lundry.ae/lnk/AG-JD02' }
+      ];
+      setPaymentLinks(mockPaymentLinks);
+
+      const mockReconciliations = [
+        { id: 'REC-1001', date: '2026-06-15 22:00', cashCounted: 450.00, cashExpected: 450.00, status: 'Matched', verifiedBy: 'Super Admin' },
+        { id: 'REC-1002', date: '2026-06-14 22:00', cashCounted: 320.00, cashExpected: 325.00, status: 'Discrepancy (-5.00)', verifiedBy: 'Super Admin' }
+      ];
+      setReconciliations(mockReconciliations);
+
+      const mockPayrollEmployees = [
+        { id: 'EMP-1', name: 'John Doe', role: 'Cashier', baseSalary: 3500 },
+        { id: 'EMP-2', name: 'Alice Smith', role: 'Washer', baseSalary: 4000 },
+        { id: 'EMP-3', name: 'Bob Jones', role: 'Delivery Agent', baseSalary: 3200 },
+        { id: 'EMP-4', name: 'Emily Rose', role: 'Ironer', baseSalary: 3800 }
+      ];
+      setPayrollEmployees(mockPayrollEmployees);
+
+      const mockPayrollPayments = [
+        { id: 'PR-1001', month: 'May 2026', employeeName: 'John Doe', role: 'Cashier', base: 3500, daysWorked: 30, overtime: 12, bonus: 150, deduction: 0, net: 3770, status: 'Paid', date: '2026-05-31' },
+        { id: 'PR-1002', month: 'May 2026', employeeName: 'Alice Smith', role: 'Washer', base: 4000, daysWorked: 28, overtime: 5, bonus: 0, deduction: 100, net: 3733, status: 'Paid', date: '2026-05-31' }
+      ];
+      setPayrollPayments(mockPayrollPayments);
+
+      const mockAccrualLogs = [
+        { id: 'ACR-1001', date: '2026-06-15', employeeName: 'John Doe', type: 'Leave Salary Accrual', monthYear: 'June 2026', amount: 291.67, status: 'Accrued' },
+        { id: 'ACR-1002', date: '2026-06-15', employeeName: 'Alice Smith', type: 'Gratuity / End of Service Accrual', monthYear: 'June 2026', amount: 333.33, status: 'Accrued' },
+        { id: 'ACR-1003', date: '2026-06-15', employeeName: 'Bob Jones', type: 'Leave Salary Accrual', monthYear: 'June 2026', amount: 266.67, status: 'Accrued' }
+      ];
+      setAccrualLogs(mockAccrualLogs);
+
       setLoading(false);
     }
   };
@@ -685,7 +728,7 @@ export default function Accounts() {
   }, [refunds, refundsPage]);
 
   // Payment link handler
-  const handleCreatePaymentLink = (e) => {
+  const handleCreatePaymentLink = async (e) => {
     e.preventDefault();
     if (!linkFormData.customerId || !linkFormData.amount) {
       alert("Please fill in all fields");
@@ -698,6 +741,7 @@ export default function Accounts() {
     
     const newLink = {
       id: linkId,
+      customerId: linkFormData.customerId,
       customerName: customer.name,
       description: orderRef,
       amount: amountVal,
@@ -707,7 +751,20 @@ export default function Accounts() {
       url: `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`
     };
 
-    setPaymentLinks(prev => [newLink, ...prev]);
+    if (window.electronAPI?.dbQuery) {
+      try {
+        await window.electronAPI.dbQuery(
+          `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [newLink.id, newLink.customerId, newLink.customerName, newLink.description, newLink.amount, newLink.channel, newLink.date, newLink.status, newLink.url]
+        );
+        fetchData();
+      } catch (err) {
+        console.error("Database payment link insert failed:", err);
+      }
+    } else {
+      setPaymentLinks(prev => [newLink, ...prev]);
+    }
     setShowNewLinkCard(false);
     setLinkFormData({ customerId: '', description: '', amount: '', channel: 'Apple Pay' });
   };
@@ -780,7 +837,7 @@ export default function Accounts() {
   };
 
   // Reconciliation handler
-  const handlePostReconciliation = (e) => {
+  const handlePostReconciliation = async (e) => {
     e.preventDefault();
     const countedVal = parseFloat(reconcileFormData.cashCounted);
     if (isNaN(countedVal) || countedVal < 0) {
@@ -803,7 +860,20 @@ export default function Accounts() {
       verifiedBy: user.name || 'Manager'
     };
 
-    setReconciliations(prev => [newRec, ...prev]);
+    if (window.electronAPI?.dbQuery) {
+      try {
+        await window.electronAPI.dbQuery(
+          `INSERT INTO reconciliations (id, date, cashCounted, cashExpected, status, verifiedBy) 
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [newRec.id, newRec.date, newRec.cashCounted, newRec.cashExpected, newRec.status, newRec.verifiedBy]
+        );
+        fetchData();
+      } catch (err) {
+        console.error("Database reconciliation insert failed:", err);
+      }
+    } else {
+      setReconciliations(prev => [newRec, ...prev]);
+    }
     setShowReconcileCard(false);
     setReconcileFormData({ cashCounted: '' });
   };
@@ -887,6 +957,25 @@ export default function Accounts() {
           ]
         );
 
+        // Also insert into payroll_payments table
+        await window.electronAPI.dbQuery(
+          `INSERT INTO payroll_payments (id, month, employeeName, role, base, daysWorked, overtime, bonus, deduction, net, status, date) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Paid', ?)`,
+          [
+            activePayslip.id,
+            activePayslip.month,
+            activePayslip.employeeName,
+            activePayslip.role,
+            activePayslip.base,
+            activePayslip.daysWorked,
+            activePayslip.overtime,
+            activePayslip.bonus,
+            activePayslip.deduction,
+            activePayslip.net,
+            activePayslip.date.split(' ')[0]
+          ]
+        );
+
         fetchData();
       } catch (err) {
         console.error("Database salary payment insertion failed:", err);
@@ -899,7 +988,9 @@ export default function Accounts() {
       date: getLocalDateTime().split(' ')[0]
     };
 
-    setPayrollPayments(prev => [paidPayslip, ...prev]);
+    if (!window.electronAPI?.dbQuery) {
+      setPayrollPayments(prev => [paidPayslip, ...prev]);
+    }
     setShowPayslipModal(false);
     setShowPayrollCalcCard(false);
     setActivePayslip(null);
@@ -907,7 +998,7 @@ export default function Accounts() {
   };
 
   // Accrual post handler
-  const handlePostAccrual = (e) => {
+  const handlePostAccrual = async (e) => {
     e.preventDefault();
     const amt = parseFloat(accrualFormData.amount);
     if (isNaN(amt) || amt <= 0) {
@@ -925,7 +1016,20 @@ export default function Accounts() {
       status: 'Accrued'
     };
 
-    setAccrualLogs(prev => [newAccrual, ...prev]);
+    if (window.electronAPI?.dbQuery) {
+      try {
+        await window.electronAPI.dbQuery(
+          `INSERT INTO accrual_logs (id, date, employeeName, type, monthYear, amount, status) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [newAccrual.id, newAccrual.date, newAccrual.employeeName, newAccrual.type, newAccrual.monthYear, newAccrual.amount, newAccrual.status]
+        );
+        fetchData();
+      } catch (err) {
+        console.error("Database accrual insert failed:", err);
+      }
+    } else {
+      setAccrualLogs(prev => [newAccrual, ...prev]);
+    }
     setShowNewAccrualCard(false);
     setAccrualFormData({ employeeName: 'John Doe', type: 'Leave Salary Accrual', monthYear: 'June 2026', amount: '' });
   };
