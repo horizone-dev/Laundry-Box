@@ -16,6 +16,7 @@ export default function Login({ onLogin }) {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [logoClicks, setLogoClicks] = useState(0);
   
+  const [version, setVersion] = useState('1.0.1');
   const [identifier, setIdentifier] = useState('');
   const [secret, setSecret] = useState('');
   const [twoFactor, setTwoFactor] = useState('');
@@ -33,6 +34,17 @@ export default function Login({ onLogin }) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Fetch dynamic version on mount
+  useEffect(() => {
+    const fetchVersion = async () => {
+      if (window.electronAPI?.getAppVersion) {
+        const ver = await window.electronAPI.getAppVersion();
+        setVersion(ver);
+      }
+    };
+    fetchVersion();
   }, []);
 
   const triggerAdminMode = () => {
@@ -119,7 +131,7 @@ export default function Login({ onLogin }) {
           <div className={styles.visualFooter}>
             <div className={styles.statusIndicator}>
               <div className={styles.pulse}></div>
-              <span>System Core v1.0.0 - Secure</span>
+              <span>System Core v{version} - Secure</span>
             </div>
           </div>
         </div>

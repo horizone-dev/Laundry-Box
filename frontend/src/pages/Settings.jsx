@@ -322,56 +322,7 @@ export default function Settings() {
     total: 35.1
   };
 
-  if (user.role === 'super_admin') {
-    return (
-      <div className={styles.settingsPage}>
-        <div className={styles.headerRow}>
-          <div className={styles.headerMain}>
-            <h1>Settings</h1>
-            <p>Database Administration & Maintenance</p>
-          </div>
-        </div>
 
-        <div className={styles.settingsGrid} style={{ display: 'block' }}>
-          <div className={styles.mainContent}>
-            <div className={styles.profileContainer}>
-              <div className={styles.card}>
-                <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem' }}>
-                  <div className={styles.backupIcon} style={{ background: '#F3E8FF', padding: '1rem', borderRadius: '12px' }}>
-                    <Upload size={32} color="#7C3AED" />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Import / Restore Database Backup</h3>
-                    <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
-                      Choose a previously exported backup file (<code>laundry_pos_backup.sqlite</code> or any <code>.sqlite</code>/<code>.db</code> backup) to restore all data. This will completely replace the active database and reload the application.
-                    </p>
-                    <button
-                      className={styles.saveBtn}
-                      style={{ background: '#7C3AED', padding: '0.75rem 1.5rem', border: 'none', color: 'white', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}
-                      onClick={async () => {
-                        if (window.electronAPI?.importDatabase) {
-                          if (confirm('WARNING: Importing a backup will completely replace your current database and restart the application view. Are you sure you want to proceed?')) {
-                            const result = await window.electronAPI.importDatabase();
-                            if (result.success) {
-                              alert('Database imported and restored successfully!');
-                            } else if (result.error !== 'Cancelled') {
-                              alert('Restore failed: ' + result.error);
-                            }
-                          }
-                        }
-                      }}
-                    >
-                      <Upload size={18} /> Choose Backup File & Restore
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className={styles.settingsPage}>
