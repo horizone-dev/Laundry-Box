@@ -46,6 +46,12 @@
         }
       ]
     },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "artifactName": "Laundry-Box-Setup-${version}.${ext}"
+    },
     "extraResources": [
       {
         "from": "backend/",
