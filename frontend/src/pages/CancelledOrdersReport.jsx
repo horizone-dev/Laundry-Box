@@ -24,6 +24,31 @@ const itemVariants = {
 
 export default function CancelledOrdersReport() {
   const { settings, formatDate } = useSettings();
+  const formatDateTimeSplit = (dateVal) => {
+    if (!dateVal) return { date: 'N/A', time: '' };
+    const formattedDate = formatDate(dateVal);
+    if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return { date: formattedDate, time: '' };
+    
+    let d;
+    try {
+      d = new Date(dateVal);
+    } catch(e) {
+      return { date: formattedDate, time: '' };
+    }
+    if (isNaN(d.getTime())) return { date: formattedDate, time: '' };
+
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    let ampm = '';
+    if (settings.timeFormat === '12h' || !settings.timeFormat) {
+      ampm = hours >= 12 ? ' PM' : ' AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+    }
+    const formattedTime = `${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
+    return { date: formattedDate, time: formattedTime };
+  };
+
   const navigate = useNavigate();
 
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
@@ -267,19 +292,29 @@ export default function CancelledOrdersReport() {
                   } catch (_) {}
 
                   let cancelledAt = '—';
+                  let cancelledAtTime = '';
                   try {
                     const hist = JSON.parse(o.statusHistory || '[]');
                     const ev = hist.find(h => h.status === 'Cancelled');
-                    if (ev) cancelledAt = formatDate(ev.timestamp);
+                    if (ev) {
+                      const { date: cDate, time: cTime } = formatDateTimeSplit(ev.timestamp);
+                      cancelledAt = cDate;
+                      cancelledAtTime = cTime;
+                    }
                   } catch (_) {}
 
                   return (
                     <tr key={idx} className={styles.tableRow}>
                       <td className={styles.dateCell}>
-                        <div>{formatDate(o.createdAt)}</div>
-                        <div className={styles.timeText}>
-                          {new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </div>
+                        {(() => {
+                          const { date: oDate, time: oTime } = formatDateTimeSplit(o.createdAt);
+                          return (
+                            <>
+                              <div>{oDate}</div>
+                              {oTime && <div className={styles.timeText}>{oTime}</div>}
+                            </>
+                          );
+                        })()}
                       </td>
                       <td>
                         <span className={styles.billRef}>{o.billNumber || o.id || '—'}</span>
@@ -294,7 +329,10 @@ export default function CancelledOrdersReport() {
                       <td className={`${styles.numCol} ${styles.amountCell}`}>
                         <CurrencySymbol size={11} /> {(o.totalAmount || 0).toFixed(2)}
                       </td>
-                      <td className={styles.cancelledAtCell}>{cancelledAt}</td>
+                      <td className={styles.cancelledAtCell}>
+                        <div>{cancelledAt}</div>
+                        {cancelledAtTime && <div className={styles.timeText}>{cancelledAtTime}</div>}
+                      </td>
                     </tr>
                   );
                 })}

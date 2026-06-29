@@ -73,7 +73,16 @@ export function SettingsProvider({ children }) {
     invoiceTermsText: '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.',
     billingPrinter: '',
     tagPrinter: '',
-    enablePaymentLinks: true
+    enablePaymentLinks: true,
+    waNewOrderTemplate: 'Hello {customerName}! Your laundry bill for {orderId} of {total} has been saved. {dueAmount} is pending. Thank you!',
+    waOrderReadyTemplate: 'Dear {customerName}, your order {orderId} is now ready for pick-up! Total due is {dueAmount}. Thank you!',
+    waReminderTemplate: 'Hello {customerName}, this is a gentle reminder that an amount of {dueAmount} is pending for order {orderId}. Kindly settle at your earliest convenience.',
+    waStatementTemplate: 'Hello {customerName}, your current outstanding balance is {dueAmount}. Please find your statement attached.',
+    waCheckoutReceiptTemplate: 'Hello {customerName}! Your laundry order totaling {total} has been received and is now being processed. Thank you for choosing us!',
+    waStatusUpdateTemplate: 'Hello! Regarding your laundry order #{orderId}, the current status is "{status}". Expected delivery date is {deliveryDate}. Thank you!',
+    waCustomerBalanceTemplate: 'Hello {customerName}! This is a friendly reminder regarding your outstanding balance of {dueAmount} at {shopName}. Please settle it at your earliest convenience. Thank you!',
+    waGeneralTemplate: 'Hello! This is from {shopName}. We\'re reaching out regarding your account.',
+    waInvoiceShareTemplate: '*INVOICE RECEIVED*\n\nHello! Here is your bill for order *{orderId}*.\n\n*Items:*\n{itemsSummary}\n\n*Total Amount: {total}*'
   });
 
   const settingsRef = useRef(settings);
@@ -160,7 +169,16 @@ export function SettingsProvider({ children }) {
             invoiceTermsText: shopSettings?.invoiceTermsText ?? '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.',
             billingPrinter: shopSettings?.billingPrinter || '',
             tagPrinter: shopSettings?.tagPrinter || '',
-            enablePaymentLinks: shopSettings?.enablePaymentLinks ?? true
+            enablePaymentLinks: shopSettings?.enablePaymentLinks ?? true,
+            waNewOrderTemplate: shopSettings?.waNewOrderTemplate ?? 'Hello {customerName}! Your laundry bill for {orderId} of {total} has been saved. {dueAmount} is pending. Thank you!',
+            waOrderReadyTemplate: shopSettings?.waOrderReadyTemplate ?? 'Dear {customerName}, your order {orderId} is now ready for pick-up! Total due is {dueAmount}. Thank you!',
+            waReminderTemplate: shopSettings?.waReminderTemplate ?? 'Hello {customerName}, this is a gentle reminder that an amount of {dueAmount} is pending for order {orderId}. Kindly settle at your earliest convenience.',
+            waStatementTemplate: shopSettings?.waStatementTemplate ?? 'Hello {customerName}, your current outstanding balance is {dueAmount}. Please find your statement attached.',
+            waCheckoutReceiptTemplate: shopSettings?.waCheckoutReceiptTemplate ?? 'Hello {customerName}! Your laundry order totaling {total} has been received and is now being processed. Thank you for choosing us!',
+            waStatusUpdateTemplate: shopSettings?.waStatusUpdateTemplate ?? 'Hello! Regarding your laundry order #{orderId}, the current status is "{status}". Expected delivery date is {deliveryDate}. Thank you!',
+            waCustomerBalanceTemplate: shopSettings?.waCustomerBalanceTemplate ?? 'Hello {customerName}! This is a friendly reminder regarding your outstanding balance of {dueAmount} at {shopName}. Please settle it at your earliest convenience. Thank you!',
+            waGeneralTemplate: shopSettings?.waGeneralTemplate ?? 'Hello! This is from {shopName}. We\'re reaching out regarding your account.',
+            waInvoiceShareTemplate: shopSettings?.waInvoiceShareTemplate ?? '*INVOICE RECEIVED*\n\nHello! Here is your bill for order *{orderId}*.\n\n*Items:*\n{itemsSummary}\n\n*Total Amount: {total}*'
           });
           window.localStorage.setItem('billingPrinter', shopSettings?.billingPrinter || '');
           window.localStorage.setItem('tagPrinter', shopSettings?.tagPrinter || '');
@@ -240,7 +258,16 @@ export function SettingsProvider({ children }) {
           invoiceTermsText: updated.invoiceTermsText,
           billingPrinter: updated.billingPrinter,
           tagPrinter: updated.tagPrinter,
-          enablePaymentLinks: updated.enablePaymentLinks
+          enablePaymentLinks: updated.enablePaymentLinks,
+          waNewOrderTemplate: updated.waNewOrderTemplate,
+          waOrderReadyTemplate: updated.waOrderReadyTemplate,
+          waReminderTemplate: updated.waReminderTemplate,
+          waStatementTemplate: updated.waStatementTemplate,
+          waCheckoutReceiptTemplate: updated.waCheckoutReceiptTemplate,
+          waStatusUpdateTemplate: updated.waStatusUpdateTemplate,
+          waCustomerBalanceTemplate: updated.waCustomerBalanceTemplate,
+          waGeneralTemplate: updated.waGeneralTemplate,
+          waInvoiceShareTemplate: updated.waInvoiceShareTemplate
         });
 
         await window.electronAPI.dbQuery(

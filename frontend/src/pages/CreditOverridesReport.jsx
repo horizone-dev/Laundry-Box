@@ -25,6 +25,31 @@ const itemVariants = {
 
 export default function CreditOverridesReport() {
   const { settings, formatDate } = useSettings();
+  const formatDateTimeSplit = (dateVal) => {
+    if (!dateVal) return { date: 'N/A', time: '' };
+    const formattedDate = formatDate(dateVal);
+    if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return { date: formattedDate, time: '' };
+    
+    let d;
+    try {
+      d = new Date(dateVal);
+    } catch(e) {
+      return { date: formattedDate, time: '' };
+    }
+    if (isNaN(d.getTime())) return { date: formattedDate, time: '' };
+
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    let ampm = '';
+    if (settings.timeFormat === '12h' || !settings.timeFormat) {
+      ampm = hours >= 12 ? ' PM' : ' AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+    }
+    const formattedTime = `${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
+    return { date: formattedDate, time: formattedTime };
+  };
+
   const navigate = useNavigate();
 
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
@@ -338,10 +363,17 @@ export default function CreditOverridesReport() {
                   return (
                     <tr key={log.id || idx} className={styles.tableRow}>
                       <td className={styles.dateCell}>
-                        <div>{formatDate(log.timestamp)}</div>
-                        <div className={styles.timeText}>
-                          {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </div>
+                        {(() => {
+                          const { date: logDate, time: logTime } = formatDateTimeSplit(log.timestamp);
+                          return (
+                            <>
+                              <div>{logDate}</div>
+                              {logTime && (
+                                <div className={styles.timeText}>{logTime}</div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </td>
                       <td>
                         <div className={styles.customerName}>{log.customerName || 'Walk-in'}</div>

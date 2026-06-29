@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Search, Filter, Calendar, Clock, Package, CheckCircle, 
-  AlertCircle, Phone, DollarSign, Truck, 
+import {
+  Search, Filter, Calendar, Clock, Package, CheckCircle,
+  AlertCircle, Phone, DollarSign, Truck,
   Eye, Printer, ChevronDown, Check, ArrowRight
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -20,11 +20,35 @@ const API_BASE = API_BASE_URL;
 export default function ExpectedDeliveries() {
   const navigate = useNavigate();
   const { settings, formatDate } = useSettings();
+  const formatDateTimeSplit = (dateVal) => {
+    if (!dateVal) return { date: 'N/A', time: '' };
+    const formattedDate = formatDate(dateVal);
+    if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return { date: formattedDate, time: '' };
+
+    let d;
+    try {
+      d = new Date(dateVal);
+    } catch (e) {
+      return { date: formattedDate, time: '' };
+    }
+    if (isNaN(d.getTime())) return { date: formattedDate, time: '' };
+
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    let ampm = '';
+    if (settings.timeFormat === '12h' || !settings.timeFormat) {
+      ampm = hours >= 12 ? ' PM' : ' AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+    }
+    const formattedTime = `${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
+    return { date: formattedDate, time: formattedTime };
+  };
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  
+
   // Filters
   const [dateFilter, setDateFilter] = useState('Today'); // Default to Today
   const [statusFilter, setStatusFilter] = useState('All'); // All, Confirmed, Picked Up, Washing, Drying, Ironing, Ready, Out for Delivery
@@ -87,7 +111,7 @@ export default function ExpectedDeliveries() {
           params = [term, term, term, term, term, term];
         }
         query += " ORDER BY CASE WHEN orders.expectedDeliveryDate IS NULL OR orders.expectedDeliveryDate = '' THEN 1 ELSE 0 END, orders.expectedDeliveryDate ASC, orders.createdAt DESC";
-        
+
         const res = await window.electronAPI.dbQuery(query, params);
         if (res.success) {
           setOrders(res.data);
@@ -149,7 +173,7 @@ export default function ExpectedDeliveries() {
 
       // 2. Date Filter
       const expDate = order.expectedDeliveryDate ? order.expectedDeliveryDate.substring(0, 10) : '';
-      
+
       if (dateFilter === 'All Pending') {
         // Only active/pending orders
         return order.status !== 'Delivered' && order.status !== 'Cancelled';
@@ -214,11 +238,11 @@ export default function ExpectedDeliveries() {
     try {
       const timestamp = getLocalISOString();
       let newHistory = [];
-      
+
       let history = [];
       try {
-        history = typeof order.statusHistory === 'string' 
-          ? JSON.parse(order.statusHistory || '[]') 
+        history = typeof order.statusHistory === 'string'
+          ? JSON.parse(order.statusHistory || '[]')
           : (order.statusHistory || []);
         if (!Array.isArray(history)) history = [];
       } catch (e) {
@@ -261,7 +285,7 @@ export default function ExpectedDeliveries() {
     }
 
     let cleanPhone = phone.toString().replace(/\D/g, '');
-    
+
     // Prepend country code if original phone doesn't start with '+'
     if (!phone.toString().trim().startsWith('+')) {
       const countryCode = settings.waCountryCode || '971';
@@ -280,11 +304,23 @@ export default function ExpectedDeliveries() {
         formattedExp = formatDate(expDate);
       }
     }
-    let message = `Hello! Regarding your laundry order #${id}, the current status is "${status}". Expected delivery date is ${formattedExp}. Thank you!`;
-
+    let message = '';
     const orderMatch = orders.find(o => o.id === id || o.billNumber === id);
-    if (orderMatch && orderMatch.dueAmount > 0) {
-      message += `\n\nFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${orderMatch.dueAmount.toFixed(2)}.`;
+    const customerName = orderMatch ? (orderMatch.customerName || orderMatch.customer || 'Customer') : 'Customer';
+    const due = orderMatch ? (orderMatch.dueAmount ?? 0) : 0;
+    
+    if (settings.waStatusUpdateTemplate) {
+      message = settings.waStatusUpdateTemplate
+        .replace(/{customerName}/g, customerName)
+        .replace(/{orderId}/g, id)
+        .replace(/{status}/g, status)
+        .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${due.toFixed(2)}`)
+        .replace(/{deliveryDate}/g, formattedExp);
+    } else {
+      message = `Hello! Regarding your laundry order #${id}, the current status is "${status}". Expected delivery date is ${formattedExp}. Thank you!`;
+      if (orderMatch && orderMatch.dueAmount > 0) {
+        message += `\n\nFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${orderMatch.dueAmount.toFixed(2)}.`;
+      }
     }
 
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
@@ -304,7 +340,7 @@ export default function ExpectedDeliveries() {
 
   const confirmPayment = async () => {
     if (!selectedOrderForPay) return;
-    
+
     try {
       const order = selectedOrderForPay;
       const timestamp = getLocalISOString();
@@ -333,7 +369,7 @@ export default function ExpectedDeliveries() {
         // Record account transaction
         const txnId = `TXN-${Date.now()}`;
         const _nowEd = new Date();
-        const txnTimestamp = `${_nowEd.getFullYear()}-${String(_nowEd.getMonth()+1).padStart(2,'0')}-${String(_nowEd.getDate()).padStart(2,'0')} ${String(_nowEd.getHours()).padStart(2,'0')}:${String(_nowEd.getMinutes()).padStart(2,'0')}`;
+        const txnTimestamp = `${_nowEd.getFullYear()}-${String(_nowEd.getMonth() + 1).padStart(2, '0')}-${String(_nowEd.getDate()).padStart(2, '0')} ${String(_nowEd.getHours()).padStart(2, '0')}:${String(_nowEd.getMinutes()).padStart(2, '0')}`;
         const mappedBankId = payMethod === 'Card'
           ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
           : (payMethod === 'UPI'
@@ -441,9 +477,9 @@ export default function ExpectedDeliveries() {
         <div className={styles.actions}>
           <div className={styles.searchBox}>
             <Search size={18} />
-            <input 
-              type="text" 
-              placeholder="Search by Bill ID, Customer..." 
+            <input
+              type="text"
+              placeholder="Search by Bill ID, Customer..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -487,38 +523,38 @@ export default function ExpectedDeliveries() {
       <div className={styles.filterRow}>
         <div className={styles.filterGroup}>
           <Filter size={16} color="#64748B" />
-          <button 
+          <button
             className={`${styles.filterBtn} ${dateFilter === 'All Pending' ? styles.active : ''}`}
             onClick={() => setDateFilter('All Pending')}
           >
             All Pending
           </button>
-          <button 
+          <button
             className={`${styles.filterBtn} ${dateFilter === 'Today' ? styles.active : ''}`}
             onClick={() => setDateFilter('Today')}
           >
             Today
           </button>
-          <button 
+          <button
             className={`${styles.filterBtn} ${dateFilter === 'Tomorrow' ? styles.active : ''}`}
             onClick={() => setDateFilter('Tomorrow')}
           >
             Tomorrow
           </button>
 
-          <button 
+          <button
             className={`${styles.filterBtn} ${dateFilter === 'Overdue' ? styles.active : ''}`}
             onClick={() => setDateFilter('Overdue')}
           >
             {t('overdue', settings.language)}
           </button>
-          <button 
+          <button
             className={`${styles.filterBtn} ${dateFilter === 'All' ? styles.active : ''}`}
             onClick={() => setDateFilter('All')}
           >
             All Time
           </button>
-          <button 
+          <button
             className={`${styles.filterBtn} ${dateFilter === 'Custom' ? styles.active : ''}`}
             onClick={() => setDateFilter('Custom')}
           >
@@ -527,8 +563,8 @@ export default function ExpectedDeliveries() {
         </div>
 
         <div className={styles.selectFilters}>
-          <select 
-            value={statusFilter} 
+          <select
+            value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className={styles.dropdownSelect}
           >
@@ -540,16 +576,16 @@ export default function ExpectedDeliveries() {
 
           {dateFilter === 'Custom' && (
             <div className={styles.customDateWrapper}>
-              <input 
-                type="date" 
-                value={customStart} 
+              <input
+                type="date"
+                value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
                 className={styles.dateInput}
               />
               <span className={styles.dateSeparator}>to</span>
-              <input 
-                type="date" 
-                value={customEnd} 
+              <input
+                type="date"
+                value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
                 className={styles.dateInput}
               />
@@ -566,8 +602,8 @@ export default function ExpectedDeliveries() {
               <th>Order ID</th>
               <th>Customer</th>
               <th>Created Date</th>
-              <th>Expected Date & Time (Edit Inline)</th>
-              <th>Status (Edit Inline)</th>
+              <th>Expected Date & Time</th>
+              <th>Status</th>
               <th>Payment</th>
               <th>Dues</th>
               <th>Actions</th>
@@ -582,6 +618,7 @@ export default function ExpectedDeliveries() {
                 <>
                   {paginatedOrders.map(order => {
                     const isOverdueOrder = order.expectedDeliveryDate && order.expectedDeliveryDate < todayStr && order.status !== 'Delivered' && order.status !== 'Cancelled';
+                    const { date: createdDate, time: createdTime } = formatDateTimeSplit(order.createdAt);
                     return (
                       <tr key={order.id} className={isOverdueOrder ? styles.overdueRow : ''}>
                         <td className={styles.boldText}>
@@ -596,14 +633,21 @@ export default function ExpectedDeliveries() {
                             <span className={styles.custPhone}>{order.customerPhone || 'No Phone'}</span>
                           </div>
                         </td>
-                        <td>{formatDate(order.createdAt)}</td>
+                        <td>
+                          <div>{createdDate}</div>
+                          {createdTime && (
+                            <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.15rem', fontWeight: 500 }}>
+                              {createdTime}
+                            </div>
+                          )}
+                        </td>
                         <td>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', alignItems: 'flex-start' }}>
                             <div className={styles.datePickerContainer} style={{ width: '130px' }}>
                               <Calendar size={13} className={styles.datePickerIcon} />
-                              <input 
-                                type="date" 
-                                value={order.expectedDeliveryDate ? order.expectedDeliveryDate.substring(0, 10) : ''} 
+                              <input
+                                type="date"
+                                value={order.expectedDeliveryDate ? order.expectedDeliveryDate.substring(0, 10) : ''}
                                 onChange={(e) => {
                                   const newDate = e.target.value;
                                   const existingTime = order.expectedDeliveryDate && order.expectedDeliveryDate.includes(' ')
@@ -617,9 +661,9 @@ export default function ExpectedDeliveries() {
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', padding: '0.35rem 0.5rem', background: 'white', border: '1px solid #CBD5E1', borderRadius: '6px', width: '130px', boxSizing: 'border-box' }}>
                               <Clock size={12} color="#64748B" />
-                              <input 
-                                type="time" 
-                                value={order.expectedDeliveryDate && order.expectedDeliveryDate.includes(' ') ? order.expectedDeliveryDate.split(' ')[1] : '17:00'} 
+                              <input
+                                type="time"
+                                value={order.expectedDeliveryDate && order.expectedDeliveryDate.includes(' ') ? order.expectedDeliveryDate.split(' ')[1] : '17:00'}
                                 onChange={(e) => {
                                   const newTime = e.target.value || '17:00';
                                   const existingDate = order.expectedDeliveryDate ? order.expectedDeliveryDate.substring(0, 10) : getTodayString();
@@ -632,8 +676,8 @@ export default function ExpectedDeliveries() {
                         </td>
                         <td>
                           <div className={styles.selectWrapper}>
-                            <select 
-                              value={order.status || 'Confirmed'} 
+                            <select
+                              value={order.status || 'Confirmed'}
                               onChange={(e) => handleUpdateStatus(order, e.target.value)}
                               className={`${styles.inlineSelect} ${getStatusBadgeClass(order.status)}`}
                             >
@@ -663,7 +707,7 @@ export default function ExpectedDeliveries() {
                         <td>
                           <div className={styles.actionGroup}>
                             {order.status !== 'Delivered' && order.status !== 'Cancelled' && (
-                              <button 
+                              <button
                                 className={styles.deliverBtn}
                                 onClick={() => handleQuickDeliver(order)}
                                 title="Quick Deliver"
@@ -674,7 +718,7 @@ export default function ExpectedDeliveries() {
 
 
                             {order.customerPhone && (
-                              <button 
+                              <button
                                 className={styles.whatsappBtn}
                                 onClick={() => handleWhatsApp(order.customerPhone, order.billNumber || order.id, order.status, order.expectedDeliveryDate)}
                                 title="WhatsApp Reminder"
@@ -683,8 +727,8 @@ export default function ExpectedDeliveries() {
                               </button>
                             )}
 
-                            <button 
-                              className={styles.iconBtn} 
+                            <button
+                              className={styles.iconBtn}
                               onClick={() => navigate(`/invoice/${encodeURIComponent(order.id.replace('#', ''))}`)}
                               title="View Invoice"
                             >
@@ -742,7 +786,7 @@ export default function ExpectedDeliveries() {
             </div>
             <div className={styles.modalBody}>
               <p>You are marking Order <strong>{selectedOrderForPay.id}</strong> as Paid. Choose payment method:</p>
-              
+
               <div className={styles.methodList}>
                 <label className={`${styles.methodLabel} ${payMethod === 'Cash' ? styles.activeMethod : ''}`}>
                   <input type="radio" name="payMethod" value="Cash" checked={payMethod === 'Cash'} onChange={() => setPayMethod('Cash')} />

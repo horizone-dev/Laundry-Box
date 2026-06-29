@@ -363,9 +363,23 @@ export default function Customers() {
       }
     }
 
-    let message = `Hello! This is from the Laundry Box. We're reaching out regarding your account.`;
+    let message = '';
     if (balance > 0) {
-      message += `\n\nFriendly reminder: Your outstanding balance is ${settings.currencySymbol || 'AED'} ${balance.toFixed(2)}. Please visit us to settle the payment. Thank you!`;
+      if (settings.waCustomerBalanceTemplate) {
+        const custMatch = customers.find(c => c.phone === phone);
+        message = settings.waCustomerBalanceTemplate
+          .replace(/{customerName}/g, custMatch ? custMatch.name : 'Customer')
+          .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${balance.toFixed(2)}`)
+          .replace(/{shopName}/g, settings.shopName || 'Laundry Box');
+      } else {
+        message = `Hello! This is from the ${settings.shopName || 'Laundry Box'}. We're reaching out regarding your account.\n\nFriendly reminder: Your outstanding balance is ${settings.currencySymbol || 'AED'} ${balance.toFixed(2)}. Please visit us to settle the payment. Thank you!`;
+      }
+    } else {
+      if (settings.waGeneralTemplate) {
+        message = settings.waGeneralTemplate.replace(/{shopName}/g, settings.shopName || 'Laundry Box');
+      } else {
+        message = `Hello! This is from the ${settings.shopName || 'Laundry Box'}. We're reaching out regarding your account.`;
+      }
     }
     const url = `https://wa.me/${finalPhone}?text=${encodeURIComponent(message)}`;
     if (window.electronAPI?.openExternal) {

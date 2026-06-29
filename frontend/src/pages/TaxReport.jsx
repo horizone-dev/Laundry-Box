@@ -28,6 +28,31 @@ const itemVariants = {
 
 export default function TaxReport() {
   const { settings, formatDate } = useSettings();
+  const formatDateTimeSplit = (dateVal) => {
+    if (!dateVal) return { date: 'N/A', time: '' };
+    const formattedDate = formatDate(dateVal);
+    if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return { date: formattedDate, time: '' };
+    
+    let d;
+    try {
+      d = new Date(dateVal);
+    } catch(e) {
+      return { date: formattedDate, time: '' };
+    }
+    if (isNaN(d.getTime())) return { date: formattedDate, time: '' };
+
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    let ampm = '';
+    if (settings.timeFormat === '12h' || !settings.timeFormat) {
+      ampm = hours >= 12 ? ' PM' : ' AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+    }
+    const formattedTime = `${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
+    return { date: formattedDate, time: formattedTime };
+  };
+
   const navigate = useNavigate();
   
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
@@ -421,9 +446,18 @@ export default function TaxReport() {
                 <td colSpan="8" className={styles.emptyRow}>Loading tax transactions...</td>
               </tr>
             ) : paginatedTransactions.length > 0 ? (
-              paginatedTransactions.map((tx, idx) => (
-                <tr key={`${tx.type}-${tx.id}-${idx}`}>
-                  <td className={styles.dateCell}>{formatDate(tx.date)}</td>
+              paginatedTransactions.map((tx, idx) => {
+                const { date: txDate, time: txTime } = formatDateTimeSplit(tx.date);
+                return (
+                  <tr key={`${tx.type}-${tx.id}-${idx}`}>
+                    <td className={styles.dateCell}>
+                      <div>{txDate}</div>
+                      {tx.type === 'Sale' && txTime && (
+                        <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '0.15rem', fontWeight: 500 }}>
+                          {txTime}
+                        </div>
+                      )}
+                    </td>
                   <td>
                     <span className={`${styles.typeBadge} ${tx.type === 'Sale' ? styles.badgeSale : styles.badgeExpense}`}>
                       {tx.type === 'Sale' ? 'SALE' : 'EXPENSE'}
@@ -455,7 +489,8 @@ export default function TaxReport() {
                     <CurrencySymbol size={12} /> {tx.taxAmount.toFixed(2)}
                   </td>
                 </tr>
-              ))
+                );
+              })
             ) : (
               <tr>
                 <td colSpan="8" className={styles.emptyRow}>

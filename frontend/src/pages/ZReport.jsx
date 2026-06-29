@@ -252,7 +252,7 @@ export default function ZReport() {
 
       // 1. Fetch Orders placed on selected date (including active and cancelled)
       const ordersRes = await window.electronAPI.dbQuery(
-        `SELECT id, billNumber, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, paymentMethod, items, statusHistory, createdAt 
+        `SELECT id, billNumber, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, paymentMethod, paymentBreakdown, items, statusHistory, createdAt 
          FROM orders 
          WHERE createdAt LIKE ?`,
         [dateParam]
@@ -487,24 +487,43 @@ export default function ZReport() {
       const paid = parseFloat(o.paidAmount) || 0;
       const due = parseFloat(o.dueAmount) || 0;
 
-      if (payStatusLower === 'credit') {
+      let breakdown = null;
+      try {
+        if (o.paymentBreakdown && o.paymentBreakdown !== 'null') {
+          breakdown = typeof o.paymentBreakdown === 'string'
+            ? JSON.parse(o.paymentBreakdown)
+            : o.paymentBreakdown;
+        }
+      } catch (e) {
+        console.error("Failed to parse paymentBreakdown in ZReport", e);
+      }
+
+      if (breakdown) {
+        cashSales += parseFloat(breakdown.cash || 0);
+        cardSales += parseFloat(breakdown.card || 0);
+        upiSales += parseFloat(breakdown.upi || 0);
+        bankTransfer += parseFloat(breakdown.bank || 0);
         creditUnpaid += due;
-      } else if (payStatusLower === 'partial') {
-        partialPayments += paid;
-        creditUnpaid += due;
-      } else if (payStatusLower === 'paid') {
-        if (payMethodLower === 'cash') {
-          cashSales += paid;
-        } else if (payMethodLower === 'card') {
-          cardSales += paid;
-        } else if (payMethodLower === 'upi') {
-          upiSales += paid;
-        } else if (payMethodLower === 'bank') {
-          // Best effort split Card vs Bank transfer
-          cardSales += paid * 0.6;
-          bankTransfer += paid * 0.4;
-        } else {
-          cashSales += paid;
+      } else {
+        if (payStatusLower === 'credit') {
+          creditUnpaid += due;
+        } else if (payStatusLower === 'partial') {
+          partialPayments += paid;
+          creditUnpaid += due;
+        } else if (payStatusLower === 'paid') {
+          if (payMethodLower === 'cash') {
+            cashSales += paid;
+          } else if (payMethodLower === 'card') {
+            cardSales += paid;
+          } else if (payMethodLower === 'upi') {
+            upiSales += paid;
+          } else if (payMethodLower === 'bank') {
+            // Best effort split Card vs Bank transfer
+            cardSales += paid * 0.6;
+            bankTransfer += paid * 0.4;
+          } else {
+            cashSales += paid;
+          }
         }
       }
     });

@@ -31,7 +31,7 @@
 .settlementContainer {
   display: flex;
   background-color: var(--bg-primary);
-  height: calc(100vh - 64px - 1.5rem);
+  height: calc(100vh - 50px - 1rem);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   color: var(--text-main);
   overflow: hidden;
@@ -52,12 +52,12 @@
 }
 
 .sidebarHeader {
-  padding: 1.5rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border-light);
 }
 
 .sidebarHeader h2 {
-  font-size: 1.25rem;
+  font-size: 1.05rem;
   font-weight: 800;
   color: var(--text-main);
   letter-spacing: -0.02em;
@@ -73,7 +73,7 @@
 
 /* Search input */
 .searchContainer {
-  padding: 1rem 1.5rem 0.5rem;
+  padding: 0.5rem 1rem 0.25rem;
   position: relative;
 }
 
@@ -87,7 +87,7 @@
 
 .sidebarSearch {
   width: 100%;
-  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  padding: 0.5rem 0.75rem 0.5rem 2.25rem;
   background: var(--bg-primary);
   border: 1.5px solid var(--border-color);
   border-radius: 10px;
@@ -107,14 +107,14 @@
 /* Sidebar Tab list */
 .sidebarTabs {
   display: flex;
-  padding: 0.5rem 1.5rem;
+  padding: 0.25rem 1rem;
   gap: 0.5rem;
   border-bottom: 1px solid var(--border-light);
 }
 
 .tabBtn {
   flex: 1;
-  padding: 1rem;
+  padding: 0.5rem;
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--text-sub);
@@ -149,7 +149,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.875rem 1rem;
+  padding: 0.5rem 0.75rem;
   border-radius: 12px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -248,7 +248,7 @@
   flex: 1;
   height: 100%;
   overflow-y: auto;
-  padding: 2rem;
+  padding: 0.75rem 1rem;
   display: flex;
   flex-direction: column;
 }
@@ -257,12 +257,12 @@
 .dashboardView {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 0.75rem;
   animation: fadeIn 0.3s ease;
 }
 
 .dashboardHeader h1 {
-  font-size: 1.75rem;
+  font-size: 1.3rem;
   font-weight: 900;
   color: var(--text-main);
   letter-spacing: -0.03em;
@@ -280,16 +280,16 @@
 .kpiGrid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 1.5rem;
+  gap: 0.75rem;
 }
 
 .kpiCardItem {
   background: var(--bg-card);
-  padding: 1.5rem;
+  padding: 0.6rem 1rem;
   border-radius: 20px;
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: 0.75rem;
   border: 1px solid var(--border-light);
   box-shadow: var(--shadow-sm);
   transition: all 0.25s ease;
@@ -353,7 +353,7 @@
 }
 
 .kpiItemValue {
-  font-size: 1.5rem;
+  font-size: 1.2rem;
   font-weight: 900;
   color: var(--text-main);
   margin: 0.1rem 0;
@@ -372,14 +372,14 @@
   border-radius: 20px;
   border: 1px solid var(--border-light);
   box-shadow: var(--shadow-sm);
-  padding: 1.5rem;
+  padding: 0.75rem 1rem;
 }
 
 .sectionHeader {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.25rem;
+  margin-bottom: 0.75rem;
 }
 
 .sectionHeader h3 {
@@ -411,7 +411,7 @@
 
 .collectionsTable th {
   text-align: left;
-  padding: 1rem;
+  padding: 0.5rem 0.75rem;
   background: var(--bg-primary);
   font-size: 0.75rem;
   font-weight: 800;
@@ -422,7 +422,7 @@
 }
 
 .collectionsTable td {
-  padding: 1rem;
+  padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-main);
@@ -509,7 +509,7 @@
 .workspaceView {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 0.75rem;
   animation: fadeIn 0.25s ease;
 }
 
@@ -603,7 +603,7 @@
 /* Financial Balance Card */
 .balanceHeroCard {
   border-radius: 24px;
-  padding: 2rem;
+  padding: 0.75rem 1.25rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -641,7 +641,7 @@
 }
 
 .balanceBigAmount {
-  font-size: 2.5rem;
+  font-size: 1.6rem;
   font-weight: 900;
   color: var(--text-main);
   letter-spacing: -0.04em;
@@ -671,7 +671,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.6rem;
-  padding: 0.875rem 1.5rem;
+  padding: 0.5rem 1rem;
   border-radius: 12px;
   font-weight: 800;
   font-size: 0.9rem;
@@ -724,7 +724,7 @@
 }
 
 .workspaceTabsHeader {
-  padding: 0.75rem 1.25rem;
+  padding: 0.4rem 0.75rem;
   border-bottom: 1.5px solid var(--border-light);
 }
 
@@ -766,7 +766,7 @@
 
 .ledgerDetailsTable th {
   text-align: left;
-  padding: 1rem;
+  padding: 0.5rem 0.75rem;
   background: var(--bg-card);
   font-size: 0.75rem;
   font-weight: 800;
@@ -777,7 +777,7 @@
 }
 
 .ledgerDetailsTable td {
-  padding: 1rem;
+  padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-main);

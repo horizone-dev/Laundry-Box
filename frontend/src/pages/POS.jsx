@@ -142,6 +142,9 @@ export default function POS() {
         }
 
         setSpecialInstructions(order.specialInstructions || '');
+        if (order.specialInstructions) {
+          setShowSpecialInstructions(true);
+        }
 
         const methodMap = {
           'CASH': 'cash',
@@ -183,6 +186,7 @@ export default function POS() {
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(getTomorrowDateString());
   const [expectedDeliveryTime, setExpectedDeliveryTime] = useState('17:00');
   const [specialInstructions, setSpecialInstructions] = useState('');
+  const [showSpecialInstructions, setShowSpecialInstructions] = useState(false);
   const [showSpecialPresets, setShowSpecialPresets] = useState(false);
   const [showItemPresets, setShowItemPresets] = useState(false);
 
@@ -190,6 +194,11 @@ export default function POS() {
   const [paymentMethod, setPaymentMethod] = useState(settings.defaultPaymentMethod?.toLowerCase() || 'cash');
   const [selectedBank, setSelectedBank] = useState('');
   const [tenderedAmount, setTenderedAmount] = useState('');
+  const [cashAmount, setCashAmount] = useState('');
+  const [cardAmount, setCardAmount] = useState('');
+  const [upiAmount, setUpiAmount] = useState('');
+  const [bankAmount, setBankAmount] = useState('');
+  const [activePaymentField, setActivePaymentField] = useState('cash'); // 'cash' | 'card' | 'upi' | 'bank'
   const [printReceipt, setPrintReceipt] = useState(settings.autoPrint !== undefined ? settings.autoPrint : true);
 
   useEffect(() => {
@@ -261,23 +270,63 @@ export default function POS() {
     fetchNextOrderId();
   }, []);
 
-  const checkCreditLimitBeforeAction = (actionType) => {
+  const checkCreditLimitBeforeAction = async (actionType) => {
     if (!selectedCustomer || selectedCustomer.id === 'Walk-in') return false;
     if (!settings.enableCreditLimitProtection) return false;
 
-    if (actionType === 'saveOrder' || (actionType === 'completePayment' && paymentMethod === 'credit')) {
-      const currentOutstanding = selectedCustomer.balance || 0;
-      const creditLimit = selectedCustomer.creditLimit !== undefined && selectedCustomer.creditLimit !== null && selectedCustomer.creditLimit !== 0
-        ? selectedCustomer.creditLimit
+    // Fetch fresh customer details from DB to prevent stale balance issues
+    let freshBalance = selectedCustomer.balance || 0;
+    let freshCreditLimit = selectedCustomer.creditLimit || 0;
+    
+    if (window.electronAPI?.dbQuery) {
+      const custRes = await window.electronAPI.dbQuery(
+        'SELECT balance, creditLimit FROM customers WHERE id = ?',
+        [selectedCustomer.id]
+      );
+      if (custRes.success && custRes.data.length > 0) {
+        freshBalance = custRes.data[0].balance || 0;
+        freshCreditLimit = custRes.data[0].creditLimit || 0;
+      }
+    }
+
+    // Determine old dueAmount if editing an order to prevent double-counting
+    let oldDueAmount = 0;
+    if (editOrderId && window.electronAPI?.dbQuery) {
+      const oldOrderRes = await window.electronAPI.dbQuery(
+        'SELECT dueAmount, totalAmount FROM orders WHERE id = ?', 
+        [editOrderId]
+      );
+      if (oldOrderRes.success && oldOrderRes.data.length > 0) {
+        if (actionType === 'completePayment') {
+          oldDueAmount = oldOrderRes.data[0].dueAmount || 0;
+        } else {
+          oldDueAmount = oldOrderRes.data[0].totalAmount || 0;
+        }
+      }
+    }
+
+    // Use the new multi-payment state instead of the old single tenderedAmount
+    const totalPaidNow = parseFloat(cashAmount || 0) + parseFloat(cardAmount || 0) + parseFloat(upiAmount || 0) + parseFloat(bankAmount || 0);
+    const isCreditOrPartial = paymentMethod === 'credit' || totalPaidNow < total;
+    if (actionType === 'saveOrder' || (actionType === 'completePayment' && isCreditOrPartial)) {
+      const currentOutstanding = freshBalance;
+      const creditLimit = freshCreditLimit !== undefined && freshCreditLimit !== null && freshCreditLimit !== 0
+        ? freshCreditLimit
         : (settings.defaultCreditLimit ?? 500);
-      const orderAmount = total;
-      const newOutstanding = currentOutstanding + orderAmount;
+      // orderAmount is the amount that will remain unpaid (dueAmount)
+      const orderAmount = actionType === 'completePayment' ? Math.max(0, total - totalPaidNow) : total;
+      const netIncrease = orderAmount - oldDueAmount;
+
+      // If outstanding balance is not increasing, no need to block
+      if (netIncrease <= 0) return false;
+
+      const newOutstanding = currentOutstanding + netIncrease;
 
       // Block if ALREADY at/over limit OR if new order would exceed limit
       if (currentOutstanding >= creditLimit || newOutstanding > creditLimit) {
         const exceededAmount = newOutstanding > creditLimit
           ? newOutstanding - creditLimit
-          : currentOutstanding - creditLimit + orderAmount;
+          : currentOutstanding - creditLimit + netIncrease;
         const overrideAllowed = true;
 
         // Pre-generate orderId if not already generated
@@ -289,7 +338,7 @@ export default function POS() {
           customerName: selectedCustomer.name,
           creditLimit,
           currentOutstanding,
-          orderAmount,
+          orderAmount: netIncrease,
           newOutstanding,
           exceededAmount: Math.max(0, exceededAmount),
           overrideAllowed
@@ -301,6 +350,7 @@ export default function POS() {
     }
     return false; // allowed
   };
+
 
   const handleVerifyManagerPin = async (e) => {
     e.preventDefault();
@@ -519,7 +569,13 @@ export default function POS() {
     : (subtotal - discount + totalTax);
   const tax = totalTax;
 
-  const changeDue = parseFloat(tenderedAmount || 0) - total;
+  const cashVal = parseFloat(cashAmount || 0);
+  const cardVal = parseFloat(cardAmount || 0);
+  const upiVal = parseFloat(upiAmount || 0);
+  const bankVal = parseFloat(bankAmount || 0);
+  const totalPaid = cashVal + cardVal + upiVal + bankVal;
+  const remainingDue = Math.max(0, total - totalPaid);
+  const changeDue = Math.max(0, totalPaid - total);
 
   const handleWhatsApp = (phone, text = null) => {
     if (!phone) return;
@@ -535,7 +591,7 @@ export default function POS() {
       }
     }
 
-    const message = text || `Hello! This is from the Laundry Box. We're reaching out regarding your order.`;
+    const message = text || (settings.waGeneralTemplate ? settings.waGeneralTemplate.replace(/{shopName}/g, settings.shopName || 'Laundry Box') : `Hello! This is from the ${settings.shopName || 'Laundry Box'}. We're reaching out regarding your order.`);
     const url = `https://wa.me/${finalPhone}?text=${encodeURIComponent(message)}`;
     if (window.electronAPI?.openExternal) {
       window.electronAPI.openExternal(url);
@@ -738,13 +794,86 @@ export default function POS() {
     }));
   };
 
+  const handleKeypadPress = (val) => {
+    let currentValStr = '';
+    if (activePaymentField === 'cash') currentValStr = cashAmount.toString();
+    else if (activePaymentField === 'card') currentValStr = cardAmount.toString();
+    else if (activePaymentField === 'upi') currentValStr = upiAmount.toString();
+    else if (activePaymentField === 'bank') currentValStr = bankAmount.toString();
+
+    let newValStr = currentValStr;
+    if (val === 'clear') {
+      newValStr = '';
+    } else if (val === 'exact') {
+      const otherSum = (activePaymentField === 'cash' ? 0 : cashVal) +
+                        (activePaymentField === 'card' ? 0 : cardVal) +
+                        (activePaymentField === 'upi' ? 0 : upiVal) +
+                        (activePaymentField === 'bank' ? 0 : bankVal);
+      newValStr = Math.max(0, total - otherSum).toFixed(2);
+    } else {
+      newValStr = currentValStr + val.toString();
+    }
+
+    if (activePaymentField === 'cash') setCashAmount(newValStr);
+    else if (activePaymentField === 'card') setCardAmount(newValStr);
+    else if (activePaymentField === 'upi') setUpiAmount(newValStr);
+    else if (activePaymentField === 'bank') setBankAmount(newValStr);
+  };
+
   const handleCompletePayment = async (isOverridden = false) => {
-    if (!isOverridden && checkCreditLimitBeforeAction('completePayment')) {
+    if (!isOverridden && (await checkCreditLimitBeforeAction('completePayment'))) {
       return;
     }
     const orderId = pendingOrderId || '0001';
     const billNumber = `BN-${Date.now().toString().slice(-6)}`;
     const combinedExpectedDelivery = expectedDeliveryDate ? `${expectedDeliveryDate} ${expectedDeliveryTime || '17:00'}` : '';
+
+    const cashVal = parseFloat(cashAmount || 0);
+    const cardVal = parseFloat(cardAmount || 0);
+    const upiVal = parseFloat(upiAmount || 0);
+    const bankVal = parseFloat(bankAmount || 0);
+    const totalPaid = cashVal + cardVal + upiVal + bankVal;
+
+    if (totalPaid > total + 0.01) {
+      alert("Validation Error: Total Paid cannot exceed the Invoice Total!");
+      return;
+    }
+    if (totalPaid < total && (!selectedCustomer || selectedCustomer.id === 'Walk-in')) {
+      alert("Walk-in customers cannot have unpaid balance. Please select a customer to record credit/partial payment.");
+      return;
+    }
+
+    const newPaidAmount = totalPaid;
+    const newDueAmount = Math.max(0, total - totalPaid);
+    
+    let newPayStatus = PAYMENT_STATUS.PARTIAL;
+    if (Math.abs(newPaidAmount - total) < 0.01) {
+      newPayStatus = PAYMENT_STATUS.PAID;
+    } else if (newPaidAmount === 0) {
+      newPayStatus = PAYMENT_STATUS.CREDIT;
+    }
+
+    const paidMethods = [];
+    if (cashVal > 0) paidMethods.push(PAYMENT_METHODS.CASH);
+    if (cardVal > 0) paidMethods.push(PAYMENT_METHODS.CARD);
+    if (upiVal > 0) paidMethods.push(PAYMENT_METHODS.UPI);
+    if (bankVal > 0) paidMethods.push(PAYMENT_METHODS.BANK);
+
+    let newPayMethod = PAYMENT_METHODS.NOT_PAID;
+    if (paidMethods.length === 1) {
+      newPayMethod = paidMethods[0];
+    } else if (paidMethods.length > 1) {
+      newPayMethod = 'Mixed';
+    } else if (newPayStatus === PAYMENT_STATUS.PAID) {
+      newPayMethod = settings.defaultPaymentMethod || PAYMENT_METHODS.CASH;
+    }
+
+    const paymentBreakdownJson = JSON.stringify({
+      cash: cashVal,
+      card: cardVal,
+      upi: upiVal,
+      bank: bankVal
+    });
 
     if (window.electronAPI?.dbQuery) {
       try {
@@ -760,86 +889,109 @@ export default function POS() {
               );
             }
 
-            const newStatus = paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : oldOrder.status;
-            const newPaidAmount = paymentMethod === 'credit' ? 0 : total;
-            const newDueAmount = paymentMethod === 'credit' ? total : 0;
-            const newPayStatus = paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID;
-            const newPayMethod = paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'upi' ? PAYMENT_METHODS.UPI : PAYMENT_METHODS.NOT_PAID));
+            const newStatus = newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.PAYMENT_PENDING : oldOrder.status;
 
             const updateResult = await window.electronAPI.dbQuery(
-              `UPDATE orders SET 
-               customerId = ?, status = ?, totalAmount = ?, paidAmount = ?, dueAmount = ?, 
-               paymentStatus = ?, items = ?, expectedDeliveryDate = ?, specialInstructions = ?, 
-               updatedAt = ?, paymentMethod = ?, isSynced = 0 
-               WHERE id = ?`,
-              [
-                selectedCustomer ? selectedCustomer.id : 'Walk-in',
-                newStatus,
-                total,
-                newPaidAmount,
-                newDueAmount,
-                newPayStatus,
-                JSON.stringify(cart),
-                combinedExpectedDelivery,
-                specialInstructions,
-                getLocalISOString(),
-                newPayMethod,
-                editOrderId
-              ]
-            );
+               `UPDATE orders SET 
+                customerId = ?, status = ?, totalAmount = ?, paidAmount = ?, dueAmount = ?, 
+                paymentStatus = ?, items = ?, expectedDeliveryDate = ?, specialInstructions = ?, 
+                updatedAt = ?, paymentMethod = ?, isSynced = 0, paymentBreakdown = ? 
+                WHERE id = ?`,
+               [
+                 selectedCustomer ? selectedCustomer.id : 'Walk-in',
+                 newStatus,
+                 total,
+                 newPaidAmount,
+                 newDueAmount,
+                 newPayStatus,
+                 JSON.stringify(cart),
+                 combinedExpectedDelivery,
+                 specialInstructions,
+                 getLocalISOString(),
+                 newPayMethod,
+                 paymentBreakdownJson,
+                 editOrderId
+               ]
+             );
 
-            if (!updateResult || !updateResult.success) {
-              if (oldOrder.paymentStatus === 'Credit' || oldOrder.paymentStatus === 'Partial') {
-                await window.electronAPI.dbQuery(
-                  'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-                  [oldOrder.dueAmount, getLocalISOString(), oldOrder.customerId]
-                );
-              }
-              alert('Failed to update order: ' + (updateResult?.error || 'Unknown error'));
-              return;
-            }
+             if (!updateResult || !updateResult.success) {
+               if (oldOrder.paymentStatus === 'Credit' || oldOrder.paymentStatus === 'Partial') {
+                 await window.electronAPI.dbQuery(
+                   'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+                   [oldOrder.dueAmount, getLocalISOString(), oldOrder.customerId]
+                 );
+               }
+               alert('Failed to update order: ' + (updateResult?.error || 'Unknown error'));
+               return;
+             }
 
-            if ((newPayStatus === 'Credit' || newPayStatus === 'Partial') && selectedCustomer) {
-              await window.electronAPI.dbQuery(
-                'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-                [newDueAmount, getLocalISOString(), selectedCustomer.id]
-              );
-            }
+             if ((newPayStatus === 'Credit' || newPayStatus === 'Partial') && selectedCustomer) {
+               await window.electronAPI.dbQuery(
+                 'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+                 [newDueAmount, getLocalISOString(), selectedCustomer.id]
+               );
+             }
 
-            axios.post(`${API_BASE_URL}/orders`, {
-              id: editOrderId,
-              billNumber: oldOrder.billNumber,
-              customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
-              customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
-              customerPhone: selectedCustomer ? selectedCustomer.phone : '',
-              shopId: DEFAULT_SHOP_ID,
-              branchId: DEFAULT_BRANCH_ID,
-              status: newStatus,
-              totalAmount: total,
-              paidAmount: newPaidAmount,
-              dueAmount: newDueAmount,
-              paymentStatus: newPayStatus,
-              paymentMethod: newPayMethod,
-              items: cart,
-              expectedDeliveryDate: combinedExpectedDelivery,
-              specialInstructions
-            }).catch(e => console.warn(e));
+             axios.post(`${API_BASE_URL}/orders`, {
+               id: editOrderId,
+               billNumber: oldOrder.billNumber,
+               customerId: selectedCustomer ? selectedCustomer.id : 'Walk-in',
+               customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+               customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+               shopId: DEFAULT_SHOP_ID,
+               branchId: DEFAULT_BRANCH_ID,
+               status: newStatus,
+               totalAmount: total,
+               paidAmount: newPaidAmount,
+               dueAmount: newDueAmount,
+               paymentStatus: newPayStatus,
+               paymentMethod: newPayMethod,
+               paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal },
+               items: cart,
+               expectedDeliveryDate: combinedExpectedDelivery,
+               specialInstructions
+             }).catch(e => console.warn(e));
 
-            const txnId = `TXN-${Date.now()}`;
-            const _nowP = new Date();
-            const txnTimestamp = `${_nowP.getFullYear()}-${String(_nowP.getMonth()+1).padStart(2,'0')}-${String(_nowP.getDate()).padStart(2,'0')} ${String(_nowP.getHours()).padStart(2,'0')}:${String(_nowP.getMinutes()).padStart(2,'0')}`;
-            const accountType = (paymentMethod === 'bank' || paymentMethod === 'card' || paymentMethod === 'upi') ? 'BANK' : 'CASH';
+             // 3. Record Transactions in Accounts
+             const paymentMethodsList = [
+               { name: 'Cash', value: cashVal, accountType: 'CASH', icon: 'Wallet' },
+               { name: 'Card', value: cardVal, accountType: 'BANK', icon: 'CreditCard' },
+               { name: 'UPI', value: upiVal, accountType: 'BANK', icon: 'QrCode' },
+               { name: 'Bank', value: bankVal, accountType: 'BANK', icon: 'Landmark' },
+             ];
 
-            if (paymentMethod !== 'credit') {
-              const desc = `Updated Order ${editOrderId}${accountType === 'BANK' ? ` via ${selectedBank}` : ''}`;
-              const mappedBankId = accountType === 'BANK' ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank) : null;
-              await window.electronAPI.dbQuery(
-                `INSERT INTO account_transactions 
-                 (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [txnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales', total, desc, txnTimestamp, 0, getLocalISOString(), 'ShoppingBag', mappedBankId]
-              );
-            }
+             for (const method of paymentMethodsList) {
+               if (method.value > 0) {
+                 const txnId = `TXN-${Date.now()}-${method.name.toLowerCase()}`;
+                 const txnTimestamp = getLocalDateTime();
+                 const accountType = method.accountType;
+                 const mappedBankId = accountType === 'BANK'
+                   ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
+                   : null;
+
+                 const desc = `Order ${editOrderId.replace('#', '')} via ${method.name}`;
+                 await window.electronAPI.dbQuery(
+                   `INSERT INTO account_transactions 
+                    (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+                   [txnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales', method.value, desc, txnTimestamp, getLocalISOString(), method.icon, mappedBankId]
+                 );
+
+                 // Record card commission if applicable
+                 if (method.name === 'Card' && settings.cardCommission > 0) {
+                   const commissionRate = parseFloat(settings.cardCommission || 0);
+                   const commissionAmount = method.value * (commissionRate / 100);
+                   const commTxnId = `TXN-COMM-${Date.now()}`;
+                   const commDesc = `Card Commission for Order ${editOrderId}`;
+                   await window.electronAPI.dbQuery(
+                     `INSERT INTO account_transactions 
+                      (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+                     [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, getLocalISOString(), 'Percent', mappedBankId]
+                   );
+                 }
+               }
+             }
 
             setEditOrderId(null);
             setCart([]);
@@ -853,27 +1005,28 @@ export default function POS() {
         }
 
         const insertResult = await window.electronAPI.dbQuery(
-          `INSERT INTO orders (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, statusHistory, createdAt, isSynced, updatedAt, paymentMethod, expectedDeliveryDate, specialInstructions) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO orders (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, statusHistory, createdAt, isSynced, updatedAt, paymentMethod, expectedDeliveryDate, specialInstructions, paymentBreakdown) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             orderId,
             DEFAULT_SHOP_ID,
             billNumber,
             DEFAULT_BRANCH_ID,
             selectedCustomer ? selectedCustomer.id : 'Walk-in',
-            paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : ORDER_STATUS.CONFIRMED,
+            newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.PAYMENT_PENDING : ORDER_STATUS.CONFIRMED,
             total,
-            paymentMethod === 'credit' ? 0 : total,
-            paymentMethod === 'credit' ? total : 0,
-            paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
+            newPaidAmount,
+            newDueAmount,
+            newPayStatus,
             JSON.stringify(cart),
-            JSON.stringify([{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }]),
+            JSON.stringify([{ status: newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }]),
             getLocalISOString(),
             0,
             getLocalISOString(),
-            paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'upi' ? PAYMENT_METHODS.UPI : PAYMENT_METHODS.NOT_PAID)),
+            newPayMethod,
             combinedExpectedDelivery,
-            specialInstructions
+            specialInstructions,
+            paymentBreakdownJson
           ]
         );
 
@@ -885,13 +1038,13 @@ export default function POS() {
             const creditLimit = (selectedCustomer?.creditLimit && selectedCustomer.creditLimit !== 0)
               ? selectedCustomer.creditLimit
               : (settings.defaultCreditLimit ?? 500);
-            const newOutstanding = currentOutstanding + total;
+            const newOutstanding = currentOutstanding + newDueAmount;
             setCreditWarningDetails({
               orderId: orderId,
               customerName: selectedCustomer?.name,
               creditLimit,
               currentOutstanding,
-              orderAmount: total,
+              orderAmount: newDueAmount,
               newOutstanding,
               exceededAmount: Math.max(0, newOutstanding - creditLimit),
               overrideAllowed: true
@@ -914,14 +1067,15 @@ export default function POS() {
           customerPhone: selectedCustomer ? selectedCustomer.phone : '',
           shopId: DEFAULT_SHOP_ID,
           branchId: DEFAULT_BRANCH_ID,
-          status: paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : ORDER_STATUS.CONFIRMED,
+          status: newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.PAYMENT_PENDING : ORDER_STATUS.CONFIRMED,
           totalAmount: total,
-          paidAmount: paymentMethod === 'credit' ? 0 : total,
-          dueAmount: paymentMethod === 'credit' ? total : 0,
-          paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
-          paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'upi' ? PAYMENT_METHODS.UPI : PAYMENT_METHODS.NOT_PAID)),
+          paidAmount: newPaidAmount,
+          dueAmount: newDueAmount,
+          paymentStatus: newPayStatus,
+          paymentMethod: newPayMethod,
+          paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal },
           items: cart,
-          statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
+          statusHistory: [{ status: newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
           expectedDeliveryDate: combinedExpectedDelivery,
           specialInstructions
         }).catch(syncErr => {
@@ -937,54 +1091,65 @@ export default function POS() {
             customerPhone: selectedCustomer ? selectedCustomer.phone : '',
             shopId: DEFAULT_SHOP_ID,
             branchId: DEFAULT_BRANCH_ID,
-            status: paymentMethod === 'credit' ? ORDER_STATUS.PAYMENT_PENDING : ORDER_STATUS.CONFIRMED,
+            status: newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.PAYMENT_PENDING : ORDER_STATUS.CONFIRMED,
             totalAmount: total,
-            paidAmount: paymentMethod === 'credit' ? 0 : total,
-            dueAmount: paymentMethod === 'credit' ? total : 0,
-            paymentStatus: paymentMethod === 'credit' ? PAYMENT_STATUS.CREDIT : PAYMENT_STATUS.PAID,
-            paymentMethod: paymentMethod === 'cash' ? PAYMENT_METHODS.CASH : (paymentMethod === 'card' ? PAYMENT_METHODS.CARD : (paymentMethod === 'upi' ? PAYMENT_METHODS.UPI : PAYMENT_METHODS.NOT_PAID)),
+            paidAmount: newPaidAmount,
+            dueAmount: newDueAmount,
+            paymentStatus: newPayStatus,
+            paymentMethod: newPayMethod,
+            paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal },
             items: cart,
-            statusHistory: [{ status: paymentMethod === 'credit' ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
+            statusHistory: [{ status: newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
             expectedDeliveryDate: combinedExpectedDelivery,
             specialInstructions
           }
         }));
 
-        if (paymentMethod === 'credit' && selectedCustomer) {
+        if ((newPayStatus === PAYMENT_STATUS.CREDIT || newPayStatus === PAYMENT_STATUS.PARTIAL) && selectedCustomer) {
           await window.electronAPI.dbQuery(
             'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-            [total, getLocalISOString(), selectedCustomer.id]
+            [newDueAmount, getLocalISOString(), selectedCustomer.id]
           );
         }
 
-        // Record Transaction in Accounts
-        const txnId = `TXN-${Date.now()}`;
-        const _nowP = new Date();
-        const txnTimestamp = `${_nowP.getFullYear()}-${String(_nowP.getMonth()+1).padStart(2,'0')}-${String(_nowP.getDate()).padStart(2,'0')} ${String(_nowP.getHours()).padStart(2,'0')}:${String(_nowP.getMinutes()).padStart(2,'0')}`;
-        const accountType = (paymentMethod === 'bank' || paymentMethod === 'card' || paymentMethod === 'upi') ? 'BANK' : 'CASH';
+        // Record Transactions in Accounts
+        const paymentMethodsList = [
+          { name: 'Cash', value: cashVal, accountType: 'CASH', icon: 'Wallet' },
+          { name: 'Card', value: cardVal, accountType: 'BANK', icon: 'CreditCard' },
+          { name: 'UPI', value: upiVal, accountType: 'BANK', icon: 'QrCode' },
+          { name: 'Bank', value: bankVal, accountType: 'BANK', icon: 'Landmark' },
+        ];
 
-        if (paymentMethod !== 'credit') {
-          const desc = `Order ${orderId}${accountType === 'BANK' ? ` via ${selectedBank}` : ''}`;
-          const mappedBankId = accountType === 'BANK' ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank) : null;
-          await window.electronAPI.dbQuery(
-            `INSERT INTO account_transactions 
-             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [txnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales', total, desc, txnTimestamp, 0, getLocalISOString(), 'ShoppingBag', mappedBankId]
-          );
+        for (const method of paymentMethodsList) {
+          if (method.value > 0) {
+            const txnId = `TXN-${Date.now()}-${method.name.toLowerCase()}`;
+            const txnTimestamp = getLocalDateTime();
+            const accountType = method.accountType;
+            const mappedBankId = accountType === 'BANK'
+              ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
+              : null;
 
-          // Record card commission if applicable
-          if (paymentMethod === 'card' && settings.cardCommission > 0) {
-            const commissionRate = parseFloat(settings.cardCommission || 0);
-            const commissionAmount = total * (commissionRate / 100);
-            const commTxnId = `TXN-COMM-${Date.now()}`;
-            const commDesc = `Card Commission for Order ${orderId}`;
+            const desc = `Order ${orderId} via ${method.name}`;
             await window.electronAPI.dbQuery(
               `INSERT INTO account_transactions 
                (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, 0, getLocalISOString(), 'Percent', mappedBankId]
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+              [txnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales', method.value, desc, txnTimestamp, getLocalISOString(), method.icon, mappedBankId]
             );
+
+            // Record card commission if applicable
+            if (method.name === 'Card' && settings.cardCommission > 0) {
+               const commissionRate = parseFloat(settings.cardCommission || 0);
+               const commissionAmount = method.value * (commissionRate / 100);
+               const commTxnId = `TXN-COMM-${Date.now()}`;
+               const commDesc = `Card Commission for Order ${orderId}`;
+               await window.electronAPI.dbQuery(
+                 `INSERT INTO account_transactions 
+                  (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+                 [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, getLocalISOString(), 'Percent', mappedBankId]
+               );
+            }
           }
         }
 
@@ -1031,7 +1196,7 @@ export default function POS() {
       return;
     }
 
-    if (!isOverridden && checkCreditLimitBeforeAction('saveOrder')) {
+    if (!isOverridden && (await checkCreditLimitBeforeAction('saveOrder'))) {
       return;
     }
 
@@ -1129,8 +1294,8 @@ export default function POS() {
 
         const insertResult = await window.electronAPI.dbQuery(
           `INSERT INTO orders 
-           (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, items, statusHistory, createdAt, updatedAt, paymentStatus, isSynced, paymentMethod, expectedDeliveryDate, specialInstructions) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, items, statusHistory, createdAt, updatedAt, paymentStatus, isSynced, paymentMethod, expectedDeliveryDate, specialInstructions, paymentBreakdown) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             orderId,
             DEFAULT_SHOP_ID,
@@ -1149,7 +1314,8 @@ export default function POS() {
             0,
             PAYMENT_METHODS.NOT_PAID,
             combinedExpectedDelivery,
-            specialInstructions
+            specialInstructions,
+            JSON.stringify({ cash: 0, card: 0, upi: 0, bank: 0 })
           ]
         );
 
@@ -1228,6 +1394,7 @@ export default function POS() {
             dueAmount: total,
             paymentStatus: PAYMENT_STATUS.CREDIT,
             paymentMethod: PAYMENT_METHODS.NOT_PAID.toUpperCase(),
+            paymentBreakdown: { cash: 0, card: 0, upi: 0, bank: 0 },
             items: cart,
             statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: getLocalISOString() }],
             expectedDeliveryDate: combinedExpectedDelivery,
@@ -1289,9 +1456,9 @@ export default function POS() {
       setLastOrderInfo({
         orderId,
         total,
-        customerName: selectedCustomer.name,
-        customerPhone: selectedCustomer.phone,
-        newBalance: (selectedCustomer.balance || 0) + total
+        customerName: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+        customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+        newBalance: (selectedCustomer?.balance || 0) + total
       });
       setShowSuccessModal(true);
       setCart([]);
@@ -1309,7 +1476,7 @@ export default function POS() {
             <Edit3 size={18} className={styles.clearCart} onClick={() => setStep('pos')} />
           </div>
           <div className={styles.summaryCard}>
-            <p style={{ fontSize: '0.85rem', color: '#64748B' }}>Ticket #7721 • Customer: Julian Reed</p>
+            <p style={{ fontSize: '0.85rem', color: '#64748B' }}>Ticket #{pendingOrderId} • Customer: {selectedCustomer ? selectedCustomer.name : 'Walk-in Customer'}</p>
             {cart.map((item, idx) => (
               <div key={idx} className={styles.cartItem}>
                 <div className={styles.cartItemIcon}>{getIcon(services.find(s => s.name === item.name)?.icon)}</div>
@@ -1357,32 +1524,121 @@ export default function POS() {
               <span className={styles.amountBoxValue}><CurrencySymbol size={16} /> {total.toFixed(2)}</span>
             </div>
             <div className={styles.amountBox}>
-              <span className={styles.amountBoxLabel}>Tendered</span>
-              <span className={styles.amountBoxValue}><CurrencySymbol size={16} /> {tenderedAmount || '0.00'}</span>
+              <span className={styles.amountBoxLabel}>Total Paid</span>
+              <span className={styles.amountBoxValue} style={{ color: '#10B981' }}><CurrencySymbol size={16} /> {totalPaid.toFixed(2)}</span>
             </div>
-            <div className={`${styles.amountBox} ${changeDue > 0 ? styles.amountBoxChange : ''}`}>
-              <span className={styles.amountBoxLabel}>Change Due</span>
-              <span className={styles.amountBoxValue}><CurrencySymbol size={16} /> {changeDue > 0 ? changeDue.toFixed(2) : '0.00'}</span>
+            <div className={`${styles.amountBox} ${remainingDue > 0 ? styles.amountBoxChange : ''}`}>
+              <span className={styles.amountBoxLabel}>Remaining Due</span>
+              <span className={styles.amountBoxValue} style={{ color: remainingDue > 0 ? '#EF4444' : '#10B981' }}><CurrencySymbol size={16} /> {remainingDue.toFixed(2)}</span>
             </div>
           </div>
 
           <div>
-            <h3 className={styles.modalSectionTitle}>Payment Method</h3>
-            <div className={styles.paymentMethods}>
-              <MethodCard id="cash" label="Cash" icon={<Wallet />} active={paymentMethod === 'cash'} onClick={setPaymentMethod} />
-              <MethodCard id="card" label="Card" icon={<CreditCard />} active={paymentMethod === 'card'} onClick={setPaymentMethod} />
-              <MethodCard id="upi" label="UPI" icon={<QrCode />} active={paymentMethod === 'upi'} onClick={setPaymentMethod} />
-              <MethodCard id="credit" label="Store Credit" icon={<User />} active={paymentMethod === 'credit'} onClick={setPaymentMethod} />
+            <h3 className={styles.modalSectionTitle}>Mixed Payment Details (Click field to enter amount)</h3>
+            <div className={styles.mixedPaymentGrid} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div 
+                onClick={() => setActivePaymentField('cash')}
+                style={{
+                  background: activePaymentField === 'cash' ? '#EFF6FF' : 'white',
+                  border: activePaymentField === 'cash' ? '2px solid #2563EB' : '1px solid #E2E8F0',
+                  borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
+                  <Wallet size={14} /> Cash Amount
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
+                  <CurrencySymbol size={12} />
+                  <input 
+                    type="number" 
+                    placeholder="0.00" 
+                    value={cashAmount} 
+                    onChange={(e) => setCashAmount(e.target.value)} 
+                    onFocus={() => setActivePaymentField('cash')}
+                    style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
+                  />
+                </div>
+              </div>
+
+              <div 
+                onClick={() => setActivePaymentField('card')}
+                style={{
+                  background: activePaymentField === 'card' ? '#EFF6FF' : 'white',
+                  border: activePaymentField === 'card' ? '2px solid #2563EB' : '1px solid #E2E8F0',
+                  borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
+                  <CreditCard size={14} /> Card Amount
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
+                  <CurrencySymbol size={12} />
+                  <input 
+                    type="number" 
+                    placeholder="0.00" 
+                    value={cardAmount} 
+                    onChange={(e) => setCardAmount(e.target.value)} 
+                    onFocus={() => setActivePaymentField('card')}
+                    style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
+                  />
+                </div>
+              </div>
+
+              <div 
+                onClick={() => setActivePaymentField('upi')}
+                style={{
+                  background: activePaymentField === 'upi' ? '#EFF6FF' : 'white',
+                  border: activePaymentField === 'upi' ? '2px solid #2563EB' : '1px solid #E2E8F0',
+                  borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
+                  <QrCode size={14} /> UPI Amount
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
+                  <CurrencySymbol size={12} />
+                  <input 
+                    type="number" 
+                    placeholder="0.00" 
+                    value={upiAmount} 
+                    onChange={(e) => setUpiAmount(e.target.value)} 
+                    onFocus={() => setActivePaymentField('upi')}
+                    style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
+                  />
+                </div>
+              </div>
+
+              <div 
+                onClick={() => setActivePaymentField('bank')}
+                style={{
+                  background: activePaymentField === 'bank' ? '#EFF6FF' : 'white',
+                  border: activePaymentField === 'bank' ? '2px solid #2563EB' : '1px solid #E2E8F0',
+                  borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
+                  <Landmark size={14} /> Bank Transfer
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
+                  <CurrencySymbol size={12} />
+                  <input 
+                    type="number" 
+                    placeholder="0.00" 
+                    value={bankAmount} 
+                    onChange={(e) => setBankAmount(e.target.value)} 
+                    onFocus={() => setActivePaymentField('bank')}
+                    style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
-          {(paymentMethod === 'card' || paymentMethod === 'upi') && settings.bankAccounts?.length > 0 && (
+          {(cardVal > 0 || upiVal > 0 || bankVal > 0) && settings.bankAccounts?.length > 0 && (
             <div style={{ marginTop: '1rem' }}>
-              <h3 className={styles.modalSectionTitle}>
-                {paymentMethod === 'card' ? 'Select Card Account' : 'Select UPI Account'}
-              </h3>
-              <div className={styles.inputWrapper} style={{ background: 'white', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.25rem 0.5rem' }}>
-                {paymentMethod === 'card' ? <CreditCard size={18} color="#2563EB" /> : <QrCode size={18} color="#2563EB" />}
+              <h3 className={styles.modalSectionTitle}>Select Bank Account for Digital Payments</h3>
+              <div className={styles.inputWrapper} style={{ background: 'white', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.25rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Landmark size={18} color="#2563EB" />
                 <select
                   className={styles.inputField}
                   style={{ border: 'none', width: '100%', outline: 'none' }}
@@ -1399,13 +1655,13 @@ export default function POS() {
 
           <div className={styles.checkoutBottom}>
             <div>
-              <h3 className={styles.modalSectionTitle}>Enter Amount</h3>
+              <h3 className={styles.modalSectionTitle}>Enter Amount for {activePaymentField.toUpperCase()}</h3>
               <div className={styles.numpad}>
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9, '.', 0].map(n => (
-                  <button key={n} className={styles.numBtn} onClick={() => setTenderedAmount(prev => prev + n.toString())}>{n}</button>
+                  <button key={n} className={styles.numBtn} onClick={() => handleKeypadPress(n)}>{n}</button>
                 ))}
-                <button className={`${styles.numBtn} ${styles.numBtnAction}`} onClick={() => setTenderedAmount('')}><X size={24} /></button>
-                <button className={`${styles.numBtn} ${styles.numBtnSpecial}`} style={{ gridColumn: 'span 3', height: '48px' }} onClick={() => setTenderedAmount(total.toFixed(2))}>Exact Cash</button>
+                <button className={`${styles.numBtn} ${styles.numBtnAction}`} onClick={() => handleKeypadPress('clear')}><X size={24} /></button>
+                <button className={`${styles.numBtn} ${styles.numBtnSpecial}`} style={{ gridColumn: 'span 3', height: '48px' }} onClick={() => handleKeypadPress('exact')}>Exact Amount</button>
               </div>
             </div>
 
@@ -1433,7 +1689,15 @@ export default function POS() {
                 <button
                   className={styles.waReceiptBtn}
                   onClick={() => {
-                    const msg = `Hello ${selectedCustomer.name}! Your laundry order totaling ${total.toFixed(2)} has been received and is now being processed. Thank you for choosing us!`;
+                    let msg = '';
+                    if (settings.waCheckoutReceiptTemplate) {
+                      msg = settings.waCheckoutReceiptTemplate
+                        .replace(/{customerName}/g, selectedCustomer.name)
+                        .replace(/{total}/g, `${settings.currencySymbol || 'AED'} ${total.toFixed(2)}`)
+                        .replace(/{shopName}/g, settings.shopName || 'Laundry Box');
+                    } else {
+                      msg = `Hello ${selectedCustomer.name}! Your laundry order totaling ${total.toFixed(2)} has been received and is now being processed. Thank you for choosing us!`;
+                    }
                     handleWhatsApp(selectedCustomer.phone, msg);
                   }}
                 >
@@ -1621,7 +1885,7 @@ export default function POS() {
               )}
             </div>
           </div>
-          <Trash2 size={18} className={styles.clearCart} onClick={() => { setCart([]); setExpectedDeliveryDate(getTomorrowDateString()); setExpectedDeliveryTime('17:00'); setSpecialInstructions(''); }} />
+          <Trash2 size={18} className={styles.clearCart} onClick={() => { setCart([]); setExpectedDeliveryDate(getTomorrowDateString()); setExpectedDeliveryTime('17:00'); setSpecialInstructions(''); setShowSpecialInstructions(false); }} />
         </div>
         <div className={styles.cartMetadata}>
           <div style={{ display: 'flex', flexDirection: 'row', gap: '0.5rem' }}>
@@ -1651,48 +1915,60 @@ export default function POS() {
             </div>
           </div>
           <div className={styles.metadataRow}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label className={styles.metadataLabel}>
-                <FileText size={13} style={{ marginRight: '4px' }} />
+            <div 
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+              onClick={() => setShowSpecialInstructions(!showSpecialInstructions)}
+            >
+              <label className={styles.metadataLabel} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <FileText size={13} />
                 ⚠️ Special Instructions
               </label>
-              <button
-                type="button"
-                className={styles.togglePresetsBtn}
-                onClick={() => setShowSpecialPresets(!showSpecialPresets)}
-              >
-                {showSpecialPresets ? 'Hide Presets' : 'Show Presets'}
-              </button>
+              <span style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#2563EB', background: '#EFF6FF', padding: '2px 8px', borderRadius: '12px' }}>
+                {showSpecialInstructions ? 'Hide' : 'Show'}
+              </span>
             </div>
-            <input
-              type="text"
-              className={styles.metadataInput}
-              placeholder="e.g. Starch, hang, handle with care..."
-              value={specialInstructions}
-              onChange={(e) => setSpecialInstructions(e.target.value)}
-            />
-            {showSpecialPresets && (
-              <div className={styles.presetNotesContainer} style={{ marginTop: '0.4rem' }}>
-                {(settings.presetDamageNotes || []).map((note, idx) => (
+            {showSpecialInstructions && (
+              <div style={{ marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button
-                    key={idx}
                     type="button"
-                    className={styles.presetNoteChip}
-                    style={{ padding: '0.2rem 0.5rem', fontSize: '0.72rem' }}
-                    onClick={() => {
-                      const current = (specialInstructions || '').trim();
-                      if (!current) {
-                        setSpecialInstructions(note);
-                        return;
-                      }
-                      const parts = current.split(',').map(p => p.trim());
-                      if (parts.includes(note)) return;
-                      setSpecialInstructions(`${current}, ${note}`);
-                    }}
+                    className={styles.togglePresetsBtn}
+                    onClick={(e) => { e.stopPropagation(); setShowSpecialPresets(!showSpecialPresets); }}
                   >
-                    {note}
+                    {showSpecialPresets ? 'Hide Presets' : 'Show Presets'}
                   </button>
-                ))}
+                </div>
+                <input
+                  type="text"
+                  className={styles.metadataInput}
+                  placeholder="e.g. Starch, hang, handle with care..."
+                  value={specialInstructions}
+                  onChange={(e) => setSpecialInstructions(e.target.value)}
+                />
+                {showSpecialPresets && (
+                  <div className={styles.presetNotesContainer}>
+                    {(settings.presetDamageNotes || []).map((note, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        className={styles.presetNoteChip}
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.72rem' }}
+                        onClick={() => {
+                          const current = (specialInstructions || '').trim();
+                          if (!current) {
+                            setSpecialInstructions(note);
+                            return;
+                          }
+                          const parts = current.split(',').map(p => p.trim());
+                          if (parts.includes(note)) return;
+                          setSpecialInstructions(`${current}, ${note}`);
+                        }}
+                      >
+                        {note}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2337,127 +2613,88 @@ export default function POS() {
                 </div>
               </div>
             </div>
-            <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
-              <div style={{ background: '#F8FAFC', borderRadius: '12px', padding: '1rem', border: '1px solid #E2E8F0', marginBottom: '1.25rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Customer Name:</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{creditWarningDetails.customerName}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Limit:</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.creditLimit.toFixed(2)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Outstanding Balance:</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.currentOutstanding.toFixed(2)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Current Order Amount:</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.orderAmount.toFixed(2)}</span>
-                </div>
-                <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.5rem 0' }} />
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>New Outstanding Balance:</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.newOutstanding.toFixed(2)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
-                  <span>Exceeded Amount:</span>
-                  <span>{settings.currencySymbol} {creditWarningDetails.exceededAmount.toFixed(2)}</span>
-                </div>
-              </div>
-
-              {settings.enableManagerOverride ? (
-                <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '12px', padding: '0.75rem 1rem', color: '#1E40AF', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  <Info size={18} />
-                  <span>This order can be authorized using the secure PIN.</span>
-                </div>
-              ) : (
-                <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: '12px', padding: '0.75rem 1rem', color: '#C53030', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  <AlertCircle size={18} />
-                  <span>Credit Limit Protection is active and Manager Override is disabled.</span>
-                </div>
-              )}
-            </div>
-            <div className={styles.modalFooter} style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem' }}>
-              <button
-                type="button"
-                className={styles.secondaryBtn}
-                onClick={handleCancelOverride}
-                style={{ flex: 1 }}
-              >
-                Cancel
-              </button>
-              {creditWarningDetails.overrideAllowed && settings.enableManagerOverride && (
-                <button
-                  type="button"
-                  className={styles.saveBtn}
-                  onClick={() => setShowManagerPinModal(true)}
-                  style={{ flex: 1, background: '#D97706', color: 'white' }}
-                >
-                  Manager Override
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Manager PIN Modal */}
-      {showManagerPinModal && (
-        <div className={styles.modalOverlay} onClick={() => { setShowManagerPinModal(false); setManagerPinValue(''); setManagerPinError(''); }}>
-          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div className={styles.modalTitle}>
-                <h2>Manager Verification</h2>
-                <p>Enter the PIN to approve this credit</p>
-              </div>
-            </div>
             <form onSubmit={handleVerifyManagerPin}>
               <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
-                <div className={styles.formGroup}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>SECURE PIN</label>
-                  <div className={styles.posInputWrapper}>
-                    <Lock size={18} />
-                    <input
-                      type="password"
-                      required
-                      maxLength={4}
-                      placeholder="Enter 4-Digit PIN"
-                      value={managerPinValue}
-                      onChange={(e) => setManagerPinValue(e.target.value.replace(/\D/g, ''))}
-                      style={{ fontSize: '1.25rem', letterSpacing: '0.25rem' }}
-                    />
+                <div style={{ background: '#F8FAFC', borderRadius: '12px', padding: '1rem', border: '1px solid #E2E8F0', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Customer Name:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{creditWarningDetails.customerName}</span>
                   </div>
-                  {managerPinError && (
-                    <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 600 }}>{managerPinError}</p>
-                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Limit:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.creditLimit.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Outstanding Balance:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.currentOutstanding.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Balance Increase:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.orderAmount.toFixed(2)}</span>
+                  </div>
+                  <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.5rem 0' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>New Outstanding Balance:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.newOutstanding.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
+                    <span>Exceeded Amount:</span>
+                    <span>{settings.currencySymbol} {creditWarningDetails.exceededAmount.toFixed(2)}</span>
+                  </div>
                 </div>
+
+                {settings.enableManagerOverride ? (
+                  <div className={styles.formGroup} style={{ marginTop: '1rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>ENTER MANAGER SECURE PIN TO APPROVE</label>
+                    <div className={styles.posInputWrapper} style={{ marginTop: '0.5rem' }}>
+                      <Lock size={18} />
+                      <input
+                        type="password"
+                        required
+                        maxLength={4}
+                        placeholder="Enter 4-Digit PIN"
+                        value={managerPinValue}
+                        onChange={(e) => setManagerPinValue(e.target.value.replace(/\D/g, ''))}
+                        style={{ fontSize: '1.25rem', letterSpacing: '0.25rem' }}
+                        autoFocus
+                      />
+                    </div>
+                    {managerPinError && (
+                      <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 600 }}>{managerPinError}</p>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: '12px', padding: '0.75rem 1rem', color: '#C53030', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                    <AlertCircle size={18} />
+                    <span>Credit Limit Protection is active and Manager Override is disabled.</span>
+                  </div>
+                )}
               </div>
               <div className={styles.modalFooter} style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem' }}>
                 <button
                   type="button"
                   className={styles.secondaryBtn}
-                  onClick={() => {
-                    setShowManagerPinModal(false);
-                    setManagerPinValue('');
-                    setManagerPinError('');
-                  }}
+                  onClick={handleCancelOverride}
                   style={{ flex: 1 }}
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className={styles.saveBtn}
-                  style={{ flex: 1 }}
-                >
-                  Verify
-                </button>
+                {creditWarningDetails.overrideAllowed && settings.enableManagerOverride && (
+                  <button
+                    type="submit"
+                    className={styles.saveBtn}
+                    style={{ flex: 1, background: '#D97706', color: 'white' }}
+                  >
+                    Approve Override
+                  </button>
+                )}
               </div>
             </form>
           </div>
         </div>
       )}
+
+
     </div>
   );
 }

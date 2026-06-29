@@ -1,6 +1,5 @@
 # 🧺 Laundry Management System
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/Muhammedbn/laundry-billing-software)
 [![License](https://img.shields.io/badge/license-ISC-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey.svg)]()
 
@@ -53,8 +52,13 @@ A professional, high-performance Laundry Management and POS (Point of Sale) syst
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/Muhammedbn/laundry-billing-software.git
-cd laundry-billing-software
+git init
+git add .
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/horizone-dev/Laundry-Box.git
+git push -u origin main
+
 ```
 
 ### 2. Install Dependencies
@@ -105,9 +109,8 @@ This project is licensed under the ISC License - see the [LICENSE](LICENSE) file
 ---
 
 ## 📞 Support & Contact
-**Developer:** Muhammed BN  
-**GitHub:** [@Muhammedbn](https://github.com/Muhammedbn)  
-**Project:** [Laundry Billing Software](https://github.com/Muhammedbn/laundry-billing-software)
-
+**Developer:** Horizon Development Team  
+**GitHub:** [@horizone-dev](https://github.com/horizone-dev)  
+**Project:** [Laundry Box](https://github.com/horizone-dev/Laundry-Box)
 ---
-*Developed with ❤️ by Laundry Management System Team*
+*Developed with ❤️ by Horizon Development Team*

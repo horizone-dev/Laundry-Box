@@ -1231,19 +1231,19 @@ export default function Orders({ isPendingView = false }) {
                         {t('total', settings.language)}: <CurrencySymbol size={10} /> {(order.totalAmount || 0).toFixed(2)} | {t('paid', settings.language)}: <CurrencySymbol size={10} /> {(order.paidAmount || 0).toFixed(2)}
                      </div>
                      <div style={{ marginTop: '6px' }}>
-                        {order.paymentStatus === 'Paid' || (order.dueAmount !== undefined && order.dueAmount <= 0) ? (
-                          <span className={
-                           order.paymentMethod === 'Cash' ? styles.methodCash : 
-                           order.paymentMethod === 'Bank' ? styles.methodOther :
-                           order.paymentMethod === 'Mixed' ? styles.methodOther :
-                           styles.methodOther
-                         }>
-                           {order.paymentMethod}
-                          </span>
-                        ) : order.paymentStatus === 'Partial' ? (
-                          <span className={styles.methodPartial}>
-                            {t('partial', settings.language) || 'Partial'}
-                          </span>
+                        {order.paymentStatus === 'Paid' || order.paymentStatus === 'Partial' || (order.dueAmount !== undefined && order.dueAmount <= 0) ? (
+                          order.paymentMethod ? (
+                            <span className={
+                             order.paymentMethod === 'Cash' ? styles.methodCash : 
+                             order.paymentMethod === 'Bank' ? styles.methodOther :
+                             order.paymentMethod === 'Mixed' ? styles.methodOther :
+                             styles.methodOther
+                           }>
+                             {order.paymentMethod}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94A3B8' }}>-</span>
+                          )
                         ) : (
                           <span className={styles.methodCredit}>
                             {t('notPaid', settings.language)}
@@ -1351,7 +1351,7 @@ export default function Orders({ isPendingView = false }) {
                     </td>
                     <td className={styles.amountText}><CurrencySymbol size={14} /> {order.totalAmount?.toFixed(2)}</td>
                     <td>
-                       {order.paymentStatus === 'Paid' ? (
+                       {order.paymentStatus === 'Paid' || order.paymentStatus === 'Partial' ? (
                          order.paymentMethod ? (
                             <span className={
                               order.paymentMethod === 'Cash' ? styles.methodCash : 
@@ -1875,131 +1875,88 @@ export default function Orders({ isPendingView = false }) {
                 </div>
               </div>
             </div>
-            <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
-              <div style={{ background: '#F8FAFC', borderRadius: '12px', padding: '1rem', border: '1px solid #E2E8F0', marginBottom: '1.25rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Customer Name:</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{creditWarningDetails.customerName}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Limit:</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.creditLimit.toFixed(2)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Outstanding Balance:</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.currentOutstanding.toFixed(2)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Balance Increase:</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.orderAmount.toFixed(2)}</span>
-                </div>
-                <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.5rem 0' }} />
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>New Outstanding Balance:</span>
-                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.newOutstanding.toFixed(2)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
-                  <span>Exceeded Amount:</span>
-                  <span>{settings.currencySymbol} {creditWarningDetails.exceededAmount.toFixed(2)}</span>
-                </div>
-              </div>
-
-              {settings.enableManagerOverride ? (
-                <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '12px', padding: '0.75rem 1rem', color: '#1E40AF', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  <Info size={18} />
-                  <span>This update can be authorized using the secure PIN.</span>
-                </div>
-              ) : (
-                <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: '12px', padding: '0.75rem 1rem', color: '#C53030', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                  <AlertCircle size={18} />
-                  <span>Credit Limit Protection is active and Manager Override is disabled.</span>
-                </div>
-              )}
-            </div>
-            <div className={styles.modalFooter} style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem' }}>
-              <button 
-                type="button" 
-                className={styles.secondaryBtn} 
-                onClick={handleCancelOverride}
-                style={{ flex: 1 }}
-              >
-                Cancel
-              </button>
-              {creditWarningDetails.overrideAllowed && settings.enableManagerOverride && (
-                <button 
-                  type="button" 
-                  className={styles.saveBtn} 
-                  onClick={() => setShowManagerPinModal(true)}
-                  style={{ flex: 1, background: '#D97706', color: 'white' }}
-                >
-                  Manager Override
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Manager PIN Modal */}
-      {showManagerPinModal && (
-        <div className={styles.modalOverlay} onClick={() => {
-          setShowManagerPinModal(false);
-          setManagerPinValue('');
-          setManagerPinError('');
-        }}>
-          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div className={styles.modalTitle}>
-                <h2>Manager Verification</h2>
-                <p>Enter the PIN to approve this credit</p>
-              </div>
-            </div>
             <form onSubmit={handleVerifyManagerPin}>
               <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
-                <div className={styles.formGroup}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>SECURE PIN</label>
-                  <div className={styles.posInputWrapper}>
-                    <Lock size={18} />
-                    <input 
-                      type="password" 
-                      required 
-                      maxLength={4}
-                      placeholder="Enter 4-Digit PIN"
-                      value={managerPinValue}
-                      onChange={(e) => setManagerPinValue(e.target.value.replace(/\D/g, ''))}
-                      style={{ fontSize: '1.25rem', letterSpacing: '0.25rem' }}
-                    />
+                <div style={{ background: '#F8FAFC', borderRadius: '12px', padding: '1rem', border: '1px solid #E2E8F0', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Customer Name:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{creditWarningDetails.customerName}</span>
                   </div>
-                  {managerPinError && (
-                    <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 600 }}>{managerPinError}</p>
-                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Limit:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.creditLimit.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Outstanding Balance:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.currentOutstanding.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Balance Increase:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.orderAmount.toFixed(2)}</span>
+                  </div>
+                  <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.5rem 0' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>New Outstanding Balance:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.newOutstanding.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
+                    <span>Exceeded Amount:</span>
+                    <span>{settings.currencySymbol} {creditWarningDetails.exceededAmount.toFixed(2)}</span>
+                  </div>
                 </div>
+
+                {settings.enableManagerOverride ? (
+                  <div className={styles.formGroup} style={{ marginTop: '1rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>ENTER MANAGER SECURE PIN TO APPROVE</label>
+                    <div className={styles.posInputWrapper} style={{ marginTop: '0.5rem' }}>
+                      <Lock size={18} />
+                      <input
+                        type="password"
+                        required
+                        maxLength={4}
+                        placeholder="Enter 4-Digit PIN"
+                        value={managerPinValue}
+                        onChange={(e) => setManagerPinValue(e.target.value.replace(/\D/g, ''))}
+                        style={{ fontSize: '1.25rem', letterSpacing: '0.25rem' }}
+                        autoFocus
+                      />
+                    </div>
+                    {managerPinError && (
+                      <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 600 }}>{managerPinError}</p>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: '12px', padding: '0.75rem 1rem', color: '#C53030', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                    <AlertCircle size={18} />
+                    <span>Credit Limit Protection is active and Manager Override is disabled.</span>
+                  </div>
+                )}
               </div>
               <div className={styles.modalFooter} style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem' }}>
-                <button 
-                  type="button" 
-                  className={styles.secondaryBtn} 
-                  onClick={() => {
-                    setShowManagerPinModal(false);
-                    setManagerPinValue('');
-                    setManagerPinError('');
-                  }}
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={handleCancelOverride}
                   style={{ flex: 1 }}
                 >
                   Cancel
                 </button>
-                <button 
-                  type="submit" 
-                  className={styles.saveBtn}
-                  style={{ flex: 1 }}
-                >
-                  Verify
-                </button>
+                {creditWarningDetails.overrideAllowed && settings.enableManagerOverride && (
+                  <button
+                    type="submit"
+                    className={styles.saveBtn}
+                    style={{ flex: 1, background: '#D97706', color: 'white' }}
+                  >
+                    Approve Override
+                  </button>
+                )}
               </div>
             </form>
           </div>
         </div>
       )}
+
+
     </div>
   );
 }

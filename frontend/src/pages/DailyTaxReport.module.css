@@ -1,7 +1,7 @@
 .taxPage {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 0.75rem;
   padding: 0 1rem 1rem 1rem;
 }
 
@@ -10,14 +10,14 @@
   justify-content: space-between;
   align-items: flex-start;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 0.5rem;
 }
 
 .headerInfo h1 {
-  font-size: 2.2rem;
+  font-size: 1.35rem;
   font-weight: 800;
   color: var(--text-primary, #0F172A);
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.15rem;
   background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -39,19 +39,19 @@
 .kpiGrid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 1.5rem;
+  gap: 0.75rem;
 }
 
 .kpiCard {
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  padding: 1.75rem;
+  padding: 0.6rem 1rem;
   border-radius: 18px;
   box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.12), 0 2px 8px -1px rgba(148, 163, 184, 0.08);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.4rem;
   position: relative;
   overflow: hidden;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -146,10 +146,10 @@
 }
 
 .kpiValue {
-  font-size: 2.1rem;
+  font-size: 1.25rem;
   font-weight: 800;
   color: #0F172A;
-  margin-top: 0.25rem;
+  margin-top: 0.15rem;
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -168,7 +168,7 @@
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-radius: 20px;
-  padding: 1.75rem;
+  padding: 0.75rem 1rem;
   border: 1px solid rgba(226, 232, 240, 0.8);
   box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.08);
 }
@@ -176,8 +176,8 @@
 .tableToolbar {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 1.5rem;
-  gap: 1.25rem;
+  margin-bottom: 0.75rem;
+  gap: 0.75rem;
   flex-wrap: wrap;
 }
 
@@ -191,7 +191,7 @@
 }
 
 .filterSelect {
-  padding: 0.75rem 1.25rem;
+  padding: 0.5rem 0.75rem;
   background: #FFFFFF;
   border: 1px solid #E2E8F0;
   border-radius: 12px;
@@ -260,7 +260,7 @@
 .taxTable th {
   text-align: left;
   border-bottom: 2px solid #E2E8F0;
-  padding: 1.15rem 1rem;
+  padding: 0.5rem 0.75rem;
   color: #475569;
   font-size: 0.8rem;
   font-weight: 700;
@@ -270,7 +270,7 @@
 }
 
 .taxTable td {
-  padding: 1.15rem 1rem;
+  padding: 0.5rem 0.75rem;
   font-size: 0.95rem;
   border-bottom: 1px solid #F1F5F9;
   color: #334155;
@@ -329,8 +329,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 1.5rem;
-  padding-top: 1.25rem;
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
   border-top: 1px solid #E2E8F0;
 }
 

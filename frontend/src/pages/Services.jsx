@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import {
   Plus, Search, Scissors, Zap, Sparkles, Tag, X, Layout,
   Shirt, Bed, Wind, Droplet, Heart, Layers, Camera,
-  Image as ImageIcon, Trash2, Edit2, ChevronDown, ChevronUp, Package
+  Image as ImageIcon, Trash2, Edit2, Package
 } from 'lucide-react';
+import Cropper from 'react-easy-crop';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID, CATEGORIES } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
@@ -70,6 +71,66 @@ export default function Services({ defaultTab = 'list' }) {
   const [formData, setFormData] = useState({});
   const [editId, setEditId] = useState(null);
   const [dragActive, setDragActive] = useState(false);
+
+  // States for Image Cropping
+  const [imageToCrop, setImageToCrop] = useState(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+
+  const onCropComplete = (croppedArea, croppedAreaPixels) => {
+    setCroppedAreaPixels(croppedAreaPixels);
+  };
+
+  const getCroppedImg = (imageSrc, pixelCrop) => {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.src = imageSrc;
+      image.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = pixelCrop.width;
+        canvas.height = pixelCrop.height;
+
+        ctx.drawImage(
+          image,
+          pixelCrop.x,
+          pixelCrop.y,
+          pixelCrop.width,
+          pixelCrop.height,
+          0,
+          0,
+          pixelCrop.width,
+          pixelCrop.height
+        );
+
+        // Downscale to 300x300 for optimal performance
+        const maxCanvas = document.createElement('canvas');
+        const maxCtx = maxCanvas.getContext('2d');
+        const targetSize = 300;
+        maxCanvas.width = targetSize;
+        maxCanvas.height = targetSize;
+        maxCtx.drawImage(canvas, 0, 0, targetSize, targetSize);
+
+        resolve(maxCanvas.toDataURL('image/jpeg', 0.85));
+      };
+      image.onerror = (error) => reject(error);
+    });
+  };
+
+  const handleCropSave = async () => {
+    try {
+      if (imageToCrop && croppedAreaPixels) {
+        const croppedImage = await getCroppedImg(imageToCrop, croppedAreaPixels);
+        setFormData(prev => ({ ...prev, image: croppedImage }));
+        setImageToCrop(null);
+      }
+    } catch (e) {
+      console.error("Failed to crop image:", e);
+      alert("Failed to crop image. Please try again.");
+    }
+  };
 
   // Custom states for Multiple Pricing
   const [selectedTypesList, setSelectedTypesList] = useState([]);
@@ -173,55 +234,7 @@ export default function Services({ defaultTab = 'list' }) {
     }
   };
 
-  const handleMoveOrder = async (item, direction, table) => {
-    if (!window.electronAPI?.dbQuery) return;
 
-    let itemsList = [];
-    if (table === 'services') itemsList = [...services];
-    else if (table === 'service_types') itemsList = [...types];
-    else if (table === 'addons') itemsList = [...addons];
-    else if (table === 'service_categories') itemsList = [...categories];
-
-    itemsList.sort((a, b) => {
-      if ((a.sortOrder || 0) !== (b.sortOrder || 0)) {
-        return (a.sortOrder || 0) - (b.sortOrder || 0);
-      }
-      return String(a.id).localeCompare(String(b.id));
-    });
-
-    const index = itemsList.findIndex(x => x.id === item.id);
-    if (index === -1) return;
-
-    let targetIndex = -1;
-    if (direction === 'up' && index > 0) {
-      targetIndex = index - 1;
-    } else if (direction === 'down' && index < itemsList.length - 1) {
-      targetIndex = index + 1;
-    }
-
-    if (targetIndex !== -1) {
-      const currentItem = itemsList[index];
-      const targetItem = itemsList[targetIndex];
-
-      const currentSort = currentItem.sortOrder || 0;
-      const targetSort = targetItem.sortOrder || 0;
-
-      let newCurrentSort = targetSort;
-      let newTargetSort = currentSort;
-
-      if (currentSort === targetSort) {
-        newCurrentSort = direction === 'up' ? currentSort - 1 : currentSort + 1;
-      }
-
-      try {
-        await window.electronAPI.dbQuery(`UPDATE ${table} SET sortOrder = ?, updatedAt = ? WHERE id = ?`, [newCurrentSort, new Date().toISOString(), currentItem.id]);
-        await window.electronAPI.dbQuery(`UPDATE ${table} SET sortOrder = ?, updatedAt = ? WHERE id = ?`, [newTargetSort, new Date().toISOString(), targetItem.id]);
-        fetchData();
-      } catch (err) {
-        console.error("Failed to reorder:", err);
-      }
-    }
-  };
 
   const processImage = (file) => {
     if (!file) return;
@@ -232,35 +245,9 @@ export default function Services({ defaultTab = 'list' }) {
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 300;
-        const MAX_HEIGHT = 300;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        setFormData(prev => ({ ...prev, image: dataUrl }));
-      };
-      img.src = event.target.result;
+      setImageToCrop(event.target.result);
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
     };
     reader.readAsDataURL(file);
   };
@@ -558,8 +545,6 @@ export default function Services({ defaultTab = 'list' }) {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
                         <div className={styles.itemActions}>
-                          <button className={styles.actionBtn} onClick={() => handleMoveOrder(s, 'up', 'services')} title="Move Up"><ChevronUp size={16} /></button>
-                          <button className={styles.actionBtn} onClick={() => handleMoveOrder(s, 'down', 'services')} title="Move Down"><ChevronDown size={16} /></button>
                           <button className={styles.actionBtn} onClick={() => handleEdit(s, 'service')}><Edit2 size={16} /></button>
                           <button className={`${styles.actionBtn} ${styles.deleteBtn}`} onClick={() => handleDelete(s.id, 'services')}><Trash2 size={16} /></button>
                         </div>
@@ -603,8 +588,6 @@ export default function Services({ defaultTab = 'list' }) {
                       <span className={styles.treatmentMeta}>Active treatment model</span>
                     </div>
                     <div className={styles.treatmentActions}>
-                      <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(t, 'up', 'service_types')} title="Move Up"><ChevronUp size={15} /></button>
-                      <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(t, 'down', 'service_types')} title="Move Down"><ChevronDown size={15} /></button>
                       <button className={styles.iconActionBtn} onClick={() => handleEdit(t, 'type')} title="Edit"><Edit2 size={15} /></button>
                       <button className={`${styles.iconActionBtn} ${styles.delete}`} onClick={() => handleDelete(t.id, 'service_types')} title="Delete"><Trash2 size={15} /></button>
                     </div>
@@ -648,8 +631,6 @@ export default function Services({ defaultTab = 'list' }) {
                       </span>
                     </div>
                     <div className={styles.addonActions}>
-                      <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(a, 'up', 'addons')} title="Move Up"><ChevronUp size={15} /></button>
-                      <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(a, 'down', 'addons')} title="Move Down"><ChevronDown size={15} /></button>
                       <button className={styles.iconActionBtn} onClick={() => handleEdit(a, 'addon')} title="Edit"><Edit2 size={15} /></button>
                       <button className={`${styles.iconActionBtn} ${styles.delete}`} onClick={() => handleDelete(a.id, 'addons')} title="Delete"><Trash2 size={15} /></button>
                     </div>
@@ -693,8 +674,6 @@ export default function Services({ defaultTab = 'list' }) {
                         <span className={styles.categoryCount}>{serviceCount} Service{serviceCount !== 1 ? 's' : ''}</span>
                       </div>
                       <div className={styles.categoryActions}>
-                        <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(c, 'up', 'service_categories')} title="Move Up"><ChevronUp size={15} /></button>
-                        <button className={styles.iconActionBtn} onClick={() => handleMoveOrder(c, 'down', 'service_categories')} title="Move Down"><ChevronDown size={15} /></button>
                         <button className={styles.iconActionBtn} onClick={() => handleEdit(c, 'category')} title="Edit"><Edit2 size={15} /></button>
                         <button className={`${styles.iconActionBtn} ${styles.delete}`} onClick={() => handleDelete(c.id, 'service_categories')} title="Delete"><Trash2 size={15} /></button>
                       </div>
@@ -988,6 +967,53 @@ export default function Services({ defaultTab = 'list' }) {
                 <button type="submit" className={styles.submitBtn}>Save {showModal}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Cropper Modal Overlay */}
+      {imageToCrop && (
+        <div className={styles.cropperModalOverlay}>
+          <div className={styles.cropperModal}>
+            <div className={styles.cropperModalHeader}>
+              <h3>Crop & Edit Image</h3>
+              <button type="button" onClick={() => setImageToCrop(null)} className={styles.cropperCloseBtn}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className={styles.cropperModalBody}>
+              <div className={styles.cropperContainer}>
+                <Cropper
+                  image={imageToCrop}
+                  crop={crop}
+                  zoom={zoom}
+                  aspect={1}
+                  onCropChange={setCrop}
+                  onCropComplete={onCropComplete}
+                  onZoomChange={setZoom}
+                />
+              </div>
+              <div className={styles.zoomControlRow}>
+                <label>Zoom</label>
+                <input
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.1}
+                  value={zoom}
+                  onChange={(e) => setZoom(parseFloat(e.target.value))}
+                  className={styles.zoomSlider}
+                />
+              </div>
+            </div>
+            <div className={styles.cropperModalFooter}>
+              <button type="button" className={styles.secondaryBtn} onClick={() => setImageToCrop(null)}>
+                Cancel
+              </button>
+              <button type="button" className={styles.cropSaveBtn} onClick={handleCropSave}>
+                Crop & Save
+              </button>
+            </div>
           </div>
         </div>
       )}

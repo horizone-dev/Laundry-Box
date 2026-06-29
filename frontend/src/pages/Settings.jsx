@@ -322,6 +322,57 @@ export default function Settings() {
     total: 35.1
   };
 
+  if (user.role === 'super_admin') {
+    return (
+      <div className={styles.settingsPage}>
+        <div className={styles.headerRow}>
+          <div className={styles.headerMain}>
+            <h1>Settings</h1>
+            <p>Database Administration & Maintenance</p>
+          </div>
+        </div>
+
+        <div className={styles.settingsGrid} style={{ display: 'block' }}>
+          <div className={styles.mainContent}>
+            <div className={styles.profileContainer}>
+              <div className={styles.card}>
+                <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem' }}>
+                  <div className={styles.backupIcon} style={{ background: '#F3E8FF', padding: '1rem', borderRadius: '12px' }}>
+                    <Upload size={32} color="#7C3AED" />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Import / Restore Database Backup</h3>
+                    <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                      Choose a previously exported backup file (<code>laundry_pos_backup.sqlite</code> or any <code>.sqlite</code>/<code>.db</code> backup) to restore all data. This will completely replace the active database and reload the application.
+                    </p>
+                    <button
+                      className={styles.saveBtn}
+                      style={{ background: '#7C3AED', padding: '0.75rem 1.5rem', border: 'none', color: 'white', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}
+                      onClick={async () => {
+                        if (window.electronAPI?.importDatabase) {
+                          if (confirm('WARNING: Importing a backup will completely replace your current database and restart the application view. Are you sure you want to proceed?')) {
+                            const result = await window.electronAPI.importDatabase();
+                            if (result.success) {
+                              alert('Database imported and restored successfully!');
+                            } else if (result.error !== 'Cancelled') {
+                              alert('Restore failed: ' + result.error);
+                            }
+                          }
+                        }
+                      }}
+                    >
+                      <Upload size={18} /> Choose Backup File & Restore
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.settingsPage}>
       <div className={styles.headerRow}>
@@ -1390,7 +1441,7 @@ export default function Settings() {
           {activeTab === 'Payment Gateways' && (
             <div className={styles.profileContainer}>
               
-              {user.role === 'super_admin' && (
+              {isSuperAdmin && (
                 <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
                   <h2 className={styles.cardTitle}>Online Payment Links</h2>
                   <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.25rem' }}>Configure online payment link status.</p>
@@ -1626,6 +1677,76 @@ export default function Settings() {
                       Sent from the Customer Statements page.
                     </p>
                   </div>
+
+                  <div className={styles.formGroup}>
+                    <label>POS Checkout Receipt Confirmation Message</label>
+                    <textarea
+                      className={styles.inputField}
+                      style={{ minHeight: '100px', padding: '0.75rem', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box', border: '1px solid #CBD5E1', borderRadius: '8px' }}
+                      placeholder="e.g. Hello {customerName}! Your laundry order totaling {total} has been received. Thank you!"
+                      value={settings.waCheckoutReceiptTemplate || ''}
+                      onChange={(e) => updateSettings({ waCheckoutReceiptTemplate: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Sent when choosing to WhatsApp a receipt during the checkout flow.
+                    </p>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>General Workflow Status Update Message</label>
+                    <textarea
+                      className={styles.inputField}
+                      style={{ minHeight: '100px', padding: '0.75rem', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box', border: '1px solid #CBD5E1', borderRadius: '8px' }}
+                      placeholder="e.g. Hello! Regarding your laundry order #{orderId}, the current status is {status}."
+                      value={settings.waStatusUpdateTemplate || ''}
+                      onChange={(e) => updateSettings({ waStatusUpdateTemplate: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Sent when doing a general workflow status update from Expected Deliveries or Kanban board.
+                    </p>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Customer Outstanding Balance Reminder</label>
+                    <textarea
+                      className={styles.inputField}
+                      style={{ minHeight: '100px', padding: '0.75rem', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box', border: '1px solid #CBD5E1', borderRadius: '8px' }}
+                      placeholder="e.g. Hello {customerName}! Friendly reminder that your outstanding balance is {dueAmount}."
+                      value={settings.waCustomerBalanceTemplate || ''}
+                      onChange={(e) => updateSettings({ waCustomerBalanceTemplate: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Sent from the main Customer database list or Overdue Statement view.
+                    </p>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>General Reach out / Quick Chat Template</label>
+                    <textarea
+                      className={styles.inputField}
+                      style={{ minHeight: '100px', padding: '0.75rem', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box', border: '1px solid #CBD5E1', borderRadius: '8px' }}
+                      placeholder="e.g. Hello! We are reaching out from {shopName} regarding your account."
+                      value={settings.waGeneralTemplate || ''}
+                      onChange={(e) => updateSettings({ waGeneralTemplate: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Sent on general quick-chat WhatsApp click when no specific transaction context is present.
+                    </p>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Invoice Detail Share Template</label>
+                    <textarea
+                      className={styles.inputField}
+                      style={{ minHeight: '100px', padding: '0.75rem', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box', border: '1px solid #CBD5E1', borderRadius: '8px' }}
+                      placeholder="e.g. Hello {customerName}! Here is your bill for order {orderId}: {itemsSummary}."
+                      value={settings.waInvoiceShareTemplate || ''}
+                      onChange={(e) => updateSettings({ waInvoiceShareTemplate: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Sent from the print Invoice page when choosing to send details via WhatsApp.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1733,7 +1854,7 @@ export default function Settings() {
                     </div>
                   </div>
 
-                  {user.role === 'super_admin' && (
+                  {isSuperAdmin && (
                     <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem', marginTop: '1.5rem' }}>
                       <div className={styles.backupIcon} style={{ background: '#F3E8FF', padding: '1rem', borderRadius: '12px' }}>
                         <Upload size={32} color="#7C3AED" />

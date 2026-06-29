@@ -62,7 +62,15 @@ export default function OverdueStatement() {
         cleanPhone = cleanCountryCode + cleanPhone;
       }
     }
-    const message = `Hello ${customer.name}! This is a friendly reminder regarding your outstanding balance of ${settings.currencySymbol || 'AED'} ${totalOverdue.toFixed(2)} at ${settings.shopName || 'our laundry'}. Please visit us to settle the payment. Thank you!`;
+    let message = '';
+    if (settings.waCustomerBalanceTemplate) {
+      message = settings.waCustomerBalanceTemplate
+        .replace(/{customerName}/g, customer.name)
+        .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${totalOverdue.toFixed(2)}`)
+        .replace(/{shopName}/g, settings.shopName || 'Laundry Box');
+    } else {
+      message = `Hello ${customer.name}! This is a friendly reminder regarding your outstanding balance of ${settings.currencySymbol || 'AED'} ${totalOverdue.toFixed(2)} at ${settings.shopName || 'our laundry'}. Please visit us to settle the payment. Thank you!`;
+    }
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
     if (window.electronAPI?.openExternal) {
       window.electronAPI.openExternal(url);

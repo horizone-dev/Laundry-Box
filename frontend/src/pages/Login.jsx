@@ -65,11 +65,15 @@ export default function Login({ onLogin }) {
       });
       
       if (response.data.token) {
+        const userProfile = { ...response.data.user };
+        if (userProfile.role === 'admin') userProfile.role = 'super_admin';
+        if (userProfile.role === 'staff') userProfile.role = 'cashier';
+
         sessionStorage.setItem('token', response.data.token);
-        sessionStorage.setItem('user', JSON.stringify(response.data.user));
+        sessionStorage.setItem('user', JSON.stringify(userProfile));
         sessionStorage.setItem('isAuthenticated', 'true');
         onLogin(true);
-        const destination = response.data.user?.role === 'super_admin' ? '/activation' : '/pos';
+        const destination = userProfile.role === 'super_admin' ? '/activation' : '/pos';
         navigate(destination, { replace: true });
       }
     } catch (err) {

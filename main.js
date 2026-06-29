@@ -17,7 +17,7 @@ process.on('unhandledRejection', (reason) => {
   } catch (_) {}
 });
 const { spawn } = require('child_process');
-const { initDB, getDB, closeDB } = require('./database');
+const { initDB, getDB, closeDB, generateServiceSVG } = require('./database');
 
 let mainWindow;
 let backendProcess;
@@ -139,12 +139,12 @@ app.whenReady().then(async () => {
     const shopId = 'SHOP_01';
     const now = new Date().toISOString();
     
-    const insertService = db.prepare('INSERT INTO services (id, shopId, name, price, icon, category, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    insertService.run('1', shopId, "Men's Shirt", 3.50, 'Shirt', 'Laundry', now);
-    insertService.run('2', shopId, "Women's Dress", 8.00, 'Heart', 'Laundry', now);
-    insertService.run('3', shopId, "Suit Jacket", 12.50, 'Layers', 'Dry Cleaning', now);
-    insertService.run('4', shopId, "Pants", 5.00, 'Shirt', 'Laundry', now);
-    insertService.run('5', shopId, "Bedding", 15.00, 'Bed', 'Laundry', now);
+    const insertService = db.prepare('INSERT INTO services (id, shopId, name, price, icon, category, image, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    insertService.run('1', shopId, "Men's Shirt", 3.50, 'Shirt', 'Laundry', generateServiceSVG("Men's Shirt", 'Laundry'), now);
+    insertService.run('2', shopId, "Women's Dress", 8.00, 'Heart', 'Laundry', generateServiceSVG("Women's Dress", 'Laundry'), now);
+    insertService.run('3', shopId, "Suit Jacket", 12.50, 'Layers', 'Dry Cleaning', generateServiceSVG("Suit Jacket", 'Dry Cleaning'), now);
+    insertService.run('4', shopId, "Pants", 5.00, 'Shirt', 'Laundry', generateServiceSVG("Pants", 'Laundry'), now);
+    insertService.run('5', shopId, "Bedding", 15.00, 'Bed', 'Laundry', generateServiceSVG("Bedding", 'Laundry'), now);
 
     const insertType = db.prepare('INSERT INTO service_types (id, shopId, name, price, icon, updatedAt) VALUES (?, ?, ?, ?, ?, ?)');
     insertType.run('wf', shopId, 'Wash & Fold', 4.50, 'Droplet', now);
@@ -700,8 +700,36 @@ ipcMain.handle('import-database', async () => {
     // 1. Close active DB connection
     closeDB();
 
-    // 2. Overwrite the active database file with the backup
-    fs.copyFileSync(backupSrcPath, targetDbPath);
+    // Pause briefly to allow SQLite to release OS file locks on Windows
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Remove SQLite temporary/WAL files if they exist to prevent recovery log replay from corrupting new database state
+    const walPath = targetDbPath + '-wal';
+    const shmPath = targetDbPath + '-shm';
+    const journalPath = targetDbPath + '-journal';
+    if (fs.existsSync(walPath)) {
+      try { fs.unlinkSync(walPath); } catch (e) { console.error('Failed to delete WAL file:', e); }
+    }
+    if (fs.existsSync(shmPath)) {
+      try { fs.unlinkSync(shmPath); } catch (e) { console.error('Failed to delete SHM file:', e); }
+    }
+    if (fs.existsSync(journalPath)) {
+      try { fs.unlinkSync(journalPath); } catch (e) { console.error('Failed to delete journal file:', e); }
+    }
+
+    // 2. Overwrite the active database file with the backup (with retry loop)
+    let copied = false;
+    let attempts = 5;
+    while (!copied && attempts > 0) {
+      try {
+        fs.copyFileSync(backupSrcPath, targetDbPath);
+        copied = true;
+      } catch (copyErr) {
+        attempts--;
+        if (attempts === 0) throw copyErr;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
 
     // 3. Re-initialize DB
     initDB(app.getPath('userData'));

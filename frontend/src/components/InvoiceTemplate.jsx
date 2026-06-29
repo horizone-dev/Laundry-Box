@@ -307,6 +307,15 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <span className={styles.metaValue}>{order.billNumber}</span>
             </div>
           )}
+          <div className={styles.metaRow}>
+            <span className={styles.metaLabelEnAr}>{formatLabel('Payment Status', 'حالة الدفع')}:</span>
+            <span className={styles.metaValue} style={{ 
+              fontWeight: 'bold', 
+              color: getInvoiceStatus() === 'Paid' ? '#16A34A' : (getInvoiceStatus() === 'Partial' ? '#D97706' : '#DC2626')
+            }}>
+              {formatLabel(getInvoiceStatus(), getInvoiceStatus() === 'Paid' ? 'مدفوع' : (getInvoiceStatus() === 'Partial' ? 'مدفوع جزئياً' : 'آجل / ذمم'))}
+            </span>
+          </div>
         </div>
         <div className={styles.metaRightColumn}>
           <div className={styles.metaRow}>
@@ -615,6 +624,12 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <span>{formatLabel('Total (Inc. VAT)', 'الإجمالي شامل الضريبة')}</span>
               <span className={styles.totalVal}><CurrencySymbol size={11} /> {computedTotal.toFixed(2)}</span>
             </div>
+            {computedTotal - (order.paidAmount || 0) > 0 && (
+              <div className={styles.totalRowBilingual} style={{ color: '#E11D48', fontWeight: 'bold', background: '#FFF1F2', padding: '0.2rem 0.5rem', borderRadius: '4px', marginTop: '0.25rem' }}>
+                <span>{formatLabel('Invoice Due', 'المستحق للفاتورة')}</span>
+                <span className={styles.totalVal}><CurrencySymbol size={11} /> {Math.max(0, computedTotal - (order.paidAmount || 0)).toFixed(2)}</span>
+              </div>
+            )}
           </div>
 
           <div className={styles.totalsSubCard}>
@@ -626,6 +641,56 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <span>{formatLabel('Total Paid', 'المبلغ المدفوع')}</span>
               <span className={styles.totalVal}><CurrencySymbol size={11} /> {(order.paidAmount || 0).toFixed(2)}</span>
             </div>
+            {(() => {
+              const breakdown = order.paymentBreakdown;
+              const hasBreakdown = breakdown && (
+                (breakdown.cash && breakdown.cash > 0) ||
+                (breakdown.card && breakdown.card > 0) ||
+                (breakdown.upi && breakdown.upi > 0) ||
+                (breakdown.bank && breakdown.bank > 0)
+              );
+              if (hasBreakdown) {
+                return (
+                  <div style={{ borderTop: '1px dashed #CBD5E1', marginTop: '0.25rem', paddingTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.15rem', width: '100%' }}>
+                    <span style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 600 }}>
+                      {formatLabel('Payment Details', 'تفاصيل الدفع')}:
+                    </span>
+                    {breakdown.cash > 0 && (
+                      <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                        <span>- {formatLabel('Cash', 'نقداً')}</span>
+                        <span><CurrencySymbol size={9} /> {breakdown.cash.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {breakdown.card > 0 && (
+                      <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                        <span>- {formatLabel('Card', 'بطاقة')}</span>
+                        <span><CurrencySymbol size={9} /> {breakdown.card.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {breakdown.upi > 0 && (
+                      <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                        <span>- {formatLabel('UPI', 'يو بي آي')}</span>
+                        <span><CurrencySymbol size={9} /> {breakdown.upi.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {breakdown.bank > 0 && (
+                      <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                        <span>- {formatLabel('Bank Transfer', 'تحويل بنكي')}</span>
+                        <span><CurrencySymbol size={9} /> {breakdown.bank.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              } else if (order.paymentMethod && order.paymentMethod !== 'Not Paid') {
+                return (
+                  <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                    <span>{formatLabel('Paid Via', 'طريقة الدفع')}</span>
+                    <span>{order.paymentMethod}</span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
             <div className={styles.totalRowBilingual}>
               <span>{formatLabel('Previous Balance', 'الرصيد السابق')}</span>
               <span className={styles.totalVal}><CurrencySymbol size={11} /> {(order.previousBalance || 0).toFixed(2)}</span>

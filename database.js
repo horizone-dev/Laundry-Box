@@ -106,7 +106,8 @@ function initDB(appPath) {
       updatedAt TEXT,
       paymentMethod TEXT DEFAULT 'CASH',
       expectedDeliveryDate TEXT,
-      specialInstructions TEXT
+      specialInstructions TEXT,
+      paymentBreakdown TEXT
     );
 
     CREATE TABLE IF NOT EXISTS payments (
@@ -349,6 +350,9 @@ function initDB(appPath) {
     if (!orderCols.some(col => col.name === 'paymentMethod')) {
       db.exec("ALTER TABLE orders ADD COLUMN paymentMethod TEXT DEFAULT 'CASH';");
     }
+    if (!orderCols.some(col => col.name === 'paymentBreakdown')) {
+      db.exec("ALTER TABLE orders ADD COLUMN paymentBreakdown TEXT;");
+    }
 
     const payCols = db.prepare("PRAGMA table_info(payments)").all();
     if (!payCols.some(col => col.name === 'customerId')) {
@@ -540,17 +544,18 @@ function runDataHealer(db) {
       db.prepare(updateQuery).run(params);
     }
 
-    // Normalize legacy paymentMethod values to the 3-option system: Not Paid, Cash, Bank
+    // Normalize legacy paymentMethod values to the 6-option system: Not Paid, Cash, Card, UPI, Bank, Mixed
     console.log("Normalizing legacy paymentMethod values...");
     // Orders that are credit/unpaid: set to 'Not Paid'
     db.exec(`UPDATE orders SET paymentMethod = 'Not Paid', isSynced = 0, updatedAt = '${timestamp}'
-             WHERE paymentStatus IN ('Credit') AND (paymentMethod IS NULL OR paymentMethod = '' OR paymentMethod NOT IN ('Not Paid', 'Cash', 'Bank', 'Mixed'));`);
+             WHERE paymentStatus IN ('Credit') AND (paymentMethod IS NULL OR paymentMethod = '' OR paymentMethod NOT IN ('Not Paid', 'Cash', 'Card', 'UPI', 'Bank', 'Mixed'));`);
     // Old 'Credit' method on any orders -> 'Not Paid'
     db.exec(`UPDATE orders SET paymentMethod = 'Not Paid', isSynced = 0, updatedAt = '${timestamp}' WHERE paymentMethod = 'Credit';`);
-    // Old Card/UPI/Wallet paid orders -> treat as Cash (best-effort normalization)
-    db.exec(`UPDATE orders SET paymentMethod = 'Cash', isSynced = 0, updatedAt = '${timestamp}' WHERE paymentMethod IN ('Card', 'UPI / QR Payment', 'Wallet', 'UPI', 'CASH') AND paymentStatus = 'Paid';`);
-    // Old 'BANK' (uppercase) -> 'Bank'
+    // Normalize legacy uppercase / invalid method names (CASH -> Cash, BANK -> Bank, Wallet -> Cash, etc.)
+    db.exec(`UPDATE orders SET paymentMethod = 'Cash', isSynced = 0, updatedAt = '${timestamp}' WHERE paymentMethod IN ('CASH', 'Wallet', 'UPI / QR Payment') AND paymentStatus = 'Paid';`);
     db.exec(`UPDATE orders SET paymentMethod = 'Bank', isSynced = 0, updatedAt = '${timestamp}' WHERE paymentMethod = 'BANK';`);
+    // Auto-fix 0.00 fully paid orders that are marked as 'Not Paid' under paymentMethod to 'Cash'
+    db.exec(`UPDATE orders SET paymentMethod = 'Cash', isSynced = 0, updatedAt = '${timestamp}' WHERE totalAmount = 0 AND paymentStatus = 'Paid' AND paymentMethod = 'Not Paid';`);
 
     // For fully-paid orders that came from settlements, recalculate paymentMethod from payments table
     console.log("Recalculating paymentMethod for settled credit orders from payment history...");
@@ -558,19 +563,21 @@ function runDataHealer(db) {
       SELECT id, paymentMethod 
       FROM orders 
       WHERE paymentStatus = 'Paid' AND dueAmount <= 0 AND paidAmount > 0
-        AND (paymentMethod IS NULL OR paymentMethod = '' OR paymentMethod = 'Not Paid' OR paymentMethod NOT IN ('Cash', 'Bank', 'Mixed'))
+        AND (paymentMethod IS NULL OR paymentMethod = '' OR paymentMethod = 'Not Paid' OR paymentMethod NOT IN ('Cash', 'Card', 'UPI', 'Bank', 'Mixed'))
     `).all();
     for (const order of paidOrdersFromCredit) {
       const payRows = db.prepare("SELECT DISTINCT method FROM payments WHERE orderId = ?").all(order.id);
-      if (payRows.length === 0) continue; // No payment records — skip (direct POS sale, keep its method)
-      const methods = payRows.map(r => r.method);
-      const hasCash = methods.some(m => m === 'Cash');
-      const hasBank = methods.some(m => m === 'Bank');
-      if (!hasCash && !hasBank) continue; // Unknown legacy methods, skip
+      if (payRows.length === 0) continue;
+      const methods = payRows.map(r => r.method).filter(m => m && m !== 'Not Paid');
+      if (methods.length === 0) continue;
+      
       let newMethod;
-      if (hasCash && hasBank) newMethod = 'Mixed';
-      else if (hasBank) newMethod = 'Bank';
-      else newMethod = 'Cash';
+      if (methods.length === 1) {
+        newMethod = methods[0];
+      } else {
+        newMethod = 'Mixed';
+      }
+      
       if (order.paymentMethod !== newMethod) {
         db.prepare(`UPDATE orders SET paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?`).run(newMethod, timestamp, order.id);
       }
@@ -698,10 +705,89 @@ function runDataHealer(db) {
       });
     }
 
+    // 10. Populate default service images if null or empty
+    const unmappedServices = db.prepare("SELECT id, name, category FROM services WHERE image IS NULL OR image = ''").all();
+    if (unmappedServices.length > 0) {
+      console.log(`Data Healer: Generating dynamic SVGs for ${unmappedServices.length} services...`);
+      const updateStmt = db.prepare("UPDATE services SET image = ?, isSynced = 0, updatedAt = ? WHERE id = ?");
+      const now = new Date().toISOString();
+      for (const s of unmappedServices) {
+        const svgDataUrl = generateServiceSVG(s.name, s.category);
+        updateStmt.run(svgDataUrl, now, s.id);
+      }
+    }
+
     console.log("Data Healer completed.");
   } catch (err) {
     console.error("Data Healer failed:", err);
   }
+}
+
+function generateServiceSVG(name, category) {
+  let startColor = '#3B82F6';
+  let endColor = '#1D4ED8';
+  let iconPath = '';
+
+  const catStr = String(category || '').toLowerCase();
+  if (catStr === 'dry cleaning') {
+    startColor = '#8B5CF6';
+    endColor = '#6D28D9';
+  } else if (catStr === 'alterations') {
+    startColor = '#EC4899';
+    endColor = '#BE185D';
+  }
+
+  const nameLower = String(name || '').toLowerCase();
+  if (nameLower.includes('shirt')) {
+    iconPath = `<path d="M30 25 L40 33 L45 28 L55 28 L60 33 L70 25 L75 35 L70 50 L65 50 L65 75 C65 77 63 79 61 79 L39 79 C37 79 35 77 35 75 L35 50 L30 50 L25 35 Z" fill="white" />
+                <path d="M50 35 L50 75" stroke="${endColor}" stroke-width="2" stroke-dasharray="3 3" />
+                <circle cx="50" cy="45" r="2" fill="white" />
+                <circle cx="50" cy="55" r="2" fill="white" />
+                <circle cx="50" cy="65" r="2" fill="white" />`;
+  } else if (nameLower.includes('dress')) {
+    iconPath = `<path d="M38 25 C38 25 45 28 50 28 C55 28 62 25 62 25 L70 75 C70 77 68 79 66 79 L34 79 C32 79 30 77 30 75 Z" fill="white" />
+                <path d="M42 35 C45 38 55 38 58 35" stroke="${startColor}" stroke-width="2" fill="none" />
+                <path d="M44 48 C46 51 54 51 56 48" stroke="${startColor}" stroke-width="2" fill="none" />`;
+  } else if (nameLower.includes('jacket') || nameLower.includes('suit')) {
+    iconPath = `<path d="M28 28 L40 22 L50 26 L60 22 L72 28 L75 48 L70 50 L70 75 C70 77 68 79 66 79 L34 79 C32 79 30 77 30 75 L30 50 L25 48 Z" fill="white" />
+                <path d="M42 22 L50 35 L58 22" stroke="${startColor}" stroke-width="2" fill="none" />
+                <line x1="50" y1="35" x2="50" y2="79" stroke="${endColor}" stroke-width="2" />
+                <path d="M38 45 H44" stroke="${endColor}" stroke-width="2" />
+                <path d="M56 45 H62" stroke="${endColor}" stroke-width="2" />`;
+  } else if (nameLower.includes('pants') || nameLower.includes('trousers')) {
+    iconPath = `<path d="M32 22 H68 L64 75 C64 77 62 79 60 79 H52 C50 79 49 77 48 75 L45 42 L42 75 C41 77 40 79 38 79 H30 C28 79 26 77 26 75 Z" fill="white" />
+                <line x1="32" y1="30" x2="68" y2="30" stroke="${endColor}" stroke-width="2" />`;
+  } else if (nameLower.includes('bedding') || nameLower.includes('blanket') || nameLower.includes('bed')) {
+    iconPath = `<path d="M20 30 C20 28 22 26 24 26 H76 C78 26 80 28 80 30 V70 C80 72 78 74 76 74 H24 C22 74 20 72 20 70 Z" fill="white" opacity="0.9" />
+                <path d="M25 40 H75 V68 H25 Z" fill="${startColor}" opacity="0.15" />
+                <path d="M28 32 H46 V42 H28 Z" fill="${endColor}" opacity="0.75" rx="2" />
+                <path d="M54 32 H72 V42 H54 Z" fill="${endColor}" opacity="0.75" rx="2" />
+                <path d="M20 50 H80" stroke="${endColor}" stroke-width="3" />`;
+  } else {
+    iconPath = `<path d="M25 35 H75 L70 72 C70 76 66 79 62 79 H38 C34 79 30 76 30 72 Z" fill="white" />
+                <ellipse cx="50" cy="35" rx="25" ry="5" fill="${endColor}" />
+                <path d="M30 45 L35 70" stroke="${startColor}" stroke-width="2" stroke-linecap="round" />
+                <path d="M50 45 L50 70" stroke="${startColor}" stroke-width="2" stroke-linecap="round" />
+                <path d="M70 45 L65 70" stroke="${startColor}" stroke-width="2" stroke-linecap="round" />`;
+  }
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+    <defs>
+      <linearGradient id="grad-${name.replace(/[^a-zA-Z]/g, '')}" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" style="stop-color:${startColor};stop-opacity:1" />
+        <stop offset="100%" style="stop-color:${endColor};stop-opacity:1" />
+      </linearGradient>
+      <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+        <feDropShadow dx="0" dy="4" stdDeviation="4" flood-opacity="0.15"/>
+      </filter>
+    </defs>
+    <rect width="100" height="100" rx="16" fill="url(#grad-${name.replace(/[^a-zA-Z]/g, '')})" />
+    <g filter="url(#shadow)">
+      ${iconPath}
+    </g>
+  </svg>`;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 function getDB() {
@@ -719,4 +805,4 @@ function closeDB() {
   }
 }
 
-module.exports = { initDB, getDB, runDataHealer, closeDB };
+module.exports = { initDB, getDB, runDataHealer, closeDB, generateServiceSVG };

@@ -639,13 +639,23 @@ export default function Workflow() {
           return trans === key ? st : trans;
         };
         const statusText = orderMatch ? translateOrderSt(orderMatch.status) : t('confirmed', settings.language);
-        message = t('waStatusMessage', settings.language).replace('{id}', id).replace('{status}', statusText);
         
-        if (orderMatch && due > 0) {
-          message += `\n\nFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${due.toFixed(2)}.`;
-          if (paymentLinkUrl) {
-            message += `\n\nPay online: ${paymentLinkUrl}`;
+        if (settings.waStatusUpdateTemplate) {
+          message = settings.waStatusUpdateTemplate
+            .replace(/{customerName}/g, orderMatch ? (orderMatch.customerName || orderMatch.customer || 'Customer') : 'Customer')
+            .replace(/{orderId}/g, id)
+            .replace(/{status}/g, statusText)
+            .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${due.toFixed(2)}`)
+            .replace(/{deliveryDate}/g, orderMatch ? (orderMatch.expectedDeliveryDate || '') : '');
+        } else {
+          message = t('waStatusMessage', settings.language).replace('{id}', id).replace('{status}', statusText);
+          if (orderMatch && due > 0) {
+            message += `\n\nFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${due.toFixed(2)}.`;
           }
+        }
+        
+        if (orderMatch && due > 0 && paymentLinkUrl) {
+          message += `\n\nPay online: ${paymentLinkUrl}`;
         }
       }
     }

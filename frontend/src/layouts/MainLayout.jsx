@@ -32,7 +32,7 @@ export default function MainLayout() {
   const location = useLocation();
 
 
-  const [showQuickDeliver, setShowQuickDeliver] = useState(false);
+  const [deliveryToast, setDeliveryToast] = useState(null);
   const [showQuickSettle, setShowQuickSettle] = useState(false);
   const [quickSearch, setQuickSearch] = useState('');
   const [settleSearch, setSettleSearch] = useState('');
@@ -219,16 +219,24 @@ export default function MainLayout() {
 
 
   let user = {};
+  let normalized = false;
   try {
     user = JSON.parse(sessionStorage.getItem('user') || '{}');
+    if (user.role === 'admin') {
+      user.role = 'super_admin';
+      normalized = true;
+    }
+    if (user.role === 'staff') {
+      user.role = 'cashier';
+      normalized = true;
+    }
+    if (normalized) {
+      sessionStorage.setItem('user', JSON.stringify(user));
+    }
   } catch (e) {
     console.error("Failed to parse user data", e);
   }
   let role = user.role || '';
-
-  // Backward compatibility for old roles
-  if (role === 'admin') role = 'super_admin';
-  if (role === 'staff') role = 'cashier';
 
   const [userPermissions, setUserPermissions] = useState(null);
 
@@ -237,7 +245,7 @@ export default function MainLayout() {
   }, [role]);
 
   useEffect(() => {
-    if (role === 'super_admin' && location.pathname !== '/activation') {
+    if (role === 'super_admin' && location.pathname !== '/activation' && location.pathname !== '/settings') {
       navigate('/activation', { replace: true });
     }
   }, [role, location.pathname, navigate]);
@@ -372,102 +380,108 @@ export default function MainLayout() {
     },
   ];
 
-  const handleQuickDeliverSearch = async (val) => {
-    setQuickSearch(val);
-    if (!val || val.trim().length < 2) {
-      setFoundOrder(null);
-      return;
-    }
-
-    if (window.electronAPI?.dbQuery) {
-      const cleanVal = val.replace('#', '').replace('ORDER:', '').trim();
-      const term = `%${cleanVal}%`;
-      const rawTerm = `%${val}%`;
-
-      const res = await window.electronAPI.dbQuery(
-        `SELECT * FROM orders 
-         WHERE id LIKE ? OR billNumber LIKE ? 
-         OR id LIKE ? OR billNumber LIKE ? 
-         OR customerName LIKE ? OR customerPhone LIKE ?`,
-        [term, term, rawTerm, rawTerm, term, term]
-      );
-      if (res.success && res.data.length > 0) {
-        const cleanSearch = val.replace('#', '').replace('ORDER:', '').trim().toLowerCase();
-        // Sort to find the best match
-        const sorted = [...res.data].sort((a, b) => {
-          const aId = (a.id || '').toString().toLowerCase().replace('#', '');
-          const bId = (b.id || '').toString().toLowerCase().replace('#', '');
-          const aBill = (a.billNumber || '').toString().toLowerCase().replace('#', '');
-          const bBill = (b.billNumber || '').toString().toLowerCase().replace('#', '');
-
-          if (aId === cleanSearch || aBill === cleanSearch) return -1;
-          if (bId === cleanSearch || bBill === cleanSearch) return 1;
-          return 0;
-        });
-        setFoundOrder(sorted[0]);
-        return; // Success, stop here
-      }
-    }
-
-    // Fallback to Remote API if Local DB fails or has no results
-    try {
-      const res = await axios.get(`${API_BASE}/orders/search?q=${encodeURIComponent(val)}`);
-      if (res.data && res.data.length > 0) {
-        setFoundOrder(res.data[0]);
-      } else {
-        setFoundOrder(null);
-      }
-    } catch (apiErr) {
-      console.error("Remote search failed:", apiErr);
-      setFoundOrder(null);
-    }
+  const showToast = (message, type = 'success') => {
+    setDeliveryToast({ message, type });
+    setTimeout(() => {
+      setDeliveryToast(null);
+    }, 4000);
   };
 
-  const processQuickDelivery = async () => {
-    if (!foundOrder) return;
-    setIsUpdating(true);
-    try {
-      if (window.electronAPI?.dbQuery) {
-        let history = [];
-        try {
-          history = typeof foundOrder.statusHistory === 'string'
-            ? JSON.parse(foundOrder.statusHistory || '[]')
-            : (foundOrder.statusHistory || []);
-          if (!Array.isArray(history)) history = [];
-        } catch (e) {
-          history = [];
+  const handleQuickDeliverKeyPress = async (e) => {
+    if (e.key === 'Enter') {
+      const val = e.target.value.trim();
+      if (!val) return;
+
+      const cleanVal = val.replace('#', '').trim();
+      if (!cleanVal) return;
+
+      e.target.value = '';
+
+      try {
+        if (window.electronAPI?.dbQuery) {
+          const queryRes = await window.electronAPI.dbQuery(
+            'SELECT * FROM orders WHERE id = ? OR billNumber = ?',
+            [cleanVal, cleanVal]
+          );
+
+          if (queryRes.success && queryRes.data.length > 0) {
+            const order = queryRes.data[0];
+
+            if (order.status === 'Delivered') {
+              showToast(`Order #${order.id} is already Delivered!`, 'error');
+              return;
+            }
+
+            let history = [];
+            try {
+              history = typeof order.statusHistory === 'string'
+                ? JSON.parse(order.statusHistory || '[]')
+                : (order.statusHistory || []);
+              if (!Array.isArray(history)) history = [];
+            } catch (err) {
+              history = [];
+            }
+            const newHistory = [...history, { status: 'Delivered', updatedBy: 'Admin Staff', timestamp: new Date().toISOString() }];
+
+            const updateRes = await window.electronAPI.dbQuery(
+              'UPDATE orders SET status = ?, statusHistory = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+              ['Delivered', JSON.stringify(newHistory), new Date().toISOString(), order.id]
+            );
+
+            if (updateRes.success) {
+              try {
+                await axios.patch(`${API_BASE}/orders/${encodeURIComponent(order.id)}/status`, {
+                  status: 'Delivered',
+                  updatedBy: 'Admin Staff'
+                });
+              } catch (syncErr) {
+                console.warn("Cloud sync failed, will retry later:", syncErr);
+              }
+
+              showToast(`Order #${order.id} marked as Delivered!`, 'success');
+
+              setTimeout(() => {
+                window.location.reload();
+              }, 1500);
+            } else {
+              showToast(`Failed to update Order #${order.id}`, 'error');
+            }
+          } else {
+            try {
+              const remoteRes = await axios.get(`${API_BASE}/orders/search?q=${encodeURIComponent(cleanVal)}`);
+              if (remoteRes.data && remoteRes.data.length > 0) {
+                const order = remoteRes.data[0];
+                if (order.status === 'Delivered') {
+                  showToast(`Order #${order.id} is already Delivered!`, 'error');
+                  return;
+                }
+
+                await axios.patch(`${API_BASE}/orders/${encodeURIComponent(order.id)}/status`, {
+                  status: 'Delivered',
+                  updatedBy: 'Admin Staff'
+                });
+
+                showToast(`Order #${order.id} marked as Delivered!`, 'success');
+                setTimeout(() => {
+                  window.location.reload();
+                }, 1500);
+              } else {
+                showToast(`Order #${cleanVal} not found!`, 'error');
+              }
+            } catch (apiErr) {
+              showToast(`Order #${cleanVal} not found!`, 'error');
+            }
+          }
+        } else {
+          showToast(`Mock: Order #${cleanVal} marked as Delivered!`, 'success');
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
         }
-        const newHistory = [...history, { status: 'Delivered', updatedBy: 'Admin Staff', timestamp: new Date().toISOString() }];
-
-        await window.electronAPI.dbQuery(
-          'UPDATE orders SET status = ?, statusHistory = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          ['Delivered', JSON.stringify(newHistory), new Date().toISOString(), foundOrder.id]
-        );
-
-        // Sync with cloud backend if online
-        try {
-          await axios.patch(`${API_BASE}/orders/${encodeURIComponent(foundOrder.id)}/status`, {
-            status: 'Delivered',
-            updatedBy: 'Admin Staff'
-          });
-        } catch (syncErr) {
-          console.warn("Cloud sync failed, will retry later:", syncErr);
-        }
-
-        alert(`Order #${foundOrder.id} marked as Delivered!`);
-        setShowQuickDeliver(false);
-        setQuickSearch('');
-        setFoundOrder(null);
-
-        // Refresh page if on Orders page
-        if (location.pathname.includes('/orders')) {
-          window.location.reload();
-        }
+      } catch (err) {
+        console.error("Auto-delivery failed:", err);
+        showToast("Auto-delivery failed: " + err.message, 'error');
       }
-    } catch (err) {
-      alert("Failed to update status: " + err.message);
-    } finally {
-      setIsUpdating(false);
     }
   };
   const handleQuickSettleSearch = async (val) => {
@@ -697,7 +711,7 @@ export default function MainLayout() {
 
   const filteredNavItems = navItems
     .filter(item => {
-      if (role === 'super_admin') return item.path === '/activation';
+      if (role === 'super_admin') return item.path === '/activation' || item.path === '/settings';
       if (item.roleOnly) {
         if (Array.isArray(item.roleOnly)) return item.roleOnly.includes(role);
         return item.roleOnly === role;
@@ -882,13 +896,14 @@ export default function MainLayout() {
                 >
                   <Plus size={18} /> New Order
                 </button>
-                <button
-                  className={styles.headerDeliverBtn}
-                  onClick={() => setShowQuickDeliver(true)}
-                  title="Quick Delivery"
-                >
-                  <Truck size={18} /> Deliver
-                </button>
+                <div className={styles.headerDeliverInput} title="Scan or type Order ID to mark as Delivered">
+                  <Truck size={16} color="#94A3B8" />
+                  <input
+                    type="text"
+                    placeholder="Deliver Order ID..."
+                    onKeyDown={handleQuickDeliverKeyPress}
+                  />
+                </div>
                 <button className={styles.headerSettleBtn} onClick={() => setShowQuickSettle(true)}>
                   <DollarSign size={18} /> Settle Bill
                 </button>
@@ -1017,73 +1032,6 @@ export default function MainLayout() {
         </div>
       </main>
 
-      {/* Quick Delivery Modal */}
-      {showQuickDeliver && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.quickModal}>
-            <div className={styles.modalHeader}>
-              <div className={styles.titleWithIcon}>
-                <Truck color="#2563EB" size={24} />
-                <h2>Quick Delivery</h2>
-              </div>
-              <button className={styles.closeBtn} onClick={() => { setShowQuickDeliver(false); setQuickSearch(''); setFoundOrder(null); }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className={styles.modalBody}>
-              <div className={styles.inputGroup}>
-                <label>Enter Bill No or Order ID</label>
-                <div className={styles.searchWrapper}>
-                  <Search size={18} className={styles.searchIcon} />
-                  <input
-                    type="text"
-                    placeholder={`e.g. ${settings.invoicePrefix || '#'}${settings.invoicePrefix ? '0001' : '50504'}`}
-                    value={quickSearch}
-                    onChange={(e) => handleQuickDeliverSearch(e.target.value)}
-                    autoFocus
-                  />
-                </div>
-              </div>
-
-              {foundOrder ? (
-                <div className={styles.orderResult}>
-                  <div className={styles.resultHeader}>
-                    <span className={styles.orderId}>{settings.invoicePrefix || ''}{foundOrder.id}</span>
-                    <span className={`${styles.statusBadge} ${foundOrder.status === 'Delivered' ? styles.statusDone : ''}`}>
-                      {foundOrder.status}
-                    </span>
-                  </div>
-                  <div className={styles.resultRow}>
-                    <span className={styles.label}>Customer:</span>
-                    <span className={styles.value}>{foundOrder.customerName || 'Walk-in'}</span>
-                  </div>
-                  <div className={styles.resultRow}>
-                    <span className={styles.label}>Amount:</span>
-                    <span className={styles.value}>{(settings.currencySymbol || 'AED')} {foundOrder.totalAmount?.toFixed(2)}</span>
-                  </div>
-
-                  {foundOrder.status === 'Delivered' ? (
-                    <div className={styles.alreadyDelivered}>
-                      <CheckCircle size={16} /> Already Delivered
-                    </div>
-                  ) : (
-                    <button
-                      className={styles.confirmDeliverBtn}
-                      onClick={processQuickDelivery}
-                      disabled={isUpdating}
-                    >
-                      {isUpdating ? 'Updating...' : 'Mark as Delivered'}
-                    </button>
-                  )}
-                </div>
-              ) : quickSearch.length >= 3 ? (
-                <div className={styles.noOrder}>No order found with this ID</div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      )}
       {/* Quick Settlement Modal */}
       {showQuickSettle && (
         <div className={styles.modalOverlay}>
@@ -1246,6 +1194,12 @@ export default function MainLayout() {
         </div>
       )}
 
+      {deliveryToast && (
+        <div className={deliveryToast.type === 'error' ? styles.toastNotificationError : styles.toastNotification}>
+          {deliveryToast.type === 'error' ? <AlertTriangle size={18} /> : <CheckCircle size={18} />}
+          <span>{deliveryToast.message}</span>
+        </div>
+      )}
     </div>
   );
 }

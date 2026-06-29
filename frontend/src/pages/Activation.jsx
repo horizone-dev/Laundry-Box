@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  ShieldCheck, Key, Package, Calendar, Cpu, CheckCircle, 
-  Printer, Zap, Coffee, Users, Cloud, BarChart3, Save, RefreshCw, 
-  Info, AlertTriangle, Clock, Building2
+  ShieldCheck, Key, Calendar, Cpu, CheckCircle, 
+  RefreshCw, Info, AlertTriangle, Clock, Building2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useSettings } from '../store/SettingsContext';
@@ -47,10 +46,6 @@ const Activation = () => {
       setFeatures(settings.licenseFeatures);
     }
   }, [settings]);
-
-  const toggleFeature = (feature) => {
-    setFeatures(prev => ({ ...prev, [feature]: !prev[feature] }));
-  };
 
   const handleActivate = async () => {
     const payload = {
@@ -101,11 +96,6 @@ const Activation = () => {
       setExpiryDate(trialDateStr);
       alert('Software reset to a 1-month trial period.');
     }
-  };
-
-  const handleSaveFeatures = async () => {
-    await updateSettings({ licenseFeatures: features });
-    alert('Features updated successfully!');
   };
 
   const getRemainingDays = () => {
@@ -211,127 +201,6 @@ const Activation = () => {
           </div>
         </motion.div>
 
-        {/* Card 2: Premium Features */}
-        <motion.div 
-          className={styles.card}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
-        >
-          <div className={styles.cardHeader}>
-            <Cpu size={20} className={styles.iconCyan} />
-            <h3>Premium Features</h3>
-          </div>
-          <div className={styles.featureList}>
-            <div className={styles.featureItem}>
-              <div className={styles.featureInfo}>
-                <Package size={18} />
-                <div>
-                  <p>Quick Items POS</p>
-                  <span>Grid-based quick item selection on checkout</span>
-                </div>
-              </div>
-              <label className={styles.switch}>
-                <input 
-                  type="checkbox" 
-                  checked={features.quickItem} 
-                  onChange={() => toggleFeature('quickItem')} 
-                />
-                <span className={styles.slider}></span>
-              </label>
-            </div>
-            
-            <div className={styles.featureItem}>
-              <div className={styles.featureInfo}>
-                <Zap size={18} />
-                <div>
-                  <p>Barcode Scanning</p>
-                  <span>Scan invoice barcodes for instant search</span>
-                </div>
-              </div>
-              <label className={styles.switch}>
-                <input 
-                  type="checkbox" 
-                  checked={features.barcode} 
-                  onChange={() => toggleFeature('barcode')} 
-                />
-                <span className={styles.slider}></span>
-              </label>
-            </div>
-
-            <div className={styles.featureItem}>
-              <div className={styles.featureInfo}>
-                <Coffee size={18} />
-                <div>
-                  <p>KOT / Kitchen Ticket</p>
-                  <span>Print preparation tickets for operators</span>
-                </div>
-              </div>
-              <label className={styles.switch}>
-                <input 
-                  type="checkbox" 
-                  checked={features.kot} 
-                  onChange={() => toggleFeature('kot')} 
-                />
-                <span className={styles.slider}></span>
-              </label>
-            </div>
-
-            <div className={styles.featureItem}>
-              <div className={styles.featureInfo}>
-                <Users size={18} />
-                <div>
-                  <p>Multi-User Access</p>
-                  <span>Shift management and custom employee roles</span>
-                </div>
-              </div>
-              <label className={styles.switch}>
-                <input 
-                  type="checkbox" 
-                  checked={features.multiUser} 
-                  onChange={() => toggleFeature('multiUser')} 
-                />
-                <span className={styles.slider}></span>
-              </label>
-            </div>
-
-            <div className={styles.featureItem}>
-              <div className={styles.featureInfo}>
-                <BarChart3 size={18} />
-                <div>
-                  <p>Analytics & Reports</p>
-                  <span>Detailed revenue, expense, and tax statements</span>
-                </div>
-              </div>
-              <label className={styles.switch}>
-                <input 
-                  type="checkbox" 
-                  checked={features.reports} 
-                  onChange={() => toggleFeature('reports')} 
-                />
-                <span className={styles.slider}></span>
-              </label>
-            </div>
-
-            <div className={styles.featureItem}>
-              <div className={styles.featureInfo}>
-                <Cloud size={18} />
-                <div>
-                  <p>Cloud Sync Backup</p>
-                  <span>Automatic background database replication</span>
-                </div>
-              </div>
-              <label className={styles.switch}>
-                <input 
-                  type="checkbox" 
-                  checked={features.cloudSync} 
-                  onChange={() => toggleFeature('cloudSync')} 
-                />
-                <span className={styles.slider}></span>
-              </label>
-            </div>
-          </div>
-        </motion.div>
 
         {/* Card 3: License Status */}
         <motion.div 
@@ -380,10 +249,6 @@ const Activation = () => {
         <button className={styles.resetBtn} onClick={handleReset}>
           <RefreshCw size={18} />
           <span>Reset Activation</span>
-        </button>
-        <button className={styles.saveBtn} onClick={handleSaveFeatures}>
-          <Save size={18} />
-          <span>Save License</span>
         </button>
       </footer>
     </div>

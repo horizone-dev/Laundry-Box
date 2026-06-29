@@ -12,6 +12,31 @@ import styles from './Reports.module.css';
 
 export default function RevenueReport() {
   const { settings, formatDate } = useSettings();
+  const formatDateTimeSplit = (dateVal) => {
+    if (!dateVal) return { date: 'N/A', time: '' };
+    const formattedDate = formatDate(dateVal);
+    if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return { date: formattedDate, time: '' };
+    
+    let d;
+    try {
+      d = new Date(dateVal);
+    } catch(e) {
+      return { date: formattedDate, time: '' };
+    }
+    if (isNaN(d.getTime())) return { date: formattedDate, time: '' };
+
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    let ampm = '';
+    if (settings.timeFormat === '12h' || !settings.timeFormat) {
+      ampm = hours >= 12 ? ' PM' : ' AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+    }
+    const formattedTime = `${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
+    return { date: formattedDate, time: formattedTime };
+  };
+
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -125,16 +150,16 @@ export default function RevenueReport() {
         {stats.map((s, i) => (
           <div key={i} className={styles.kpiCard}>
             <div className={styles.cardHeader} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ background: s.bg, padding: '0.75rem', borderRadius: '12px' }}>
+              <div style={{ background: s.bg, padding: '0.4rem', borderRadius: '12px' }}>
                 <s.icon size={20} color={s.color} />
               </div>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#10B981', background: '#ECFDF5', padding: '0.25rem 0.5rem', borderRadius: '100px' }}>
                 +12.5%
               </span>
             </div>
-            <div style={{ marginTop: '1.25rem' }}>
+            <div style={{ marginTop: '0.5rem' }}>
               <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748B' }}>{s.label}</span>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#1E293B', marginTop: '0.25rem' }}>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1E293B', marginTop: '0.15rem' }}>
                 <CurrencySymbol size={18} /> {s.value.toLocaleString()}
               </h2>
             </div>
@@ -142,8 +167,8 @@ export default function RevenueReport() {
         ))}
       </div>
 
-      <div className={styles.tableCard} style={{ marginTop: '2rem', background: 'white', borderRadius: '24px', padding: '1.5rem', border: '1px solid #E2E8F0' }}>
-        <div className={styles.tableToolbar} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', gap: '1rem', flexWrap: 'wrap' }}>
+      <div className={styles.tableCard} style={{ marginTop: '0.75rem', background: 'white', borderRadius: '16px', padding: '0.75rem 1rem', border: '1px solid #E2E8F0' }}>
+        <div className={styles.tableToolbar} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', gap: '1rem', flexWrap: 'wrap' }}>
           <div className={styles.searchBox} style={{ position: 'relative', flex: 1, maxWidth: '400px' }}>
             <Search size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
             <input 
@@ -151,14 +176,14 @@ export default function RevenueReport() {
               placeholder="Search by Order ID..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              style={{ width: '100%', padding: '0.75rem 1rem 0.75rem 2.75rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', outline: 'none' }}
+              style={{ width: '100%', padding: '0.5rem 1rem 0.5rem 2.5rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', outline: 'none' }}
             />
           </div>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
              <select 
                value={filterDate} 
                onChange={(e) => setFilterDate(e.target.value)}
-               style={{ padding: '0.75rem 1rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', fontWeight: 600, color: '#475569' }}
+               style={{ padding: '0.5rem 0.75rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', fontWeight: 600, color: '#475569' }}
              >
                <option value="All">All Time</option>
                <option value="Today">Today</option>
@@ -169,7 +194,7 @@ export default function RevenueReport() {
              <select 
                value={filterMethod} 
                onChange={(e) => setFilterMethod(e.target.value)}
-               style={{ padding: '0.75rem 1rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', fontWeight: 600, color: '#475569' }}
+               style={{ padding: '0.5rem 0.75rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', fontWeight: 600, color: '#475569' }}
              >
                <option value="All">All Methods</option>
                <option value="Cash">Cash</option>
@@ -183,21 +208,28 @@ export default function RevenueReport() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ textAlign: 'left', borderBottom: '1px solid #F1F5F9' }}>
-              <th style={{ padding: '1rem', color: '#64748B', fontSize: '0.85rem' }}>DATE</th>
-              <th style={{ padding: '1rem', color: '#64748B', fontSize: '0.85rem' }}>ORDER ID</th>
-              <th style={{ padding: '1rem', color: '#64748B', fontSize: '0.85rem' }}>METHOD</th>
-              <th style={{ padding: '1rem', color: '#64748B', fontSize: '0.85rem' }}>STATUS</th>
-              <th style={{ padding: '1rem', color: '#64748B', fontSize: '0.85rem', textAlign: 'right' }}>AMOUNT</th>
+              <th style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.85rem' }}>DATE</th>
+              <th style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.85rem' }}>ORDER ID</th>
+              <th style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.85rem' }}>METHOD</th>
+              <th style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.85rem' }}>STATUS</th>
+              <th style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.85rem', textAlign: 'right' }}>AMOUNT</th>
             </tr>
           </thead>
           <tbody>
-            {paginatedPayments.map((p, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                <td style={{ padding: '1.25rem 1rem', fontSize: '0.9rem', color: '#64748B', fontWeight: 600 }}>
-                  {formatDate(p.createdAt)}
-                </td>
-                <td style={{ padding: '1.25rem 1rem', fontWeight: 700, color: '#1E293B' }}>{p.orderId || 'Direct Payment'}</td>
-                <td style={{ padding: '1.25rem 1rem' }}>
+            {paginatedPayments.map((p, i) => {
+              const { date: payDate, time: payTime } = formatDateTimeSplit(p.createdAt);
+              return (
+                <tr key={i} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                  <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.9rem', color: '#64748B', fontWeight: 600 }}>
+                    <div>{payDate}</div>
+                    {payTime && (
+                      <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '0.15rem', fontWeight: 500 }}>
+                        {payTime}
+                      </div>
+                    )}
+                  </td>
+                <td style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: '#1E293B' }}>{p.orderId || 'Direct Payment'}</td>
+                <td style={{ padding: '0.5rem 0.75rem' }}>
                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                      {(() => {
                        const m = p.method?.toUpperCase();
@@ -209,16 +241,17 @@ export default function RevenueReport() {
                      <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{p.method}</span>
                    </div>
                 </td>
-                <td style={{ padding: '1.25rem 1rem' }}>
+                <td style={{ padding: '0.5rem 0.75rem' }}>
                   <span style={{ padding: '0.25rem 0.75rem', background: '#DCFCE7', color: '#166534', borderRadius: '100px', fontSize: '0.75rem', fontWeight: 700 }}>
                     SUCCESS
                   </span>
                 </td>
-                <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 800, color: '#1E293B' }}>
+                <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 800, color: '#1E293B' }}>
                   <CurrencySymbol size={14} /> {p.amount.toFixed(2)}
                 </td>
               </tr>
-            ))}
+            );
+            })}
             {filteredPayments.length === 0 && (
               <tr>
                 <td colSpan="5" style={{ padding: '3rem', textAlign: 'center', color: '#94A3B8', fontWeight: 600 }}>

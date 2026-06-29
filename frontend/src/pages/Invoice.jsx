@@ -106,6 +106,20 @@ export default function Invoice() {
               residency: 'Customer Residency',
               status: rawOrder.status,
               paymentStatus: rawOrder.paymentStatus,
+              paymentMethod: rawOrder.paymentMethod,
+              paymentBreakdown: (() => {
+                let parsed = null;
+                try {
+                  if (rawOrder.paymentBreakdown && rawOrder.paymentBreakdown !== 'null') {
+                    parsed = typeof rawOrder.paymentBreakdown === 'string'
+                      ? JSON.parse(rawOrder.paymentBreakdown)
+                      : rawOrder.paymentBreakdown;
+                  }
+                } catch (e) {
+                  console.error("Failed to parse paymentBreakdown:", e);
+                }
+                return parsed;
+              })(),
               items: (() => {
                 let parsed = [];
                 try {
@@ -250,64 +264,73 @@ export default function Invoice() {
       }
     }
 
-    const itemsSummary = order.items.map(item => `- ${item.qty} x ${item.name} (${settings.currencySymbol || 'AED'} ${item.total.toFixed(2)})`).join('%0A');
-    let message = `*INVOICE RECEIVED* %0A%0AHello! Here is your bill for order *${order.id}*.%0A%0A*Items:*%0A${itemsSummary}%0A%0A*Total Amount: ${settings.currencySymbol || 'AED'} ${order.total.toFixed(2)}*`;
-    
-    if (order.expectedDeliveryDate) {
-      message += `%0A%0A*Expected Delivery Date:* ${order.expectedDeliveryDate}`;
-    }
-    
-    message += `%0A%0A_Your PDF invoice has been generated and downloaded. Please attach it here to share._`;
-    
+    const itemsSummaryNormal = order.items.map(item => `- ${item.qty} x ${item.name} (${settings.currencySymbol || 'AED'} ${item.total.toFixed(2)})`).join('\n');
     const due = order.dueAmount ?? (order.total - (order.paidAmount || 0));
-    if (due > 0) {
-      message += `%0A%0AFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${due.toFixed(2)}.`;
-      
-      if (settings.enablePaymentLinks !== false) {
-        // Auto generate / retrieve payment link
-        let paymentLinkUrl = '';
-        if (window.electronAPI?.dbQuery) {
-          try {
-            const searchRes = await window.electronAPI.dbQuery(
-              `SELECT * FROM payment_links WHERE (description LIKE ? OR id = ?) AND status = 'Active' LIMIT 1`,
-              [`%${order.id}%`, `LNK-${order.billNumber}`]
-            );
-            if (searchRes.success && searchRes.data.length > 0) {
-              paymentLinkUrl = searchRes.data[0].url;
-            } else {
-              const linkId = `LNK-${order.billNumber || Date.now().toString().slice(-4)}`;
-              const url = `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`;
-              const dateStr = getLocalDateTime();
-              await window.electronAPI.dbQuery(
-                `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
-                [
-                  linkId,
-                  order.customerId || 'Walk-in',
-                  order.customer || 'Walk-in Customer',
-                  `Order #${order.billNumber || order.id}`,
-                  due,
-                  'Apple Pay',
-                  dateStr,
-                  url
-                ]
-              );
-              paymentLinkUrl = url;
-            }
-          } catch (err) {
-            console.error("Failed to query or create payment link in database:", err);
-          }
-        } else {
-          paymentLinkUrl = `https://pay.lundry.ae/lnk/lnk-${(order.billNumber || 'mock').toLowerCase()}`;
-        }
-        
-        if (paymentLinkUrl) {
-          message += `%0A%0APlease pay online using this link: ${paymentLinkUrl}`;
-        }
+
+    let message = '';
+    if (settings.waInvoiceShareTemplate) {
+      message = settings.waInvoiceShareTemplate
+        .replace(/{customerName}/g, order.customer || 'Customer')
+        .replace(/{orderId}/g, order.id)
+        .replace(/{itemsSummary}/g, itemsSummaryNormal)
+        .replace(/{total}/g, `${settings.currencySymbol || 'AED'} ${order.total.toFixed(2)}`)
+        .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${due.toFixed(2)}`)
+        .replace(/{deliveryDate}/g, order.expectedDeliveryDate || '');
+    } else {
+      message = `*INVOICE RECEIVED*\n\nHello! Here is your bill for order *${order.id}*.\n\n*Items:*\n${itemsSummaryNormal}\n\n*Total Amount: ${settings.currencySymbol || 'AED'} ${order.total.toFixed(2)}*`;
+      if (order.expectedDeliveryDate) {
+        message += `\n\n*Expected Delivery Date:* ${order.expectedDeliveryDate}`;
+      }
+      message += `\n\n_Your PDF invoice has been generated and downloaded. Please attach it here to share._`;
+      if (due > 0) {
+        message += `\n\nFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${due.toFixed(2)}.`;
       }
     }
 
-    const url = `https://wa.me/${finalPhone}?text=${message}`;
+    if (due > 0 && settings.enablePaymentLinks !== false) {
+      // Auto generate / retrieve payment link
+      let paymentLinkUrl = '';
+      if (window.electronAPI?.dbQuery) {
+        try {
+          const searchRes = await window.electronAPI.dbQuery(
+            `SELECT * FROM payment_links WHERE (description LIKE ? OR id = ?) AND status = 'Active' LIMIT 1`,
+            [`%${order.id}%`, `LNK-${order.billNumber}`]
+          );
+          if (searchRes.success && searchRes.data.length > 0) {
+            paymentLinkUrl = searchRes.data[0].url;
+          } else {
+            const linkId = `LNK-${order.billNumber || Date.now().toString().slice(-4)}`;
+            const url = `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`;
+            const dateStr = getLocalDateTime();
+            await window.electronAPI.dbQuery(
+              `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
+              [
+                linkId,
+                order.customerId || 'Walk-in',
+                order.customer || 'Walk-in Customer',
+                `Order #${order.billNumber || order.id}`,
+                due,
+                'Apple Pay',
+                dateStr,
+                url
+              ]
+            );
+            paymentLinkUrl = url;
+          }
+        } catch (err) {
+          console.error("Failed to query or create payment link in database:", err);
+        }
+      } else {
+        paymentLinkUrl = `https://pay.lundry.ae/lnk/lnk-${(order.billNumber || 'mock').toLowerCase()}`;
+      }
+      
+      if (paymentLinkUrl) {
+        message += `\n\nPlease pay online using this link: ${paymentLinkUrl}`;
+      }
+    }
+
+    const url = `https://wa.me/${finalPhone}?text=${encodeURIComponent(message)}`;
     if (window.electronAPI?.openExternal) {
       window.electronAPI.openExternal(url);
     } else {
