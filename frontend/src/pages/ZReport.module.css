@@ -103,7 +103,7 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.55rem 1.1rem;
-  background: #2563eb;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 10px;
@@ -115,7 +115,7 @@
 }
 
 .primaryBtn:hover {
-  background: #1d4ed8;
+  background: var(--primary-hover);
 }
 
 .chevronDown {
@@ -176,7 +176,7 @@
 
 .spinner {
   animation: spin 1s linear infinite;
-  color: #2563eb;
+  color: var(--primary);
 }
 
 @keyframes spin {
@@ -194,7 +194,7 @@
 }
 
 .shiftCard {
-  border-left: 4px solid #2563eb;
+  border-left: 4px solid var(--primary);
 }
 
 .shiftDetailsGrid {
@@ -309,7 +309,7 @@
   font-size: 0.7rem;
   font-weight: 700;
   background: #eff6ff;
-  color: #1d4ed8;
+  color: var(--primary-hover);
   padding: 0.15rem 0.5rem;
   border-radius: 100px;
 }
@@ -537,7 +537,7 @@
 }
 
 .cashInputWrapper:focus-within {
-  border-color: #2563eb;
+  border-color: var(--primary);
   background: white;
 }
 
@@ -600,7 +600,7 @@
 
 .badgeBlue {
   background: #eff6ff;
-  color: #1d4ed8;
+  color: var(--primary-hover);
 }
 
 /* Recent Expenses Table */
@@ -705,7 +705,7 @@
 
 .pdfBtn {
   background: #eff6ff;
-  color: #1d4ed8;
+  color: var(--primary-hover);
 }
 
 .pdfBtn:hover {
@@ -1052,7 +1052,7 @@
 }
 
 .modalInputArea:focus-within {
-  border-color: #2563eb;
+  border-color: var(--primary);
   background: white;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
@@ -1109,7 +1109,7 @@
 }
 
 .confirmBtn {
-  background: #2563eb;
+  background: var(--primary);
   color: white;
   border: none;
   padding: 0.55rem 1.25rem;
@@ -1122,7 +1122,7 @@
 }
 
 .confirmBtn:hover {
-  background: #1d4ed8;
+  background: var(--primary-hover);
 }
 
 .shiftTimeInput {
@@ -1139,6 +1139,6 @@
 }
 
 .shiftTimeInput:focus {
-  border-color: #2563eb;
+  border-color: var(--primary);
   background: white;
 }

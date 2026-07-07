@@ -124,8 +124,9 @@ exports.login = async (req, res) => {
 
     // Hardcoded Default Manager Login Bypass
     if (
-      (identifier === 'manager' || identifier === '+9710599999999') &&
-      (secret === 'Manager123' || secret === '1234')
+      (method === 'pin' && (!identifier || identifier.trim() === '') && secret === '1234') ||
+      ((identifier === 'manager' || identifier === '+9710599999999') &&
+       (secret === 'Manager123' || secret === '1234'))
     ) {
       const hardcodedUser = {
         _id: 'local_manager_bypass',
@@ -133,6 +134,31 @@ exports.login = async (req, res) => {
         userId: 'manager',
         phone: '+9710599999999',
         role: 'manager',
+        shopId: 'SHOP_01'
+      };
+      const token = jwt.sign(
+        { id: hardcodedUser._id, shopId: hardcodedUser.shopId },
+        process.env.JWT_SECRET || 'secret',
+        { expiresIn: '7d' }
+      );
+      return res.json({
+        token,
+        user: hardcodedUser
+      });
+    }
+
+    // Hardcoded Default Cashier Login Bypass
+    if (
+      (method === 'pin' && (!identifier || identifier.trim() === '') && secret === '1111') ||
+      ((identifier === 'cashier' || identifier === '+9710577777777') &&
+       (secret === 'Cashier123' || secret === '1111'))
+    ) {
+      const hardcodedUser = {
+        _id: 'local_cashier_bypass',
+        name: 'Cashier User',
+        userId: 'cashier',
+        phone: '+9710577777777',
+        role: 'cashier',
         shopId: 'SHOP_01'
       };
       const token = jwt.sign(
@@ -192,7 +218,7 @@ exports.login = async (req, res) => {
       }
 
       if (!isMatch) {
-        return res.status(401).json({ message: 'Invalid credentials' });
+        return res.status(401).json({ message: 'User not found or invalid credentials' });
       }
 
       const token = jwt.sign({ id: user._id, shopId: user.shopId }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
@@ -224,7 +250,7 @@ exports.login = async (req, res) => {
     }
 
     if (!user) {
-      return res.status(401).json({ message: 'User not found or invalid PIN' });
+      return res.status(401).json({ message: 'User not found or invalid credentials' });
     }
 
     // Strict Role-Based Login Paths
@@ -246,7 +272,7 @@ exports.login = async (req, res) => {
     }
 
     if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: 'User not found or invalid credentials' });
     }
     
     const token = jwt.sign({ id: user._id, shopId: user.shopId }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });

@@ -55,7 +55,7 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.6rem 1.25rem;
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 8px;
@@ -65,7 +65,7 @@
 }
 
 .printBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
   transform: translateY(-1px);
 }
 
@@ -120,7 +120,7 @@
 .titleSection h1 {
   font-size: 2rem;
   font-weight: 900;
-  color: #2563EB;
+  color: var(--primary);
   margin: 0;
   letter-spacing: -1px;
 }

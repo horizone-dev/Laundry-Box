@@ -34,7 +34,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  background: #2563eb;
+  background: var(--primary);
   color: white;
   border: none;
   padding: 0.75rem 1.25rem;
@@ -46,7 +46,7 @@
 }
 
 .addUserBtn:hover {
-  background: #1d4ed8;
+  background: var(--primary-hover);
   transform: translateY(-1px);
   box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
 }
@@ -79,8 +79,8 @@
 }
 
 .activeTab {
-  color: #2563eb;
-  border-bottom-color: #2563eb;
+  color: var(--primary);
+  border-bottom-color: var(--primary);
 }
 
 .filters {
@@ -112,7 +112,7 @@
 
 .searchBox input:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
@@ -157,7 +157,7 @@
   width: 40px;
   height: 40px;
   background: #eff6ff;
-  color: #2563eb;
+  color: var(--primary);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -379,7 +379,7 @@
 }
 
 .editRoleBtn:hover {
-  background: #2563eb;
+  background: var(--primary);
   color: white;
 }
 
@@ -426,8 +426,8 @@
 }
 
 .createBtn:hover {
-  border-color: #2563eb;
-  color: #2563eb;
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 /* Modal Styling */
@@ -513,7 +513,7 @@
 
 .formGroup input:focus, .formGroup select:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
@@ -550,7 +550,7 @@
   padding: 0.75rem 1.5rem;
   border-radius: 10px;
   border: none;
-  background: #2563eb;
+  background: var(--primary);
   color: white;
   font-weight: 600;
   cursor: pointer;
@@ -558,7 +558,7 @@
 }
 
 .submitBtn:hover {
-  background: #1d4ed8;
+  background: var(--primary-hover);
   transform: translateY(-1px);
 }
 
@@ -599,8 +599,8 @@
 }
 
 .checked {
-  background: #2563eb;
-  border-color: #2563eb;
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .permissionItem span {

@@ -274,168 +274,6 @@ export default function ServicesReport() {
           </button>
         </div>
       </motion.div>
-
-      {/* KPI Cards Grid */}
-      <motion.div className={styles.kpiGrid} variants={itemVariants}>
-        <div className={styles.kpiCard}>
-          <div className={styles.iconBox} style={{ background: '#EFF6FF' }}>
-            <Package size={20} color="#2563EB" />
-          </div>
-          <div className={styles.kpiLabel}>Total Items Cleaned</div>
-          <div className={styles.kpiValue}>{reportData.totalItems.toLocaleString()}</div>
-          <div className={styles.kpiSubtext}>Volume across active orders</div>
-        </div>
-
-        <div className={styles.kpiCard}>
-          <div className={styles.iconBox} style={{ background: '#ECFDF5' }}>
-            <Star size={20} color="#10B981" />
-          </div>
-          <div className={styles.kpiLabel}>Most Popular Service</div>
-          <div className={styles.kpiValue} style={{ fontSize: '1.25rem', height: '2.5rem', display: 'flex', alignItems: 'center' }}>
-            {reportData.mostPopular ? `${reportData.mostPopular.name} (${reportData.mostPopular.qty} sold)` : '—'}
-          </div>
-          <div className={styles.kpiSubtext}>Highest count in chosen date range</div>
-        </div>
-
-        <div className={styles.kpiCard}>
-          <div className={styles.iconBox} style={{ background: '#FFFBEB' }}>
-            <Award size={20} color="#F59E0B" />
-          </div>
-          <div className={styles.kpiLabel}>Top Revenue Generator</div>
-          <div className={styles.kpiValue} style={{ fontSize: '1.25rem', height: '2.5rem', display: 'flex', alignItems: 'center' }}>
-            {reportData.highestRevenue ? (
-              <>
-                {reportData.highestRevenue.name} 
-                <span className={styles.kpiRevenueAmount}>
-                  (<CurrencySymbol size={12} />{reportData.highestRevenue.revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
-                </span>
-              </>
-            ) : '—'}
-          </div>
-          <div className={styles.kpiSubtext}>Highest revenue service line</div>
-        </div>
-
-        <div className={styles.kpiCard}>
-          <div className={styles.iconBox} style={{ background: '#F5F3FF' }}>
-            <Layers size={20} color="#8B5CF6" />
-          </div>
-          <div className={styles.kpiLabel}>Add-ons Added</div>
-          <div className={styles.kpiValue}>{reportData.totalAddons.toLocaleString()}</div>
-          <div className={styles.kpiSubtext}>Fragrance, starch, special treatments</div>
-        </div>
-      </motion.div>
-
-      {/* Visual Analytics Charts */}
-      <motion.div className={styles.chartsGrid} variants={itemVariants}>
-        {/* Revenue by Category */}
-        <div className={styles.chartCard}>
-          <h3 className={styles.chartTitle}>Revenue & Volume by Category</h3>
-          {reportData.categoryData.length === 0 ? (
-            <div className={styles.emptyChart}>No category data available</div>
-          ) : (
-            <div className={styles.chartContainer}>
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={reportData.categoryData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                  <XAxis dataKey="name" stroke="#64748B" fontSize={12} tickLine={false} />
-                  <YAxis stroke="#64748B" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip 
-                    contentStyle={{ background: '#FFF', border: '1px solid #E2E8F0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
-                    formatter={(value, name) => name === 'revenue' ? [`${settings.currencySymbol || 'AED'} ${value.toFixed(2)}`, 'Revenue'] : [value, 'Volume']}
-                  />
-                  <Legend />
-                  <Bar dataKey="revenue" name="Revenue" fill="#2563EB" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="qty" name="Qty Sold" fill="#10B981" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-
-        {/* Top 5 Services */}
-        <div className={styles.chartCard}>
-          <h3 className={styles.chartTitle}>Top 5 Services by Revenue</h3>
-          {reportData.topServicesData.length === 0 ? (
-            <div className={styles.emptyChart}>No service performance data available</div>
-          ) : (
-            <div className={styles.chartContainer}>
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={reportData.topServicesData} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                  <XAxis type="number" stroke="#64748B" fontSize={11} tickLine={false} />
-                  <YAxis type="category" dataKey="name" stroke="#64748B" fontSize={11} tickLine={false} width={100} />
-                  <Tooltip 
-                    contentStyle={{ background: '#FFF', border: '1px solid #E2E8F0', borderRadius: '8px' }}
-                    formatter={(value) => [`${settings.currencySymbol || 'AED'} ${value.toFixed(2)}`, 'Revenue']}
-                  />
-                  <Bar dataKey="revenue" fill="#8B5CF6" radius={[0, 4, 4, 0]} barSize={16} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-
-        {/* Treatment Types Distribution */}
-        <div className={styles.chartCard}>
-          <h3 className={styles.chartTitle}>Service Types (Treatments)</h3>
-          {reportData.typeData.length === 0 ? (
-            <div className={styles.emptyChart}>No treatment options data available</div>
-          ) : (
-            <div className={styles.chartContainer} style={{ display: 'flex', alignItems: 'center' }}>
-              <div style={{ flex: 1, height: '260px' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={reportData.typeData}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={4}
-                    >
-                      {reportData.typeData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value) => [value, 'Quantity']} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className={styles.pieLegendList}>
-                {reportData.typeData.map((entry, index) => (
-                  <div key={entry.name} className={styles.legendItem}>
-                    <span className={styles.legendColorDot} style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                    <span className={styles.legendLabelText}>{entry.name} ({entry.value})</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Add-ons Popularity */}
-        <div className={styles.chartCard}>
-          <h3 className={styles.chartTitle}>Add-ons Breakdown</h3>
-          {reportData.addonData.length === 0 ? (
-            <div className={styles.emptyChart}>No add-ons sold in this period</div>
-          ) : (
-            <div className={styles.chartContainer}>
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={reportData.addonData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                  <XAxis dataKey="name" stroke="#64748B" fontSize={11} tickLine={false} />
-                  <YAxis stroke="#64748B" fontSize={11} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ background: '#FFF', border: '1px solid #E2E8F0', borderRadius: '8px' }} />
-                  <Bar dataKey="count" name="Times Sold" fill="#F59E0B" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-      </motion.div>
-
       {/* Summary Breakdown Table Card */}
       <motion.div className={styles.tableCard} variants={itemVariants}>
         <div className={styles.tableHeaderSection}>
@@ -495,8 +333,8 @@ export default function ServicesReport() {
         ) : sortedAndSearchedServices.length === 0 ? (
           <div className={styles.emptyTable}>No sales metrics found for the selected filter criteria.</div>
         ) : (
-          <div className={styles.tableResponsive}>
-            <table className={styles.table}>
+          <div className="table-container">
+            <table className="base-table">
               <thead>
                 <tr>
                   <th onClick={() => handleSort('name')} className={styles.sortableHeader}>
@@ -505,11 +343,11 @@ export default function ServicesReport() {
                   <th onClick={() => handleSort('category')} className={styles.sortableHeader}>
                     CATEGORY {sortField === 'category' && (sortAsc ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
                   </th>
-                  <th className={styles.numCol}>UNIT PRICE</th>
-                  <th onClick={() => handleSort('qty')} className={`${styles.numCol} ${styles.sortableHeader}`}>
+                  <th className="num-col">UNIT PRICE</th>
+                  <th onClick={() => handleSort('qty')} className={`num-col ${styles.sortableHeader}`}>
                     QTY SOLD {sortField === 'qty' && (sortAsc ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
                   </th>
-                  <th onClick={() => handleSort('revenue')} className={`${styles.numCol} ${styles.sortableHeader}`}>
+                  <th onClick={() => handleSort('revenue')} className={`num-col ${styles.sortableHeader}`}>
                     REVENUE {sortField === 'revenue' && (sortAsc ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
                   </th>
                 </tr>
@@ -521,11 +359,11 @@ export default function ServicesReport() {
                     <td>
                       <span className={styles.categoryBadge}>{svc.category}</span>
                     </td>
-                    <td className={styles.numCol}>
+                    <td className="num-col">
                       <CurrencySymbol size={12} /> {svc.unitPrice.toFixed(2)}
                     </td>
-                    <td className={`${styles.numCol} ${styles.qtyCell}`}>{svc.qty}</td>
-                    <td className={`${styles.numCol} ${styles.revenueCell}`}>
+                    <td className={`num-col ${styles.qtyCell}`}>{svc.qty}</td>
+                    <td className={`num-col ${styles.revenueCell}`}>
                       <CurrencySymbol size={12} /> {svc.revenue.toFixed(2)}
                     </td>
                   </tr>
@@ -534,8 +372,8 @@ export default function ServicesReport() {
               <tfoot>
                 <tr className={styles.totalsRow}>
                   <td colSpan={3} className={styles.totalsLabel}>TOTAL ({reportData.serviceList.length} items)</td>
-                  <td className={`${styles.numCol} ${styles.totalsQty}`}>{reportData.totalItems}</td>
-                  <td className={`${styles.numCol} ${styles.totalsRevenue}`}>
+                  <td className={`num-col ${styles.totalsQty}`}>{reportData.totalItems}</td>
+                  <td className={`num-col ${styles.totalsRevenue}`}>
                     <CurrencySymbol size={13} /> {reportData.serviceList.reduce((sum, s) => sum + s.revenue, 0).toFixed(2)}
                   </td>
                 </tr>

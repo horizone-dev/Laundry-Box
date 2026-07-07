@@ -80,8 +80,8 @@
 }
 
 .refreshBtn:hover {
-  border-color: #2563EB;
-  color: #2563EB;
+  border-color: var(--primary);
+  color: var(--primary);
   transform: translateY(-1px);
 }
 
@@ -95,7 +95,7 @@
   background: #EFF6FF;
   border: 1.5px solid #BFDBFE;
   border-radius: 10px;
-  color: #2563EB;
+  color: var(--primary);
   font-weight: 700;
   font-size: 0.84rem;
   cursor: pointer;
@@ -142,7 +142,7 @@
 
 .scrollArrow:hover {
   background: #FFFFFF;
-  color: #2563EB;
+  color: var(--primary);
   border-color: #BFDBFE;
   transform: translateY(-50%) scale(1.08);
   box-shadow: 0 6px 12px rgba(37, 99, 235, 0.15);
@@ -437,7 +437,7 @@
 
 .actionBtn:hover {
   background: #F1F5F9;
-  color: #2563EB;
+  color: var(--primary);
   border-color: #CBD5E1;
 }
 
@@ -473,7 +473,7 @@
 
 .spinner {
   animation: spin 1.2s linear infinite;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 @keyframes spin {
@@ -805,12 +805,12 @@
 }
 
 .printBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
 }
 .printBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
 }
 
 .tagBtn {
@@ -880,8 +880,8 @@
 }
 
 .payOptionActive {
-  border-color: #2563EB;
-  color: #2563EB;
+  border-color: var(--primary);
+  color: var(--primary);
   background: #EFF6FF;
 }
 

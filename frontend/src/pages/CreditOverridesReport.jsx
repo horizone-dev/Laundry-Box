@@ -246,37 +246,6 @@ export default function CreditOverridesReport() {
         </div>
       </motion.div>
 
-      {/* KPI Cards */}
-      <motion.div className={styles.kpiGrid} variants={itemVariants}>
-        <KPICard
-          icon={<FileText size={20} color="#6366F1" />}
-          bg="#EEF2FF"
-          label="Total Override Attempts"
-          value={logs.length.toLocaleString()}
-          subtext="Total logged security overrides"
-        />
-        <KPICard
-          icon={<UserCheck size={20} color="#10B981" />}
-          bg="#ECFDF5"
-          label="Approved Overrides"
-          value={totalApproved.toLocaleString()}
-          subtext="Successfully overridden by PIN"
-        />
-        <KPICard
-          icon={<ShieldClose size={20} color="#EF4444" />}
-          bg="#FEF2F2"
-          label="Failed PIN Entries"
-          value={totalFailed.toLocaleString()}
-          subtext="Attempts with incorrect PIN"
-        />
-        <KPICard
-          icon={<ShieldAlert size={20} color="#F59E0B" />}
-          bg="#FFFBEB"
-          label="Rejections & Blocks"
-          value={totalRejected.toLocaleString()}
-          subtext="Cancellations or hard blocks"
-        />
-      </motion.div>
 
       {/* Table Card */}
       <motion.div className={styles.tableCard} variants={itemVariants}>
@@ -340,18 +309,18 @@ export default function CreditOverridesReport() {
             <p>No credit overrides found for the selection.</p>
           </div>
         ) : (
-          <div className={styles.tableContainer}>
-            <table className={styles.table}>
+          <div className="table-container">
+            <table className="base-table">
               <thead>
                 <tr>
                   <th>DATE</th>
                   <th>CUSTOMER</th>
                   <th>ORDER ID</th>
                   <th>APPROVED BY</th>
-                  <th className={styles.numCol}>ORDER AMOUNT</th>
-                  <th className={styles.numCol}>LIMIT</th>
-                  <th className={styles.numCol}>EXCEEDED</th>
-                  <th style={{ textAlign: 'center' }}>ACTION</th>
+                  <th className="num-col">ORDER AMOUNT</th>
+                  <th className="num-col">LIMIT</th>
+                  <th className="num-col">EXCEEDED</th>
+                  <th className="center-col">ACTION</th>
                 </tr>
               </thead>
               <tbody>
@@ -385,16 +354,16 @@ export default function CreditOverridesReport() {
                       <td>
                         <div className={styles.customerName}>{formatUser(log.userId)}</div>
                       </td>
-                      <td className={`${styles.amountCell} ${styles.numCol}`}>
+                      <td className={`num-col ${styles.amountCell}`}>
                         <CurrencySymbol size={11} /> {(log.orderAmount || 0).toFixed(2)}
                       </td>
-                      <td className={`${styles.amountCell} ${styles.numCol}`}>
+                      <td className={`num-col ${styles.amountCell}`}>
                         <CurrencySymbol size={11} /> {(log.creditLimit || 0).toFixed(2)}
                       </td>
-                      <td className={`${styles.exceededCell} ${styles.numCol}`}>
+                      <td className={`num-col ${styles.exceededCell}`}>
                         <CurrencySymbol size={11} /> {(log.exceededAmount || 0).toFixed(2)}
                       </td>
-                      <td style={{ textAlign: 'center' }}>
+                      <td className="center-col">
                         <span className={`${styles.actionBadge} ${actionBadgeClass}`}>
                           {log.actionType}
                         </span>

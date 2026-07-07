@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Zap, Search, RefreshCw, Clock, Phone, User, X, ChevronDown, 
-  CheckCircle, AlertCircle, Trash2, Printer, QrCode, ArrowLeft, 
+import {
+  Zap, Search, RefreshCw, Clock, Phone, User, X, ChevronDown,
+  CheckCircle, AlertCircle, Trash2, Printer, QrCode, ArrowLeft,
   ArrowRight, Eye, Wallet, CreditCard, ShoppingCart,
   ChevronLeft, ChevronRight
 } from 'lucide-react';
@@ -41,11 +41,11 @@ export default function Workflow() {
     if (!dateVal) return 'N/A';
     const formattedDate = formatDate(dateVal);
     if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return formattedDate;
-    
+
     let d;
     try {
       d = new Date(dateVal);
-    } catch(e) {
+    } catch (e) {
       return formattedDate;
     }
     if (isNaN(d.getTime())) return formattedDate;
@@ -65,10 +65,11 @@ export default function Workflow() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [limit, setLimit] = useState(20);
+  const [limit, setLimit] = useState(150);
   const [hasMore, setHasMore] = useState(true);
+  const [columnCounts, setColumnCounts] = useState({});
   const isFetchingRef = useRef(false);
-  
+
   // Drag and drop states
   const [draggedOrderId, setDraggedOrderId] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
@@ -83,8 +84,8 @@ export default function Workflow() {
   // Exclude terminal statuses from Kanban columns
   const columns = useMemo(() => {
     const rawStatuses = settings.workflowStatuses || [
-      'Confirmed', 'Picked Up', 'Washing', 'Drying', 
-      'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 
+      'Confirmed', 'Picked Up', 'Washing', 'Drying',
+      'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery',
       'Delivered', 'Cancelled'
     ];
     return rawStatuses.filter(status => status !== 'Delivered' && status !== 'Cancelled');
@@ -120,6 +121,48 @@ export default function Workflow() {
     }
   };
 
+  const fetchColumnCounts = async () => {
+    if (!window.electronAPI?.dbQuery) return;
+    try {
+      const trimmedSearch = searchTerm.trim();
+      let query = `
+        SELECT orders.status, COUNT(*) as count 
+        FROM orders 
+        LEFT JOIN customers ON orders.customerId = customers.id
+        WHERE orders.status NOT IN ('Delivered', 'Cancelled')
+      `;
+      let params = [];
+      if (trimmedSearch) {
+        query += `
+          AND (
+            orders.id LIKE ? 
+            OR orders.billNumber LIKE ? 
+            OR customers.name LIKE ? 
+            OR customers.phone LIKE ? 
+            OR orders.items LIKE ?
+          )
+        `;
+        const term = `%${trimmedSearch}%`;
+        params = [term, term, term, term, term];
+      }
+      query += ` GROUP BY orders.status`;
+      const res = await window.electronAPI.dbQuery(query, params);
+      if (res.success) {
+        const counts = {};
+        res.data.forEach(row => {
+          let status = row.status;
+          if (['Payment Pending', 'Credit', 'Pending'].includes(status)) {
+            status = 'Confirmed';
+          }
+          counts[status] = (counts[status] || 0) + row.count;
+        });
+        setColumnCounts(counts);
+      }
+    } catch (err) {
+      console.error("Failed to fetch column counts:", err);
+    }
+  };
+
   // Fetch active orders from database
   const fetchOrders = async (currentLimit = limit, isNewSearch = false, isBackground = false) => {
     if (!window.electronAPI?.dbQuery) return;
@@ -137,7 +180,7 @@ export default function Workflow() {
         WHERE orders.status NOT IN ('Delivered', 'Cancelled')
       `;
       let params = [];
-      
+
       const trimmedSearch = searchTerm.trim();
       if (trimmedSearch) {
         query += `
@@ -152,17 +195,17 @@ export default function Workflow() {
         const term = `%${trimmedSearch}%`;
         params = [term, term, term, term, term];
       }
-      
+
       query += ` ORDER BY orders.createdAt ASC LIMIT ?`;
-      params.push(isNewSearch ? 20 : currentLimit);
+      params.push(isNewSearch ? 150 : currentLimit);
 
       const res = await window.electronAPI.dbQuery(query, params);
       if (res.success) {
         setOrders(res.data);
-        const actualLimit = isNewSearch ? 20 : currentLimit;
+        const actualLimit = isNewSearch ? 150 : currentLimit;
         setHasMore(res.data.length === actualLimit);
         if (isNewSearch) {
-          setLimit(20);
+          setLimit(150);
         }
       }
     } catch (err) {
@@ -175,10 +218,18 @@ export default function Workflow() {
     }
   };
 
+  const isMounted = useRef(false);
   // Debounced search trigger
   useEffect(() => {
+    if (!isMounted.current) {
+      isMounted.current = true;
+      fetchColumnCounts();
+      fetchOrders(150, true);
+      return;
+    }
     const delayDebounceFn = setTimeout(() => {
-      fetchOrders(20, true);
+      fetchColumnCounts();
+      fetchOrders(150, true);
     }, 300);
 
     return () => clearTimeout(delayDebounceFn);
@@ -186,7 +237,7 @@ export default function Workflow() {
 
   const loadMoreData = () => {
     if (loading || !hasMore || isFetchingRef.current) return;
-    const newLimit = limit + 20;
+    const newLimit = limit + 100;
     setLimit(newLimit);
     fetchOrders(newLimit, false, true);
   };
@@ -223,14 +274,14 @@ export default function Workflow() {
     columns.forEach(col => {
       groups[col] = [];
     });
-    
+
     orders.forEach(order => {
       // Map legacy statuses like 'Pending', 'Payment Pending' to 'Confirmed' if not explicitly in workflowStatuses
       let status = order.status;
       if (['Payment Pending', 'Credit', 'Pending'].includes(status)) {
         status = 'Confirmed';
       }
-      
+
       if (groups[status]) {
         groups[status].push(order);
       } else {
@@ -308,7 +359,7 @@ export default function Workflow() {
   // Payment Status transition (Paid confirmation modal launcher)
   const handleUpdatePaymentStatus = async (newPayStatus) => {
     if (!selectedOrder) return;
-    
+
     if (newPayStatus === 'Paid') {
       setOriginalPayStatus(selectedOrder.paymentStatus);
       setSelectedOrder(prev => ({ ...prev, paymentStatus: 'Paid' }));
@@ -340,18 +391,18 @@ export default function Workflow() {
         }
       }
 
-      setOrders(prev => prev.map(o => o.id === selectedOrder.id ? { 
-        ...o, 
-        paymentStatus: newPayStatus, 
-        paidAmount: updatedPaidAmount, 
-        dueAmount: updatedDueAmount 
+      setOrders(prev => prev.map(o => o.id === selectedOrder.id ? {
+        ...o,
+        paymentStatus: newPayStatus,
+        paidAmount: updatedPaidAmount,
+        dueAmount: updatedDueAmount
       } : o));
 
-      setSelectedOrder(prev => ({ 
-        ...prev, 
-        paymentStatus: newPayStatus, 
-        paidAmount: updatedPaidAmount, 
-        dueAmount: updatedDueAmount 
+      setSelectedOrder(prev => ({
+        ...prev,
+        paymentStatus: newPayStatus,
+        paidAmount: updatedPaidAmount,
+        dueAmount: updatedDueAmount
       }));
 
       alert(t('paymentStatusUpdated', settings.language));
@@ -385,8 +436,8 @@ export default function Workflow() {
 
         const txnId = `TXN-${Date.now()}`;
         const _now = new Date();
-        const txnTimestamp = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')} ${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`;
-        
+        const txnTimestamp = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')} ${String(_now.getHours()).padStart(2, '0')}:${String(_now.getMinutes()).padStart(2, '0')}`;
+
         const mappedBankId = payMethod === 'Card'
           ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
           : (payMethod === 'UPI'
@@ -510,17 +561,17 @@ export default function Workflow() {
   // Overdue status calculation
   const getDeliveryStatus = (expectedDateStr) => {
     if (!expectedDateStr) return { label: '', className: '' };
-    
+
     // Normalize date strings
     const rawDate = expectedDateStr.split(' ')[0];
     const expected = new Date(rawDate);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     expected.setHours(0, 0, 0, 0);
-    
+
     const diff = expected - today;
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-    
+
     if (days < 0) {
       return { label: `Overdue by ${Math.abs(days)}d`, className: styles.deliveryOverdue };
     } else if (days === 0) {
@@ -554,7 +605,7 @@ export default function Workflow() {
       alert(t('invalidPhoneFormat', settings.language));
       return;
     }
-    
+
     // Prepend country code if original phone doesn't start with '+'
     if (!phone.toString().trim().startsWith('+')) {
       const countryCode = settings.waCountryCode || '971';
@@ -563,7 +614,7 @@ export default function Workflow() {
         cleanPhone = cleanCountryCode + cleanPhone;
       }
     }
-    
+
     const orderMatch = orders.find(o => o.id === id) || selectedOrder;
     const isReadyStatus = orderMatch && ['Ready', 'Ready to Pick up'].includes(orderMatch.status);
 
@@ -574,7 +625,7 @@ export default function Workflow() {
       if (window.electronAPI?.dbQuery) {
         try {
           const searchRes = await window.electronAPI.dbQuery(
-            `SELECT * FROM payment_links WHERE (description LIKE ? OR id = ?) AND status = 'Active' LIMIT 1`,
+            `SELECT * FROM payment_links WHERE (description LIKE ? OR id = ?) AND status IN ('Active', 'Pending') LIMIT 1`,
             [`%${orderMatch.id}%`, `LNK-${orderMatch.billNumber}`]
           );
           if (searchRes.success && searchRes.data.length > 0) {
@@ -584,17 +635,17 @@ export default function Workflow() {
             const url = `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`;
             const dateStr = getLocalDateTime();
             await window.electronAPI.dbQuery(
-              `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
+              `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
+               VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?, ?)`,
               [
                 linkId,
                 orderMatch.customerId || 'Walk-in',
                 orderMatch.customerName || orderMatch.customer || 'Walk-in Customer',
                 `Order #${orderMatch.billNumber || orderMatch.id}`,
                 due,
-                'Apple Pay',
                 dateStr,
-                url
+                url,
+                linkId
               ]
             );
             paymentLinkUrl = url;
@@ -639,7 +690,7 @@ export default function Workflow() {
           return trans === key ? st : trans;
         };
         const statusText = orderMatch ? translateOrderSt(orderMatch.status) : t('confirmed', settings.language);
-        
+
         if (settings.waStatusUpdateTemplate) {
           message = settings.waStatusUpdateTemplate
             .replace(/{customerName}/g, orderMatch ? (orderMatch.customerName || orderMatch.customer || 'Customer') : 'Customer')
@@ -653,7 +704,7 @@ export default function Workflow() {
             message += `\n\nFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${due.toFixed(2)}.`;
           }
         }
-        
+
         if (orderMatch && due > 0 && paymentLinkUrl) {
           message += `\n\nPay online: ${paymentLinkUrl}`;
         }
@@ -702,45 +753,48 @@ export default function Workflow() {
 
   return (
     <div className={styles.page}>
-      
+
       {/* Header Panel */}
       <div className={styles.header}>
         <div className={styles.headerInfo}>
           <h1>{t('workflow', settings.language) || 'Workflow Board'}</h1>
           <p className={styles.subtext}>Monitor and transition operational laundry stages visually.</p>
         </div>
-        
+
         <div className={styles.headerActions}>
           <div className={styles.searchBar}>
             <Search size={18} color="#94A3B8" />
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder={t('searchPlaceholder', settings.language)}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className={styles.searchInput}
             />
             {searchTerm && (
-              <X 
-                size={16} 
-                color="#94A3B8" 
-                style={{ cursor: 'pointer' }} 
-                onClick={() => setSearchTerm('')} 
+              <X
+                size={16}
+                color="#94A3B8"
+                style={{ cursor: 'pointer' }}
+                onClick={() => setSearchTerm('')}
               />
             )}
           </div>
           {hasMore && (
-            <button 
-              className={styles.loadMoreBtn} 
-              onClick={() => loadMoreData()} 
+            <button
+              className={styles.loadMoreBtn}
+              onClick={() => loadMoreData()}
               title="Load Next 20 Orders"
             >
               <Zap size={16} /> Load More
             </button>
           )}
-          <button 
-            className={styles.refreshBtn} 
-            onClick={() => fetchOrders(limit, false)} 
+          <button
+            className={styles.refreshBtn}
+            onClick={() => {
+              fetchColumnCounts();
+              fetchOrders(limit, false);
+            }}
             title="Refresh Board"
           >
             <RefreshCw size={18} />
@@ -748,12 +802,7 @@ export default function Workflow() {
         </div>
       </div>
 
-      {loading ? (
-        <div className={styles.loadingContainer}>
-          <RefreshCw size={36} className={styles.spinner} />
-          <p>{t('loading', settings.language)}</p>
-        </div>
-      ) : orders.length === 0 ? (
+      {orders.length === 0 && !loading ? (
         <div className={styles.emptyBoard}>
           <ShoppingCart size={48} color="#CBD5E1" />
           <h3>No Active Orders</h3>
@@ -763,9 +812,9 @@ export default function Workflow() {
         /* Kanban Lane Grid Wrapper */
         <div className={`${styles.boardWrapper} ${canScrollLeft ? styles.hasScrollLeft : ''} ${canScrollRight ? styles.hasScrollRight : ''}`}>
           {canScrollLeft && (
-            <button 
+            <button
               type="button"
-              className={`${styles.scrollArrow} ${styles.scrollArrowLeft}`} 
+              className={`${styles.scrollArrow} ${styles.scrollArrowLeft}`}
               onClick={() => scrollBoard('left')}
               aria-label="Scroll board left"
             >
@@ -774,138 +823,141 @@ export default function Workflow() {
           )}
 
           <div className={styles.boardContainer} ref={boardRef} onScroll={checkScroll}>
-          {columns.map(col => {
-            const laneOrders = ordersByStatus[col] || [];
-            const isDragOver = dragOverColumn === col;
-            
-            return (
-              <div 
-                key={col} 
-                className={`${styles.column} ${isDragOver ? styles.columnDragOver : ''}`}
-                data-status={col}
-                onDragOver={(e) => handleDragOver(e, col)}
-                onDragEnter={(e) => handleDragEnter(e, col)}
-                onDrop={(e) => handleDrop(e, col)}
-              >
-                <div className={styles.columnHeader}>
-                  <div className={styles.columnTitle}>
-                    <span>{translateStatus(col)}</span>
-                  </div>
-                  <span className={styles.countBadge}>{laneOrders.length}</span>
-                </div>
+            {columns.map(col => {
+              const laneOrders = ordersByStatus[col] || [];
+              const isDragOver = dragOverColumn === col;
 
-                <div 
-                  className={styles.cardsContainer} 
-                  onDragLeave={() => setDragOverColumn(null)}
-                  onScroll={(e) => {
-                    const { scrollTop, scrollHeight, clientHeight } = e.target;
-                    if (scrollHeight - scrollTop - clientHeight < 20) {
-                      loadMoreData();
-                    }
-                  }}
+              return (
+                <div
+                  key={col}
+                  className={`${styles.column} ${isDragOver ? styles.columnDragOver : ''}`}
+                  data-status={col}
+                  onDragOver={(e) => handleDragOver(e, col)}
+                  onDragEnter={(e) => handleDragEnter(e, col)}
+                  onDrop={(e) => handleDrop(e, col)}
                 >
-                  {laneOrders.length > 0 ? (
-                    laneOrders.map(order => {
-                      const delivery = getDeliveryStatus(order.expectedDeliveryDate);
-                      const isExpress = order.specialInstructions?.toLowerCase().includes('express') || order.items?.toLowerCase().includes('express');
-                      
-                      return (
-                        <div 
-                          key={order.id}
-                          className={`${styles.card} ${draggedOrderId === order.id ? styles.cardDragging : ''}`}
-                          draggable
-                          onDragStart={(e) => handleDragStart(e, order.id)}
-                          onDragEnd={handleDragEnd}
-                          onClick={() => setSelectedOrder(order)}
-                        >
-                          <div className={styles.cardHeader}>
-                            <div>
-                              <span className={styles.orderId}>{settings.invoicePrefix || ''}{order.id}</span>
-                              <span className={styles.billNum}>{t('bill', settings.language)}: {order.billNumber || 'N/A'}</span>
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-end' }}>
-                              <span className={`${styles.paymentBadge} ${
-                                order.paymentStatus === 'Paid' ? styles.paymentPaid :
-                                order.paymentStatus === 'Credit' ? styles.paymentCredit :
-                                order.paymentStatus === 'Partial' ? styles.paymentPartial :
-                                styles.paymentPending
-                              }`}>
-                                {order.paymentStatus ? t(order.paymentStatus.toLowerCase(), settings.language) : t('pending', settings.language)}
-                              </span>
-                              {isExpress && <span className={styles.expressBadge}>Express</span>}
-                            </div>
-                          </div>
-
-                          <div className={styles.customerInfo}>
-                            <span className={styles.custName}>
-                              {order.customerName || (order.customerId === 'Walk-in' ? t('walkInCustomer', settings.language) : order.customerId)}
-                            </span>
-                            <span className={styles.custPhone}>
-                              {order.customerPhone || order.phone || t('noPhone', settings.language)}
-                            </span>
-                          </div>
-
-                          <div className={styles.itemsSummary}>
-                            {getItemsSummary(order.items)}
-                          </div>
-
-                          <div className={styles.cardFooter}>
-                            <span className={styles.price}>
-                              <CurrencySymbol size={11} /> {order.totalAmount?.toFixed(2)}
-                            </span>
-                            {delivery.label && (
-                              <span className={`${styles.deliveryInfo} ${delivery.className}`}>
-                                <Clock size={11} />
-                                {delivery.label}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Quick shifts actions */}
-                          <div className={styles.cardActions} onClick={(e) => e.stopPropagation()}>
-                            {columns.indexOf(col) > 0 && (
-                              <button 
-                                className={styles.actionBtn} 
-                                onClick={() => handleShiftStatus(order, 'prev')}
-                                title="Move Back"
-                              >
-                                <ArrowLeft size={12} />
-                              </button>
-                            )}
-                            <button 
-                              className={styles.actionBtn} 
-                              onClick={() => setSelectedOrder(order)}
-                              title="View Details"
-                            >
-                              <Eye size={12} />
-                            </button>
-                            <button 
-                              className={styles.actionBtn} 
-                              onClick={() => handleShiftStatus(order, 'next')}
-                              title={columns.indexOf(col) === columns.length - 1 ? "Mark Delivered" : "Move Forward"}
-                            >
-                              <ArrowRight size={12} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className={styles.emptyLane}>
-                      <Clock size={20} color="#CBD5E1" />
-                      <div className={styles.emptyLaneText}>No orders here</div>
+                  <div className={styles.columnHeader}>
+                    <div className={styles.columnTitle}>
+                      <span>{translateStatus(col)}</span>
                     </div>
-                  )}
+                    <span className={styles.countBadge}>{columnCounts[col] || 0}</span>
+                  </div>
+
+                  <div
+                    className={styles.cardsContainer}
+                    onDragLeave={() => setDragOverColumn(null)}
+                    onScroll={(e) => {
+                      const { scrollTop, scrollHeight, clientHeight } = e.target;
+                      if (scrollHeight - scrollTop - clientHeight < 20) {
+                        loadMoreData();
+                      }
+                    }}
+                  >
+                    {loading && laneOrders.length === 0 ? (
+                      <div className={styles.emptyLane} style={{ padding: '2rem' }}>
+                        <RefreshCw size={24} className="spin" style={{ animation: 'spin 1s linear infinite' }} />
+                      </div>
+                    ) : laneOrders.length > 0 ? (
+                      laneOrders.map(order => {
+                        const delivery = getDeliveryStatus(order.expectedDeliveryDate);
+                        const isExpress = order.specialInstructions?.toLowerCase().includes('express') || order.items?.toLowerCase().includes('express');
+
+                        return (
+                          <div
+                            key={order.id}
+                            className={`${styles.card} ${draggedOrderId === order.id ? styles.cardDragging : ''}`}
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, order.id)}
+                            onDragEnd={handleDragEnd}
+                            onClick={() => setSelectedOrder(order)}
+                          >
+                            <div className={styles.cardHeader}>
+                              <div>
+                                <span className={styles.orderId}>{settings.invoicePrefix || ''}{order.id}</span>
+                                <span className={styles.billNum}>{t('bill', settings.language)}: {order.billNumber || 'N/A'}</span>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-end' }}>
+                                <span className={`${styles.paymentBadge} ${order.paymentStatus === 'Paid' ? styles.paymentPaid :
+                                    order.paymentStatus === 'Credit' ? styles.paymentCredit :
+                                      order.paymentStatus === 'Partial' ? styles.paymentPartial :
+                                        styles.paymentPending
+                                  }`}>
+                                  {order.paymentStatus ? t(order.paymentStatus.toLowerCase(), settings.language) : t('pending', settings.language)}
+                                </span>
+                                {isExpress && <span className={styles.expressBadge}>Express</span>}
+                              </div>
+                            </div>
+
+                            <div className={styles.customerInfo}>
+                              <span className={styles.custName}>
+                                {order.customerName || (order.customerId === 'Walk-in' ? t('walkInCustomer', settings.language) : order.customerId)}
+                              </span>
+                              <span className={styles.custPhone}>
+                                {order.customerPhone || order.phone || t('noPhone', settings.language)}
+                              </span>
+                            </div>
+
+                            <div className={styles.itemsSummary}>
+                              {getItemsSummary(order.items)}
+                            </div>
+
+                            <div className={styles.cardFooter}>
+                              <span className={styles.price}>
+                                <CurrencySymbol size={11} /> {order.totalAmount?.toFixed(2)}
+                              </span>
+                              {delivery.label && (
+                                <span className={`${styles.deliveryInfo} ${delivery.className}`}>
+                                  <Clock size={11} />
+                                  {delivery.label}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Quick shifts actions */}
+                            <div className={styles.cardActions} onClick={(e) => e.stopPropagation()}>
+                              {columns.indexOf(col) > 0 && (
+                                <button
+                                  className={styles.actionBtn}
+                                  onClick={() => handleShiftStatus(order, 'prev')}
+                                  title="Move Back"
+                                >
+                                  <ArrowLeft size={12} />
+                                </button>
+                              )}
+                              <button
+                                className={styles.actionBtn}
+                                onClick={() => setSelectedOrder(order)}
+                                title="View Details"
+                              >
+                                <Eye size={12} />
+                              </button>
+                              <button
+                                className={styles.actionBtn}
+                                onClick={() => handleShiftStatus(order, 'next')}
+                                title={columns.indexOf(col) === columns.length - 1 ? "Mark Delivered" : "Move Forward"}
+                              >
+                                <ArrowRight size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className={styles.emptyLane}>
+                        <Clock size={20} color="#CBD5E1" />
+                        <div className={styles.emptyLaneText}>No orders here</div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
           </div>
 
           {canScrollRight && (
-            <button 
+            <button
               type="button"
-              className={`${styles.scrollArrow} ${styles.scrollArrowRight}`} 
+              className={`${styles.scrollArrow} ${styles.scrollArrowRight}`}
               onClick={() => scrollBoard('right')}
               aria-label="Scroll board right"
             >
@@ -944,7 +996,7 @@ export default function Workflow() {
                             {selectedOrder.customerPhone || selectedOrder.phone || t('noPhone', settings.language)} • {selectedOrder.customerId}
                           </p>
                           {(selectedOrder.customerPhone || selectedOrder.phone) && (
-                            <button 
+                            <button
                               className={styles.waBtnMini}
                               onClick={() => handleWhatsApp(selectedOrder.customerPhone || selectedOrder.phone, selectedOrder.id)}
                             >
@@ -983,11 +1035,11 @@ export default function Workflow() {
                       {(() => {
                         let items = [];
                         try {
-                          items = typeof selectedOrder.items === 'string' 
-                            ? JSON.parse(selectedOrder.items || '[]') 
+                          items = typeof selectedOrder.items === 'string'
+                            ? JSON.parse(selectedOrder.items || '[]')
                             : (selectedOrder.items || []);
-                        } catch(e) { console.error("Parse items failed", e); }
-                        
+                        } catch (e) { console.error("Parse items failed", e); }
+
                         return (Array.isArray(items) ? items : []).map((item, i) => {
                           let treatmentLabel = '';
                           if (item.types && Array.isArray(item.types) && item.types.length > 0) {
@@ -1005,8 +1057,8 @@ export default function Workflow() {
                       })()}
                       <div className={styles.orderTotal}>
                         <span>
-                          {selectedOrder.paymentStatus === 'Paid' 
-                            ? `${t('totalPaidVia', settings.language)} ${getPaymentMethodTranslation(selectedOrder.paymentMethod || 'Cash')}` 
+                          {selectedOrder.paymentStatus === 'Paid'
+                            ? `${t('totalPaidVia', settings.language)} ${getPaymentMethodTranslation(selectedOrder.paymentMethod || 'Cash')}`
                             : `${t('paymentStatus', settings.language)}: ${t(selectedOrder.paymentStatus?.toLowerCase() || 'notPaid', settings.language)}`
                           }
                         </span>
@@ -1021,11 +1073,11 @@ export default function Workflow() {
                       {(() => {
                         let history = [];
                         try {
-                          history = typeof selectedOrder.statusHistory === 'string' 
-                            ? JSON.parse(selectedOrder.statusHistory || '[]') 
+                          history = typeof selectedOrder.statusHistory === 'string'
+                            ? JSON.parse(selectedOrder.statusHistory || '[]')
                             : (selectedOrder.statusHistory || []);
-                        } catch(e) { console.error(e); }
-                        
+                        } catch (e) { console.error(e); }
+
                         return (Array.isArray(history) ? history : []).map((h, i) => (
                           <div key={i} className={styles.timelineItem}>
                             <div className={styles.timelineDot}></div>
@@ -1048,8 +1100,8 @@ export default function Workflow() {
                   <div className={styles.statusAction}>
                     <label>Workflow Stage</label>
                     <div className={styles.statusSelectWrapper}>
-                      <select 
-                        value={['Payment Pending', 'Credit', 'Pending'].includes(selectedOrder.status) ? 'Confirmed' : selectedOrder.status} 
+                      <select
+                        value={['Payment Pending', 'Credit', 'Pending'].includes(selectedOrder.status) ? 'Confirmed' : selectedOrder.status}
                         onChange={(e) => handleUpdateStatus(selectedOrder.id, e.target.value)}
                         className={styles.statusSelect}
                       >
@@ -1064,13 +1116,13 @@ export default function Workflow() {
 
 
                   <div className={styles.actionBtns}>
-                    <button 
+                    <button
                       className={styles.printBtn}
                       onClick={() => handlePrint(selectedOrder.id)}
                     >
                       <Printer size={16} /> {t('printReceipt', settings.language)}
                     </button>
-                    <button 
+                    <button
                       className={styles.tagBtn}
                       onClick={handlePrintTags}
                     >
@@ -1099,27 +1151,27 @@ export default function Workflow() {
               <h2 style={{ fontSize: '1.15rem' }}>{t('confirmPayment', settings.language)}</h2>
               <X size={20} className={styles.closeBtn} onClick={() => { setShowPayModal(false); if (originalPayStatus) setSelectedOrder(prev => ({ ...prev, paymentStatus: originalPayStatus })); }} />
             </div>
-            
+
             <p style={{ fontSize: '0.85rem', color: '#64748B', margin: '0.5rem 0 1.5rem' }}>
               Select transaction account for Order <strong>#{settings.invoicePrefix || ''}{selectedOrder.id}</strong> payment:
             </p>
 
             <div className={styles.payOptionGrid}>
-              <div 
+              <div
                 className={`${styles.payOption} ${payMethod === 'Cash' ? styles.payOptionActive : ''}`}
                 onClick={() => setPayMethod('Cash')}
               >
                 <Wallet size={20} />
                 <span>{t('cashaccount', settings.language)}</span>
               </div>
-              <div 
+              <div
                 className={`${styles.payOption} ${payMethod === 'Card' ? styles.payOptionActive : ''}`}
                 onClick={() => setPayMethod('Card')}
               >
                 <CreditCard size={20} />
                 <span>{t('card', settings.language)}</span>
               </div>
-              <div 
+              <div
                 className={`${styles.payOption} ${payMethod === 'UPI' ? styles.payOptionActive : ''}`}
                 onClick={() => setPayMethod('UPI')}
               >
@@ -1129,7 +1181,7 @@ export default function Workflow() {
             </div>
 
             <div className={styles.btnRow}>
-              <button 
+              <button
                 className={styles.secondaryBtn}
                 onClick={() => {
                   setShowPayModal(false);
@@ -1140,8 +1192,8 @@ export default function Workflow() {
               >
                 {t('cancel', settings.language)}
               </button>
-              <button 
-                className={styles.printBtn} 
+              <button
+                className={styles.printBtn}
                 style={{ flex: 1.5 }}
                 onClick={confirmPaidStatus}
               >

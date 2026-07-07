@@ -18,6 +18,7 @@ process.on('unhandledRejection', (reason) => {
 });
 const { spawn } = require('child_process');
 const { initDB, getDB, closeDB, generateServiceSVG } = require('./database');
+const emailService = require('./emailService');
 
 let mainWindow;
 let backendProcess;
@@ -37,6 +38,37 @@ function createWindow() {
   // Remove default window menu bar (File, Edit, View, Window)
   mainWindow.setMenu(null);
 
+  // Lock down navigation to local resources only
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const parsedUrl = new URL(url);
+      const allowedHosts = ['localhost', '127.0.0.1'];
+      if (parsedUrl.protocol !== 'file:' && !allowedHosts.includes(parsedUrl.hostname)) {
+        event.preventDefault();
+        console.warn(`Blocked unauthorized navigation to: ${url}`);
+      }
+    } catch (e) {
+      event.preventDefault();
+    }
+  });
+
+  // Safe external URL opening
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    const allowedPrefixes = [
+      'https://wa.me/',
+      'https://api.whatsapp.com/',
+      'tel:',
+      'mailto:'
+    ];
+    const isAllowed = allowedPrefixes.some(prefix => url.startsWith(prefix));
+    if (isAllowed) {
+      shell.openExternal(url).catch(err => console.error("Failed to open link:", err));
+    } else {
+      console.warn(`Blocked attempt to open external window: ${url}`);
+    }
+    return { action: 'deny' };
+  });
+
   // Log all frontend console messages to a local file for debugging
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     try {
@@ -55,7 +87,7 @@ function createWindow() {
   const isDev = !app.isPackaged;
   
   if (isDev) {
-    // mainWindow.webContents.openDevTools();
+    mainWindow.webContents.openDevTools();
     mainWindow.loadURL('http://localhost:5173').catch(err => {
       console.log('Vite not ready, retrying in 2s...');
       setTimeout(() => mainWindow.loadURL('http://localhost:5173'), 2000);
@@ -130,6 +162,7 @@ async function waitForServer(url, timeout = 10000) {
 app.whenReady().then(async () => {
   console.log("Starting system...");
   initDB(app.getPath('userData'));
+  emailService.initScheduler();
   
   // Seed initial data if tables are empty
   const db = getDB();
@@ -488,6 +521,115 @@ ipcMain.handle('db-query', (event, { query, params }) => {
     }
   } catch (err) {
     console.error('DB Error:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('create-nomod-checkout', async (event, { amount, currency, customer, orderId, userRole }) => {
+  try {
+    const db = getDB();
+    const shopResult = db.prepare('SELECT settings FROM shops LIMIT 1').get();
+    const settings = shopResult && shopResult.settings ? JSON.parse(shopResult.settings) : {};
+
+    const apiKey = settings.nomodApiKey;
+    const linkId = `LNK-${Date.now().toString().slice(-4)}`;
+
+    // If no API key configured or it is a placeholder/empty, return a sandbox demo link without calling the real API
+    if (!apiKey || apiKey.trim() === '' || apiKey.includes('placeholder') || apiKey.length < 10) {
+      const sandboxUrl = `https://demo.nomod.com/pay?ref=${linkId}&amount=${parseFloat(amount).toFixed(2)}&currency=${currency || settings.nomodCurrency || 'AED'}`;
+      return { success: true, data: { url: sandboxUrl, id: linkId }, linkId };
+    }
+
+    const response = await fetch('https://api.nomod.com/v1/checkout', {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        reference_id: linkId,
+        amount: parseFloat(amount).toFixed(2),
+        currency: currency || settings.nomodCurrency || 'AED',
+        success_url: settings.nomodSuccessUrl || 'https://pay.lundry.ae/success',
+        failure_url: settings.nomodFailureUrl || 'https://pay.lundry.ae/failure',
+        cancelled_url: settings.nomodFailureUrl || 'https://pay.lundry.ae/cancelled',
+        customer: {
+          first_name: (customer?.name || 'Customer').split(' ')[0],
+          last_name: (customer?.name || 'Customer').split(' ').slice(1).join(' ') || 'Laundry',
+          phone_number: customer?.phone || ''
+        },
+        metadata: {
+          orderId: orderId,
+          description: `Payment for Order #${orderId}`
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Nomod API response error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    return { success: true, data, linkId };
+  } catch (err) {
+    console.error("create-nomod-checkout failed:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('retrieve-nomod-checkout-status', async (event, { checkoutId, userRole }) => {
+  try {
+    const db = getDB();
+    const shopResult = db.prepare('SELECT settings FROM shops LIMIT 1').get();
+    const settings = shopResult && shopResult.settings ? JSON.parse(shopResult.settings) : {};
+
+    // Enforce role permission rules on backend
+    if (userRole === 'staff') {
+      throw new Error("Staff are unauthorized to perform Nomod actions.");
+    }
+
+    const apiKey = settings.nomodApiKey;
+    if (!apiKey) {
+      throw new Error("Nomod API key is missing. Please configure it in Settings.");
+    }
+
+    const response = await fetch(`https://api.nomod.com/v1/checkout/${checkoutId}`, {
+      method: 'GET',
+      headers: {
+        'X-API-KEY': apiKey,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Nomod Status API failed: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    return { success: true, data };
+  } catch (err) {
+    console.error("retrieve-nomod-checkout-status failed:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('log-audit-event', async (event, { eventName, details, userId, userRole }) => {
+  try {
+    const db = getDB();
+    const logId = `AUDIT-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const timestamp = new Date().toISOString();
+    const device = process.platform + ' (' + process.arch + ')';
+
+    db.prepare(`
+      INSERT INTO audit_logs (id, event, details, userId, userRole, timestamp, device)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(logId, eventName, details || '', userId || 'System', userRole || 'System', timestamp, device);
+
+    return { success: true };
+  } catch (err) {
+    console.error("log-audit-event failed:", err);
     return { success: false, error: err.message };
   }
 });
@@ -1039,6 +1181,19 @@ ipcMain.handle('print-html', async (event, { html, css, printerName }) => {
   }
 });
 
+ipcMain.handle('get-email-settings', async () => {
+  return await emailService.getEmailSettings();
+});
 
+ipcMain.handle('save-email-settings', async (event, settings) => {
+  try {
+    emailService.saveEmailSettings(settings);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
 
-
+ipcMain.handle('test-email', async () => {
+  return await emailService.sendEmailReport(0);
+});

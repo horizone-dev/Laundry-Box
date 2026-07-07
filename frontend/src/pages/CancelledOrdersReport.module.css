@@ -151,7 +151,7 @@
 }
 
 .searchInput:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
@@ -177,7 +177,7 @@
 }
 
 .filterSelect:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
 }
 
@@ -198,7 +198,7 @@
 }
 
 .dateInput:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
 }
 
@@ -394,9 +394,9 @@
 }
 
 .pageBtn.active {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
 }
 
 .pageBtn:disabled {

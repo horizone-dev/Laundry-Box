@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  Wallet, Landmark, ArrowUpRight, ArrowDownLeft, 
+import {
+  Wallet, Landmark, ArrowUpRight, ArrowDownLeft,
   Plus, Search, Filter, Calendar, Printer,
   DollarSign, Receipt, CreditCard, ChevronRight,
   ArrowLeftRight, Trash2, CheckCircle, HelpCircle,
@@ -37,9 +37,9 @@ export default function Accounts() {
   }, [isAuthorized, navigate]);
 
   if (!isAuthorized) return null;
-  
+
   const { settings, updateSettings, formatDate } = useSettings();
-  
+
   /* ─── State ──────────────────────────────────────── */
   const [activeTab, setActiveTab] = useState('Payments');
   const [notified, setNotified] = useState(false);
@@ -51,7 +51,7 @@ export default function Accounts() {
   const [transactions, setTransactions] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [refundsPage, setRefundsPage] = useState(1);
-  
+
   const [dbCustomers, setDbCustomers] = useState([]);
   const [dbOrders, setDbOrders] = useState([]);
 
@@ -61,8 +61,7 @@ export default function Accounts() {
   const [linkFormData, setLinkFormData] = useState({
     customerId: '',
     description: '',
-    amount: '',
-    channel: 'Apple Pay'
+    amount: ''
   });
 
   // Refunds State
@@ -112,11 +111,11 @@ export default function Accounts() {
   const [dateRange, setDateRange] = useState('Today');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
-  
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [showAddAccountModal, setShowAddAccountModal] = useState(false);
-  
+
   const [activeBankAccountId, setActiveBankAccountId] = useState(
     settings.bankAccounts && settings.bankAccounts.length > 0 ? settings.bankAccounts[0].id : ''
   );
@@ -175,7 +174,7 @@ export default function Accounts() {
       setActiveBankAccountId('');
     }
   }, [settings.bankAccounts, activeBankAccountId]);
-  
+
   const [formData, setFormData] = useState({
     type: 'INCOME',
     category: 'Service Payment',
@@ -218,18 +217,18 @@ export default function Accounts() {
         `, []);
 
         // Compatibility checks
-        try { await window.electronAPI.dbQuery('ALTER TABLE account_transactions ADD COLUMN icon TEXT', []); } catch(e) {}
-        try { await window.electronAPI.dbQuery('ALTER TABLE account_transactions ADD COLUMN bankAccountId TEXT', []); } catch(e) {}
+        try { await window.electronAPI.dbQuery('ALTER TABLE account_transactions ADD COLUMN icon TEXT', []); } catch (e) { }
+        try { await window.electronAPI.dbQuery('ALTER TABLE account_transactions ADD COLUMN bankAccountId TEXT', []); } catch (e) { }
 
         // Fetch ALL transactions to compute balances for both cards in real-time
         const res = await window.electronAPI.dbQuery(
-          'SELECT * FROM account_transactions ORDER BY date DESC', 
+          'SELECT * FROM account_transactions ORDER BY date DESC',
           []
         );
-        
+
         if (res.success) {
           setTransactions(res.data);
-          
+
           // Fetch order-customer lookup
           const orderCustomerRes = await window.electronAPI.dbQuery(`
             SELECT o.id, c.name AS customerName 
@@ -239,7 +238,7 @@ export default function Accounts() {
             SELECT id, customerName 
             FROM deleted_orders
           `, []);
-          
+
           const orderCustomerMap = {};
           if (orderCustomerRes.success) {
             orderCustomerRes.data.forEach(row => {
@@ -252,7 +251,7 @@ export default function Accounts() {
           const mappedRefunds = returnTxns.map(t => {
             const orderIdMatch = t.description.match(/Bill\s*(?:#|##)?([A-Za-z0-9_-]+)/i);
             const orderId = orderIdMatch ? orderIdMatch[1] : '';
-            
+
             let reason = 'Damaged Garment';
             if (t.description.startsWith('Return - Bill')) {
               reason = 'Order Deleted';
@@ -417,16 +416,24 @@ export default function Accounts() {
     return income - expense;
   }, [cashTxns]);
 
+  const gatewayTxns = useMemo(() => transactions.filter(t => t.accountType === 'GATEWAY'), [transactions]);
+
+  const gatewayBalance = useMemo(() => {
+    const income = gatewayTxns.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + t.amount, 0);
+    const expense = gatewayTxns.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + t.amount, 0);
+    return income - expense;
+  }, [gatewayTxns]);
+
   const bankBalances = useMemo(() => {
     const balances = {};
     const bankAccountsList = settings.bankAccounts || [];
-    
+
     bankAccountsList.forEach(bank => {
       balances[bank.id] = 0;
     });
-    
+
     let unassigned = 0;
-    
+
     transactions.forEach(t => {
       if (t.accountType === 'BANK') {
         const amt = t.type === 'INCOME' ? t.amount : -t.amount;
@@ -437,13 +444,13 @@ export default function Accounts() {
         }
       }
     });
-    
+
     if (bankAccountsList.length > 0) {
       balances[bankAccountsList[0].id] += unassigned;
     } else {
       balances['default'] = unassigned;
     }
-    
+
     return balances;
   }, [transactions, settings.bankAccounts]);
 
@@ -481,26 +488,26 @@ export default function Accounts() {
         const id = `TXN-${Date.now()}`;
         const timestamp = getLocalDateTime();
         const nowIso = getLocalISOString();
-        
+
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
           [
-            id, 
-            DEFAULT_SHOP_ID, 
-            activeAccountType, 
-            formData.type, 
-            formData.category, 
-            parseFloat(formData.amount), 
-            formData.description, 
-            timestamp, 
+            id,
+            DEFAULT_SHOP_ID,
+            activeAccountType,
+            formData.type,
+            formData.category,
+            parseFloat(formData.amount),
+            formData.description,
+            timestamp,
             nowIso,
             formData.icon,
             activeAccountType === 'BANK' ? activeBankAccountId : null
           ]
         );
-        
+
         if (formData.type === 'EXPENSE') {
           await window.electronAPI.dbQuery(
             `INSERT INTO expenses 
@@ -517,7 +524,7 @@ export default function Accounts() {
             ]
           );
         }
-        
+
         setShowAddModal(false);
         fetchData();
       } catch (err) {
@@ -551,8 +558,8 @@ export default function Accounts() {
     }
 
     const source = activeAccountType;
-    const target = transferTargetId === 'CASH' ? 'CASH' : 'BANK';
-    const targetBankId = transferTargetId !== 'CASH' ? (transferTargetId === 'BANK' ? null : transferTargetId) : null;
+    const target = transferTargetId === 'CASH' ? 'CASH' : (transferTargetId === 'GATEWAY' ? 'GATEWAY' : 'BANK');
+    const targetBankId = (transferTargetId !== 'CASH' && transferTargetId !== 'GATEWAY') ? (transferTargetId === 'BANK' ? null : transferTargetId) : null;
     const sourceBankId = source === 'BANK' ? activeBankAccountId : null;
 
     let sourceName = '';
@@ -560,6 +567,9 @@ export default function Accounts() {
     if (source === 'CASH') {
       sourceName = 'Cash';
       sourceBalanceVal = cashBalance;
+    } else if (source === 'GATEWAY') {
+      sourceName = 'Nomod Payment Link';
+      sourceBalanceVal = gatewayBalance;
     } else {
       const activeBank = settings.bankAccounts?.find(b => b.id === activeBankAccountId);
       sourceName = activeBank ? activeBank.bankName : 'Bank';
@@ -569,6 +579,8 @@ export default function Accounts() {
     let targetName = '';
     if (transferTargetId === 'CASH') {
       targetName = 'Cash';
+    } else if (transferTargetId === 'GATEWAY') {
+      targetName = 'Nomod Payment Link';
     } else {
       const targetBank = settings.bankAccounts?.find(b => b.id === transferTargetId);
       targetName = targetBank ? targetBank.bankName : 'Bank';
@@ -582,7 +594,7 @@ export default function Accounts() {
       try {
         const timestamp = getLocalDateTime();
         const nowIso = getLocalISOString();
-        
+
         // 1. Create Expense from Source Account
         const sourceTxnId = `TXN-XFER-OUT-${Date.now()}`;
         await window.electronAPI.dbQuery(
@@ -665,20 +677,7 @@ export default function Accounts() {
   };
 
   const handleDeleteTransaction = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this transaction? This will not affect any customer statements if it was linked to an order payment.")) return;
-    
-    if (window.electronAPI?.dbQuery) {
-      try {
-        await window.electronAPI.dbQuery('DELETE FROM account_transactions WHERE id = ?', [id]);
-        await window.electronAPI.dbQuery('DELETE FROM expenses WHERE id = ?', [id]);
-        fetchData();
-      } catch (err) {
-        console.error("Delete transaction error:", err);
-        alert("Failed to delete transaction.");
-      }
-    } else {
-      setTransactions(prev => prev.filter(t => t.id !== id));
-    }
+    alert("Restricted: Deleting transactions is not allowed to maintain account integrity.");
   };
 
   /* ─── Filtering & Search ──────────────────────────── */
@@ -686,14 +685,16 @@ export default function Accounts() {
     return transactions.filter(t => {
       if (activeAccountType === 'CASH') {
         return t.accountType === 'CASH';
+      } else if (activeAccountType === 'GATEWAY') {
+        return t.accountType === 'GATEWAY';
       } else {
         if (settings.bankAccounts && settings.bankAccounts.length > 0) {
           const firstBankId = settings.bankAccounts[0].id;
           if (activeBankAccountId === firstBankId) {
-            return t.accountType === 'BANK' && 
-              (t.bankAccountId === activeBankAccountId || 
-               !t.bankAccountId || 
-               !settings.bankAccounts.some(b => b.id === t.bankAccountId));
+            return t.accountType === 'BANK' &&
+              (t.bankAccountId === activeBankAccountId ||
+                !t.bankAccountId ||
+                !settings.bankAccounts.some(b => b.id === t.bankAccountId));
           } else {
             return t.accountType === 'BANK' && t.bankAccountId === activeBankAccountId;
           }
@@ -707,7 +708,7 @@ export default function Accounts() {
   const filteredTransactions = useMemo(() => {
     const bounds = getLocalDateBounds(dateRange, customStart, customEnd);
     return activeTransactions.filter(t => {
-      const matchesSearch = 
+      const matchesSearch =
         t.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         t.category?.toLowerCase().includes(searchTerm.toLowerCase());
       if (!matchesSearch) return false;
@@ -748,25 +749,48 @@ export default function Accounts() {
     const linkId = `LNK-${Date.now().toString().slice(-4)}`;
     const orderRef = linkFormData.description.trim() || `Ref #${Math.floor(1000 + Math.random() * 9000)}`;
     const amountVal = parseFloat(linkFormData.amount);
-    
+
+    let checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${amountVal}&reference=${linkId}`;
+    if (window.electronAPI?.createNomodCheckout) {
+      try {
+        const checkoutRes = await window.electronAPI.createNomodCheckout({
+          amount: amountVal,
+          currency: settings.nomodCurrency || 'AED',
+          customer: {
+            name: customer.name,
+            phone: customer.phone || ''
+          },
+          orderId: orderRef,
+          userRole: user.role || 'staff'
+        });
+        if (checkoutRes.success && checkoutRes.data?.url) {
+          checkoutUrl = checkoutRes.data.url;
+        } else if (checkoutRes.error) {
+          console.warn("Nomod API failed, falling back to sandbox link:", checkoutRes.error);
+        }
+      } catch (err) {
+        console.warn("Nomod API connection error:", err.message);
+      }
+    }
+
     const newLink = {
       id: linkId,
       customerId: linkFormData.customerId,
       customerName: customer.name,
       description: orderRef,
       amount: amountVal,
-      channel: linkFormData.channel,
+      channel: 'Nomod',
       date: getLocalDateTime(),
-      status: 'Active',
-      url: `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`
+      status: 'Pending',
+      url: checkoutUrl
     };
 
     if (window.electronAPI?.dbQuery) {
       try {
         await window.electronAPI.dbQuery(
           `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [newLink.id, newLink.customerId, newLink.customerName, newLink.description, newLink.amount, newLink.channel, newLink.date, newLink.status, newLink.url]
+           VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?)`,
+          [newLink.id, newLink.customerId, newLink.customerName, newLink.description, newLink.amount, newLink.date, newLink.url]
         );
         fetchData();
       } catch (err) {
@@ -776,7 +800,7 @@ export default function Accounts() {
       setPaymentLinks(prev => [newLink, ...prev]);
     }
     setShowNewLinkCard(false);
-    setLinkFormData({ customerId: '', description: '', amount: '', channel: 'Apple Pay' });
+    setLinkFormData({ customerId: '', description: '', amount: '' });
   };
 
   // Refund handler
@@ -804,20 +828,20 @@ export default function Accounts() {
         const id = `TXN-RFD-${Date.now()}`;
         const timestamp = getLocalDateTime();
         const nowIso = getLocalISOString();
-        
+
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
           [
-            id, 
-            DEFAULT_SHOP_ID, 
-            refundFormData.accountId === 'CASH' ? 'CASH' : 'BANK', 
-            'EXPENSE', 
-            'Return', 
-            amountVal, 
-            `Refund for Bill #${refundFormData.orderId} - ${refundFormData.reason}`, 
-            timestamp, 
+            id,
+            DEFAULT_SHOP_ID,
+            refundFormData.accountId === 'CASH' ? 'CASH' : 'BANK',
+            'EXPENSE',
+            'Return',
+            amountVal,
+            `Refund for Bill #${refundFormData.orderId} - ${refundFormData.reason}`,
+            timestamp,
             nowIso,
             'Receipt',
             refundFormData.accountId === 'CASH' ? null : refundFormData.accountId
@@ -927,26 +951,26 @@ export default function Accounts() {
   // Payroll payout handler
   const handlePaySalary = async () => {
     if (!activePayslip) return;
-    
+
     if (window.electronAPI?.dbQuery) {
       try {
         const id = `TXN-PR-${Date.now()}`;
         const timestamp = getLocalDateTime();
         const nowIso = getLocalISOString();
-        
+
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
           [
-            id, 
-            DEFAULT_SHOP_ID, 
-            payrollInputData.paymentAccount === 'CASH' ? 'CASH' : 'BANK', 
-            'EXPENSE', 
-            'Salaries', 
-            activePayslip.net, 
-            `Salary Payment for ${activePayslip.employeeName} - June 2026`, 
-            timestamp, 
+            id,
+            DEFAULT_SHOP_ID,
+            payrollInputData.paymentAccount === 'CASH' ? 'CASH' : 'BANK',
+            'EXPENSE',
+            'Salaries',
+            activePayslip.net,
+            `Salary Payment for ${activePayslip.employeeName} - June 2026`,
+            timestamp,
             nowIso,
             'Receipt',
             payrollInputData.paymentAccount === 'CASH' ? null : payrollInputData.paymentAccount
@@ -1082,14 +1106,14 @@ export default function Accounts() {
     const regex = /(#[a-zA-Z0-9_-]+)/g;
     const parts = description.split(regex);
     if (parts.length === 1) return description;
-    
+
     return parts.map((part, index) => {
       if (regex.test(part)) {
         const orderIdClean = part.replace('#', '');
         return (
-          <span 
-            key={index} 
-            className={styles.billLink} 
+          <span
+            key={index}
+            className={styles.billLink}
             onClick={() => navigate(`/invoice/${orderIdClean}`)}
           >
             {part}
@@ -1102,7 +1126,7 @@ export default function Accounts() {
 
   return (
     <div className={styles.page}>
-      
+
       <div className={styles.topTabBar} data-noprint="true">
         {tabs.map((tab) => (
           <button
@@ -1117,91 +1141,24 @@ export default function Accounts() {
 
       {activeTab === 'Payments' ? (
         <div className={styles.splitLayout}>
-        
-        {/* ── Left Sidebar (Accounts Cards) ──────────────── */}
-        <div className={styles.sidebarCol} data-noprint="true">
-          
-          {/* Cash Card */}
-          <div 
-            className={`${styles.accountCard} ${activeAccountType === 'CASH' ? styles.accountCardActive : ''}`}
-            onClick={() => navigate('/accounts/cash')}
-          >
-            <div className={styles.cardHeaderSmall}>
-              <span className={styles.accountLabel}>CASH</span>
-              <Wallet size={18} className={styles.accountIcon} />
-            </div>
-            <div className={styles.accountBalance}>
-              {cashBalance.toFixed(2)} <span className={styles.curr}>{settings.currencySymbol || 'AED'}</span>
-            </div>
-            
-            {activeAccountType === 'CASH' && (
-              <div className={styles.cardQuickActions} onClick={e => e.stopPropagation()}>
-                <div className={styles.actionRow}>
-                  <button className={styles.cardBtnGreen} onClick={() => handleOpenAddModal('INCOME')}>+ Income</button>
-                  <button className={styles.cardBtnRed} onClick={() => handleOpenAddModal('EXPENSE')}>- Expense</button>
-                </div>
-                <button className={styles.cardBtnOutline} onClick={handleOpenTransferModal}>
-                  <ArrowLeftRight size={14} /> Transfer
-                </button>
-              </div>
-            )}
-          </div>
 
-          {/* Bank Cards */}
-          {settings.bankAccounts && settings.bankAccounts.length > 0 ? (
-            settings.bankAccounts.map((bank) => {
-              const isCardActive = activeAccountType === 'BANK' && activeBankAccountId === bank.id;
-              const bal = bankBalances[bank.id] || 0;
-              
-              return (
-                <div 
-                  key={bank.id}
-                  className={`${styles.accountCard} ${isCardActive ? styles.accountCardActive : ''}`}
-                  onClick={() => {
-                    navigate('/accounts/bank');
-                    setActiveBankAccountId(bank.id);
-                  }}
-                >
-                  <div className={styles.cardHeaderSmall}>
-                    <span className={styles.accountLabel}>{bank.bankName.toUpperCase()}</span>
-                    <Landmark size={18} className={styles.accountIcon} />
-                  </div>
-                  <div className={styles.accountBalance}>
-                    {bal.toFixed(2)} <span className={styles.curr}>{settings.currencySymbol || 'AED'}</span>
-                  </div>
-                  
-                  {isCardActive && (
-                    <div className={styles.cardQuickActions} onClick={e => e.stopPropagation()}>
-                      <div className={styles.actionRow}>
-                        <button className={styles.cardBtnGreen} onClick={() => handleOpenAddModal('INCOME')}>+ Income</button>
-                        <button className={styles.cardBtnRed} onClick={() => handleOpenAddModal('EXPENSE')}>- Expense</button>
-                      </div>
-                      <button className={styles.cardBtnOutline} onClick={handleOpenTransferModal}>
-                        <ArrowLeftRight size={14} /> Transfer
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          ) : (
-            /* Fallback generic Bank Card */
-            <div 
-              className={`${styles.accountCard} ${activeAccountType === 'BANK' ? styles.accountCardActive : ''}`}
-              onClick={() => {
-                navigate('/accounts/bank');
-                setActiveBankAccountId('');
-              }}
+          {/* ── Left Sidebar (Accounts Cards) ──────────────── */}
+          <div className={styles.sidebarCol} data-noprint="true">
+
+            {/* Cash Card */}
+            <div
+              className={`${styles.accountCard} ${activeAccountType === 'CASH' ? styles.accountCardActive : ''}`}
+              onClick={() => navigate('/accounts/cash')}
             >
               <div className={styles.cardHeaderSmall}>
-                <span className={styles.accountLabel}>BANK (GENERAL)</span>
-                <Landmark size={18} className={styles.accountIcon} />
+                <span className={styles.accountLabel}>CASH</span>
+                <Wallet size={18} className={styles.accountIcon} />
               </div>
               <div className={styles.accountBalance}>
-                {(bankBalances['default'] || 0).toFixed(2)} <span className={styles.curr}>{settings.currencySymbol || 'AED'}</span>
+                {cashBalance.toFixed(2)} <span className={styles.curr}>{settings.currencySymbol || 'AED'}</span>
               </div>
-              
-              {activeAccountType === 'BANK' && (
+
+              {activeAccountType === 'CASH' && (
                 <div className={styles.cardQuickActions} onClick={e => e.stopPropagation()}>
                   <div className={styles.actionRow}>
                     <button className={styles.cardBtnGreen} onClick={() => handleOpenAddModal('INCOME')}>+ Income</button>
@@ -1213,182 +1170,275 @@ export default function Accounts() {
                 </div>
               )}
             </div>
-          )}
 
-          {/* Add Account Button */}
-          <button className={styles.addAccountBtn} onClick={() => setShowAddAccountModal(true)}>
-            <Plus size={16} /> + Add account
-          </button>
-        </div>
-
-        {/* ── Right Detail Pane (Transactions table) ─────── */}
-        <div className={styles.detailCol}>
-          
-          {/* Detail Header Row (Title left, Controls right) */}
-          <div className={styles.detailHeader}>
-            <h2>
-              Payments for accounts "{activeAccountType === 'CASH' ? 'Cash' : (
-                settings.bankAccounts?.find(b => b.id === activeBankAccountId)?.bankName || 'Bank'
-              )}"
-            </h2>
-            
-            <div className={styles.headerControls} data-noprint="true">
-              <div className={styles.filterGroup}>
-                <label className={styles.fieldLabel}>Period</label>
-                <div className={styles.dateSelectorInput}>
-                  <Calendar size={14} color="#64748B" />
-                  <select 
-                    value={dateRange}
-                    onChange={(e) => setDateRange(e.target.value)}
-                    className={styles.selectNative}
-                  >
-                    <option value="All">All Time</option>
-                    <option value="Today">Today</option>
-                    <option value="This Month">This Month</option>
-                    <option value="This Year">This Year</option>
-                    <option value="Custom">Custom Range</option>
-                  </select>
-                </div>
+            {/* Gateway Card */}
+            <div
+              className={`${styles.accountCard} ${activeAccountType === 'GATEWAY' ? styles.accountCardActive : ''}`}
+              onClick={() => navigate('/accounts/gateway')}
+            >
+              <div className={styles.cardHeaderSmall}>
+                <span className={styles.accountLabel}>NOMOD PAYMENT LINK</span>
+                <CreditCard size={18} className={styles.accountIcon} />
+              </div>
+              <div className={styles.accountBalance}>
+                {gatewayBalance.toFixed(2)} <span className={styles.curr}>{settings.currencySymbol || 'AED'}</span>
               </div>
 
-              {dateRange === 'Custom' && (
-                <div className={styles.customDateWrapper}>
-                  <div className={styles.filterGroup}>
-                    <label className={styles.fieldLabel}>From</label>
-                    <input 
-                      type="date" 
-                      value={customStart} 
-                      onChange={(e) => setCustomStart(e.target.value)} 
-                      className={styles.datePickerInput}
-                    />
+              {activeAccountType === 'GATEWAY' && (
+                <div className={styles.cardQuickActions} onClick={e => e.stopPropagation()}>
+                  <div className={styles.actionRow}>
+                    <button className={styles.cardBtnGreen} onClick={() => handleOpenAddModal('INCOME')}>+ Income</button>
+                    <button className={styles.cardBtnRed} onClick={() => handleOpenAddModal('EXPENSE')}>- Expense</button>
                   </div>
-                  <span className={styles.rangeSep}>to</span>
-                  <div className={styles.filterGroup}>
-                    <label className={styles.fieldLabel}>To</label>
-                    <input 
-                      type="date" 
-                      value={customEnd} 
-                      onChange={(e) => setCustomEnd(e.target.value)} 
-                      className={styles.datePickerInput}
-                    />
-                  </div>
+                  <button className={styles.cardBtnOutline} onClick={handleOpenTransferModal}>
+                    <ArrowLeftRight size={14} /> Transfer
+                  </button>
                 </div>
               )}
-
-              <div className={styles.filterGroup}>
-                <label className={styles.fieldLabel}>Search</label>
-                <div className={styles.searchWrapper}>
-                  <Search size={14} color="#64748B" />
-                  <input 
-                    type="text" 
-                    placeholder="Search comments..." 
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className={styles.searchInput}
-                  />
-                </div>
-              </div>
-
-              <div className={styles.actionButtons}>
-                <button className={styles.applyBtn} onClick={fetchData}>Apply</button>
-                <button className={styles.printBtn} onClick={handlePrint} title="Print Statements">
-                  <Printer size={16} /> Print
-                </button>
-              </div>
             </div>
+
+            {/* Bank Cards */}
+            {settings.bankAccounts && settings.bankAccounts.length > 0 ? (
+              settings.bankAccounts.map((bank) => {
+                const isCardActive = activeAccountType === 'BANK' && activeBankAccountId === bank.id;
+                const bal = bankBalances[bank.id] || 0;
+
+                return (
+                  <div
+                    key={bank.id}
+                    className={`${styles.accountCard} ${isCardActive ? styles.accountCardActive : ''}`}
+                    onClick={() => {
+                      navigate('/accounts/bank');
+                      setActiveBankAccountId(bank.id);
+                    }}
+                  >
+                    <div className={styles.cardHeaderSmall}>
+                      <span className={styles.accountLabel}>{bank.bankName.toUpperCase()}</span>
+                      <Landmark size={18} className={styles.accountIcon} />
+                    </div>
+                    <div className={styles.accountBalance}>
+                      {bal.toFixed(2)} <span className={styles.curr}>{settings.currencySymbol || 'AED'}</span>
+                    </div>
+
+                    {isCardActive && (
+                      <div className={styles.cardQuickActions} onClick={e => e.stopPropagation()}>
+                        <div className={styles.actionRow}>
+                          <button className={styles.cardBtnGreen} onClick={() => handleOpenAddModal('INCOME')}>+ Income</button>
+                          <button className={styles.cardBtnRed} onClick={() => handleOpenAddModal('EXPENSE')}>- Expense</button>
+                        </div>
+                        <button className={styles.cardBtnOutline} onClick={handleOpenTransferModal}>
+                          <ArrowLeftRight size={14} /> Transfer
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              /* Fallback generic Bank Card */
+              <div
+                className={`${styles.accountCard} ${activeAccountType === 'BANK' ? styles.accountCardActive : ''}`}
+                onClick={() => {
+                  navigate('/accounts/bank');
+                  setActiveBankAccountId('');
+                }}
+              >
+                <div className={styles.cardHeaderSmall}>
+                  <span className={styles.accountLabel}>BANK (GENERAL)</span>
+                  <Landmark size={18} className={styles.accountIcon} />
+                </div>
+                <div className={styles.accountBalance}>
+                  {(bankBalances['default'] || 0).toFixed(2)} <span className={styles.curr}>{settings.currencySymbol || 'AED'}</span>
+                </div>
+
+                {activeAccountType === 'BANK' && (
+                  <div className={styles.cardQuickActions} onClick={e => e.stopPropagation()}>
+                    <div className={styles.actionRow}>
+                      <button className={styles.cardBtnGreen} onClick={() => handleOpenAddModal('INCOME')}>+ Income</button>
+                      <button className={styles.cardBtnRed} onClick={() => handleOpenAddModal('EXPENSE')}>- Expense</button>
+                    </div>
+                    <button className={styles.cardBtnOutline} onClick={handleOpenTransferModal}>
+                      <ArrowLeftRight size={14} /> Transfer
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Add Account Button */}
+            <button className={styles.addAccountBtn} onClick={() => setShowAddAccountModal(true)}>
+              <Plus size={16} /> + Add account
+            </button>
           </div>
 
-          {/* Transaction Ledger Table */}
-          <div className={styles.tableCard}>
-            <table className={styles.ledgerTable}>
-              <thead>
-                <tr>
-                  <th>CREATED</th>
-                  <th>COMMENT</th>
-                  <th className={styles.numCol}>TYPE</th>
-                  <th className={styles.numCol}>AMOUNT</th>
-                  <th className={styles.actionCol} data-noprint="true"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan="5" className={styles.emptyRow}>Loading entries…</td>
-                  </tr>
-                ) : filteredTransactions.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" className={styles.emptyRow}>No transactions found matching criteria.</td>
-                  </tr>
-                ) : (
-                  paginatedTransactions.map(t => {
-                    // Parse user/cashier name who created the transaction
-                    const matchesCashier = t.description?.match(/Settlement from (.+?)(?:\s+via|$)/i) || t.description?.match(/Settlement for Bill #(.+?)(?:\s+via|$)/i);
-                    const creatorName = matchesCashier ? 'System' : (user.name || 'Mohammed');
-                    
-                    return (
-                      <tr key={t.id} className={styles.ledgerRow}>
-                        <td>
-                          <div className={styles.createdCell}>
-                            <div className={styles.creatorBold}>{creatorName}</div>
-                            <div className={styles.dateGray}>
-                              {formatDate(t.date)} {new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          <div className={styles.commentCell}>
-                            <div className={styles.commentMain}>{renderDescriptionWithLinks(t.description)}</div>
-                            <div className={styles.commentSub}>{t.category}</div>
-                          </div>
-                        </td>
-                        <td className={styles.numCol}>
-                          <span className={`${styles.typeBadge} ${t.type === 'INCOME' ? styles.incomeBadge : styles.expenseBadge}`}>
-                            {t.type === 'INCOME' ? 'INCOME' : 'EXPENSE'}
-                          </span>
-                        </td>
-                        <td className={`${styles.numCol} ${t.type === 'INCOME' ? styles.incomeAmt : styles.expenseAmt}`}>
-                          {t.type === 'INCOME' ? '+' : '-'}{t.amount.toFixed(2)} <span className={styles.currencyMini}>{settings.currencySymbol || 'AED'}</span>
-                        </td>
-                        <td className={styles.actionCol} data-noprint="true">
-                          <button className={styles.deleteRowBtn} onClick={() => handleDeleteTransaction(t.id)}>
-                            <Trash2 size={15} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
+          {/* ── Right Detail Pane (Transactions table) ─────── */}
+          <div className={styles.detailCol}>
+
+            {/* Detail Header Row (Title left, Controls right) */}
+            <div className={styles.detailHeader}>
+              <h2>
+                Payments for accounts "{activeAccountType === 'CASH' ? 'Cash' : (
+                  settings.bankAccounts?.find(b => b.id === activeBankAccountId)?.bankName || 'Bank'
+                )}"
+              </h2>
+
+              <div className={styles.headerControls} data-noprint="true">
+                <div className={styles.filterGroup}>
+                  <label className={styles.fieldLabel}>Period</label>
+                  <div className={styles.dateSelectorInput}>
+                    <Calendar size={14} color="#64748B" />
+                    <select
+                      value={dateRange}
+                      onChange={(e) => setDateRange(e.target.value)}
+                      className={styles.selectNative}
+                    >
+                      <option value="All">All Time</option>
+                      <option value="Today">Today</option>
+                      <option value="This Month">This Month</option>
+                      <option value="This Year">This Year</option>
+                      <option value="Custom">Custom Range</option>
+                    </select>
+                  </div>
+                </div>
+
+                {dateRange === 'Custom' && (
+                  <div className={styles.customDateWrapper}>
+                    <div className={styles.filterGroup}>
+                      <label className={styles.fieldLabel}>From</label>
+                      <input
+                        type="date"
+                        value={customStart}
+                        onChange={(e) => setCustomStart(e.target.value)}
+                        className={styles.datePickerInput}
+                      />
+                    </div>
+                    <span className={styles.rangeSep}>to</span>
+                    <div className={styles.filterGroup}>
+                      <label className={styles.fieldLabel}>To</label>
+                      <input
+                        type="date"
+                        value={customEnd}
+                        onChange={(e) => setCustomEnd(e.target.value)}
+                        className={styles.datePickerInput}
+                      />
+                    </div>
+                  </div>
                 )}
-              </tbody>
-              <tfoot>
-                <tr className={styles.footerTotalsRow}>
-                  <td colSpan="2" className={styles.totalsLabel}>TOTALS</td>
-                  <td className={styles.numCol}>
-                    <div className={styles.totalsText}>In: +{filteredIncome.toFixed(2)}</div>
-                    <div className={styles.totalsText}>Out: -{filteredExpense.toFixed(2)}</div>
-                  </td>
-                  <td className={`${styles.numCol} ${styles.totalBalance}`}>
-                    {(filteredIncome - filteredExpense).toFixed(2)} <span className={styles.currencyMini}>{settings.currencySymbol || 'AED'}</span>
-                  </td>
-                  <td className={styles.actionCol} data-noprint="true"></td>
-                </tr>
-              </tfoot>
-            </table>
-            {/* Pagination Controls */}
-            {!loading && (
-              <Pagination
-                currentPage={currentPage}
-                totalPages={Math.ceil(filteredTransactions.length / 20)}
-                onPageChange={setCurrentPage}
-                totalItems={filteredTransactions.length}
-                pageSize={20}
-                itemLabel="transactions"
-              />
-            )}
+
+                <div className={styles.filterGroup}>
+                  <label className={styles.fieldLabel}>Search</label>
+                  <div className={styles.searchWrapper}>
+                    <Search size={14} color="#64748B" />
+                    <input
+                      type="text"
+                      placeholder="Search comments..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className={styles.searchInput}
+                    />
+                  </div>
+                </div>
+
+                <div className={styles.actionButtons}>
+                  <button className={styles.applyBtn} onClick={fetchData}>Apply</button>
+                  <button className={styles.printBtn} onClick={handlePrint} title="Print Statements">
+                    <Printer size={16} /> Print
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Transaction Ledger Table */}
+            <div className={styles.tableCard}>
+              <table className={styles.ledgerTable}>
+                <thead>
+                  <tr>
+                    <th>CREATED</th>
+                    <th>COMMENT</th>
+                    <th className={styles.numCol}>TYPE</th>
+                    <th className={styles.numCol}>AMOUNT</th>
+                    <th className={styles.actionCol} data-noprint="true"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan="5" className={styles.emptyRow}>Loading entries…</td>
+                    </tr>
+                  ) : filteredTransactions.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className={styles.emptyRow}>No transactions found matching criteria.</td>
+                    </tr>
+                  ) : (
+                    paginatedTransactions.map(t => {
+                      // Parse user/cashier name who created the transaction
+                      const matchesCashier = t.description?.match(/Settlement from (.+?)(?:\s+via|$)/i) || t.description?.match(/Settlement for Bill #(.+?)(?:\s+via|$)/i);
+                      const creatorName = matchesCashier ? 'System' : (user.name || 'Mohammed');
+
+                      return (
+                        <tr key={t.id} className={styles.ledgerRow}>
+                          <td>
+                            <div className={styles.createdCell}>
+                              <div className={styles.creatorBold}>{creatorName}</div>
+                              <div className={styles.dateGray}>
+                                {formatDate(t.date)} {new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <div className={styles.commentCell}>
+                              <div className={styles.commentMain}>{renderDescriptionWithLinks(t.description)}</div>
+                              <div className={styles.commentSub}>{t.category}</div>
+                            </div>
+                          </td>
+                          <td className={styles.numCol}>
+                            <span className={`${styles.typeBadge} ${t.type === 'INCOME' ? styles.incomeBadge : styles.expenseBadge}`}>
+                              {t.type === 'INCOME' ? 'INCOME' : 'EXPENSE'}
+                            </span>
+                          </td>
+                          <td className={`${styles.numCol} ${t.type === 'INCOME' ? styles.incomeAmt : styles.expenseAmt}`}>
+                            {t.type === 'INCOME' ? '+' : '-'}{t.amount.toFixed(2)} <span className={styles.currencyMini}>{settings.currencySymbol || 'AED'}</span>
+                          </td>
+                          <td className={styles.actionCol} data-noprint="true">
+                            <button className={styles.deleteRowBtn} onClick={() => handleDeleteTransaction(t.id)}>
+                              <Trash2 size={15} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr className={styles.footerTotalsRow}>
+                    <td colSpan="2" className={styles.totalsLabel}>TOTALS</td>
+                    <td className={styles.numCol}>
+                      <div className={styles.totalsText}>In: +{filteredIncome.toFixed(2)}</div>
+                      <div className={styles.totalsText}>Out: -{filteredExpense.toFixed(2)}</div>
+                    </td>
+                    <td className={`${styles.numCol} ${styles.totalBalance}`}>
+                      {(filteredIncome - filteredExpense).toFixed(2)} <span className={styles.currencyMini}>{settings.currencySymbol || 'AED'}</span>
+                    </td>
+                    <td className={styles.actionCol} data-noprint="true"></td>
+                  </tr>
+                </tfoot>
+              </table>
+              {/* Pagination Controls */}
+              {!loading && (
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={Math.ceil(filteredTransactions.length / 20)}
+                  onPageChange={setCurrentPage}
+                  totalItems={filteredTransactions.length}
+                  pageSize={20}
+                  itemLabel="transactions"
+                />
+              )}
+            </div>
+
           </div>
 
         </div>
-
-      </div>
       ) : activeTab === 'Payment links' ? (
         <div className={styles.detailCol}>
           <div className={styles.tabContentHeader}>
@@ -1405,7 +1455,7 @@ export default function Accounts() {
                   <label>Select Customer</label>
                   <select
                     value={linkFormData.customerId}
-                    onChange={(e) => setLinkFormData({...linkFormData, customerId: e.target.value})}
+                    onChange={(e) => setLinkFormData({ ...linkFormData, customerId: e.target.value })}
                     className={styles.modalSelect}
                     required
                   >
@@ -1422,7 +1472,7 @@ export default function Accounts() {
                     step="0.01"
                     placeholder="0.00"
                     value={linkFormData.amount}
-                    onChange={(e) => setLinkFormData({...linkFormData, amount: e.target.value})}
+                    onChange={(e) => setLinkFormData({ ...linkFormData, amount: e.target.value })}
                     className={styles.modalInput}
                     required
                   />
@@ -1433,23 +1483,11 @@ export default function Accounts() {
                     type="text"
                     placeholder="e.g. Order #105103"
                     value={linkFormData.description}
-                    onChange={(e) => setLinkFormData({...linkFormData, description: e.target.value})}
+                    onChange={(e) => setLinkFormData({ ...linkFormData, description: e.target.value })}
                     className={styles.modalInput}
                   />
                 </div>
-                <div className={styles.formGroup}>
-                  <label>Payment Channel</label>
-                  <select
-                    value={linkFormData.channel}
-                    onChange={(e) => setLinkFormData({...linkFormData, channel: e.target.value})}
-                    className={styles.modalSelect}
-                  >
-                    <option value="Apple Pay">Apple Pay</option>
-                    <option value="Visa">Visa</option>
-                    <option value="Mastercard">Mastercard</option>
-                    <option value="Google Pay">Google Pay</option>
-                  </select>
-                </div>
+
               </div>
               <div className={styles.formActions}>
                 <button type="button" className={styles.btnSecondary} onClick={() => setShowNewLinkCard(false)}>Cancel</button>
@@ -1467,7 +1505,6 @@ export default function Accounts() {
                   <th>CUSTOMER</th>
                   <th>DESCRIPTION</th>
                   <th className={styles.numCol}>AMOUNT</th>
-                  <th>METHOD</th>
                   <th>STATUS</th>
                   <th className={styles.actionCol}>ACTIONS</th>
                 </tr>
@@ -1475,7 +1512,7 @@ export default function Accounts() {
               <tbody>
                 {paymentLinks.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className={styles.emptyRow}>No payment links generated yet.</td>
+                    <td colSpan="7" className={styles.emptyRow}>No payment links generated yet.</td>
                   </tr>
                 ) : (
                   paymentLinks.map(link => (
@@ -1487,27 +1524,26 @@ export default function Accounts() {
                       <td className={`${styles.numCol} ${styles.incomeAmt}`}>
                         {link.amount.toFixed(2)} <span className={styles.currencyMini}>{settings.currencySymbol || 'AED'}</span>
                       </td>
-                      <td><span className={styles.tagBadge}>{link.channel}</span></td>
                       <td>
-                        <span className={`${
-                          link.status === 'Paid' ? styles.badgePaid : 
-                          link.status === 'Active' ? styles.badgeActive : styles.badgeExpired
-                        }`}>
+                        <span className={`${link.status === 'Paid' ? styles.badgePaid :
+                            (link.status === 'Active' || link.status === 'Pending') ? styles.badgeActive :
+                              link.status === 'Cancelled' ? styles.badgeExpired : styles.badgeExpired
+                          }`}>
                           {link.status}
                         </span>
                       </td>
                       <td className={styles.actionCol}>
                         <div className={styles.linkActionButtons} style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-                          <button 
-                            className={styles.shareBtn} 
+                          <button
+                            className={styles.shareBtn}
                             onClick={() => {
                               const customer = dbCustomers.find(c => c.name === link.customerName);
                               const phoneNum = customer ? customer.phone : '';
                               const text = `Dear ${link.customerName},\n\n` +
-                                           `Here is your payment link of *${(settings.currencySymbol || 'AED')} ${link.amount.toFixed(2)}* for *${link.description}*.\n\n` +
-                                           `Please pay online using this link: ${link.url}\n\n` +
-                                           `Thank you!\n*${(settings.shopName || 'Laundry Box')}*`;
-                              
+                                `Here is your payment link of *${(settings.currencySymbol || 'AED')} ${link.amount.toFixed(2)}* for *${link.description}*.\n\n` +
+                                `Please pay online using this link: ${link.url}\n\n` +
+                                `Thank you!\n*${(settings.shopName || 'Laundry Box')}*`;
+
                               let cleanPhone = phoneNum;
                               if (cleanPhone) {
                                 if (cleanPhone.startsWith('+')) {
@@ -1517,7 +1553,7 @@ export default function Accounts() {
                                   cleanPhone = code + cleanPhone.replace(/[^\d]/g, '');
                                 }
                               }
-                              
+
                               const url = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(text)}`;
                               if (window.electronAPI?.openExternal) {
                                 window.electronAPI.openExternal(url);
@@ -1526,11 +1562,11 @@ export default function Accounts() {
                               }
                             }}
                             title="Share via WhatsApp"
-                            style={{ 
-                              background: '#10b981', 
-                              color: 'white', 
-                              border: 'none', 
-                              padding: '5px 10px', 
+                            style={{
+                              background: '#10b981',
+                              color: 'white',
+                              border: 'none',
+                              padding: '5px 10px',
                               borderRadius: '6px',
                               cursor: 'pointer',
                               display: 'flex',
@@ -1542,7 +1578,7 @@ export default function Accounts() {
                           >
                             <Share2 size={12} /> Share WhatsApp
                           </button>
-                          
+
                           {link.status === 'Active' && (
                             <button
                               onClick={async () => {
@@ -1550,30 +1586,30 @@ export default function Accounts() {
                                   if (window.electronAPI?.dbQuery) {
                                     try {
                                       await window.electronAPI.dbQuery("UPDATE payment_links SET status = 'Paid' WHERE id = ?", [link.id]);
-                                      
+
                                       const txnId = `TXN-LNK-PAY-${Date.now()}`;
                                       const timestamp = getLocalDateTime();
                                       const nowIso = getLocalISOString();
-                                      
+
                                       await window.electronAPI.dbQuery(
                                         `INSERT INTO account_transactions 
                                          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
                                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
                                         [
-                                          txnId, 
-                                          DEFAULT_SHOP_ID, 
-                                          'BANK', 
-                                          'INCOME', 
-                                          'Service Payment', 
-                                          link.amount, 
-                                          `Online Payment - ${link.customerName} - ${link.description} (Link ${link.id})`, 
-                                          timestamp, 
+                                          txnId,
+                                          DEFAULT_SHOP_ID,
+                                          'BANK',
+                                          'INCOME',
+                                          'Service Payment',
+                                          link.amount,
+                                          `Online Payment - ${link.customerName} - ${link.description} (Link ${link.id})`,
+                                          timestamp,
                                           nowIso,
                                           'CreditCard',
                                           settings.bankAccounts && settings.bankAccounts.length > 0 ? settings.bankAccounts[0].id : null
                                         ]
                                       );
-                                      
+
                                       fetchData();
                                     } catch (err) {
                                       console.error('Failed to mark payment link as paid:', err);
@@ -1647,7 +1683,7 @@ export default function Accounts() {
                     step="0.01"
                     placeholder="0.00"
                     value={refundFormData.amount}
-                    onChange={(e) => setRefundFormData({...refundFormData, amount: e.target.value})}
+                    onChange={(e) => setRefundFormData({ ...refundFormData, amount: e.target.value })}
                     className={styles.modalInput}
                     required
                   />
@@ -1656,7 +1692,7 @@ export default function Accounts() {
                   <label>Reason for Refund</label>
                   <select
                     value={refundFormData.reason}
-                    onChange={(e) => setRefundFormData({...refundFormData, reason: e.target.value})}
+                    onChange={(e) => setRefundFormData({ ...refundFormData, reason: e.target.value })}
                     className={styles.modalSelect}
                   >
                     <option value="Damaged Garment">Damaged Garment</option>
@@ -1670,7 +1706,7 @@ export default function Accounts() {
                   <label>Deduct From Account</label>
                   <select
                     value={refundFormData.accountId}
-                    onChange={(e) => setRefundFormData({...refundFormData, accountId: e.target.value})}
+                    onChange={(e) => setRefundFormData({ ...refundFormData, accountId: e.target.value })}
                     className={styles.modalSelect}
                   >
                     <option value="CASH">Cash Account</option>
@@ -1747,9 +1783,9 @@ export default function Accounts() {
               <div className={styles.modalBody}>
                 <div className={styles.formGroup}>
                   <label>Category</label>
-                  <select 
+                  <select
                     value={formData.category}
-                    onChange={(e) => setFormData({...formData, category: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                     className={styles.modalSelect}
                   >
                     {formData.type === 'INCOME' ? (
@@ -1774,16 +1810,16 @@ export default function Accounts() {
                     )}
                   </select>
                 </div>
-                
+
                 <div className={styles.formGroup}>
                   <label>Amount ({settings.currencySymbol || 'AED'})</label>
-                  <input 
-                    type="number" 
-                    step="0.01" 
-                    placeholder="0.00" 
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
                     required
                     value={formData.amount}
-                    onChange={(e) => setFormData({...formData, amount: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
                     className={styles.modalInput}
                     autoFocus
                   />
@@ -1791,10 +1827,10 @@ export default function Accounts() {
 
                 <div className={styles.formGroup}>
                   <label>Description / Notes</label>
-                  <textarea 
+                  <textarea
                     placeholder="Provide details about this entry..."
                     value={formData.description}
-                    onChange={(e) => setFormData({...formData, description: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     className={styles.modalTextarea}
                     required
                   />
@@ -1822,17 +1858,17 @@ export default function Accounts() {
                 <div className={styles.transferFlowInfo}>
                   <div className={styles.flowNode}>
                     <span className={styles.flowLabel}>From Account</span>
-                    <strong>{activeAccountType === 'CASH' ? 'Cash' : (settings.bankAccounts?.find(b => b.id === activeBankAccountId)?.bankName || 'Bank')}</strong>
+                    <strong>{activeAccountType === 'CASH' ? 'Cash' : (activeAccountType === 'GATEWAY' ? 'Nomod Payment Link' : (settings.bankAccounts?.find(b => b.id === activeBankAccountId)?.bankName || 'Bank'))}</strong>
                     <span className={styles.flowBalSmall}>
-                      Bal: {(activeAccountType === 'CASH' ? cashBalance : (bankBalances[activeBankAccountId] || 0)).toFixed(2)} {settings.currencySymbol}
+                      Bal: {(activeAccountType === 'CASH' ? cashBalance : (activeAccountType === 'GATEWAY' ? gatewayBalance : (bankBalances[activeBankAccountId] || 0))).toFixed(2)} {settings.currencySymbol}
                     </span>
                   </div>
                   <div className={styles.flowArrow}><ArrowLeftRight size={20} /></div>
                   <div className={styles.flowNode}>
                     <span className={styles.flowLabel}>To Account</span>
-                    <strong>{transferTargetId === 'CASH' ? 'Cash' : (settings.bankAccounts?.find(b => b.id === transferTargetId)?.bankName || 'Bank')}</strong>
+                    <strong>{transferTargetId === 'CASH' ? 'Cash' : (transferTargetId === 'GATEWAY' ? 'Nomod Payment Link' : (settings.bankAccounts?.find(b => b.id === transferTargetId)?.bankName || 'Bank'))}</strong>
                     <span className={styles.flowBalSmall}>
-                      Bal: {(transferTargetId === 'CASH' ? cashBalance : (bankBalances[transferTargetId] || 0)).toFixed(2)} {settings.currencySymbol}
+                      Bal: {(transferTargetId === 'CASH' ? cashBalance : (transferTargetId === 'GATEWAY' ? gatewayBalance : (bankBalances[transferTargetId] || 0))).toFixed(2)} {settings.currencySymbol}
                     </span>
                   </div>
                 </div>
@@ -1845,22 +1881,36 @@ export default function Accounts() {
                     className={styles.modalSelect}
                   >
                     {activeAccountType === 'CASH' ? (
-                      settings.bankAccounts?.length > 0 ? (
-                        settings.bankAccounts.map(b => (
-                          <option key={b.id} value={b.id}>{b.bankName}</option>
-                        ))
-                      ) : (
-                        <option value="BANK">General Bank</option>
-                      )
+                      <>
+                        <option value="GATEWAY">Nomod Payment Link</option>
+                        {settings.bankAccounts?.length > 0 ? (
+                          settings.bankAccounts.map(b => (
+                            <option key={b.id} value={b.id}>{b.bankName}</option>
+                          ))
+                        ) : (
+                          <option value="BANK">General Bank</option>
+                        )}
+                      </>
+                    ) : activeAccountType === 'GATEWAY' ? (
+                      <>
+                        <option value="CASH">Cash</option>
+                        {settings.bankAccounts?.length > 0 ? (
+                          settings.bankAccounts.map(b => (
+                            <option key={b.id} value={b.id}>{b.bankName}</option>
+                          ))
+                        ) : (
+                          <option value="BANK">General Bank</option>
+                        )}
+                      </>
                     ) : (
                       <>
                         <option value="CASH">Cash</option>
+                        <option value="GATEWAY">Nomod Payment Link</option>
                         {settings.bankAccounts
                           ?.filter(b => b.id !== activeBankAccountId)
                           .map(b => (
                             <option key={b.id} value={b.id}>{b.bankName}</option>
-                          ))
-                        }
+                          ))}
                       </>
                     )}
                   </select>
@@ -1868,13 +1918,13 @@ export default function Accounts() {
 
                 <div className={styles.formGroup}>
                   <label>Amount to Transfer ({settings.currencySymbol || 'AED'})</label>
-                  <input 
-                    type="number" 
-                    step="0.01" 
-                    placeholder="0.00" 
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
                     required
                     value={transferData.amount}
-                    onChange={(e) => setTransferData({...transferData, amount: e.target.value})}
+                    onChange={(e) => setTransferData({ ...transferData, amount: e.target.value })}
                     className={styles.modalInput}
                     autoFocus
                   />
@@ -1882,10 +1932,10 @@ export default function Accounts() {
 
                 <div className={styles.formGroup}>
                   <label>Note / Remarks</label>
-                  <textarea 
+                  <textarea
                     placeholder="Reason or notes about this transfer..."
                     value={transferData.note}
-                    onChange={(e) => setTransferData({...transferData, note: e.target.value})}
+                    onChange={(e) => setTransferData({ ...transferData, note: e.target.value })}
                     className={styles.modalTextarea}
                   />
                 </div>
@@ -1920,10 +1970,10 @@ export default function Accounts() {
                   accountNumber: newAccountData.accountNumber.trim(),
                   iban: newAccountData.iban.trim()
                 };
-                
+
                 const newAccounts = [...(settings.bankAccounts || []), newBank];
                 await updateSettings({ bankAccounts: newAccounts });
-                
+
                 setActiveBankAccountId(newBank.id);
                 setNewAccountData({ bankName: '', accountNumber: '', iban: '' });
                 setShowAddAccountModal(false);
@@ -1936,35 +1986,35 @@ export default function Accounts() {
               <div className={styles.modalBody}>
                 <div className={styles.formGroup}>
                   <label>Bank Name</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. Emirates NBD, ADCB" 
+                  <input
+                    type="text"
+                    placeholder="e.g. Emirates NBD, ADCB"
                     required
                     value={newAccountData.bankName}
-                    onChange={(e) => setNewAccountData({...newAccountData, bankName: e.target.value})}
+                    onChange={(e) => setNewAccountData({ ...newAccountData, bankName: e.target.value })}
                     className={styles.modalInput}
                     autoFocus
                   />
                 </div>
-                
+
                 <div className={styles.formGroup}>
                   <label>Account Number (Optional)</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. 101xxxxxx" 
+                  <input
+                    type="text"
+                    placeholder="e.g. 101xxxxxx"
                     value={newAccountData.accountNumber}
-                    onChange={(e) => setNewAccountData({...newAccountData, accountNumber: e.target.value})}
+                    onChange={(e) => setNewAccountData({ ...newAccountData, accountNumber: e.target.value })}
                     className={styles.modalInput}
                   />
                 </div>
 
                 <div className={styles.formGroup}>
                   <label>IBAN (Optional)</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. AE83022xxxxxxxxxxxxxx" 
+                  <input
+                    type="text"
+                    placeholder="e.g. AE83022xxxxxxxxxxxxxx"
                     value={newAccountData.iban}
-                    onChange={(e) => setNewAccountData({...newAccountData, iban: e.target.value})}
+                    onChange={(e) => setNewAccountData({ ...newAccountData, iban: e.target.value })}
                     className={styles.modalInput}
                   />
                 </div>

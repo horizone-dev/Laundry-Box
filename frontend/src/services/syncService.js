@@ -1,4 +1,4 @@
-import { DEFAULT_SHOP_ID } from '../constants';
+import { DEFAULT_SHOP_ID, DEFAULT_BRANCH_ID } from '../constants';
 import api from './api';
 
 export const syncData = async () => {
@@ -11,16 +11,24 @@ export const syncData = async () => {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
     const shopId = user.shopId || DEFAULT_SHOP_ID;
 
+    // Read branch settings from localStorage (saved by Settings.jsx)
+    const savedSettings = (() => {
+      try { return JSON.parse(localStorage.getItem('laundry_settings') || '{}'); } catch { return {}; }
+    })();
+    const branchName   = savedSettings.branchName   || 'Main Branch';
+    const branchApiKey = savedSettings.branchApiKey || 'default_sync_key_change_me';
+    const branchId     = savedSettings.branchId     || DEFAULT_BRANCH_ID;
+
     // 1. Fetch unsynced local data
-    const resOrders = await window.electronAPI.dbQuery('SELECT * FROM orders WHERE isSynced = 0', []);
+    const resOrders    = await window.electronAPI.dbQuery('SELECT * FROM orders WHERE isSynced = 0', []);
     const resCustomers = await window.electronAPI.dbQuery('SELECT * FROM customers WHERE isSynced = 0', []);
-    const resPayments = await window.electronAPI.dbQuery('SELECT * FROM payments WHERE isSynced = 0', []);
-    const resTxns = await window.electronAPI.dbQuery('SELECT * FROM account_transactions WHERE isSynced = 0', []);
+    const resPayments  = await window.electronAPI.dbQuery('SELECT * FROM payments WHERE isSynced = 0', []);
+    const resTxns      = await window.electronAPI.dbQuery('SELECT * FROM account_transactions WHERE isSynced = 0', []);
     
-    const unsyncedOrders = resOrders.data || [];
+    const unsyncedOrders    = resOrders.data    || [];
     const unsyncedCustomers = resCustomers.data || [];
-    const unsyncedPayments = resPayments.data || [];
-    const unsyncedTxns = resTxns.data || [];
+    const unsyncedPayments  = resPayments.data  || [];
+    const unsyncedTxns      = resTxns.data      || [];
 
     if (unsyncedOrders.length === 0 && unsyncedCustomers.length === 0 && unsyncedPayments.length === 0 && unsyncedTxns.length === 0) {
       console.log('No local data to sync.');
@@ -46,7 +54,26 @@ export const syncData = async () => {
       lastSyncTimestamp
     };
 
-    const response = await api.post('/sync', payload);
+    // Include Branch authentication headers
+    const response = await api.post('/sync', payload, {
+      headers: {
+        'X-Branch-Id': branchId,
+        'X-Branch-API-Key': branchApiKey
+      }
+    });
+
+    // 3.5 Register / heartbeat this branch in the dashboard registry
+    try {
+      await api.post('/dashboard/register-branch', {
+        branchId,
+        shopId,
+        branchName,
+        branchApiKey,
+      });
+    } catch (regErr) {
+      console.warn('Branch dashboard registration skipped (backend may be offline):', regErr.message);
+    }
+
     
     if (response.data.success) {
       // 4. Mark local data as synced

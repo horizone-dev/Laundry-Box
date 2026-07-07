@@ -93,7 +93,7 @@
   box-shadow: var(--shadow-md);
 }
 
-.kpiCard:nth-child(1):hover::after { background: #2563EB; }
+.kpiCard:nth-child(1):hover::after { background: var(--primary); }
 .kpiCard:nth-child(2):hover::after { background: #10B981; }
 .kpiCard:nth-child(3):hover::after { background: #F59E0B; }
 .kpiCard:nth-child(4):hover::after { background: #8B5CF6; }
@@ -277,7 +277,7 @@
 }
 
 .searchInput:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
 }
@@ -303,7 +303,7 @@
 }
 
 .filterSelect:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
 }
 
@@ -326,7 +326,7 @@
 }
 
 .dateInput:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
 }
 
@@ -405,7 +405,7 @@
   display: inline-block;
   padding: 0.25rem 0.75rem;
   background: #EFF6FF;
-  color: #2563EB;
+  color: var(--primary);
   border-radius: 100px;
   font-size: 0.75rem;
   font-weight: 700;
@@ -602,8 +602,8 @@
 }
 
 .paginationActiveBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
   box-shadow: 0 2px 4px rgba(37, 99, 235, 0.15);
 }

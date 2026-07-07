@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, UserPlus, Download, Calendar, MoreHorizontal, 
   TrendingUp, ChevronLeft, ChevronRight, X, Phone, MapPin, CreditCard, Wallet, DollarSign, Trash2, Users, Edit2, Lock,
-  Printer
+  Printer, AlertTriangle, Eye
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import WhatsAppIcon from '../components/WhatsAppIcon';
@@ -12,6 +12,7 @@ import { DEFAULT_SHOP_ID } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { getLocalISOString, getLocalDateStr } from '../utils/dateUtils';
 import styles from './Customers.module.css';
+import { checkCreditLimit } from '../utils/creditLimit';
 
 export default function Customers() {
   const navigate = useNavigate();
@@ -28,6 +29,8 @@ export default function Customers() {
   const [paymentData, setPaymentData] = useState({ amount: '', method: 'Cash' });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchName, setSearchName] = useState('');
+  const [searchPhone, setSearchPhone] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
@@ -38,6 +41,21 @@ export default function Customers() {
   const [editCreditLimitValue, setEditCreditLimitValue] = useState('0');
   const [managerPinValue, setManagerPinValue] = useState('');
   const [managerPinError, setManagerPinError] = useState('');
+  const [showCreditWarning, setShowCreditWarning] = useState(false);
+  const [creditWarningDetails, setCreditWarningDetails] = useState(null);
+
+  // ─── Customer Insight View States ──────────────────────────────────────────
+  const [viewMode, setViewMode] = useState('list'); // 'list' or 'insight'
+  const [insightTab, setInsightTab] = useState('sales'); // 'sales', 'payments', 'returns'
+  const [customerPayments, setCustomerPayments] = useState([]);
+  const [customerReturns, setCustomerReturns] = useState([]);
+  const [selectedBillForPayment, setSelectedBillForPayment] = useState(null);
+  const [selectedCustomerStats, setSelectedCustomerStats] = useState({
+    totalSales: 0,
+    pendingDue: 0,
+    salesReturn: 0,
+    totalDiscount: 0
+  });
 
 
   useEffect(() => {
@@ -74,16 +92,26 @@ export default function Customers() {
   const fetchCustomers = async () => {
     if (window.electronAPI?.dbQuery) {
       try {
-        let query = 'SELECT * FROM customers';
+        let query = `
+          SELECT c.*, 
+                 IFNULL(SUM(CASE WHEN o.status != 'Cancelled' THEN o.totalAmount ELSE 0 END), 0) as totalSales
+          FROM customers c
+          LEFT JOIN orders o ON c.id = o.customerId
+        `;
         let params = [];
+        let conditions = [];
         
         if (searchTerm) {
-          query += ' WHERE name LIKE ? OR phone LIKE ? OR id LIKE ?';
+          conditions.push('(c.name LIKE ? OR c.id LIKE ? OR c.phone LIKE ?)');
           const param = `%${searchTerm}%`;
-          params = [param, param, param];
+          params.push(param, param, param);
         }
         
-        query += ' ORDER BY updatedAt DESC';
+        if (conditions.length > 0) {
+          query += ' WHERE ' + conditions.join(' AND ');
+        }
+        
+        query += ' GROUP BY c.id ORDER BY CAST(SUBSTR(c.id, 6) AS INTEGER) ASC';
         
         const result = await window.electronAPI.dbQuery(query, params);
         if (result.success) {
@@ -152,9 +180,81 @@ export default function Customers() {
     }
   };
 
-  const handlePayment = async (e) => {
+  const handleVerifyManagerPin = async (e) => {
     e.preventDefault();
+    setManagerPinError('');
+    const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+    const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
+    const userId = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
+
+    try {
+      const res = await window.electronAPI.verifyManagerPin({
+        pin: managerPinValue,
+        customerId: selectedCustomer.id,
+        customerName: selectedCustomer.name,
+        orderId: `SETTLE-CUST-${selectedCustomer.id.substring(0, 5)}`,
+        creditLimit: creditWarningDetails.creditLimit,
+        outstandingBalance: creditWarningDetails.currentOutstanding,
+        orderAmount: creditWarningDetails.orderAmount,
+        exceededAmount: creditWarningDetails.exceededAmount,
+        userId
+      });
+
+      if (res.success) {
+        setShowCreditWarning(false);
+        setManagerPinValue('');
+        setTimeout(() => {
+          handlePayment(null, true);
+        }, 50);
+      } else {
+        setManagerPinError(res.error || "Incorrect PIN! Access Denied.");
+      }
+    } catch (err) {
+      setManagerPinError("An error occurred during verification");
+    }
+  };
+
+  const handleCancelOverride = async () => {
+    const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+    const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
+    const userId = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
+
+    try {
+      await window.electronAPI.logOverrideRejection({
+        customerId: selectedCustomer.id,
+        customerName: selectedCustomer.name,
+        orderId: `SETTLE-CUST-${selectedCustomer.id.substring(0, 5)}`,
+        creditLimit: creditWarningDetails.creditLimit,
+        outstandingBalance: creditWarningDetails.currentOutstanding,
+        orderAmount: creditWarningDetails.orderAmount,
+        exceededAmount: creditWarningDetails.exceededAmount,
+        userId,
+        actionType: 'REJECTED'
+      });
+    } catch (err) {
+      console.error("Failed to log override rejection:", err);
+    }
+
+    setShowCreditWarning(false);
+    setManagerPinValue('');
+    setManagerPinError('');
+  };
+
+  const handlePayment = async (e, isOverridden = false) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!selectedCustomer || !paymentData.amount) return;
+
+    const amount = parseFloat(paymentData.amount);
+    if (isNaN(amount) || amount <= 0) return;
+
+    if (!isOverridden) {
+      const checkRes = await checkCreditLimit(selectedCustomer.id, -amount, settings);
+      if (checkRes.blocked) {
+        setCreditWarningDetails(checkRes.details);
+        setShowCreditWarning(true);
+        return;
+      }
+    }
 
     if (window.electronAPI?.dbQuery) {
       try {
@@ -279,10 +379,27 @@ export default function Customers() {
     }
   };
   const handleDeleteCustomer = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this customer? All their order history will remain but they will be removed from the list.")) return;
-    
     if (window.electronAPI?.dbQuery) {
       try {
+        // Check for orders
+        const ordersRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM orders WHERE customerId = ?', [id]);
+        const ordersCount = ordersRes?.data?.[0]?.count || 0;
+
+        // Check for payments
+        const paymentsRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM payments WHERE customerId = ?', [id]);
+        const paymentsCount = paymentsRes?.data?.[0]?.count || 0;
+
+        // Check for deleted orders
+        const deletedRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM deleted_orders WHERE customerId = ?', [id]);
+        const deletedCount = deletedRes?.data?.[0]?.count || 0;
+
+        if (ordersCount > 0 || paymentsCount > 0 || deletedCount > 0) {
+          alert("Restricted: Cannot delete this customer because they have associated orders, payments, or transaction history.");
+          return;
+        }
+
+        if (!window.confirm("Are you sure you want to delete this customer?")) return;
+
         await window.electronAPI.dbQuery('DELETE FROM customers WHERE id = ?', [id]);
         fetchCustomers();
       } catch (err) {
@@ -327,6 +444,90 @@ export default function Customers() {
     }
   };
 
+
+  const handleViewCustomerInsight = async (customer) => {
+    setSelectedCustomer(customer);
+    setLoading(true);
+    if (window.electronAPI?.dbQuery) {
+      try {
+        const result = await window.electronAPI.dbQuery(
+          "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' ORDER BY createdAt DESC",
+          [customer.id]
+        );
+        const bills = result.success ? result.data : [];
+        setCustomerBills(bills.filter(b => b.status !== 'Cancelled'));
+        setCustomerReturns(bills.filter(b => b.status === 'Cancelled'));
+
+        const paymentsRes = await window.electronAPI.dbQuery(
+          "SELECT * FROM payments WHERE customerId = ? ORDER BY createdAt DESC",
+          [customer.id]
+        );
+        setCustomerPayments(paymentsRes.success ? paymentsRes.data : []);
+
+        const totalSales = bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+        const salesReturn = bills.filter(b => b.status === 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+        
+        let totalDiscount = 0;
+        bills.forEach(bill => {
+          try {
+            const breakdown = bill.paymentBreakdown ? JSON.parse(bill.paymentBreakdown) : null;
+            if (breakdown && breakdown.discount) {
+              totalDiscount += parseFloat(breakdown.discount) || 0;
+            }
+          } catch (e) {}
+        });
+
+        setSelectedCustomerStats({
+          totalSales,
+          pendingDue: customer.balance || 0,
+          salesReturn,
+          totalDiscount
+        });
+        setViewMode('insight');
+        setInsightTab('sales');
+      } catch (err) {
+        console.error("Failed to fetch customer insight data:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleCancelOrder = async (bill) => {
+    if (bill.paymentStatus === 'Paid') {
+      alert('Restricted: Paid orders cannot be cancelled/deleted.');
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to cancel order ${bill.billNumber || bill.id}?`)) return;
+
+    const timestamp = getLocalISOString();
+    try {
+      await window.electronAPI.dbQuery(
+        "UPDATE orders SET status = 'Cancelled', dueAmount = 0, paymentStatus = 'Cancelled', isSynced = 0, updatedAt = ? WHERE id = ?",
+        [timestamp, bill.id]
+      );
+      await window.electronAPI.dbQuery(
+        "UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?",
+        [bill.dueAmount, timestamp, selectedCustomer.id]
+      );
+      
+      // Update local state customer balance
+      setSelectedCustomer(prev => ({
+        ...prev,
+        balance: prev.balance - bill.dueAmount
+      }));
+
+      alert('Order cancelled successfully!');
+      
+      // Reload details
+      const freshCust = { ...selectedCustomer, balance: selectedCustomer.balance - bill.dueAmount };
+      handleViewCustomerInsight(freshCust);
+      fetchCustomers();
+    } catch (err) {
+      console.error('Cancel order error:', err);
+      alert('Failed to cancel order.');
+    }
+  };
 
   const fetchCustomerBills = async (customerId) => {
     if (window.electronAPI?.dbQuery) {
@@ -393,21 +594,316 @@ export default function Customers() {
     return customers.slice((currentPage - 1) * 20, currentPage * 20);
   }, [customers, currentPage]);
 
-  const totalReceivables = customers.reduce((sum, c) => sum + (c.balance > 0 ? c.balance : 0), 0);
-  const totalAdvances = customers.reduce((sum, c) => sum + (c.balance < 0 ? Math.abs(c.balance) : 0), 0);
+
+  if (viewMode === 'insight' && selectedCustomer) {
+    return (
+      <div className={styles.customersPage} style={{ padding: '1rem', background: '#F8FAFC', minHeight: '100vh' }}>
+        {/* Insight Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E3A8A', textTransform: 'uppercase', letterSpacing: '0.05em' }}>📋 Customer Insight</span>
+          </div>
+          <button 
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '50%', border: '1px solid #CBD5E1', background: 'white', cursor: 'pointer', transition: 'all 0.2s' }}
+            onClick={() => {
+              setViewMode('list');
+              setSelectedCustomer(null);
+            }}
+          >
+            <X size={20} color="#64748B" />
+          </button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '1.5rem', alignItems: 'start' }}>
+          {/* Left Panel: Customer details & Sales Stats */}
+          <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #E2E8F0', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+            <div>
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Customer</div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0F172A', wordBreak: 'break-all' }}>{selectedCustomer.name}</div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Phone</div>
+              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#334155' }}>{selectedCustomer.phone || '—'}</div>
+            </div>
+
+
+
+            <div>
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Address</div>
+              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#334155', lineHeight: '1.4' }}>{selectedCustomer.address || '—'}</div>
+            </div>
+
+            <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.25rem 0' }} />
+
+            <div>
+              <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: '#1E3A8A', textTransform: 'uppercase', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.5rem', marginBottom: '1rem', letterSpacing: '0.05em' }}>Sale Details</h3>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
+                <span style={{ color: '#64748B', fontWeight: 600 }}>Total Sales</span>
+                <span style={{ fontWeight: 700, color: '#1E293B' }}>{(selectedCustomerStats.totalSales || 0).toFixed(2)}</span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
+                <span style={{ color: '#64748B', fontWeight: 600 }}>Pending Due</span>
+                <span style={{ fontWeight: 800, color: selectedCustomer.balance > 0 ? '#EF4444' : '#10B981' }}>
+                  {(selectedCustomer.balance || 0).toFixed(2)}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
+                <span style={{ color: '#64748B', fontWeight: 600 }}>Sales Return</span>
+                <span style={{ fontWeight: 700, color: '#1E293B' }}>{(selectedCustomerStats.salesReturn || 0).toFixed(2)}</span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
+                <span style={{ color: '#64748B', fontWeight: 600 }}>Total Discount</span>
+                <span style={{ fontWeight: 700, color: '#1E293B' }}>{(selectedCustomerStats.totalDiscount || 0).toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Panel: Tabs & Tables */}
+          <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #E2E8F0', padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
+              <button 
+                style={{ border: 'none', background: insightTab === 'sales' ? '#1E3A8A' : 'transparent', color: insightTab === 'sales' ? 'white' : '#64748B', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', transition: 'all 0.2s' }}
+                onClick={() => setInsightTab('sales')}
+              >
+                Sales
+              </button>
+              <button 
+                style={{ border: 'none', background: insightTab === 'payments' ? '#1E3A8A' : 'transparent', color: insightTab === 'payments' ? 'white' : '#64748B', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', transition: 'all 0.2s' }}
+                onClick={() => setInsightTab('payments')}
+              >
+                Payments
+              </button>
+              <button 
+                style={{ border: 'none', background: insightTab === 'returns' ? '#1E3A8A' : 'transparent', color: insightTab === 'returns' ? 'white' : '#64748B', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', transition: 'all 0.2s' }}
+                onClick={() => setInsightTab('returns')}
+              >
+                Returns
+              </button>
+            </div>
+
+            <div style={{ overflowX: 'auto', border: '1px solid #E2E8F0', borderRadius: '12px' }}>
+              {insightTab === 'sales' && (
+                <table className={styles.customersTable} style={{ margin: 0, width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ background: '#F8FAFC' }}># Order</th>
+                      <th style={{ background: '#F8FAFC' }}>Date</th>
+                      <th style={{ background: '#F8FAFC' }}>Net Amount</th>
+                      <th style={{ background: '#F8FAFC' }}>Pay Mode</th>
+                      <th style={{ background: '#F8FAFC', width: '150px', textAlign: 'center' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customerBills.length > 0 ? customerBills.map((bill) => (
+                      <tr key={bill.id}>
+                        <td style={{ fontWeight: 700 }}>{bill.billNumber || bill.id}</td>
+                        <td>{formatDate(bill.createdAt)}</td>
+                        <td><CurrencySymbol size={13} /> {(bill.totalAmount || 0).toFixed(2)}</td>
+                        <td style={{ fontWeight: 700, color: (bill.dueAmount || 0) > 0 ? '#EF4444' : '#10B981' }}>
+                          {(bill.dueAmount || 0) > 0 ? 'CREDIT' : 'PAID'}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', alignItems: 'center' }}>
+                            {/* View Order Detail */}
+                            <button 
+                              style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer' }}
+                              onClick={() => {
+                                navigate(`/invoice/${bill.id}`);
+                              }}
+                              title="View details"
+                            >
+                              <Eye size={16} />
+                            </button>
+                            {/* Settle Order */}
+                            {bill.dueAmount > 0 && (
+                              <button 
+                                style={{ background: 'none', border: 'none', color: '#F59E0B', cursor: 'pointer' }}
+                                onClick={() => {
+                                  setSelectedBillForPayment(bill);
+                                  setPaymentData({ amount: bill.dueAmount.toString(), method: 'Cash' });
+                                  setShowPaymentModal(true);
+                                }}
+                                title="Collect payment"
+                              >
+                                <DollarSign size={16} />
+                              </button>
+                            )}
+                            {/* Cancel/Delete Order */}
+                            {bill.paymentStatus !== 'Paid' && (
+                              <button 
+                                style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer' }}
+                                onClick={() => handleCancelOrder(bill)}
+                                title="Cancel order"
+                              >
+                                <X size={16} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan="5" style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>No sale records found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+
+              {insightTab === 'payments' && (
+                <table className={styles.customersTable} style={{ margin: 0, width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ background: '#F8FAFC' }}>Payment ID</th>
+                      <th style={{ background: '#F8FAFC' }}>Date</th>
+                      <th style={{ background: '#F8FAFC' }}>Amount</th>
+                      <th style={{ background: '#F8FAFC' }}>Method</th>
+                      <th style={{ background: '#F8FAFC' }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customerPayments.length > 0 ? customerPayments.map((pay) => (
+                      <tr key={pay.id}>
+                        <td style={{ fontWeight: 700 }}>{pay.id}</td>
+                        <td>{formatDate(pay.createdAt)}</td>
+                        <td><CurrencySymbol size={13} /> {(pay.amount || 0).toFixed(2)}</td>
+                        <td style={{ fontWeight: 600 }}>{pay.method}</td>
+                        <td>
+                          <span className={styles.statusPaid} style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', background: '#DCFCE7', color: '#15803D', fontSize: '0.75rem', fontWeight: 700 }}>SUCCESS</span>
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan="5" style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>No payment records found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+
+              {insightTab === 'returns' && (
+                <table className={styles.customersTable} style={{ margin: 0, width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ background: '#F8FAFC' }}># Order</th>
+                      <th style={{ background: '#F8FAFC' }}>Date</th>
+                      <th style={{ background: '#F8FAFC' }}>Net Amount</th>
+                      <th style={{ background: '#F8FAFC' }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customerReturns.length > 0 ? customerReturns.map((ret) => (
+                      <tr key={ret.id}>
+                        <td style={{ fontWeight: 700 }}>{ret.billNumber || ret.id}</td>
+                        <td>{formatDate(ret.createdAt)}</td>
+                        <td><CurrencySymbol size={13} /> {(ret.totalAmount || 0).toFixed(2)}</td>
+                        <td>
+                          <span style={{ color: '#EF4444', fontWeight: 700, fontSize: '0.8rem' }}>CANCELLED</span>
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan="4" style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>No returned/cancelled orders found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Re-render identical modal portals so that payment options work inside the detail page */}
+        {showPaymentModal && (
+          <div className={styles.modalOverlay} onClick={() => { setShowPaymentModal(false); setSelectedBillForPayment(null); }}>
+            <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
+                <div>
+                  <h2 style={{ color: '#0F172A' }}>Settle Customer Bill</h2>
+                  <p>{selectedBillForPayment ? `Record payment for Bill #${selectedBillForPayment.billNumber}` : 'Record payment and settle outstanding credit'}</p>
+                </div>
+                <X size={24} className={styles.closeBtn} onClick={() => { setShowPaymentModal(false); setSelectedBillForPayment(null); }} />
+              </div>
+              
+              <form onSubmit={handlePayment}>
+                <div className={styles.modalBody}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem', background: '#F1F5F9', borderRadius: '12px', marginBottom: '0.5rem' }}>
+                    <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '1.2rem', fontWeight: 800 }}>
+                      {selectedCustomer.name.charAt(0)}
+                    </div>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '1rem', color: '#1E293B' }}>{selectedCustomer.name}</h4>
+                      <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748B' }}>
+                        Due for this bill: <strong><CurrencySymbol size={14} /> {selectedBillForPayment ? selectedBillForPayment.dueAmount.toFixed(2) : selectedCustomer.balance.toFixed(2)}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Settlement Amount</label>
+                    <div className={styles.inputWrapper}>
+                      <CreditCard size={18} />
+                      <input 
+                        type="number" 
+                        step="0.01"
+                        required 
+                        autoFocus
+                        placeholder="0.00"
+                        value={paymentData.amount}
+                        onChange={(e) => setPaymentData({...paymentData, amount: e.target.value})}
+                      />
+                    </div>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Payment Method</label>
+                    <div className={styles.inputWrapper}>
+                      <Wallet size={18} />
+                      <select 
+                        style={{ background: 'transparent', border: 'none', width: '100%', outline: 'none', fontSize: '0.95rem' }}
+                        value={paymentData.method}
+                        onChange={(e) => setPaymentData({...paymentData, method: e.target.value})}
+                      >
+                        <option value="Cash">Cash Payment</option>
+                        <option value="Card">Card Payment</option>
+                        <option value="UPI">UPI Payment</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className={styles.modalFooter}>
+                  <button type="button" className={styles.secondaryBtn} onClick={() => { setShowPaymentModal(false); setSelectedBillForPayment(null); }}>Cancel</button>
+                  <button type="submit" className={styles.primaryBtn} style={{ background: '#10B981' }}>Complete Settlement</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={styles.customersPage}>
       {/* Header */}
-      <div className={styles.headerRow}>
+      <div className={styles.headerRow} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className={styles.headerTitle}>
           <h1>Customers</h1>
           <p>Manage and view your customer database and order history.</p>
         </div>
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <button className={styles.headerSettleBtn} onClick={() => navigate('/settlement')}>
-            <DollarSign size={18} /> Settle Bill
-          </button>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          {/* Unified search bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'white', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0.4rem 0.75rem', width: '280px' }}>
+            <Search size={18} color="#64748B" />
+            <input 
+              type="text" 
+              placeholder="Search name or phone..." 
+              style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: '0.9rem' }}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+
           <button className="btn btn-primary" onClick={() => {
             setEditingCustomer(null);
             setFormData({ name: '', phone: settings.waCountryCode ? `+${settings.waCountryCode.replace(/\+/g, '')}` : '+971', address: '' });
@@ -417,96 +913,19 @@ export default function Customers() {
           </button>
         </div>
       </div>
-      
-      <div className={styles.kpiGrid}>
-        <div className={`${styles.kpiCard} ${styles.kpiCardPrimary}`}>
-          <div className={styles.kpiIcon}><Users size={20} /></div>
-          <div className={styles.kpiContent}>
-            <span className={styles.kpiLabel}>Total Customers</span>
-            <span className={styles.kpiValue}>{customers.length.toLocaleString()}</span>
-          </div>
-        </div>
-
-        <div className={styles.kpiCard}>
-          <div className={`${styles.kpiIcon} ${styles.iconRed}`}><DollarSign size={20} /></div>
-          <div className={styles.kpiContent}>
-            <span className={styles.kpiLabel}>Outstanding Receivables</span>
-            <span className={styles.kpiValue}>
-              <CurrencySymbol size={18} /> {totalReceivables.toFixed(2)}
-            </span>
-          </div>
-        </div>
-
-        <div className={styles.kpiCard}>
-          <div className={`${styles.kpiIcon} ${styles.iconGreen}`}><Wallet size={20} /></div>
-          <div className={styles.kpiContent}>
-            <span className={styles.kpiLabel}>Prepaid Advances</span>
-            <span className={styles.kpiValue}>
-              <CurrencySymbol size={18} /> {totalAdvances.toFixed(2)}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className={styles.filtersCard} data-noprint="true">
-        <div className={styles.searchBox}>
-          <Search size={18} color="#94A3B8" />
-          <input 
-            type="text" 
-            placeholder="Search by ID, Name or Phone..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        <div className={styles.filterActions}>
-          <button className={styles.secondaryBtn} onClick={() => {
-            const headers = ['Customer ID', 'Name', 'Phone', 'Address', 'Balance', 'Credit Limit', 'Last Updated'];
-            const rows = customers.map(customer => [
-              customer.id,
-              customer.name,
-              customer.phone || '',
-              customer.address || '',
-              (customer.balance || 0).toFixed(2),
-              (customer.creditLimit || 0).toFixed(2),
-              customer.updatedAt || ''
-            ]);
-
-            const csvContent = [
-              headers.join(','),
-              ...rows.map(r => r.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))
-            ].join('\n');
-
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', `customers_${getLocalDateStr()}.csv`);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-          }}>
-            <Download size={18} /> Export
-          </button>
-          <button className={styles.secondaryBtn} onClick={() => window.print()}>
-            <Printer size={18} /> Print PDF
-          </button>
-        </div>
-      </div>
 
       {/* Table Section */}
       <div className={styles.tableCard}>
         <table className={styles.customersTable}>
           <thead>
             <tr>
-              <th>ID</th>
-              <th>Customer Name</th>
-              <th>Phone Number</th>
-              <th>Balance</th>
+              <th style={{ width: '80px' }}>Id</th>
+              <th>Customer</th>
+              <th>Phone</th>
               <th>Credit Limit</th>
-              <th>Last Order Date</th>
-              <th data-noprint="true">Actions</th>
+              <th>Total Sales</th>
+              <th>Due</th>
+              <th data-noprint="true" style={{ width: '180px', textAlign: 'center' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -515,112 +934,59 @@ export default function Customers() {
                 <td style={{ fontWeight: 700, color: '#64748B', fontSize: '0.8rem' }}>
                   {customer.id?.split('-')[1]?.substring(0, 8) || customer.id || idx + 1}
                 </td>
-                <td>
-                  <div className={styles.customerInfo}>
-                    <img src={customer.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(customer.name)}&background=F1F5F9&color=2563EB`} alt={customer.name} className={styles.avatar} />
-                    <div className={styles.customerDetails}>
-                      <span className={styles.customerName}>{customer.name}</span>
-                      <span className={styles.customerTag}>{customer.tag || 'Regular'}</span>
-                    </div>
-                  </div>
+                <td style={{ fontWeight: 600, color: '#1E293B' }}>
+                  {customer.name}
                 </td>
-
                 <td>
-                  {customer.phone}
+                  {customer.phone || '000'}
                 </td>
-                <td><span className={styles.balanceBadge} style={{ color: (customer.balance || 0) > 0 ? '#EF4444' : '#10B981' }}><CurrencySymbol size={16} /> {(customer.balance || 0).toFixed(2)}</span></td>
-                <td>
-                  {(() => {
-                    const effectiveLimit = (customer.creditLimit && customer.creditLimit !== 0)
-                      ? customer.creditLimit
-                      : (settings.defaultCreditLimit ?? 500);
-                    const isAtLimit = (customer.balance || 0) >= effectiveLimit;
-                    const isDefaultLimit = !customer.creditLimit || customer.creditLimit === 0;
-                    return (
-                      <span style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span style={{ color: isAtLimit ? '#EF4444' : '#1E293B', fontWeight: isAtLimit ? 700 : 'normal' }}>
-                          <CurrencySymbol size={14} />{effectiveLimit.toFixed(2)}
-                          {isDefaultLimit && <span style={{ fontSize: '0.65rem', color: '#94A3B8', marginLeft: '2px' }}>(def)</span>}
-                        </span>
-                        {isAtLimit && (
-                          <span style={{
-                            fontSize: '0.6rem',
-                            background: '#FEE2E2',
-                            color: '#DC2626',
-                            fontWeight: 800,
-                            padding: '1px 6px',
-                            borderRadius: '4px',
-                            letterSpacing: '0.03em'
-                          }}>
-                            ⚠ LIMIT REACHED
-                          </span>
-                        )}
-                      </span>
-                    );
-                  })()}
+                <td style={{ fontWeight: 600, color: '#475569' }}>
+                  {(customer.creditLimit || 0).toFixed(2)}
                 </td>
-                <td>{customer.lastDate ? formatDate(customer.lastDate) : customer.updatedAt ? formatDate(customer.updatedAt) : 'N/A'}</td>
-                <td data-noprint="true">
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <td style={{ fontWeight: 600, color: '#475569' }}>
+                  {(customer.totalSales || 0).toFixed(2)}
+                </td>
+                <td style={{ fontWeight: 700, color: (customer.balance || 0) > 0 ? '#EF4444' : '#10B981' }}>
+                  {(customer.balance || 0).toFixed(2)}
+                </td>
+                <td data-noprint="true" style={{ textAlign: 'center' }}>
+                  <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', alignItems: 'center' }}>
                     <button 
-                      className={styles.settleRowBtn}
-                      onClick={() => navigate(`/settlement?customerId=${customer.id}&amount=${customer.balance}`)}
+                      style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                      onClick={() => handleViewCustomerInsight(customer)}
+                      title="View Details"
                     >
-                      Settle
+                      <Eye size={18} />
                     </button>
                     <button 
-                      className={styles.secondaryBtn} 
-                      style={{ padding: '0.4rem 0.6rem' }}
-                      onClick={() => {
-                        setSelectedCustomer(customer);
-                        fetchCustomerBills(customer.id);
-                        setShowBillsModal(true);
-                      }}
-                    >
-                      Bills
-                    </button>
-                     <button 
-                      className={styles.secondaryBtn} 
-                      style={{ padding: '0.4rem 0.6rem', color: '#4F46E5', borderColor: '#4F46E5' }}
+                      style={{ background: 'none', border: 'none', color: '#F59E0B', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                       onClick={() => {
                         setSelectedCustomer(customer);
                         setEditingCustomer(customer);
                         setFormData({ name: customer.name, phone: customer.phone, address: customer.address || '' });
                         setShowModal(true);
                       }}
-                      title="Edit Customer Details"
+                      title="Edit Customer"
                     >
-                      <Edit2 size={16} />
+                      <Edit2 size={18} />
                     </button>
                     <button 
-                      className={styles.secondaryBtn} 
-                      style={{ padding: '0.4rem 0.6rem', color: '#2563EB', borderColor: '#2563EB' }}
+                      style={{ background: 'none', border: 'none', color: '#6366F1', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                       onClick={() => {
                         setSelectedCustomer(customer);
-                        setEditCreditLimitValue(String(customer.creditLimit || 0));
-                        setManagerPinValue('');
-                        setManagerPinError('');
+                        setEditCreditLimitValue((customer.creditLimit || 0).toString());
                         setShowEditCreditLimitModal(true);
                       }}
                       title="Edit Credit Limit"
                     >
-                      <Lock size={16} />
+                      <CreditCard size={18} />
                     </button>
                     <button 
-                      className={styles.secondaryBtn} 
-                      style={{ padding: '0.4rem 0.6rem', color: '#10B981', borderColor: '#10B981' }}
-                      onClick={() => handleWhatsApp(customer.phone, customer.balance)}
-                      title="Send WhatsApp"
-                    >
-                      <WhatsAppIcon size={16} />
-                    </button>
-                    <button 
-                      className={styles.secondaryBtn} 
-                      style={{ padding: '0.4rem 0.6rem', color: '#EF4444', borderColor: '#EF4444' }}
+                      style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                       onClick={() => handleDeleteCustomer(customer.id)}
                       title="Delete Customer"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={18} />
                     </button>
                   </div>
                 </td>
@@ -1062,6 +1428,99 @@ export default function Customers() {
               <div className={styles.modalFooter}>
                 <button type="button" className={styles.secondaryBtn} onClick={() => { setShowEditCreditLimitModal(false); setSelectedCustomer(null); }}>Cancel</button>
                 <button type="submit" className={styles.primaryBtn} style={{ background: '#2563EB' }}>Save Credit Limit</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showCreditWarning && creditWarningDetails && (
+        <div className={styles.modalOverlay} onClick={handleCancelOverride}>
+          <div className={styles.statusModal} style={{ maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader} style={{ background: '#FEF2F2', borderBottom: '1px solid #FEE2E2', padding: '1.25rem 1.5rem', borderRadius: '12px 12px 0 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <AlertTriangle size={24} color="#EF4444" />
+                <div>
+                  <h2 style={{ color: '#991B1B', margin: 0, fontSize: '1.25rem' }}>Credit Limit Exceeded</h2>
+                  <p style={{ color: '#B91C1C', margin: 0, fontSize: '0.8rem' }}>This customer has exceeded their credit threshold.</p>
+                </div>
+              </div>
+            </div>
+            <form onSubmit={handleVerifyManagerPin}>
+              <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
+                <div style={{ background: '#F8FAFC', borderRadius: '12px', padding: '1rem', border: '1px solid #E2E8F0', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Customer Name:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{creditWarningDetails.customerName}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Limit:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}><CurrencySymbol size={14} /> {creditWarningDetails.creditLimit.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Outstanding Balance:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}><CurrencySymbol size={14} /> {creditWarningDetails.currentOutstanding.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Balance Change:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}><CurrencySymbol size={14} /> {creditWarningDetails.orderAmount.toFixed(2)}</span>
+                  </div>
+                  <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.5rem 0' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>New Outstanding Balance:</span>
+                    <span style={{ color: '#1E293B', fontWeight: 700 }}><CurrencySymbol size={14} /> {creditWarningDetails.newOutstanding.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
+                    <span>Exceeded Amount:</span>
+                    <span><CurrencySymbol size={14} /> {creditWarningDetails.exceededAmount.toFixed(2)}</span>
+                  </div>
+                </div>
+
+                {settings.enableManagerOverride ? (
+                  <div className={styles.formGroup} style={{ marginTop: '1rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569' }}>ENTER MANAGER SECURE PIN TO APPROVE</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0.5rem 0.75rem', background: '#F8FAFC' }}>
+                      <Lock size={18} color="#64748B" />
+                      <input
+                        type="password"
+                        required
+                        maxLength={4}
+                        placeholder="Enter 4-Digit PIN"
+                        value={managerPinValue}
+                        onChange={(e) => setManagerPinValue(e.target.value.replace(/\D/g, ''))}
+                        style={{ fontSize: '1.25rem', letterSpacing: '0.25rem', border: 'none', background: 'transparent', outline: 'none', width: '100%' }}
+                        autoFocus
+                      />
+                    </div>
+                    {managerPinError && (
+                      <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.25rem', fontWeight: 600 }}>{managerPinError}</p>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: '12px', padding: '0.75rem 1rem', color: '#C53030', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                    <AlertCircle size={18} className="inline mr-2" />
+                    <span>Credit Limit Protection is active and Manager Override is disabled.</span>
+                  </div>
+                )}
+              </div>
+              <div className={styles.modalFooter} style={{ padding: '1rem 1.5rem', borderTop: '1px solid #E2E8F0', background: '#F8FAFC', borderRadius: '0 0 12px 12px' }}>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={handleCancelOverride}
+                  style={{ flex: 1 }}
+                >
+                  Cancel
+                </button>
+                {creditWarningDetails.overrideAllowed && settings.enableManagerOverride && (
+                  <button
+                    type="submit"
+                    className={styles.primaryBtn}
+                    style={{ flex: 1, background: '#D97706', color: 'white' }}
+                  >
+                    Approve Override
+                  </button>
+                )}
               </div>
             </form>
           </div>

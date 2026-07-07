@@ -1,0 +1,403 @@
+import React, { useState, useEffect } from 'react';
+import { Mail, Save, AlertCircle } from 'lucide-react';
+import styles from '../pages/Settings.module.css';
+
+export default function EmailReportsSettings() {
+  const [emailSettings, setEmailSettings] = useState({
+    enabled: false,
+    ownerEmail: '',
+    sendTime: '23:50',
+    provider: 'Gmail',
+    smtpHost: '',
+    smtpPort: 465,
+    username: '',
+    password: '',
+    includePdf: true,
+    includeSalesCsv: false,
+    includeExpensesCsv: false,
+    includeCollectionsCsv: false,
+    includeOutstandingCsv: false
+  });
+  
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    try {
+      if (window.electronAPI && window.electronAPI.getEmailSettings) {
+        const settings = await window.electronAPI.getEmailSettings();
+        if (settings) {
+          const provider = settings.provider || 'Gmail';
+          let defaultHost = settings.smtpHost;
+          let defaultPort = settings.smtpPort;
+          if (!defaultHost || defaultHost.trim() === '') {
+            if (provider === 'Gmail') defaultHost = 'smtp.gmail.com';
+            else if (provider === 'Outlook') defaultHost = 'smtp.office365.com';
+            else if (provider === 'Zoho') defaultHost = 'smtp.zoho.com';
+          }
+          if (!defaultPort) {
+            if (provider === 'Gmail' || provider === 'Zoho') defaultPort = 465;
+            else if (provider === 'Outlook') defaultPort = 587;
+          }
+
+          setEmailSettings({
+            enabled: settings.enabled === 1,
+            ownerEmail: settings.ownerEmail || '',
+            sendTime: settings.sendTime || '23:50',
+            provider,
+            smtpHost: defaultHost || '',
+            smtpPort: defaultPort || 465,
+            username: settings.username || '',
+            password: settings.password || '',
+            includePdf: settings.includePdf !== 0,
+            includeSalesCsv: settings.includeSalesCsv === 1,
+            includeExpensesCsv: settings.includeExpensesCsv === 1,
+            includeCollectionsCsv: settings.includeCollectionsCsv === 1,
+            includeOutstandingCsv: settings.includeOutstandingCsv === 1
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load email settings', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    let newValue = type === 'checkbox' ? checked : value;
+    
+    setEmailSettings(prev => {
+      const next = { ...prev, [name]: newValue };
+      if (name === 'provider') {
+        if (value === 'Gmail') {
+          next.smtpHost = 'smtp.gmail.com';
+          next.smtpPort = 465;
+        } else if (value === 'Outlook') {
+          next.smtpHost = 'smtp.office365.com';
+          next.smtpPort = 587;
+        } else if (value === 'Zoho') {
+          next.smtpHost = 'smtp.zoho.com';
+          next.smtpPort = 465;
+        } else {
+          next.smtpHost = '';
+          next.smtpPort = 465;
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    
+    // Ensure host and port are populated for standard providers
+    const settingsToSave = { ...emailSettings };
+    if (settingsToSave.provider === 'Gmail') {
+      settingsToSave.smtpHost = 'smtp.gmail.com';
+      settingsToSave.smtpPort = 465;
+    } else if (settingsToSave.provider === 'Outlook') {
+      settingsToSave.smtpHost = 'smtp.office365.com';
+      settingsToSave.smtpPort = 587;
+    } else if (settingsToSave.provider === 'Zoho') {
+      settingsToSave.smtpHost = 'smtp.zoho.com';
+      settingsToSave.smtpPort = 465;
+    }
+
+    try {
+      if (window.electronAPI && window.electronAPI.saveEmailSettings) {
+        const result = await window.electronAPI.saveEmailSettings(settingsToSave);
+        if (result && result.success) {
+          alert('Email settings saved successfully');
+          fetchSettings(); // reload settings
+        } else {
+          setError(result?.error || 'Failed to save settings');
+        }
+      } else {
+        setError('electronAPI not available');
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTestEmail = async () => {
+    setTesting(true);
+    setError('');
+    try {
+      if (window.electronAPI && window.electronAPI.testEmail) {
+        const result = await window.electronAPI.testEmail();
+        if (result && result.success) {
+          alert('Test email sent successfully');
+        } else {
+          setError(result?.error || result?.message || 'Failed to send test email');
+        }
+      } else {
+        setError('electronAPI not available');
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  if (loading) return <div>Loading settings...</div>;
+
+  return (
+    <div className={styles.profileContainer}>
+      <div className={styles.card}>
+        <h2 className={styles.cardTitle}>Daily Email Reports Configuration</h2>
+        <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
+          Configure automated daily business reports to be sent directly to the owner.
+        </p>
+
+        {error && (
+          <div style={{ padding: '12px', background: '#FEF2F2', color: '#EF4444', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1.5rem' }}>
+            <AlertCircle size={18} />
+            <span style={{ fontSize: '0.875rem' }}>{error}</span>
+          </div>
+        )}
+
+        <div className={styles.formGrid}>
+          <div className={styles.formGroup} style={{ display: 'flex', alignItems: 'center', gap: '10px', gridColumn: '1 / -1' }}>
+            <input 
+              type="checkbox" 
+              name="enabled"
+              checked={emailSettings.enabled}
+              onChange={handleChange}
+              style={{ width: '18px', height: '18px' }}
+              id="enableReports"
+            />
+            <label htmlFor="enableReports" style={{ fontWeight: 600, margin: 0, cursor: 'pointer' }}>Enable Automated Daily Email Reports</label>
+          </div>
+          
+          <div className={styles.formGroup}>
+            <label>Owner Email Address</label>
+            <input
+              type="email"
+              className={styles.inputField}
+              name="ownerEmail"
+              value={emailSettings.ownerEmail}
+              onChange={handleChange}
+              placeholder="owner@example.com"
+            />
+          </div>
+
+          <div className={styles.formGroup}>
+            <label>Closing Time (Auto-Mail)</label>
+            <input
+              type="time"
+              className={styles.inputField}
+              name="sendTime"
+              value={emailSettings.sendTime}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div className={styles.formGroup}>
+            <label>Email Provider</label>
+            <select
+              className={styles.inputField}
+              name="provider"
+              value={emailSettings.provider}
+              onChange={handleChange}
+            >
+              <option value="Gmail">Gmail</option>
+              <option value="Outlook">Outlook / Office365</option>
+              <option value="Zoho">Zoho Mail</option>
+              <option value="Custom SMTP">Custom SMTP</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid #E2E8F0' }}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#1E293B', marginBottom: '0.5rem' }}>Report Attachments Selection</h3>
+          <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
+            Choose which reports/files will be generated and attached to the closing email.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input 
+                type="checkbox" 
+                name="includePdf"
+                checked={emailSettings.includePdf}
+                onChange={handleChange}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                id="includePdf"
+              />
+              <label htmlFor="includePdf" style={{ margin: 0, cursor: 'pointer', fontSize: '0.9rem', fontWeight: 500 }}>Daily Summary (PDF)</label>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input 
+                type="checkbox" 
+                name="includeSalesCsv"
+                checked={emailSettings.includeSalesCsv}
+                onChange={handleChange}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                id="includeSalesCsv"
+              />
+              <label htmlFor="includeSalesCsv" style={{ margin: 0, cursor: 'pointer', fontSize: '0.9rem', fontWeight: 500 }}>Detailed Sales list (PDF)</label>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input 
+                type="checkbox" 
+                name="includeExpensesCsv"
+                checked={emailSettings.includeExpensesCsv}
+                onChange={handleChange}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                id="includeExpensesCsv"
+              />
+              <label htmlFor="includeExpensesCsv" style={{ margin: 0, cursor: 'pointer', fontSize: '0.9rem', fontWeight: 500 }}>Detailed Expenses list (PDF)</label>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input 
+                type="checkbox" 
+                name="includeCollectionsCsv"
+                checked={emailSettings.includeCollectionsCsv}
+                onChange={handleChange}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                id="includeCollectionsCsv"
+              />
+              <label htmlFor="includeCollectionsCsv" style={{ margin: 0, cursor: 'pointer', fontSize: '0.9rem', fontWeight: 500 }}>Detailed Collections list (PDF)</label>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input 
+                type="checkbox" 
+                name="includeOutstandingCsv"
+                checked={emailSettings.includeOutstandingCsv}
+                onChange={handleChange}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                id="includeOutstandingCsv"
+              />
+              <label htmlFor="includeOutstandingCsv" style={{ margin: 0, cursor: 'pointer', fontSize: '0.9rem', fontWeight: 500 }}>Customer Outstanding list (PDF)</label>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid #E2E8F0' }}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#1E293B', marginBottom: '1.5rem' }}>SMTP Credentials</h3>
+          
+          {emailSettings.provider === 'Gmail' && (
+            <div style={{ padding: '12px', background: '#FFFBEB', color: '#B45309', borderRadius: '8px', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
+              <strong>Note for Gmail:</strong> You must use an <strong>App Password</strong> generated from your Google Account Security settings. Your normal password will not work.
+            </div>
+          )}
+
+          <div className={styles.formGrid}>
+            <div className={styles.formGroup}>
+              <label>SMTP Host</label>
+              <input
+                type="text"
+                className={styles.inputField}
+                name="smtpHost"
+                value={emailSettings.smtpHost}
+                onChange={handleChange}
+                placeholder="smtp.gmail.com"
+                disabled={emailSettings.provider !== 'Custom SMTP'}
+              />
+            </div>
+            
+            <div className={styles.formGroup}>
+              <label>SMTP Port</label>
+              <input
+                type="number"
+                className={styles.inputField}
+                name="smtpPort"
+                value={emailSettings.smtpPort}
+                onChange={handleChange}
+                placeholder="465"
+                disabled={emailSettings.provider !== 'Custom SMTP'}
+              />
+            </div>
+
+            <div className={styles.formGroup}>
+              <label>Email Username / Address</label>
+              <input
+                type="text"
+                className={styles.inputField}
+                name="username"
+                value={emailSettings.username}
+                onChange={handleChange}
+                placeholder="shop@example.com"
+              />
+            </div>
+
+            <div className={styles.formGroup}>
+              <label>App Password / SMTP Password</label>
+              <input
+                type="password"
+                className={styles.inputField}
+                name="password"
+                value={emailSettings.password}
+                onChange={handleChange}
+                placeholder="••••••••••••••••"
+              />
+              <span style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '4px', display: 'block' }}>
+                Securely encrypted in database. Never saved in plain text.
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              padding: '10px 20px',
+              background: '#2563EB',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: '600',
+              cursor: saving ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}
+          >
+            <Save size={18} />
+            {saving ? 'Saving...' : 'Save Settings'}
+          </button>
+          
+          <button
+            onClick={handleTestEmail}
+            disabled={testing}
+            style={{
+              padding: '10px 20px',
+              background: '#F1F5F9',
+              color: '#475569',
+              border: '1px solid #CBD5E1',
+              borderRadius: '8px',
+              fontWeight: '600',
+              cursor: testing ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}
+          >
+            <Mail size={18} />
+            {testing ? 'Sending Test...' : 'Send Test Email'}
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+

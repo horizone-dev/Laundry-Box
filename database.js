@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 
 let db;
 
@@ -7,6 +8,19 @@ function initDB(appPath) {
   // Use app data directory for production or local root for development
   const dbPath = path.join(appPath, 'laundry_pos.sqlite');
   db = new Database(dbPath, { verbose: console.log });
+  
+  try {
+    if (fs.existsSync(dbPath)) {
+      fs.chmodSync(dbPath, 0o600);
+    }
+  } catch (err) {
+    console.warn("Failed to set strict database file permissions:", err.message);
+  }
+
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('cache_size = 10000');
+  db.pragma('foreign_keys = ON');
 
   // Initialize tables
   db.exec(`
@@ -204,7 +218,34 @@ function initDB(appPath) {
       channel TEXT,
       date TEXT,
       status TEXT,
-      url TEXT
+      url TEXT,
+      checkoutId TEXT,
+      payment_method TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS nomod_transactions (
+      id TEXT PRIMARY KEY,
+      orderId TEXT,
+      customerId TEXT,
+      customerName TEXT,
+      amount REAL,
+      currency TEXT,
+      status TEXT,
+      url TEXT,
+      transactionId TEXT,
+      gatewayResponse TEXT,
+      createdAt TEXT,
+      paidAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      event TEXT,
+      details TEXT,
+      userId TEXT,
+      userRole TEXT,
+      timestamp TEXT,
+      device TEXT
     );
 
     CREATE TABLE IF NOT EXISTS reconciliations (
@@ -247,7 +288,35 @@ function initDB(appPath) {
       amount REAL,
       status TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS email_settings (
+      id TEXT PRIMARY KEY DEFAULT '1',
+      enabled INTEGER DEFAULT 0,
+      ownerEmail TEXT,
+      sendTime TEXT DEFAULT '23:50',
+      provider TEXT,
+      smtpHost TEXT,
+      smtpPort INTEGER,
+      username TEXT,
+      passwordBuffer BLOB,
+      includePdf INTEGER DEFAULT 1,
+      includeSalesCsv INTEGER DEFAULT 0,
+      includeExpensesCsv INTEGER DEFAULT 0,
+      includeCollectionsCsv INTEGER DEFAULT 0,
+      includeOutstandingCsv INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS email_history (
+      id TEXT PRIMARY KEY,
+      date TEXT,
+      time TEXT,
+      recipient TEXT,
+      status TEXT,
+      reason TEXT,
+      retryCount INTEGER DEFAULT 0
+    );
   `);
+
 
   // Create indexes for search, filters, sorting, and synchronization performance
   db.exec(`
@@ -276,6 +345,47 @@ function initDB(appPath) {
   try {
     db.exec(`ALTER TABLE orders ADD COLUMN specialInstructions TEXT;`);
   } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE payment_links ADD COLUMN checkoutId TEXT;`);
+  } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE payment_links ADD COLUMN payment_method TEXT;`);
+  } catch (e) { /* already exists */ }
+
+  // Migrations for audit_logs table self-healing
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id TEXT PRIMARY KEY,
+        event TEXT,
+        details TEXT,
+        userId TEXT,
+        userRole TEXT,
+        timestamp TEXT,
+        device TEXT
+      );
+    `);
+    
+    // Check if the event column exists (in case table was created with an old schema)
+    const auditCols = db.prepare("PRAGMA table_info(audit_logs)").all();
+    if (!auditCols.some(col => col.name === 'event')) {
+      // If it doesn't have 'event', recreate or alter it
+      db.exec("DROP TABLE IF EXISTS audit_logs;");
+      db.exec(`
+        CREATE TABLE audit_logs (
+          id TEXT PRIMARY KEY,
+          event TEXT,
+          details TEXT,
+          userId TEXT,
+          userRole TEXT,
+          timestamp TEXT,
+          device TEXT
+        );
+      `);
+    }
+  } catch (err) {
+    console.error("Failed to migrate audit_logs table:", err);
+  }
 
   // Migrations
   try {
@@ -353,6 +463,30 @@ function initDB(appPath) {
     if (!orderCols.some(col => col.name === 'paymentBreakdown')) {
       db.exec("ALTER TABLE orders ADD COLUMN paymentBreakdown TEXT;");
     }
+    if (!orderCols.some(col => col.name === 'nomodCheckoutId')) {
+      db.exec("ALTER TABLE orders ADD COLUMN nomodCheckoutId TEXT;");
+    }
+    if (!orderCols.some(col => col.name === 'nomodPaymentLink')) {
+      db.exec("ALTER TABLE orders ADD COLUMN nomodPaymentLink TEXT;");
+    }
+    if (!orderCols.some(col => col.name === 'nomodTransactionId')) {
+      db.exec("ALTER TABLE orders ADD COLUMN nomodTransactionId TEXT;");
+    }
+    if (!orderCols.some(col => col.name === 'nomodReference')) {
+      db.exec("ALTER TABLE orders ADD COLUMN nomodReference TEXT;");
+    }
+    if (!orderCols.some(col => col.name === 'nomodGatewayResponse')) {
+      db.exec("ALTER TABLE orders ADD COLUMN nomodGatewayResponse TEXT;");
+    }
+    if (!orderCols.some(col => col.name === 'nomodPaymentStatus')) {
+      db.exec("ALTER TABLE orders ADD COLUMN nomodPaymentStatus TEXT;");
+    }
+    if (!orderCols.some(col => col.name === 'paymentVerified')) {
+      db.exec("ALTER TABLE orders ADD COLUMN paymentVerified INTEGER DEFAULT 0;");
+    }
+    if (!orderCols.some(col => col.name === 'paidAt')) {
+      db.exec("ALTER TABLE orders ADD COLUMN paidAt TEXT;");
+    }
 
     const payCols = db.prepare("PRAGMA table_info(payments)").all();
     if (!payCols.some(col => col.name === 'customerId')) {
@@ -371,6 +505,23 @@ function initDB(appPath) {
     const txnCols = db.prepare("PRAGMA table_info(account_transactions)").all();
     if (!txnCols.some(col => col.name === 'icon')) {
       db.exec("ALTER TABLE account_transactions ADD COLUMN icon TEXT DEFAULT 'DollarSign';");
+    }
+
+    const emailSettingsCols = db.prepare("PRAGMA table_info(email_settings)").all();
+    if (!emailSettingsCols.some(col => col.name === 'includePdf')) {
+      db.exec("ALTER TABLE email_settings ADD COLUMN includePdf INTEGER DEFAULT 1;");
+    }
+    if (!emailSettingsCols.some(col => col.name === 'includeSalesCsv')) {
+      db.exec("ALTER TABLE email_settings ADD COLUMN includeSalesCsv INTEGER DEFAULT 0;");
+    }
+    if (!emailSettingsCols.some(col => col.name === 'includeExpensesCsv')) {
+      db.exec("ALTER TABLE email_settings ADD COLUMN includeExpensesCsv INTEGER DEFAULT 0;");
+    }
+    if (!emailSettingsCols.some(col => col.name === 'includeCollectionsCsv')) {
+      db.exec("ALTER TABLE email_settings ADD COLUMN includeCollectionsCsv INTEGER DEFAULT 0;");
+    }
+    if (!emailSettingsCols.some(col => col.name === 'includeOutstandingCsv')) {
+      db.exec("ALTER TABLE email_settings ADD COLUMN includeOutstandingCsv INTEGER DEFAULT 0;");
     }
 
     const expCols = db.prepare("PRAGMA table_info(expenses)").all();

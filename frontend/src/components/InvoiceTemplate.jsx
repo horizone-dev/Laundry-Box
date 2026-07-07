@@ -54,9 +54,35 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
   // ── Computed totals from items ──
   const itemsTotal = items.reduce((s, i) => s + ((parseFloat(i.qty) || 0) * (parseFloat(i.price) || 0)), 0);
   const taxRate = settings.isTaxEnabled ? (settings.taxRate || 0) / 100 : 0;
-  const computedSubtotal = taxRate > 0 ? itemsTotal / (1 + taxRate) : itemsTotal;
-  const computedTax = itemsTotal - computedSubtotal;
-  const computedTotal = itemsTotal;
+
+  let computedSubtotal = 0;
+  let computedTax = 0;
+  let computedTotal = 0;
+  let computedDiscount = 0;
+
+  if (!editMode && order.total !== undefined) {
+    computedTotal = order.total;
+    computedSubtotal = computedTotal / (1 + taxRate);
+    computedTax = computedTotal - computedSubtotal;
+    if (settings.taxMethod === 'exclusive') {
+      computedDiscount = itemsTotal - computedSubtotal;
+    } else {
+      computedDiscount = itemsTotal - computedTotal;
+    }
+  } else {
+    // In edit mode or fallback when order.total is not defined
+    if (settings.taxMethod === 'exclusive') {
+      computedSubtotal = itemsTotal;
+      computedTax = itemsTotal * taxRate;
+      computedTotal = itemsTotal + computedTax;
+      computedDiscount = 0;
+    } else {
+      computedTotal = itemsTotal;
+      computedSubtotal = computedTotal / (1 + taxRate);
+      computedTax = computedTotal - computedSubtotal;
+      computedDiscount = 0;
+    }
+  }
 
   // ── Item edit helpers ──
   const updateItem = (idx, field, value) => {
@@ -612,6 +638,18 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <span>INVOICE CHARGES</span>
               {showBilingual && <span>رسوم الفاتورة</span>}
             </div>
+            {computedDiscount > 0.01 && (
+              <div className={styles.totalRowBilingual}>
+                <span>{formatLabel('Items Total', 'إجمالي المواد')}</span>
+                <span className={styles.totalVal}><CurrencySymbol size={11} /> {itemsTotal.toFixed(2)}</span>
+              </div>
+            )}
+            {computedDiscount > 0.01 && (
+              <div className={styles.totalRowBilingual}>
+                <span>{formatLabel('Discount', 'الخصم')}</span>
+                <span className={styles.totalVal} style={{ color: '#DC2626' }}>- <CurrencySymbol size={11} /> {computedDiscount.toFixed(2)}</span>
+              </div>
+            )}
             <div className={styles.totalRowBilingual}>
               <span>{formatLabel('Before VAT', 'قبل الضريبة')}</span>
               <span className={styles.totalVal}><CurrencySymbol size={11} /> {computedSubtotal.toFixed(2)}</span>

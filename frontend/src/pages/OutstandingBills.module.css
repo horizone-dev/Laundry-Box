@@ -214,7 +214,7 @@
 
 .settleBtn {
   padding: 0.4rem 1rem;
-  background: #2563eb;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 8px;
@@ -225,7 +225,7 @@
 }
 
 .settleBtn:hover {
-  background: #1d4ed8;
+  background: var(--primary-hover);
   transform: translateY(-1px);
 }
 

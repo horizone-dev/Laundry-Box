@@ -55,7 +55,7 @@
   align-items: center;
   gap: 0.45rem;
   padding: 0.6rem 1.25rem;
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 10px;
@@ -64,7 +64,7 @@
   cursor: pointer;
   transition: background 0.18s, transform 0.18s;
 }
-.btnPrimary:hover { background: #1D4ED8; transform: translateY(-1px); }
+.btnPrimary:hover { background: var(--primary-hover); transform: translateY(-1px); }
 
 .btnSecondary {
   display: flex;
@@ -80,7 +80,7 @@
   cursor: pointer;
   transition: border-color 0.18s, background 0.18s, transform 0.18s;
 }
-.btnSecondary:hover { border-color: #2563EB; color: #2563EB; transform: translateY(-1px); }
+.btnSecondary:hover { border-color: var(--primary); color: var(--primary); transform: translateY(-1px); }
 
 /* ── Filter Bar ─────────────────────────────────── */
 .filterBar {
@@ -114,7 +114,7 @@
   transition: border-color 0.18s;
   position: relative;
 }
-.selectorInput:focus-within { border-color: #2563EB; background: white; }
+.selectorInput:focus-within { border-color: var(--primary); background: white; }
 
 .selectedName {
   font-weight: 700;
@@ -236,7 +236,7 @@
   border-radius: 10px;
   background: #F8FAFC;
 }
-.dateField:focus-within { border-color: #2563EB; background: white; }
+.dateField:focus-within { border-color: var(--primary); background: white; }
 
 .dateInput {
   border: none;
@@ -293,7 +293,7 @@
 
 .typeBtnActive {
   background: white;
-  color: #2563EB;
+  color: var(--primary);
   box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
 
@@ -390,7 +390,7 @@
 
 /* ── Customer Banner ────────────────────────────── */
 .customerBanner {
-  background: linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%);
+  background: linear-gradient(135deg, #1E3A5F 0%, var(--primary) 100%);
   border-radius: 12px;
   padding: 0.75rem 1.25rem;
   display: flex;
@@ -525,14 +525,14 @@
 }
 
 .refLink {
-  color: #2563EB;
+  color: var(--primary);
   cursor: pointer;
   text-decoration: underline;
   transition: color 0.15s;
 }
 
 .refLink:hover {
-  color: #1D4ED8;
+  color: var(--primary-hover);
 }
 
 .descCell {
@@ -736,8 +736,8 @@
 }
 
 .paginationActiveBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
   box-shadow: 0 2px 4px rgba(37, 99, 235, 0.15);
 }

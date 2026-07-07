@@ -32,12 +32,12 @@
 }
 
 .tabBtn:hover {
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .tabBtnActive {
-  color: #2563EB;
-  border-bottom-color: #2563EB;
+  color: var(--primary);
+  border-bottom-color: var(--primary);
 }
 
 /* ── Split Layout ───────────────────────────────── */
@@ -299,7 +299,7 @@
 }
 
 .applyBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 8px;
@@ -311,7 +311,7 @@
 }
 
 .applyBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
 }
 
 .printBtn {
@@ -575,7 +575,7 @@
 }
 
 .modalSelect:focus, .modalInput:focus, .modalTextarea:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
 }
@@ -657,7 +657,7 @@
 
 .flowArrow {
   padding: 0.5rem;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 /* ── Tab Placeholder ────────────────────────────── */
@@ -734,7 +734,7 @@
 }
 
 .billLink {
-  color: #2563EB;
+  color: var(--primary);
   cursor: pointer;
   font-weight: 700;
   text-decoration: underline;
@@ -742,7 +742,7 @@
 }
 
 .billLink:hover {
-  color: #1D4ED8;
+  color: var(--primary-hover);
 }
 
 /* ── Interactive Tab Layouts ────────────────────── */
@@ -760,7 +760,7 @@
 }
 
 .btnPrimary {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 10px;
@@ -775,7 +775,7 @@
 }
 
 .btnPrimary:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
 }
 
 .btnSecondary {
@@ -875,7 +875,7 @@
 
 .badgeActive {
   background: #DBEAFE;
-  color: #1D4ED8;
+  color: var(--primary-hover);
 }
 
 .badgePending {
@@ -890,7 +890,7 @@
 
 .linkUrl {
   font-family: monospace;
-  color: #2563EB;
+  color: var(--primary);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -1061,7 +1061,7 @@
   padding: 1rem;
   border-radius: 50%;
   background: #EFF6FF;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .upcomingIconAnim {
@@ -1084,7 +1084,7 @@
 .upcomingBadge {
   font-size: 0.75rem;
   font-weight: 800;
-  color: #2563EB;
+  color: var(--primary);
   background: #EFF6FF;
   padding: 0.25rem 0.75rem;
   border-radius: 20px;
@@ -1188,7 +1188,7 @@
 }
 
 .notifyBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 8px;
@@ -1201,7 +1201,7 @@
 }
 
 .notifyBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
 }
 
 .notifyBtnActive {
@@ -1262,9 +1262,9 @@
 }
 
 .paginationActiveBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
   box-shadow: 0 2px 4px rgba(37, 99, 235, 0.15);
 }
 

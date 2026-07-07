@@ -61,9 +61,9 @@
 }
 
 .categoryTab.active {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
 }
 
 .activeStation {
@@ -117,7 +117,7 @@
 }
 
 .itemCard.selected {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: #EFF6FF;
 }
 
@@ -129,13 +129,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #2563EB;
+  color: var(--primary);
   transition: all 0.2s;
 }
 
 .itemCard:hover .itemIcon {
   background: #EFF6FF;
-  color: #1D4ED8;
+  color: var(--primary-hover);
 }
 
 .itemCard.selected .itemIcon {
@@ -168,7 +168,7 @@
 .itemPrice {
   font-size: 0.8rem;
   font-weight: 700;
-  color: #2563EB;
+  color: var(--primary);
   background: #F1F5F9;
   padding: 0.2rem 0.6rem;
   border-radius: 20px;
@@ -182,7 +182,7 @@
   position: absolute;
   top: 8px;
   right: 8px;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .addItemCard {
@@ -271,7 +271,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #2563EB;
+  color: var(--primary);
   border: 1px solid #E2E8F0;
   flex-shrink: 0;
 }
@@ -309,7 +309,7 @@
 
 .cartItemAddons {
   font-size: 0.65rem;
-  color: #1D4ED8;
+  color: var(--primary-hover);
   font-weight: 700;
   background: #EFF6FF;
   padding: 0.08rem 0.35rem;
@@ -392,7 +392,7 @@
 }
 
 .cartItemEditBtn:hover {
-  color: #2563EB;
+  color: var(--primary);
   background: #EFF6FF;
 }
 
@@ -440,7 +440,7 @@
 }
 
 .totalValue {
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .cartActions {
@@ -525,7 +525,7 @@
 
 .advanceBadge {
   font-size: 0.7rem;
-  color: #2563eb;
+  color: var(--primary);
   font-weight: 800;
   background: #EFF6FF;
   padding: 0.1rem 0.4rem;
@@ -588,7 +588,7 @@
 .draftBtn:hover:not(:disabled) {
   background: #EFF6FF;
   border-color: #BFDBFE;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .draftBtn:disabled {
@@ -599,7 +599,7 @@
 .draftBtnActive {
   border-color: #BFDBFE;
   background: #EFF6FF;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .loadDraftBtn {
@@ -609,7 +609,7 @@
   padding: 0.35rem 0.65rem;
   border-radius: 7px;
   border: 1px solid #BFDBFE;
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   font-size: 0.72rem;
   font-weight: 700;
@@ -619,7 +619,7 @@
 }
 
 .loadDraftBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
 }
 
 /* Draft toast */
@@ -677,7 +677,7 @@
 }
 
 .submitBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   padding: 1rem;
@@ -693,7 +693,7 @@
 }
 
 .submitBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
 }
 
 /* Modal Styling */
@@ -751,7 +751,7 @@
   height: 36px;
   border-radius: 8px;
   background: #EFF6FF;
-  color: #2563EB;
+  color: var(--primary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -845,9 +845,9 @@
 }
 
 .serviceTypeCard.active {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: #EFF6FF;
-  box-shadow: 0 0 0 1px #2563EB;
+  box-shadow: 0 0 0 1px var(--primary);
 }
 
 .selectionIndicator {
@@ -869,8 +869,8 @@
 }
 
 .serviceTypeCard.active .checkboxOutline {
-  background: #2563EB;
-  border-color: #2563EB;
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .serviceTypeIcon {
@@ -880,7 +880,7 @@
 }
 
 .serviceTypeCard.active .serviceTypeIcon {
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .serviceTypeName {
@@ -897,7 +897,7 @@
 }
 
 .serviceTypeCard.active .serviceTypePrice {
-  color: #2563EB;
+  color: var(--primary);
 }
 
 /* Add-on Pill Chips */
@@ -927,8 +927,8 @@
 
 .addonChip.active {
   background: #EFF6FF;
-  border-color: #2563EB;
-  box-shadow: 0 0 0 1px #2563EB;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
 }
 
 .addonCheckbox {
@@ -945,8 +945,8 @@
 }
 
 .addonChip.active .addonCheckbox {
-  background: #2563EB;
-  border-color: #2563EB;
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .checkIconMini {
@@ -971,7 +971,7 @@
 }
 
 .addonChip.active .addonChipPrice {
-  color: #2563EB;
+  color: var(--primary);
 }
 
 /* Two column details */
@@ -1013,7 +1013,7 @@
 }
 
 .priceInputWrapper:focus-within {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
@@ -1024,7 +1024,7 @@
 }
 
 .priceInputWrapper:focus-within .currencyPrefix {
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .priceInput {
@@ -1069,13 +1069,13 @@
 }
 
 .qtyLargeBtn.primary {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
 }
 
 .qtyLargeBtn.primary:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
 }
 
 .qtyLargeInput {
@@ -1126,7 +1126,7 @@
 }
 
 .remarksTextarea:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
@@ -1160,7 +1160,7 @@
 }
 
 .tempInput:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
@@ -1195,7 +1195,7 @@
 }
 
 .modalSubmitBtn {
-  background: linear-gradient(135deg, #2563EB, #1D4ED8);
+  background: linear-gradient(135deg, var(--primary), var(--primary-hover));
   color: white;
   border: none;
   border-radius: 10px;
@@ -1212,7 +1212,7 @@
 }
 
 .modalSubmitBtn:hover {
-  background: linear-gradient(135deg, #1D4ED8, #1E40AF);
+  background: linear-gradient(135deg, var(--primary-hover), #1E40AF);
   transform: translateY(-1px);
   box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
 }
@@ -1331,7 +1331,7 @@
 }
 
 .methodCard.active {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: #EFF6FF;
 }
 
@@ -1347,7 +1347,7 @@
 }
 
 .methodCard.active .methodIcon {
-  color: #2563EB;
+  color: var(--primary);
   background: white;
 }
 
@@ -1402,14 +1402,14 @@
 
 .numBtnSpecial {
   background: #DBEAFE;
-  color: #2563EB;
+  color: var(--primary);
   font-size: 0.75rem;
   text-transform: uppercase;
 }
 
 .completeBtn {
   align-self: flex-end;
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 16px;
@@ -1479,7 +1479,7 @@
 }
 
 .switchOn {
-  background: #2563EB;
+  background: var(--primary);
 }
 
 .switchHandle {
@@ -1516,7 +1516,7 @@
 }
 
 .customerSearchInput:focus-within {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
@@ -1538,7 +1538,7 @@
   padding: 0.5rem 0.75rem;
   border-radius: 8px;
   border: 1px solid #DBEAFE;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .selCustInfo {
@@ -1620,7 +1620,7 @@
 }
 
 .addNewBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   padding: 0.4rem 0.75rem;
@@ -1646,10 +1646,10 @@
 }
 
 .posInputWrapper:focus-within {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .posInputWrapper input {
@@ -1695,7 +1695,7 @@
 }
 
 .sidebarAddBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 8px;
@@ -1710,7 +1710,7 @@
 }
 
 .sidebarAddBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
   transform: translateY(-1px);
 }
 
@@ -1825,7 +1825,7 @@
 }
 
 .printSuccessBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   padding: 1rem;
@@ -1840,7 +1840,7 @@
 }
 
 .printSuccessBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
   transform: translateY(-1px);
 }
 
@@ -1994,6 +1994,6 @@
 }
 
 .togglePresetsBtn:hover {
-  color: #2563eb;
+  color: var(--primary);
   text-decoration: underline;
 }

@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import {
   Plus, Search, Scissors, Zap, Sparkles, Tag, X, Layout,
   Shirt, Bed, Wind, Droplet, Heart, Layers, Camera,
-  Image as ImageIcon, Trash2, Edit2, Package
+  Image as ImageIcon, Trash2, Edit2, Package, BedDouble
 } from 'lucide-react';
+const Dress = Shirt;
 import Cropper from 'react-easy-crop';
 import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID, CATEGORIES } from '../constants';
@@ -13,6 +14,25 @@ import styles from './Services.module.css';
 
 export default function Services({ defaultTab = 'list' }) {
   const { settings, updateSettings } = useSettings();
+  const getIcon = (iconName, size = 20) => {
+    const icons = {
+      'Shirt': <Shirt size={size} />,
+      'Dress': <Dress size={size} />,
+      'Bed': <Bed size={size} />,
+      'BedDouble': <BedDouble size={size} />,
+      'Layers': <Layers size={size} />,
+      'Wind': <Wind size={size} />,
+      'Droplet': <Droplet size={size} />,
+      'Sparkles': <Sparkles size={size} />,
+      'Zap': <Zap size={size} />,
+      'Package': <Package size={size} />,
+      'Scissors': <Scissors size={size} />,
+      'Tag': <Tag size={size} />,
+      'Layout': <Layout size={size} />,
+      'Heart': <Heart size={size} />
+    };
+    return icons[iconName] || null;
+  };
   const [services, setServices] = useState([]);
   const [types, setTypes] = useState([]);
   const [addons, setAddons] = useState([]);
@@ -172,7 +192,7 @@ export default function Services({ defaultTab = 'list' }) {
 
   const handleOpenModal = (type) => {
     if (type === 'service') {
-      setFormData({ name: '', price: '', category: categories[0]?.name || CATEGORIES.LAUNDRY, taxRate: '', image: null, defaultDeliveryMethod: 'Hanger' });
+      setFormData({ name: '', price: '', category: categories[0]?.name || CATEGORIES.LAUNDRY, taxRate: '', image: null, defaultDeliveryMethod: 'Hanger', icon: 'Shirt' });
       // Pre-fill types pricing grid with empty values
       const defaultMap = {};
       types.forEach(t => {
@@ -193,7 +213,7 @@ export default function Services({ defaultTab = 'list' }) {
 
   const handleEdit = (item, type) => {
     setEditId(item.id);
-    setFormData({ ...item });
+    setFormData({ icon: 'Shirt', ...item });
 
     if (type === 'service') {
       let parsedPricing = [];
@@ -301,11 +321,11 @@ export default function Services({ defaultTab = 'list' }) {
         const basePrice = pricingArray.length > 0 ? pricingArray[0].price : 0;
 
         if (editId) {
-          query = 'UPDATE services SET name=?, price=?, image=?, category=?, taxRate=?, pricing=?, defaultDeliveryMethod=?, updatedAt=? WHERE id=?';
-          params = [formData.name, basePrice, formData.image, formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, formData.defaultDeliveryMethod || 'Hanger', timestamp, editId];
+          query = 'UPDATE services SET name=?, price=?, image=?, icon=?, category=?, taxRate=?, pricing=?, defaultDeliveryMethod=?, updatedAt=? WHERE id=?';
+          params = [formData.name, basePrice, formData.image, formData.icon || 'Shirt', formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, formData.defaultDeliveryMethod || 'Hanger', timestamp, editId];
         } else {
-          query = 'INSERT INTO services (id, shopId, name, price, image, category, taxRate, pricing, defaultDeliveryMethod, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-          params = [id, shopId, formData.name, basePrice, formData.image, formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, formData.defaultDeliveryMethod || 'Hanger', timestamp];
+          query = 'INSERT INTO services (id, shopId, name, price, image, icon, category, taxRate, pricing, defaultDeliveryMethod, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+          params = [id, shopId, formData.name, basePrice, formData.image, formData.icon || 'Shirt', formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, formData.defaultDeliveryMethod || 'Hanger', timestamp];
         }
       } else if (showModal === 'category') {
         if (editId) {
@@ -511,8 +531,8 @@ export default function Services({ defaultTab = 'list' }) {
                             <img src={s.image} alt={s.name} className={styles.serviceImage} />
                           </div>
                         ) : (
-                          <div className={styles.iconBox} style={{ fontSize: '1.1rem' }}>
-                            🧺
+                          <div className={styles.iconBox} style={{ fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4B5563' }}>
+                            {s.icon ? getIcon(s.icon, 20) : '🧺'}
                           </div>
                         )}
                         <div>
@@ -846,6 +866,34 @@ export default function Services({ defaultTab = 'list' }) {
                       <option key={cat.id} value={cat.name}>{cat.name}</option>
                     ))}
                   </select>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>Service Icon</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    {['Shirt', 'Dress', 'Bed', 'BedDouble', 'Layers', 'Wind', 'Droplet', 'Heart', 'Sparkles', 'Zap', 'Package', 'Scissors', 'Tag', 'Layout'].map(iconName => (
+                      <button
+                        key={iconName}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, icon: iconName })}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '0.6rem',
+                          border: formData.icon === iconName ? '2px solid #3B82F6' : '1px solid #E2E8F0',
+                          borderRadius: '8px',
+                          background: formData.icon === iconName ? '#EFF6FF' : '#FFFFFF',
+                          color: formData.icon === iconName ? '#2563EB' : '#64748B',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s'
+                        }}
+                        title={iconName}
+                      >
+                        {getIcon(iconName, 20)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className={styles.formGroup}>

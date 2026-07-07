@@ -14,6 +14,8 @@ import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
 import { t } from '../utils/translations';
 import { getLocalDateTime, getLocalISOString } from '../utils/dateUtils';
 import styles from './MainLayout.module.css';
+import { checkCreditLimit } from '../utils/creditLimit';
+import { QRCodeCanvas } from 'qrcode.react';
 
 const API_BASE = API_BASE_URL;
 
@@ -45,6 +47,47 @@ export default function MainLayout() {
   const [settleMethod, setSettleMethod] = useState('Cash');
   const [logoClicks, setLogoClicks] = useState(0);
   const [selectedBank, setSelectedBank] = useState('');
+
+  const [quickCashAmount, setQuickCashAmount] = useState('');
+  const [quickCardAmount, setQuickCardAmount] = useState('');
+  const [quickUpiAmount, setQuickUpiAmount] = useState('');
+  const [quickBankAmount, setQuickBankAmount] = useState('');
+  const [quickDiscountAmount, setQuickDiscountAmount] = useState('');
+  const [nomodLinkModal, setNomodLinkModal] = useState({ show: false, url: '', linkId: '', amount: 0 });
+
+  const quickCashVal = parseFloat(quickCashAmount) || 0;
+  const quickCardVal = parseFloat(quickCardAmount) || 0;
+  const quickUpiVal = parseFloat(quickUpiAmount) || 0;
+  const quickBankVal = parseFloat(quickBankAmount) || 0;
+
+  useEffect(() => {
+    if (settleMethod === 'Mixed') {
+      const sum = quickCashVal + quickCardVal + quickUpiVal + quickBankVal;
+      setSettleAmount(sum > 0 ? sum.toString() : '');
+    }
+  }, [quickCashAmount, quickCardAmount, quickUpiAmount, quickBankAmount, settleMethod]);
+
+  useEffect(() => {
+    if (!showQuickSettle) {
+      setQuickCashAmount('');
+      setQuickCardAmount('');
+      setQuickUpiAmount('');
+      setQuickBankAmount('');
+      setQuickDiscountAmount('');
+      setSelectedSettleTarget(null);
+      setSettleAmount('');
+      setSettleMethod('Cash');
+    }
+  }, [showQuickSettle]);
+
+  useEffect(() => {
+    if (settleMethod !== 'Mixed') {
+      setQuickCashAmount('');
+      setQuickCardAmount('');
+      setQuickUpiAmount('');
+      setQuickBankAmount('');
+    }
+  }, [settleMethod]);
 
   useEffect(() => {
     if (settings.bankAccounts && settings.bankAccounts.length > 0) {
@@ -346,6 +389,7 @@ export default function MainLayout() {
         { path: '/reports/daily-tax', label: 'Daily Tax Report' },
         { path: '/reports/z-report', label: 'Z Report' },
         { path: '/reports/credit-overrides', label: 'Credit Overrides' },
+        { path: '/reports/nomod-history', label: 'Nomod History' },
       ]
     },
     {
@@ -355,6 +399,7 @@ export default function MainLayout() {
       subItems: [
         { path: '/accounts/cash', label: 'Cash Account' },
         { path: '/accounts/bank', label: 'Bank Account' },
+        { path: '/accounts/gateway', label: 'Payment Link' },
       ]
     },
     {
@@ -525,181 +570,375 @@ export default function MainLayout() {
     }
   };
 
-  const processQuickSettle = async () => {
+  const processQuickSettle = async (isOverridden = false) => {
     if (!selectedSettleTarget || !settleAmount || parseFloat(settleAmount) <= 0) return;
 
     setIsUpdating(true);
     try {
       const amount = parseFloat(settleAmount);
+      const discount = parseFloat(quickDiscountAmount || 0) || 0;
+      const totalReduction = amount + discount;
       const timestamp = getLocalISOString();
+      const customerId = selectedSettleTarget.type === 'customer' 
+        ? selectedSettleTarget.data.id 
+        : selectedSettleTarget.data.customerId;
+
+      const checkRes = await checkCreditLimit(customerId, -amount, settings);
+      if (checkRes.blocked) {
+        if (!settings.enableManagerOverride) {
+          alert("Credit Limit Protection is active and Manager Override is disabled. Cannot complete settlement.");
+          setIsUpdating(false);
+          return;
+        }
+        const pin = prompt("Credit Limit Exceeded! Enter Manager Secure PIN to approve override:");
+        if (!pin) {
+          alert("Access Denied: PIN is required.");
+          setIsUpdating(false);
+          return;
+        }
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
+        const userId = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
+        const verifyRes = await window.electronAPI.verifyManagerPin({
+          pin,
+          customerId,
+          customerName: checkRes.details.customerName,
+          orderId: selectedSettleTarget.type === 'bill' ? selectedSettleTarget.data.id : `QUICK-SETTLE-${customerId.substring(0, 5)}`,
+          creditLimit: checkRes.details.creditLimit,
+          outstandingBalance: checkRes.details.currentOutstanding,
+          orderAmount: checkRes.details.orderAmount,
+          exceededAmount: checkRes.details.exceededAmount,
+          userId
+        });
+        if (!verifyRes.success) {
+          alert("Incorrect PIN! Access Denied.");
+          setIsUpdating(false);
+          return;
+        }
+      }
+
+      if (settleMethod === 'Nomod' && !isOverridden) {
+        let linkId = `LNK-${Date.now().toString().slice(-4)}`;
+        let checkoutUrl = '';
+        
+        if (window.electronAPI?.dbQuery) {
+          try {
+            const activeLnkRes = await window.electronAPI.dbQuery(
+              `SELECT * FROM payment_links WHERE customerId = ? AND status IN ('Active', 'Pending') AND amount = ? LIMIT 1`,
+              [customerId, amount]
+            );
+            if (activeLnkRes.success && activeLnkRes.data.length > 0) {
+              checkoutUrl = activeLnkRes.data[0].url;
+              linkId = activeLnkRes.data[0].id;
+            }
+          } catch (dbErr) {
+            console.warn("Failed to check active payment link in Quick Settle:", dbErr);
+          }
+        }
+
+        if (!checkoutUrl) {
+          try {
+            const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+            const checkoutRes = await window.electronAPI.createNomodCheckout({
+              amount: amount,
+              currency: settings.nomodCurrency || 'AED',
+              customer: {
+                name: selectedSettleTarget.type === 'customer' ? selectedSettleTarget.data.name : (selectedSettleTarget.data.customerName || 'Customer'),
+                phone: selectedSettleTarget.type === 'customer' ? selectedSettleTarget.data.phone : (selectedSettleTarget.data.customerPhone || '')
+              },
+              orderId: selectedSettleTarget.type === 'bill' ? selectedSettleTarget.data.id : `QUICK-SETTLE-${customerId.substring(0, 5)}`,
+              userRole: currentUser.role || 'staff'
+            });
+
+            if (checkoutRes.success && checkoutRes.data && checkoutRes.data.url) {
+              checkoutUrl = checkoutRes.data.url;
+              if (checkoutRes.data.id) {
+                linkId = checkoutRes.data.id;
+              }
+            } else if (checkoutRes.error) {
+              console.warn("Nomod Backend API failed in Quick Settle:", checkoutRes.error);
+              alert("Nomod Checkout API connection failed: " + checkoutRes.error + ". Falling back to sandbox payment link.");
+            }
+          } catch (err) {
+            console.warn("Nomod Checkout IPC failed in Quick Settle:", err.message);
+          }
+        }
+
+        if (!checkoutUrl) {
+          checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${amount}&reference=${linkId}`;
+        }
+
+        if (window.electronAPI?.logAuditEvent) {
+          const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+          window.electronAPI.logAuditEvent({
+            eventName: 'Payment Link Generated',
+            details: `Nomod payment link generated for Customer ${customerId} Quick Settlement, Amount: ${amount}`,
+            userId: currentUser.name || 'Staff',
+            userRole: currentUser.role || 'staff'
+          });
+        }
+
+        setNomodLinkModal({
+          show: true,
+          url: checkoutUrl,
+          linkId,
+          amount
+        });
+        setShowQuickSettle(false);
+        setIsUpdating(false);
+        return;
+      }
+
+      let splits = [];
+      if (settleMethod === 'Mixed') {
+        if (quickCashVal > 0) splits.push({ method: 'Cash', amount: quickCashVal });
+        if (quickCardVal > 0) splits.push({ method: 'Card', amount: quickCardVal });
+        if (quickUpiVal > 0) splits.push({ method: 'UPI', amount: quickUpiVal });
+        if (quickBankVal > 0) splits.push({ method: 'Bank', amount: quickBankVal });
+      } else {
+        splits.push({ method: settleMethod, amount: amount });
+      }
+      if (discount > 0) {
+        splits.push({ method: 'Discount', amount: discount });
+      }
 
       if (selectedSettleTarget.type === 'customer') {
         const customer = selectedSettleTarget.data;
 
-        // 1. Update Customer Balance
-        await window.electronAPI.dbQuery(
-          'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          [amount, timestamp, customer.id]
-        );
+        // Process splits sequentially
+        for (const split of splits) {
+          let remaining = split.amount;
 
-        // 2. Record Payment
-        await window.electronAPI.dbQuery(
-          `INSERT INTO payments (id, customerId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-          [`PAY-QUICK-${Date.now()}`, customer.id, DEFAULT_SHOP_ID, amount, (settleMethod === 'Card' || settleMethod === 'UPI') ? settleMethod : 'Cash', 'SUCCESS', timestamp, timestamp]
-        );
-
-        // Record Transaction in Accounts
-        const txnId = `TXN-${Date.now()}`;
-        const txnTimestamp = getLocalDateTime();
-        const mappedBankId = settleMethod === 'Card'
-          ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
-          : (settleMethod === 'UPI'
-            ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
-            : null);
-        await window.electronAPI.dbQuery(
-          `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-          [
-            txnId,
-            DEFAULT_SHOP_ID,
-            (settleMethod === 'Card' || settleMethod === 'UPI') ? 'BANK' : 'CASH',
-            'INCOME',
-            'Credit Settlement',
-            amount,
-            `Settlement from ${customer.name}${settleMethod === 'Card' && selectedBank ? ` via Card (${selectedBank})` : (settleMethod === 'UPI' && selectedBank ? ` via UPI (${selectedBank})` : '')}`,
-            txnTimestamp,
-            timestamp,
-            'DollarSign',
-            mappedBankId
-          ]
-        );
-
-        // Record card commission if applicable
-        if (settleMethod === 'Card' && settings.cardCommission > 0) {
-          const commissionRate = parseFloat(settings.cardCommission || 0);
-          const commissionAmount = amount * (commissionRate / 100);
-          const commTxnId = `TXN-COMM-${Date.now()}`;
-          const commDesc = `Card Commission for Credit Settlement ${customer.name}`;
-          await window.electronAPI.dbQuery(
-            `INSERT INTO account_transactions 
-             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, timestamp, 'Percent', mappedBankId]
+          // Re-fetch pending bills sequentially to get updated dues
+          const billsRes = await window.electronAPI.dbQuery(
+            "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 AND status != 'Cancelled' ORDER BY createdAt ASC",
+            [customer.id]
           );
-        }
+          const bills = billsRes.success ? billsRes.data : [];
 
-        // 3. Try to settle orders (simplified FIFO)
-        const billsRes = await window.electronAPI.dbQuery(
-          "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 ORDER BY createdAt ASC",
-          [customer.id]
-        );
+          if (bills.length > 0) {
+            for (const bill of bills) {
+              if (remaining <= 0) break;
+              const currentDue = bill.dueAmount > 0 ? bill.dueAmount : (bill.totalAmount - (bill.paidAmount || 0));
+              if (currentDue <= 0) continue;
 
-        let remaining = amount;
-        if (billsRes.success && billsRes.data.length > 0) {
-          for (const bill of billsRes.data) {
-            if (remaining <= 0) break;
-            const currentDue = bill.dueAmount;
-            let allocate = Math.min(remaining, currentDue);
-            let newPaid = (bill.paidAmount || 0) + allocate;
-            let newDue = currentDue - allocate;
-            let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+              let allocate = 0;
+              let newStatus = 'Paid';
+              let newDue = 0;
+              let newPaid = (bill.paidAmount || 0);
 
-            let updatedOrderStatus = bill.status;
-            if (newDue <= 0 && bill.status === 'Payment Pending') {
-              updatedOrderStatus = 'Confirmed';
+              if (remaining >= currentDue) {
+                allocate = currentDue;
+                remaining -= currentDue;
+                newPaid += allocate;
+                newDue = 0;
+                newStatus = 'Paid';
+              } else {
+                allocate = remaining;
+                newPaid += allocate;
+                newDue = currentDue - remaining;
+                remaining = 0;
+                newStatus = 'Partial';
+              }
+
+              const newWorkflowStatus = newDue <= 0 ? 'Confirmed' : bill.status;
+
+              let newOrderPaymentMethod = split.method;
+              if (newDue <= 0) {
+                const prevPayRes = await window.electronAPI.dbQuery(
+                  'SELECT DISTINCT method FROM payments WHERE orderId = ?',
+                  [bill.id]
+                );
+                const prevMethods = prevPayRes.success ? prevPayRes.data.map(p => p.method) : [];
+                const allMethods = [...new Set([...prevMethods, split.method])];
+                const hasCash = allMethods.some(m => m === 'Cash');
+                const hasCardOrBankOrUPI = allMethods.some(m => m === 'Card' || m === 'Bank' || m === 'UPI');
+                if (hasCash && hasCardOrBankOrUPI) newOrderPaymentMethod = 'Mixed';
+                else if (allMethods.includes('Card')) newOrderPaymentMethod = 'Card';
+                else if (allMethods.includes('UPI')) newOrderPaymentMethod = 'UPI';
+                else if (allMethods.includes('Bank')) newOrderPaymentMethod = 'Bank';
+                else newOrderPaymentMethod = 'Cash';
+              }
+
+              await window.electronAPI.dbQuery(
+                'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+                [newPaid, newDue, newStatus, newWorkflowStatus, newOrderPaymentMethod, timestamp, bill.id]
+              );
+
+              await window.electronAPI.dbQuery(
+                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                [`PAY-QUICK-${Date.now()}-${bill.id}-${split.method}`, customer.id, bill.id, DEFAULT_SHOP_ID, allocate, split.method, 'SUCCESS', timestamp, timestamp]
+              );
             }
+          }
 
+          if (remaining > 0) {
             await window.electronAPI.dbQuery(
-              'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-              [newPaid, newDue, newStatus, updatedOrderStatus, (settleMethod === 'Card' || settleMethod === 'UPI') ? settleMethod : 'Cash', timestamp, bill.id]
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+              [`PAY-ADV-${Date.now()}-${split.method}`, customer.id, null, DEFAULT_SHOP_ID, remaining, split.method, 'SUCCESS', timestamp, timestamp]
             );
-            remaining -= allocate;
           }
         }
 
-        alert(`Successfully settled ${amount} for ${customer.name}`);
-      } else if (selectedSettleTarget.type === 'bill') {
-        const bill = selectedSettleTarget.data;
-        const currentDue = bill.dueAmount;
-        let allocate = Math.min(amount, currentDue);
-        let newPaid = (bill.paidAmount || 0) + allocate;
-        let newDue = currentDue - allocate;
-        let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
-
-        let updatedOrderStatus = bill.status;
-        if (newDue <= 0 && bill.status === 'Payment Pending') {
-          updatedOrderStatus = 'Confirmed';
-        }
-
-        // 1. Update the order
-        await window.electronAPI.dbQuery(
-          'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          [newPaid, newDue, newStatus, updatedOrderStatus, (settleMethod === 'Card' || settleMethod === 'UPI') ? settleMethod : 'Cash', timestamp, bill.id]
-        );
-
-        // 2. Record Payment linked to specific order
-        await window.electronAPI.dbQuery(
-          `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-          [`PAY-QUICK-${Date.now()}-${bill.id}`, bill.customerId, bill.id, DEFAULT_SHOP_ID, amount, (settleMethod === 'Card' || settleMethod === 'UPI') ? settleMethod : 'Cash', 'SUCCESS', timestamp, timestamp]
-        );
-
-        // 3. Update Customer Balance
+        // Update Customer Balance
         await window.electronAPI.dbQuery(
           'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          [amount, timestamp, bill.customerId]
+          [totalReduction, timestamp, customer.id]
         );
 
-        // Record Transaction in Accounts
-        const txnId = `TXN-${Date.now()}`;
+        // Record Transactions in Accounts
         const txnTimestamp = getLocalDateTime();
-        const mappedBankId = settleMethod === 'Card'
-          ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
-          : (settleMethod === 'UPI'
-            ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
-            : null);
-        await window.electronAPI.dbQuery(
-          `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-          [
-            txnId,
-            DEFAULT_SHOP_ID,
-            (settleMethod === 'Card' || settleMethod === 'UPI') ? 'BANK' : 'CASH',
-            'INCOME',
-            'Sales Settlement',
-            amount,
-            `Settlement for Bill #${bill.billNumber || bill.id}${settleMethod === 'Card' && selectedBank ? ` via Card (${selectedBank})` : (settleMethod === 'UPI' && selectedBank ? ` via UPI (${selectedBank})` : '')}`,
-            txnTimestamp,
-            timestamp,
-            'DollarSign',
-            mappedBankId
-          ]
-        );
+        for (const split of splits) {
+          if (split.method === 'Discount') {
+            const splitTxnId = `TXN-${Date.now()}-Discount`;
+            await window.electronAPI.dbQuery(
+              `INSERT INTO account_transactions 
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+              [
+                splitTxnId,
+                DEFAULT_SHOP_ID,
+                'CASH',
+                'EXPENSE',
+                'Discount Given',
+                split.amount,
+                `Discount given to ${customer.name} during quick settlement`,
+                txnTimestamp,
+                timestamp,
+                'Percent',
+                null
+              ]
+            );
+            continue;
+          }
 
-        // Record card commission if applicable
-        if (settleMethod === 'Card' && settings.cardCommission > 0) {
-          const commissionRate = parseFloat(settings.cardCommission || 0);
-          const commissionAmount = amount * (commissionRate / 100);
-          const commTxnId = `TXN-COMM-${Date.now()}`;
-          const commDesc = `Card Commission for Sales Settlement ${bill.id}`;
+          const splitTxnId = `TXN-${Date.now()}-${split.method}`;
+          const splitMappedBankId = (split.method === 'Card' || split.method === 'UPI' || split.method === 'Bank')
+            ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
+            : null;
+
           await window.electronAPI.dbQuery(
             `INSERT INTO account_transactions 
              (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, timestamp, 'Percent', mappedBankId]
+            [
+              splitTxnId,
+              DEFAULT_SHOP_ID,
+              (split.method === 'Bank' || split.method === 'Card' || split.method === 'UPI') ? 'BANK' : 'CASH',
+              'INCOME',
+              'Credit Settlement',
+              split.amount,
+              `Settlement from ${customer.name} via ${split.method}${
+                (split.method === 'Card' || split.method === 'UPI' || split.method === 'Bank') && selectedBank ? ` (${selectedBank})` : ''
+              }`,
+              txnTimestamp,
+              timestamp,
+              'DollarSign',
+              splitMappedBankId
+            ]
           );
         }
 
-        alert(`Successfully settled ${amount} for Bill #${bill.billNumber || bill.id}`);
+        alert(`Successfully settled ${amount} (Discount: ${discount}) for ${customer.name}`);
+      } else if (selectedSettleTarget.type === 'bill') {
+        const bill = selectedSettleTarget.data;
+        
+        for (const split of splits) {
+          let remaining = split.amount;
+          const currentDue = bill.dueAmount;
+          let allocate = Math.min(remaining, currentDue);
+          let newPaid = (bill.paidAmount || 0) + allocate;
+          let newDue = currentDue - allocate;
+          let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+
+          let updatedOrderStatus = bill.status;
+          if (newDue <= 0 && bill.status === 'Payment Pending') {
+            updatedOrderStatus = 'Confirmed';
+          }
+
+          await window.electronAPI.dbQuery(
+            'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, status = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+            [newPaid, newDue, newStatus, updatedOrderStatus, (split.method === 'Card' || split.method === 'UPI' || split.method === 'Bank') ? split.method : 'Cash', timestamp, bill.id]
+          );
+
+          await window.electronAPI.dbQuery(
+            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+            [`PAY-QUICK-${Date.now()}-${bill.id}-${split.method}`, bill.customerId, bill.id, DEFAULT_SHOP_ID, allocate, split.method, 'SUCCESS', timestamp, timestamp]
+          );
+        }
+
+        // Update Customer Balance
+        await window.electronAPI.dbQuery(
+          'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+          [totalReduction, timestamp, bill.customerId]
+        );
+
+        // Record Transactions in Accounts
+        const txnTimestamp = getLocalDateTime();
+        for (const split of splits) {
+          if (split.method === 'Discount') {
+            const splitTxnId = `TXN-${Date.now()}-Discount`;
+            await window.electronAPI.dbQuery(
+              `INSERT INTO account_transactions 
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+              [
+                splitTxnId,
+                DEFAULT_SHOP_ID,
+                'CASH',
+                'EXPENSE',
+                'Discount Given',
+                split.amount,
+                `Discount given for Bill #${bill.billNumber || bill.id}`,
+                txnTimestamp,
+                timestamp,
+                'Percent',
+                null
+              ]
+            );
+            continue;
+          }
+
+          const splitTxnId = `TXN-${Date.now()}-${split.method}`;
+          const splitMappedBankId = (split.method === 'Card' || split.method === 'UPI' || split.method === 'Bank')
+            ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
+            : null;
+
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+            [
+              splitTxnId,
+              DEFAULT_SHOP_ID,
+              (split.method === 'Bank' || split.method === 'Card' || split.method === 'UPI') ? 'BANK' : 'CASH',
+              'INCOME',
+              'Sales Settlement',
+              split.amount,
+              `Settlement for Bill #${bill.billNumber || bill.id} via ${split.method}`,
+              txnTimestamp,
+              timestamp,
+              'DollarSign',
+              splitMappedBankId
+            ]
+          );
+        }
+
+        alert(`Successfully settled ${amount} (Discount: ${discount}) for Bill #${bill.billNumber || bill.id}`);
       }
 
       setShowQuickSettle(false);
       setSettleSearch('');
       setSelectedSettleTarget(null);
       setSettleAmount('');
+      setQuickDiscountAmount('');
+      setQuickCashAmount('');
+      setQuickCardAmount('');
+      setQuickUpiAmount('');
+      setQuickBankAmount('');
       setQuickSettleResults([]);
     } catch (err) {
       console.error("Quick settle error:", err);
@@ -907,6 +1146,11 @@ export default function MainLayout() {
                 <button className={styles.headerSettleBtn} onClick={() => setShowQuickSettle(true)}>
                   <DollarSign size={18} /> Settle Bill
                 </button>
+                {(role === 'super_admin' || role === 'manager') && (
+                  <button className={styles.headerSettleBtn} onClick={() => navigate('/reports/z-report')} title="Z Report">
+                    <Activity size={18} /> Z Report
+                  </button>
+                )}
                 <div
                   ref={notificationRef}
                   className={styles.iconBtn}
@@ -1144,7 +1388,19 @@ export default function MainLayout() {
                         value={settleAmount}
                         onChange={(e) => setSettleAmount(e.target.value)}
                         placeholder="0.00"
+                        disabled={settleMethod === 'Mixed'}
                         style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', fontSize: '1.25rem', fontWeight: 700 }}
+                      />
+                    </div>
+
+                    <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
+                      <label>Discount Amount</label>
+                      <input
+                        type="number"
+                        value={quickDiscountAmount}
+                        onChange={(e) => setQuickDiscountAmount(e.target.value)}
+                        placeholder="0.00"
+                        style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', fontSize: '1.1rem', fontWeight: 700 }}
                       />
                     </div>
 
@@ -1158,10 +1414,33 @@ export default function MainLayout() {
                         <option value="Cash">Cash</option>
                         <option value="Card">Card</option>
                         <option value="UPI">UPI</option>
+                        {settings.enableNomod && <option value="Nomod">Nomod Link</option>}
+                        <option value="Mixed">Mixed Payment</option>
                       </select>
                     </div>
 
-                    {(settleMethod === 'Card' || settleMethod === 'UPI') && settings.bankAccounts?.length > 0 && (
+                    {settleMethod === 'Mixed' && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '1rem' }}>
+                        <div>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cash</label>
+                          <input type="number" placeholder="0.00" value={quickCashAmount} onChange={(e) => setQuickCashAmount(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E2E8F0' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Card</label>
+                          <input type="number" placeholder="0.00" value={quickCardAmount} onChange={(e) => setQuickCardAmount(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E2E8F0' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>UPI</label>
+                          <input type="number" placeholder="0.00" value={quickUpiAmount} onChange={(e) => setQuickUpiAmount(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E2E8F0' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Bank</label>
+                          <input type="number" placeholder="0.00" value={quickBankAmount} onChange={(e) => setQuickBankAmount(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E2E8F0' }} />
+                        </div>
+                      </div>
+                    )}
+
+                    {(settleMethod === 'Card' || settleMethod === 'UPI' || (settleMethod === 'Mixed' && (quickCardVal > 0 || quickUpiVal > 0 || quickBankVal > 0))) && settings.bankAccounts?.length > 0 && (
                       <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
                         <label>{settleMethod === 'Card' ? 'Select Bank Account' : 'Select UPI Account'}</label>
                         <select
@@ -1179,7 +1458,7 @@ export default function MainLayout() {
                     <button
                       className={styles.confirmDeliverBtn}
                       style={{ background: '#10B981', marginTop: '1.5rem' }}
-                      onClick={processQuickSettle}
+                      onClick={() => processQuickSettle(false)}
                       disabled={isUpdating || !settleAmount}
                     >
                       {isUpdating ? 'Processing...' : 'Confirm Settlement'}
@@ -1189,6 +1468,52 @@ export default function MainLayout() {
               ) : settleSearch.length >= 2 && quickSettleResults.length === 0 ? (
                 <div className={styles.noOrder}>No matching customer or bill found</div>
               ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {nomodLinkModal.show && (
+        <div className={styles.modalOverlay} style={{ zIndex: 9999 }}>
+          <div className={styles.quickModal} style={{ width: '450px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <div className={styles.titleWithIcon}>
+                <CreditCard color="#2563EB" size={24} />
+                <h2>Nomod Payment Link</h2>
+              </div>
+              <button className={styles.closeBtn} onClick={() => setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 })}>
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className={styles.modalBody} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+                <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>SETTLEMENT AMOUNT</span>
+                <h1 style={{ margin: '0.25rem 0 0 0', color: '#1E293B', fontSize: '2rem', fontWeight: 800 }}>
+                  {settings.currencySymbol || 'AED'} {nomodLinkModal.amount.toFixed(2)}
+                </h1>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
+                <div style={{ padding: '10px', background: 'white', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <QRCodeCanvas 
+                    id="nomod-quick-settle-qr-canvas"
+                    value={nomodLinkModal.url}
+                    size={160}
+                    level="H"
+                  />
+                </div>
+              </div>
+
+              <div className={styles.inputGroup}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>Nomod Checkout URL</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={nomodLinkModal.url}
+                  style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E2E8F0', background: '#F1F5F9', marginTop: '0.25rem', fontSize: '0.85rem' }}
+                />
+              </div>
             </div>
           </div>
         </div>

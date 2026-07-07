@@ -29,7 +29,7 @@ export default function Invoice() {
             id.replace('#', '').replace('AG-', ''),
             id.replace('#', '').replace(settings.invoicePrefix || '', '')
           ];
-          
+
           let rawOrder = null;
           for (const variant of idVariations) {
             const res = await window.electronAPI.dbQuery(
@@ -56,27 +56,27 @@ export default function Invoice() {
 
             const paidAmount = rawOrder.paidAmount || 0;
             const dueAmount = rawOrder.dueAmount ?? (rawOrder.totalAmount - paidAmount);
-            
+
             let totalBalance = 0;
             let previousBalance = 0;
 
             if (rawOrder.customerId && rawOrder.customerId !== 'Walk-in') {
-               totalBalance = customerBalance;
-               previousBalance = totalBalance - dueAmount;
+              totalBalance = customerBalance;
+              previousBalance = totalBalance - dueAmount;
             } else {
-               totalBalance = dueAmount;
-               previousBalance = 0;
+              totalBalance = dueAmount;
+              previousBalance = 0;
             }
 
             const formatDateTime = (dateVal) => {
               if (!dateVal) return 'N/A';
               const formattedDate = formatDate(dateVal);
               if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return formattedDate;
-              
+
               let d;
               try {
                 d = new Date(dateVal);
-              } catch(e) {
+              } catch (e) {
                 return formattedDate;
               }
               if (isNaN(d.getTime())) return formattedDate;
@@ -254,7 +254,7 @@ export default function Invoice() {
     const origPhone = order.customerPhone || '';
     const cleanPhone = origPhone.replace(/\D/g, '');
     let finalPhone = cleanPhone;
-    
+
     // Prepend country code if original phone doesn't start with '+'
     if (cleanPhone && !origPhone.trim().startsWith('+')) {
       const countryCode = settings.waCountryCode || '971';
@@ -293,27 +293,64 @@ export default function Invoice() {
       if (window.electronAPI?.dbQuery) {
         try {
           const searchRes = await window.electronAPI.dbQuery(
-            `SELECT * FROM payment_links WHERE (description LIKE ? OR id = ?) AND status = 'Active' LIMIT 1`,
+            `SELECT * FROM payment_links WHERE (description LIKE ? OR id = ?) AND status IN ('Active', 'Pending') LIMIT 1`,
             [`%${order.id}%`, `LNK-${order.billNumber}`]
           );
           if (searchRes.success && searchRes.data.length > 0) {
             paymentLinkUrl = searchRes.data[0].url;
           } else {
             const linkId = `LNK-${order.billNumber || Date.now().toString().slice(-4)}`;
-            const url = `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`;
+            let url = '';
+            let checkoutIdVal = linkId;
+            
+            if (settings.enableNomod) {
+              try {
+                const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+                const checkoutRes = await window.electronAPI.createNomodCheckout({
+                  amount: due,
+                  currency: settings.nomodCurrency || 'AED',
+                  customer: {
+                    name: order.customer || 'Customer',
+                    phone: order.customerPhone || ''
+                  },
+                  orderId: order.id,
+                  userRole: currentUser.role || 'staff'
+                });
+ 
+                if (checkoutRes.success && checkoutRes.data && checkoutRes.data.url) {
+                  url = checkoutRes.data.url;
+                  checkoutIdVal = checkoutRes.data.id || linkId;
+                  await window.electronAPI.dbQuery(
+                    `UPDATE orders SET nomodCheckoutId = ?, nomodPaymentLink = ?, nomodPaymentStatus = 'Pending', isSynced = 0, updatedAt = ? 
+                     WHERE id = ?`,
+                    [checkoutIdVal, url, new Date().toISOString(), order.id]
+                  );
+                } else if (checkoutRes.error) {
+                  console.warn("Nomod Backend API failed in Invoice handleWhatsApp:", checkoutRes.error);
+                }
+              } catch (apiErr) {
+                console.warn("Nomod API failure in Invoice.jsx handleWhatsApp:", apiErr.message);
+              }
+              if (!url) {
+                url = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${due}&reference=${linkId}`;
+              }
+            } else {
+              url = `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`;
+            }
+ 
             const dateStr = getLocalDateTime();
             await window.electronAPI.dbQuery(
-              `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
+              `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
+               VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?, ?)`,
               [
                 linkId,
                 order.customerId || 'Walk-in',
                 order.customer || 'Walk-in Customer',
                 `Order #${order.billNumber || order.id}`,
                 due,
-                'Apple Pay',
                 dateStr,
-                url
+                url,
+                checkoutIdVal
               ]
             );
             paymentLinkUrl = url;
@@ -324,7 +361,7 @@ export default function Invoice() {
       } else {
         paymentLinkUrl = `https://pay.lundry.ae/lnk/lnk-${(order.billNumber || 'mock').toLowerCase()}`;
       }
-      
+
       if (paymentLinkUrl) {
         message += `\n\nPlease pay online using this link: ${paymentLinkUrl}`;
       }

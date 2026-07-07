@@ -154,9 +154,9 @@
 }
 
 .filterBtn.active {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
   box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
 }
 
@@ -355,7 +355,7 @@
 .badgeRed { background-color: #FEE2E2; color: #B91C1C; border: 1px solid #FCA5A5; }
 .badgeYellow { background-color: #FEF3C7; color: #D97706; border: 1px solid #FDE68A; }
 .badgeOrange { background-color: #FFEDD5; color: #C2410C; border: 1px solid #FED7AA; }
-.badgeBlue { background-color: #DBEAFE; color: #1D4ED8; border: 1px solid #BFDBFE; }
+.badgeBlue { background-color: #DBEAFE; color: var(--primary-hover); border: 1px solid #BFDBFE; }
 
 .duesCell {
   display: flex;
@@ -560,13 +560,13 @@
 }
 
 .methodLabel input {
-  accent-color: #2563EB;
+  accent-color: var(--primary);
   width: 16px;
   height: 16px;
 }
 
 .activeMethod {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: #EFF6FF;
   color: #1E40AF;
 }
@@ -625,7 +625,7 @@
 }
 
 .confirmPayBtn {
-  background: #2563EB;
+  background: var(--primary);
   border: none;
   padding: 0.5rem 1.25rem;
   border-radius: 8px;
@@ -641,7 +641,7 @@
 }
 
 .confirmPayBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
 }
 
 /* Pagination Styling */
@@ -689,9 +689,9 @@
 }
 
 .paginationActiveBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
   box-shadow: 0 2px 4px rgba(37, 99, 235, 0.15);
 }
 

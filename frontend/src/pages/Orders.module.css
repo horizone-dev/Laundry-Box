@@ -731,9 +731,9 @@
 }
 
 .deliverBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
   color: white;
-  border-color: #1D4ED8;
+  border-color: var(--primary-hover);
   transform: translateY(-1px);
   box-shadow: 0 4px 6px rgba(30, 64, 175, 0.25);
 }
@@ -864,7 +864,7 @@
 }
 
 .previewAmount h2 {
-  color: #2563EB;
+  color: var(--primary);
   font-size: 1.75rem;
 }
 
@@ -1003,7 +1003,7 @@
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  color: #2563EB;
+  color: var(--primary);
   border: 1px solid #E2E8F0;
 }
 
@@ -1088,7 +1088,7 @@
 }
 
 .listCollectBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   padding: 0.6rem 1.25rem;
@@ -1103,7 +1103,7 @@
 }
 
 .listCollectBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
   transform: translateY(-1px);
   box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
 }
@@ -1125,7 +1125,7 @@
 .listReminderBtn:hover {
   background: #F8FAFC;
   border-color: #CBD5E1;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 @keyframes modalScale {
@@ -1177,7 +1177,7 @@
 .payOptionActive {
   background: #EFF6FF;
   border-color: #3B82F6;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .payOptionActive span {
@@ -1406,9 +1406,9 @@
 }
 
 .pageBtn.active {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
 }
 
 .pageBtn:disabled {

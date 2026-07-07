@@ -326,42 +326,6 @@ export default function TaxReport() {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className={styles.kpiGrid}>
-        {/* Output Tax Card */}
-        <div className={styles.kpiCard}>
-          <div className={styles.cardHeader}>
-            <div className={styles.iconBox} style={{ background: '#EFF6FF' }}>
-              <ArrowUpRight size={20} color="#2563EB" />
-            </div>
-            {settings.trn && <span className={styles.trnBadge}>TRN: {settings.trn}</span>}
-          </div>
-          <div>
-            <span className={styles.kpiLabel}>Output Tax (Sales Collected)</span>
-            <h2 className={styles.kpiValue}>
-              <CurrencySymbol size={20} /> {totalSalesTax.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </h2>
-            <p className={styles.kpiSubtext}>VAT collected from customer orders</p>
-          </div>
-        </div>
-
-        {/* Input Tax Card */}
-        <div className={styles.kpiCard}>
-          <div className={styles.cardHeader}>
-            <div className={styles.iconBox} style={{ background: '#FEE2E2' }}>
-              <ArrowDownRight size={20} color="#EF4444" />
-            </div>
-            <span className={styles.trnBadge}>Rate: {settings.taxRate}%</span>
-          </div>
-          <div>
-            <span className={styles.kpiLabel}>Input Tax (Expenses Paid)</span>
-            <h2 className={styles.kpiValue}>
-              <CurrencySymbol size={20} /> {totalExpenseTax.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </h2>
-            <p className={styles.kpiSubtext}>VAT paid on supplies &amp; operations</p>
-          </div>
-        </div>
-      </div>
 
 
 
@@ -427,79 +391,81 @@ export default function TaxReport() {
         </div>
 
         {/* The Data Table */}
-        <table className={styles.taxTable}>
-          <thead>
-            <tr>
-              <th>DATE</th>
-              <th>TYPE</th>
-              <th>REF / TICKET NO</th>
-              <th>CUSTOMER / CATEGORY</th>
-              <th style={{ textAlign: 'right' }}>GROSS TOTAL</th>
-              <th style={{ textAlign: 'right' }}>TAXABLE AMOUNT</th>
-              <th style={{ textAlign: 'center' }}>TAX RATE</th>
-              <th style={{ textAlign: 'right' }}>TAX AMOUNT</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
+        <div className="table-container">
+          <table className="base-table">
+            <thead>
               <tr>
-                <td colSpan="8" className={styles.emptyRow}>Loading tax transactions...</td>
+                <th>DATE</th>
+                <th>TYPE</th>
+                <th>REF / TICKET NO</th>
+                <th>CUSTOMER / CATEGORY</th>
+                <th className="num-col">GROSS TOTAL</th>
+                <th className="num-col">TAXABLE AMOUNT</th>
+                <th className="center-col">TAX RATE</th>
+                <th className="num-col">TAX AMOUNT</th>
               </tr>
-            ) : paginatedTransactions.length > 0 ? (
-              paginatedTransactions.map((tx, idx) => {
-                const { date: txDate, time: txTime } = formatDateTimeSplit(tx.date);
-                return (
-                  <tr key={`${tx.type}-${tx.id}-${idx}`}>
-                    <td className={styles.dateCell}>
-                      <div>{txDate}</div>
-                      {tx.type === 'Sale' && txTime && (
-                        <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '0.15rem', fontWeight: 500 }}>
-                          {txTime}
-                        </div>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan="8" className={styles.emptyRow}>Loading tax transactions...</td>
+                </tr>
+              ) : paginatedTransactions.length > 0 ? (
+                paginatedTransactions.map((tx, idx) => {
+                  const { date: txDate, time: txTime } = formatDateTimeSplit(tx.date);
+                  return (
+                    <tr key={`${tx.type}-${tx.id}-${idx}`}>
+                      <td className={styles.dateCell}>
+                        <div>{txDate}</div>
+                        {tx.type === 'Sale' && txTime && (
+                          <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '0.15rem', fontWeight: 500 }}>
+                            {txTime}
+                          </div>
+                        )}
+                      </td>
+                    <td>
+                      <span className={`${styles.typeBadge} ${tx.type === 'Sale' ? styles.badgeSale : styles.badgeExpense}`}>
+                        {tx.type === 'Sale' ? 'SALE' : 'EXPENSE'}
+                      </span>
+                    </td>
+                    <td>
+                      {tx.type === 'Sale' ? (
+                        <span 
+                          className={styles.refCell} 
+                          onClick={() => navigate(`/invoice/${tx.id.replace('#AG-', '').replace('#', '')}`)}
+                        >
+                          {tx.ref}
+                        </span>
+                      ) : (
+                        <span className={styles.refCellDisabled}>{tx.ref}</span>
                       )}
                     </td>
-                  <td>
-                    <span className={`${styles.typeBadge} ${tx.type === 'Sale' ? styles.badgeSale : styles.badgeExpense}`}>
-                      {tx.type === 'Sale' ? 'SALE' : 'EXPENSE'}
-                    </span>
-                  </td>
-                  <td>
-                    {tx.type === 'Sale' ? (
-                      <span 
-                        className={styles.refCell} 
-                        onClick={() => navigate(`/invoice/${tx.id.replace('#AG-', '').replace('#', '')}`)}
-                      >
-                        {tx.ref}
-                      </span>
-                    ) : (
-                      <span className={styles.refCellDisabled}>{tx.ref}</span>
-                    )}
-                  </td>
-                  <td style={{ fontWeight: 600 }}>{tx.name}</td>
-                  <td className={styles.amountCol}>
-                    <CurrencySymbol size={12} /> {tx.grossAmount.toFixed(2)}
-                  </td>
-                  <td className={styles.amountCol}>
-                    <CurrencySymbol size={12} /> {tx.netAmount.toFixed(2)}
-                  </td>
-                  <td style={{ textAlign: 'center', fontWeight: 700, color: '#64748B' }}>
-                    {tx.taxAmount > 0 ? `${tx.taxRate}%` : '0%'}
-                  </td>
-                  <td className={styles.taxAmountCol}>
-                    <CurrencySymbol size={12} /> {tx.taxAmount.toFixed(2)}
+                    <td style={{ fontWeight: 600 }}>{tx.name}</td>
+                    <td className="num-col">
+                      <CurrencySymbol size={12} /> {tx.grossAmount.toFixed(2)}
+                    </td>
+                    <td className="num-col">
+                      <CurrencySymbol size={12} /> {tx.netAmount.toFixed(2)}
+                    </td>
+                    <td className="center-col" style={{ fontWeight: 700, color: '#64748B' }}>
+                      {tx.taxAmount > 0 ? `${tx.taxRate}%` : '0%'}
+                    </td>
+                    <td className="num-col" style={{ fontWeight: 700 }}>
+                      <CurrencySymbol size={12} /> {tx.taxAmount.toFixed(2)}
+                    </td>
+                  </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan="8" className={styles.emptyRow}>
+                    No tax transactions found matching the selected filters.
                   </td>
                 </tr>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan="8" className={styles.emptyRow}>
-                  No tax transactions found matching the selected filters.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+        </div>
         
         {/* Summary row */}
         {!loading && (

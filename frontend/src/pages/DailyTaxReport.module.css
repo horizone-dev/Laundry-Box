@@ -302,7 +302,7 @@
 }
 
 .salesTaxCell {
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .expenseTaxCell {
@@ -420,8 +420,8 @@
 }
 
 .paginationActiveBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
   box-shadow: 0 2px 4px rgba(37, 99, 235, 0.15);
 }

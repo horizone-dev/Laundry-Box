@@ -67,7 +67,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .statusBadge {
@@ -247,7 +247,7 @@
 .grandTotalValue {
   font-size: 1.75rem;
   font-weight: 800;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 /* Footer Actions */
@@ -259,8 +259,8 @@
 
 .printBtn {
   background: white;
-  border: 2px solid #2563EB;
-  color: #2563EB;
+  border: 2px solid var(--primary);
+  color: var(--primary);
   padding: 1rem;
   border-radius: 12px;
   font-weight: 700;
@@ -305,11 +305,11 @@
 
 /* Template: Modern */
 .template_modern {
-  border-top: 8px solid #2563EB;
+  border-top: 8px solid var(--primary);
 }
 
 .template_modern .invoiceHeader h1 {
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .template_modern .itemsTable th {
@@ -414,7 +414,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #2563EB;
+  color: var(--primary);
   flex-shrink: 0;
 }
 
@@ -837,7 +837,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .qrWrapperCompact {

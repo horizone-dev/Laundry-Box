@@ -392,7 +392,7 @@
 .actionBtn:hover {
   background: #eff6ff;
   border-color: #bfdbfe;
-  color: #2563eb;
+  color: var(--primary);
   transform: translateY(-1px);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.04);
 }
@@ -453,7 +453,7 @@
 
 .badgeNew {
   background: #eff6ff;
-  color: #2563eb;
+  color: var(--primary);
   border: 1px solid #dbeafe;
 }
 
@@ -505,7 +505,7 @@
 .boardCardId {
   font-size: 0.75rem;
   font-weight: 700;
-  color: #2563eb;
+  color: var(--primary);
 }
 
 .boardCardTime {

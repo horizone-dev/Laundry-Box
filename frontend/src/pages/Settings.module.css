@@ -97,7 +97,7 @@
 
 .scrollArrow:hover {
   background: #FFFFFF;
-  color: #2563EB;
+  color: var(--primary);
   border-color: #BFDBFE;
   transform: translateY(-50%) scale(1.08);
   box-shadow: 0 6px 12px rgba(37, 99, 235, 0.15);
@@ -137,7 +137,7 @@
 }
 
 .tab.active {
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .tab.active::after {
@@ -147,7 +147,7 @@
   left: 0;
   right: 0;
   height: 2px;
-  background: #2563EB;
+  background: var(--primary);
 }
 
 /* Settings Layout */
@@ -217,11 +217,11 @@
   padding: 0.2rem 0.6rem;
   border-radius: 20px;
   background: #EFF6FF;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .editBtn {
-  color: #2563EB;
+  color: var(--primary);
   font-weight: 600;
   cursor: pointer;
 }
@@ -273,7 +273,7 @@
 
 .addonPrice {
   font-weight: 700;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 /* POS Preview */
@@ -295,12 +295,12 @@
 }
 
 .previewItem.active {
-  border-color: #2563EB;
-  box-shadow: 0 0 0 1px #2563EB;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
 }
 
 .previewIcon {
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .previewLabel {
@@ -333,7 +333,7 @@
 }
 
 .inputField:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
 }
 
 .uploadBox {
@@ -368,7 +368,7 @@
 }
 
 .saveBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   padding: 0.75rem 1.5rem;
@@ -383,7 +383,7 @@
 }
 
 .saveBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
   transform: translateY(-1px);
   box-shadow: 0 6px 8px -1px rgba(37, 99, 235, 0.3);
 }
@@ -527,7 +527,7 @@
 }
 
 .uploadBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   padding: 1rem;
   border-radius: 6px;
@@ -541,7 +541,7 @@
 }
 
 .uploadBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
 }
 
 .removeBtn {
@@ -581,9 +581,9 @@
 }
 
 .templateActive {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: #F0F7FF;
-  box-shadow: 0 0 0 1px #2563EB;
+  box-shadow: 0 0 0 1px var(--primary);
 }
 
 .templatePreview {
@@ -607,7 +607,7 @@
 }
 
 .preview_modern {
-  background: #2563EB;
+  background: var(--primary);
 }
 
 .preview_compact {
@@ -651,7 +651,7 @@
   position: absolute;
   top: 10px;
   right: 10px;
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   font-size: 0.65rem;
   font-weight: 800;
@@ -731,7 +731,7 @@
   -webkit-appearance: none;
   width: 18px;
   height: 18px;
-  background: #2563EB;
+  background: var(--primary);
   border-radius: 50%;
   cursor: pointer;
   border: 2px solid white;
@@ -759,7 +759,7 @@
   padding: 0.6rem 1.2rem;
   border-radius: 8px;
   border: none;
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   font-weight: 700;
   font-size: 0.85rem;
@@ -806,7 +806,7 @@
 }
 
 .inputWrapper:focus-within {
-  border-color: #2563EB;
+  border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
@@ -834,7 +834,7 @@
 }
 
 .saveChangesBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   padding: 0.8rem 2rem;
   border-radius: 10px;
@@ -846,7 +846,7 @@
 }
 
 .saveChangesBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
   transform: translateY(-1px);
   box-shadow: 0 6px 8px -1px rgba(37, 99, 235, 0.3);
 }
@@ -942,7 +942,7 @@
 }
 
 input:checked+.slider {
-  background-color: #2563EB;
+  background-color: var(--primary);
 }
 
 input:checked+.slider:before {
@@ -1050,9 +1050,9 @@ input:checked+.slider:before {
 }
 
 .methodActive {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: #F0F7FF;
-  box-shadow: 0 0 0 1px #2563EB;
+  box-shadow: 0 0 0 1px var(--primary);
 }
 
 .methodIcon {
@@ -1068,7 +1068,7 @@ input:checked+.slider:before {
 }
 
 .methodActive .methodIcon {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
 }
 
@@ -1113,7 +1113,7 @@ input:checked+.slider:before {
 .activePreset {
   background: #EFF6FF;
   border-color: #3B82F6;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .headerTitleGroup {
@@ -1166,3 +1166,212 @@ input:checked+.slider:before {
   color: #1E293B;
   font-weight: 700;
 }
+
+/* System Reset styles */
+.resetGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 1024px) {
+  .resetGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.resetCard {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.resetDestructiveCard {
+  border: 1px solid #FCA5A5;
+  background: #FFF5F5;
+}
+
+.resetSectionTitle {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1E293B;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.resetDescription {
+  font-size: 0.875rem;
+  color: #64748B;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+
+.checklistHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.checklistTitle {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #334155;
+}
+
+.checklistActions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.checklistLink {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.checklistLink:hover {
+  text-decoration: underline;
+}
+
+.resetChecklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.resetChecklistItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #E2E8F0;
+  background: #F8FAFC;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.resetChecklistItem:hover {
+  border-color: #CBD5E1;
+  background: #F1F5F9;
+}
+
+.resetChecklistItem.active {
+  border-color: #BFDBFE;
+  background: #EFF6FF;
+}
+
+.resetChecklistItem.active.destructive {
+  border-color: #FCA5A5;
+  background: #FEF2F2;
+}
+
+.resetCheckbox {
+  margin-top: 0.15rem;
+  cursor: pointer;
+}
+
+.resetLabelGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+}
+
+.resetLabel {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+
+.resetSubLabel {
+  font-size: 0.75rem;
+  color: #64748B;
+}
+
+.destructiveBadge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #DC2626;
+  background: #FEE2E2;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  align-self: flex-start;
+  text-transform: uppercase;
+  margin-top: 0.25rem;
+}
+
+.resetWarningBanner {
+  background: #FFF7ED;
+  border: 1px solid #FFEDD5;
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  gap: 0.75rem;
+  color: #C2410C;
+  font-size: 0.85rem;
+  margin-bottom: 1.5rem;
+  line-height: 1.4;
+}
+
+.resetButton {
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: none;
+  width: 100%;
+}
+
+.resetButtonPrimary {
+  background: #DC2626;
+  color: white;
+}
+
+.resetButtonPrimary:hover:not(:disabled) {
+  background: #B91C1C;
+}
+
+.resetButtonPrimary:disabled {
+  background: #FCA5A5;
+  cursor: not-allowed;
+}
+
+.resetButtonSecondary {
+  background: #2563EB;
+  color: white;
+}
+
+.resetButtonSecondary:hover:not(:disabled) {
+  background: #1D4ED8;
+}
+
+.resetButtonSecondary:disabled {
+  background: #93C5FD;
+  cursor: not-allowed;
+}
+

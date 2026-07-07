@@ -8,9 +8,11 @@ import {
 import Cropper from 'react-easy-crop';
 import getCroppedImg from '../utils/cropImage';
 import { useSettings } from '../store/SettingsContext';
+import Activation from './Activation';
 import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
 import InvoiceTemplate from '../components/InvoiceTemplate';
+import EmailReportsSettings from '../components/EmailReportsSettings';
 import { useNavigate, useLocation } from 'react-router-dom';
 import defaultLogo from '../assets/logo.png';
 import styles from './Settings.module.css';
@@ -27,11 +29,16 @@ export default function Settings() {
   const isAuthorized = isSuperAdmin || isManager;
 
   const [activeTab, setActiveTab] = useState(
-    (tabParam === 'Maintenance' && !(isSuperAdmin || isManager)) || (tabParam === 'Software Update' && !(isSuperAdmin || isManager))
-      ? 'General'
-      : (tabParam || 'General')
+    isSuperAdmin
+      ? (tabParam || 'Payment Gateway')
+      : (tabParam === 'Maintenance' && !(isSuperAdmin || isManager)) || (tabParam === 'Software Update' && !(isSuperAdmin || isManager))
+        ? 'General'
+        : (tabParam || 'General')
   );
   const { settings, updateSettings } = useSettings();
+  const tabsRef = useRef(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
   const [isCreditLimitUnlocked, setIsCreditLimitUnlocked] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
   const [enteredPin, setEnteredPin] = useState('');
@@ -40,6 +47,37 @@ export default function Settings() {
   const [newPinInput, setNewPinInput] = useState('');
   const [pinChangeError, setPinChangeError] = useState('');
   const [pinChangeSuccess, setPinChangeSuccess] = useState('');
+
+  // System Reset States
+  const [resetOptions, setResetOptions] = useState({
+    generalSettings: false,
+    workflowStatuses: false,
+    presetDamageNotes: false,
+    companyInfo: false,
+    taxSettings: false,
+    billTemplates: false,
+    waTemplates: false,
+    printers: false,
+    gateways: false,
+    ordersPayments: false,
+    customers: false,
+    services: false,
+    expensesBank: false,
+    staffPayroll: false
+  });
+  const [showResetPinModal, setShowResetPinModal] = useState(false);
+  const [enteredResetPin, setEnteredResetPin] = useState('');
+  const [resetPinError, setResetPinError] = useState('');
+  const [resetPinAction, setResetPinAction] = useState('custom'); // 'custom' | 'factory'
+  const [showBackupPrompt, setShowBackupPrompt] = useState(false);
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+  const [resetTextConfirmation, setResetTextConfirmation] = useState('');
+  const [resetConfirmError, setResetConfirmError] = useState('');
+  const [showFinalConfirmModal, setShowFinalConfirmModal] = useState(false);
+  const [showSuccessSummary, setShowSuccessSummary] = useState(false);
+  const [resetSummary, setResetSummary] = useState([]);
+  const [backupError, setBackupError] = useState('');
+
 
   // Cropper States
   const [imageToCrop, setImageToCrop] = useState(null);
@@ -66,10 +104,66 @@ export default function Settings() {
   const [lastCheckTime, setLastCheckTime] = useState(localStorage.getItem('update_last_check') || '');
   const [currentVersion, setCurrentVersion] = useState('1.0.0');
 
-  // Scrollable Tabs State & Logic
-  const tabsRef = useRef(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
+  // Nomod History States
+  const [nomodTxns, setNomodTxns] = useState([]);
+  const [nomodAudits, setNomodAudits] = useState([]);
+  const [nomodSearch, setNomodSearch] = useState('');
+  const [nomodLoading, setNomodLoading] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === 'Nomod History') {
+      fetchNomodData();
+    }
+  }, [activeTab]);
+
+  const fetchNomodData = async () => {
+    if (!window.electronAPI?.dbQuery) return;
+    setNomodLoading(true);
+    try {
+      const txnsRes = await window.electronAPI.dbQuery(`SELECT * FROM nomod_transactions ORDER BY createdAt DESC`);
+      setNomodTxns(txnsRes);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setNomodLoading(false);
+    }
+  };
+
+  const handleAddDamageNote = () => {
+    const trimmed = newDamageNoteInput.trim();
+    if (!trimmed) return;
+    const currentList = settings.presetDamageNotes || [];
+    if (currentList.includes(trimmed)) {
+      alert('Preset note already exists!');
+      return;
+    }
+    const updatedList = [...currentList, trimmed];
+    updateSettings({ presetDamageNotes: updatedList });
+    setNewDamageNoteInput('');
+  };
+
+  const handleEditDamageNote = (index) => {
+    const trimmed = editingDamageNoteVal.trim();
+    if (!trimmed) return;
+    const currentList = settings.presetDamageNotes || [];
+    if (currentList[index] === trimmed) {
+      setEditingDamageNoteIdx(-1);
+      return;
+    }
+    const updatedList = [...currentList];
+    updatedList[index] = trimmed;
+    updateSettings({ presetDamageNotes: updatedList });
+    setEditingDamageNoteIdx(-1);
+  };
+
+  const handleDeleteDamageNote = (index) => {
+    const currentList = settings.presetDamageNotes || [];
+    const noteToDelete = currentList[index];
+    if (confirm(`Are you sure you want to delete the preset note "${noteToDelete}"?`)) {
+      const updatedList = currentList.filter((_, idx) => idx !== index);
+      updateSettings({ presetDamageNotes: updatedList });
+    }
+  };
 
   const checkScroll = () => {
     const el = tabsRef.current;
@@ -150,6 +244,16 @@ export default function Settings() {
         setShowPinModal(false);
         setEnteredPin('');
         setPinError('');
+        setShowResetPinModal(false);
+        setEnteredResetPin('');
+        setResetPinError('');
+        setShowBackupPrompt(false);
+        setBackupError('');
+        setShowResetConfirmModal(false);
+        setResetTextConfirmation('');
+        setResetConfirmError('');
+        setShowFinalConfirmModal(false);
+        setShowSuccessSummary(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -157,7 +261,7 @@ export default function Settings() {
   }, []);
 
   useEffect(() => {
-    const isAnyOpen = isCropping || showPinModal;
+    const isAnyOpen = isCropping || showPinModal || showResetPinModal || showBackupPrompt || showResetConfirmModal || showFinalConfirmModal || showSuccessSummary;
     if (isAnyOpen) {
       document.body.style.overflow = 'hidden';
     } else {
@@ -166,7 +270,7 @@ export default function Settings() {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isCropping, showPinModal]);
+  }, [isCropping, showPinModal, showResetPinModal, showBackupPrompt, showResetConfirmModal, showFinalConfirmModal, showSuccessSummary]);
 
   useEffect(() => {
     const fetchPrinters = async () => {
@@ -184,19 +288,25 @@ export default function Settings() {
 
   if (!isAuthorized) return null;
 
-  const tabs = [
-    'General', 
-    'Order Workflow', 
-    'Company Info', 
-    'Tax Settings', 
-    'Bill Templates', 
-    'Payment Gateways', 
-    'WhatsApp Config',
-    'Damage Notes', 
-    'Printers', 
-    ...(isSuperAdmin || isManager ? ['Maintenance'] : []),
-    ...(isSuperAdmin || isManager ? ['Software Update'] : [])
-  ];
+  const tabs = isSuperAdmin
+    ? ['Email Reports', 'Payment Gateway', 'Import Backup', 'System Reset']
+    : [
+        'General',
+        'Order Workflow',
+        'Company Info',
+        'Tax Settings',
+        'Bill Templates',
+        'Bank',
+        ...((isManager && settings.allowManagerNomodConfig) ? ['Payment Gateway'] : []),
+        'WhatsApp Config',
+        'Damage Notes',
+        'Printers',
+        ...(isManager ? ['Maintenance'] : []),
+        ...(isManager ? ['Software Update'] : []),
+        'Web Dashboard',
+        'Email Reports',
+        'System Reset'
+      ];
 
   const onCropComplete = (croppedArea, croppedAreaPixels) => {
     setCroppedAreaPixels(croppedAreaPixels);
@@ -271,39 +381,412 @@ export default function Settings() {
     }
   };
 
-  const handleAddDamageNote = () => {
-    if (!newDamageNoteInput.trim()) return;
-    const trimmed = newDamageNoteInput.trim();
-    const currentList = settings.presetDamageNotes || [];
-    if (currentList.includes(trimmed)) {
-      alert('Preset note already exists!');
-      return;
-    }
-    const updatedList = [...currentList, trimmed];
-    updateSettings({ presetDamageNotes: updatedList });
-    setNewDamageNoteInput('');
-  };
+  const handleResetExecute = async () => {
+    const isFactory = resetPinAction === 'factory';
+    const toReset = isFactory ? {
+      generalSettings: true,
+      workflowStatuses: true,
+      presetDamageNotes: true,
+      companyInfo: true,
+      taxSettings: true,
+      billTemplates: true,
+      waTemplates: true,
+      printers: true,
+      gateways: true,
+      ordersPayments: true,
+      customers: true,
+      services: true,
+      expensesBank: true,
+      staffPayroll: true
+    } : resetOptions;
 
-  const handleEditDamageNote = (index) => {
-    const trimmed = editingDamageNoteVal.trim();
-    if (!trimmed) return;
-    const currentList = settings.presetDamageNotes || [];
-    if (currentList[index] === trimmed) {
-      setEditingDamageNoteIdx(-1);
-      return;
-    }
-    const updatedList = [...currentList];
-    updatedList[index] = trimmed;
-    updateSettings({ presetDamageNotes: updatedList });
-    setEditingDamageNoteIdx(-1);
-  };
+    // Retrieve current user details for audit logging
+    const userObj = JSON.parse(sessionStorage.getItem('user') || '{}');
+    const userName = userObj.name || 'Manager';
+    const userRole = userObj.role || 'manager';
+    const modulesStr = Object.keys(toReset).filter(k => toReset[k]).map(k => {
+      const mapping = {
+        generalSettings: 'General Settings',
+        workflowStatuses: 'Order Workflow Stages',
+        presetDamageNotes: 'Damage Notes',
+        companyInfo: 'Company Info',
+        taxSettings: 'Tax Settings',
+        billTemplates: 'Invoice Templates',
+        waTemplates: 'WhatsApp Templates',
+        printers: 'Printers',
+        gateways: 'Payment Gateways',
+        ordersPayments: 'Orders & Payments',
+        customers: 'Customers',
+        services: 'Services & Products',
+        expensesBank: 'Ledger & Expenses',
+        staffPayroll: 'Staff & Payroll'
+      };
+      return mapping[k] || k;
+    }).join(', ');
 
-  const handleDeleteDamageNote = (index) => {
-    const currentList = settings.presetDamageNotes || [];
-    const noteToDelete = currentList[index];
-    if (confirm(`Are you sure you want to delete the preset note "${noteToDelete}"?`)) {
-      const updatedList = currentList.filter((_, idx) => idx !== index);
-      updateSettings({ presetDamageNotes: updatedList });
+    const resetType = isFactory ? 'Full Factory Reset' : 'Custom Reset';
+
+    // Start building updated settings
+    let newSettings = { ...settings };
+
+    if (toReset.generalSettings) {
+      newSettings = {
+        ...newSettings,
+        language: 'English',
+        dateFormat: 'DD/MM/YYYY',
+        timeFormat: '12h',
+        autoPrint: false,
+        defaultPaymentMethod: 'Cash',
+        cardCommission: 0,
+        cardDefaultAccountId: '',
+        upiDefaultAccountId: '',
+        overdueDays: 7,
+        defaultCreditLimit: 500,
+        lateDeliveryDays: 3,
+        enableCreditLimitProtection: true,
+        enableManagerOverride: true
+      };
+    }
+
+    if (toReset.workflowStatuses) {
+      newSettings.workflowStatuses = ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled'];
+    }
+
+    if (toReset.presetDamageNotes) {
+      newSettings.presetDamageNotes = ['Stain on collar', 'Fading colour', 'Missing button', 'Tear on sleeve', 'Handle with care', 'Dry Clean Only'];
+    }
+
+    if (toReset.companyInfo) {
+      newSettings = {
+        ...newSettings,
+        companyName: 'Laundry Box',
+        companyNameAr: '',
+        logo: null,
+        email: '',
+        phone: '',
+        alternatePhone: '',
+        website: '',
+        address: '',
+        addressAr: '',
+        city: '',
+        emirate: 'Dubai'
+      };
+    }
+
+    if (toReset.taxSettings) {
+      newSettings = {
+        ...newSettings,
+        taxId: '',
+        trn: '',
+        licenseNumber: '',
+        taxName: 'VAT',
+        taxRate: 5,
+        isTaxEnabled: true,
+        taxMethod: 'inclusive'
+      };
+    }
+
+    if (toReset.billTemplates) {
+      newSettings = {
+        ...newSettings,
+        invoiceTemplate: 'standard',
+        deliveryMethods: [
+          { name: 'Hanger', nameAr: 'علاقة', isDefault: true },
+          { name: 'Folded', nameAr: 'مطوي', isDefault: false },
+          { name: 'Bagged', nameAr: 'مكيس', isDefault: false }
+        ],
+        invoiceShowLogo: true,
+        invoiceShowQrCode: true,
+        invoiceShowTerms: true,
+        invoiceShowBankDetails: true,
+        invoiceShowBilingual: true,
+        invoiceTermsText: '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.'
+      };
+    }
+
+    if (toReset.waTemplates) {
+      newSettings = {
+        ...newSettings,
+        waNewOrderTemplate: 'Hello {customerName}! Your laundry bill for {orderId} of {total} has been saved. {dueAmount} is pending. Thank you!',
+        waOrderReadyTemplate: 'Dear {customerName}, your order {orderId} is now ready for pick-up! Total due is {dueAmount}. Thank you!',
+        waReminderTemplate: 'Hello {customerName}, this is a gentle reminder that an amount of {dueAmount} is pending for order {orderId}. Kindly settle at your earliest convenience.',
+        waStatementTemplate: 'Hello {customerName}, your current outstanding balance is {dueAmount}. Please find your statement attached.',
+        waCheckoutReceiptTemplate: 'Hello {customerName}! Your laundry order totaling {total} has been received and is now being processed. Thank you for choosing us!',
+        waStatusUpdateTemplate: 'Hello! Regarding your laundry order #{orderId}, the current status is "{status}". Expected delivery date is {deliveryDate}. Thank you!',
+        waCustomerBalanceTemplate: 'Hello {customerName}! This is a friendly reminder regarding your outstanding balance of {dueAmount} at {shopName}. Please settle it at your earliest convenience. Thank you!',
+        waGeneralTemplate: 'Hello! This is from {shopName}. We\'re reaching out regarding your account.',
+        waInvoiceShareTemplate: '*INVOICE RECEIVED*\n\nHello! Here is your bill for order *{orderId}*.\n\n*Items:*\n{itemsSummary}\n\n*Total Amount: {total}*'
+      };
+    }
+
+    if (toReset.printers) {
+      newSettings.billingPrinter = '';
+      newSettings.tagPrinter = '';
+      localStorage.removeItem('billingPrinter');
+      localStorage.removeItem('tagPrinter');
+    }
+
+    if (toReset.gateways) {
+      newSettings = {
+        ...newSettings,
+        enablePaymentLinks: true,
+        allowManagerStripeConfig: false,
+        enableStripe: false,
+        stripeApiKey: '',
+        stripeMerchantId: '',
+        stripeEnv: 'sandbox',
+        stripeCurrency: 'AED',
+        stripeSuccessUrl: '',
+        stripeFailureUrl: '',
+        stripeWebhookSecret: '',
+        stripeExpiry: 30,
+        allowManagerTapConfig: false,
+        enableTap: false,
+        tapApiKey: '',
+        tapMerchantId: '',
+        tapEnv: 'sandbox',
+        tapCurrency: 'AED',
+        tapSuccessUrl: '',
+        tapFailureUrl: '',
+        tapWebhookSecret: '',
+        tapExpiry: 30,
+        allowManagerMyFatoorahConfig: false,
+        enableMyFatoorah: false,
+        myfatoorahApiKey: '',
+        myfatoorahMerchantId: '',
+        myfatoorahEnv: 'sandbox',
+        myfatoorahCurrency: 'AED',
+        myfatoorahSuccessUrl: '',
+        myfatoorahFailureUrl: '',
+        myfatoorahWebhookSecret: '',
+        myfatoorahExpiry: 30,
+        allowManagerNomodConfig: false,
+        enableNomod: false,
+        nomodApiKey: '',
+        nomodMerchantId: '',
+        nomodEnv: 'sandbox',
+        nomodCurrency: 'AED',
+        nomodSuccessUrl: '',
+        nomodFailureUrl: '',
+        nomodWebhookSecret: '',
+        nomodExpiry: 30
+      };
+    }
+
+    if (toReset.expensesBank) {
+      newSettings.bankAccounts = [];
+      newSettings.defaultBankId = '';
+    }
+
+    if (isFactory) {
+      newSettings.orderDeletePin = '0000';
+    }
+
+    // Execute all DB reset operations inside a single SQLite transaction
+    const runQuery = async (query, params = []) => {
+      const res = await window.electronAPI.dbQuery(query, params);
+      if (!res.success) {
+        throw new Error(res.error || 'Database query failed');
+      }
+      return res.data;
+    };
+
+    const summaryList = [];
+
+    try {
+      await runQuery('BEGIN TRANSACTION');
+      try {
+        if (toReset.ordersPayments) {
+          await runQuery('DELETE FROM orders');
+          await runQuery('DELETE FROM payments');
+          await runQuery('DELETE FROM deleted_orders');
+          await runQuery('DELETE FROM payment_links');
+          await runQuery('DELETE FROM nomod_transactions');
+          await runQuery('DELETE FROM reconciliations');
+          await runQuery('DELETE FROM credit_override_logs');
+          summaryList.push('Transactions (Orders & Payments): Deleted all records');
+        }
+
+        if (toReset.customers) {
+          await runQuery('DELETE FROM customers');
+          summaryList.push('Customers: Deleted all customer profiles');
+          
+          // Cascaded delete to prevent orphaned records in order/payment tables
+          await runQuery('DELETE FROM orders');
+          await runQuery('DELETE FROM payments');
+          await runQuery('DELETE FROM deleted_orders');
+          await runQuery('DELETE FROM payment_links');
+          await runQuery('DELETE FROM nomod_transactions');
+          await runQuery('DELETE FROM reconciliations');
+          await runQuery('DELETE FROM credit_override_logs');
+          if (!summaryList.includes('Transactions (Orders & Payments): Deleted all records')) {
+            summaryList.push('Transactions (Orders & Payments): Deleted all records (cascaded from Customers reset)');
+          }
+        }
+
+        if (toReset.expensesBank) {
+          await runQuery('DELETE FROM expenses');
+          await runQuery('DELETE FROM account_transactions');
+          summaryList.push('Expenses & Cash Register ledger: Cleared accounts transaction logs');
+        }
+
+        if (toReset.staffPayroll) {
+          await runQuery('DELETE FROM payroll_employees');
+          await runQuery('DELETE FROM payroll_payments');
+          await runQuery('DELETE FROM accrual_logs');
+          summaryList.push('Staff & Payroll: Erased employee and pay registers');
+        }
+
+        if (toReset.services) {
+          await runQuery('DELETE FROM services');
+          await runQuery('DELETE FROM service_types');
+          await runQuery('DELETE FROM addons');
+          await runQuery('DELETE FROM service_categories');
+
+          // Re-seed default services
+          const shopId = 'SHOP_01';
+          const now = new Date().toISOString();
+
+          const generateSVG = (name, category) => {
+            let startColor = '#3B82F6';
+            let endColor = '#1D4ED8';
+            let iconPath = '';
+            const catStr = String(category || '').toLowerCase();
+            if (catStr === 'dry cleaning') {
+              startColor = '#8B5CF6';
+              endColor = '#6D28D9';
+            } else if (catStr === 'alterations') {
+              startColor = '#EC4899';
+              endColor = '#BE185D';
+            }
+            const nameLower = String(name || '').toLowerCase();
+            if (nameLower.includes('shirt')) {
+              iconPath = `<path d="M30 25 L40 33 L45 28 L55 28 L60 33 L70 25 L75 35 L70 50 L65 50 L65 75 C65 77 63 79 61 79 L39 79 C37 79 35 77 35 75 L35 50 L30 50 L25 35 Z" fill="white" />
+                          <path d="M50 35 L50 75" stroke="${endColor}" stroke-width="2" stroke-dasharray="3 3" />
+                          <circle cx="50" cy="45" r="2" fill="white" />
+                          <circle cx="50" cy="55" r="2" fill="white" />
+                          <circle cx="50" cy="65" r="2" fill="white" />`;
+            } else if (nameLower.includes('dress')) {
+              iconPath = `<path d="M38 25 C38 25 45 28 50 28 C55 28 62 25 62 25 L70 75 C70 77 68 79 66 79 L34 79 C32 79 30 77 30 75 Z" fill="white" />
+                          <path d="M42 35 C45 38 55 38 58 35" stroke="${startColor}" stroke-width="2" fill="none" />
+                          <path d="M44 48 C46 51 54 51 56 48" stroke="${startColor}" stroke-width="2" fill="none" />`;
+            } else if (nameLower.includes('jacket') || nameLower.includes('suit')) {
+              iconPath = `<path d="M28 28 L40 22 L50 26 L60 22 L72 28 L75 48 L70 50 L70 75 C70 77 68 79 66 79 L34 79 C32 79 30 77 30 75 L30 50 L25 48 Z" fill="white" />
+                          <path d="M42 22 L50 35 L58 22" stroke="${startColor}" stroke-width="2" fill="none" />
+                          <line x1="50" y1="35" x2="50" y2="79" stroke="${endColor}" stroke-width="2" />
+                          <path d="M38 45 H44" stroke="${endColor}" stroke-width="2" />
+                          <path d="M56 45 H62" stroke="${endColor}" stroke-width="2" />`;
+            } else if (nameLower.includes('pants') || nameLower.includes('trousers')) {
+              iconPath = `<path d="M32 22 H68 L64 75 C64 77 62 79 60 79 H52 C50 79 49 77 48 75 L45 42 L42 75 C41 77 40 79 38 79 H30 C28 79 26 77 26 75 Z" fill="white" />
+                          <line x1="32" y1="30" x2="68" y2="30" stroke="${endColor}" stroke-width="2" />`;
+            } else if (nameLower.includes('bedding') || nameLower.includes('blanket') || nameLower.includes('bed')) {
+              iconPath = `<path d="M20 30 C20 28 22 26 24 26 H76 C78 26 80 28 80 30 V70 C80 72 78 74 76 74 H24 C22 74 20 72 20 70 Z" fill="white" opacity="0.9" />
+                          <path d="M25 40 H75 V68 H25 Z" fill="${startColor}" opacity="0.15" />
+                          <path d="M28 32 H46 V42 H28 Z" fill="${endColor}" opacity="0.75" rx="2" />
+                          <path d="M54 32 H72 V42 H54 Z" fill="${endColor}" opacity="0.75" rx="2" />
+                          <path d="M20 50 H80" stroke="${endColor}" stroke-width="3" />`;
+            } else {
+              iconPath = `<path d="M25 35 H75 L70 72 C70 76 66 79 62 79 H38 C34 79 30 76 30 72 Z" fill="white" />
+                          <ellipse cx="50" cy="35" rx="25" ry="5" fill="${endColor}" />
+                          <path d="M30 45 L35 70" stroke="${startColor}" stroke-width="2" stroke-linecap="round" />
+                          <path d="M50 45 L50 70" stroke="${startColor}" stroke-width="2" stroke-linecap="round" />
+                          <path d="M70 45 L65 70" stroke="${startColor}" stroke-width="2" stroke-linecap="round" />`;
+            }
+
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+              <defs>
+                <linearGradient id="grad-${name.replace(/[^a-zA-Z]/g, '')}" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" style="stop-color:${startColor};stop-opacity:1" />
+                  <stop offset="100%" style="stop-color:${endColor};stop-opacity:1" />
+                </linearGradient>
+                <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+                  <feDropShadow dx="0" dy="4" stdDeviation="4" flood-opacity="0.15"/>
+                </filter>
+              </defs>
+              <rect width="100" height="100" rx="16" fill="url(#grad-${name.replace(/[^a-zA-Z]/g, '')})" />
+              <g filter="url(#shadow)">
+                ${iconPath}
+              </g>
+            </svg>`;
+            return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+          };
+
+          // Re-insert services
+          await runQuery('INSERT INTO services (id, shopId, name, price, icon, category, image, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', ['1', shopId, "Men's Shirt", 3.50, 'Shirt', 'Laundry', generateSVG("Men's Shirt", 'Laundry'), now]);
+          await runQuery('INSERT INTO services (id, shopId, name, price, icon, category, image, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', ['2', shopId, "Women's Dress", 8.00, 'Heart', 'Laundry', generateSVG("Women's Dress", 'Laundry'), now]);
+          await runQuery('INSERT INTO services (id, shopId, name, price, icon, category, image, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', ['3', shopId, "Suit Jacket", 12.50, 'Layers', 'Dry Cleaning', generateSVG("Suit Jacket", 'Dry Cleaning'), now]);
+          await runQuery('INSERT INTO services (id, shopId, name, price, icon, category, image, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', ['4', shopId, "Pants", 5.00, 'Shirt', 'Laundry', generateSVG("Pants", 'Laundry'), now]);
+          await runQuery('INSERT INTO services (id, shopId, name, price, icon, category, image, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', ['5', shopId, "Bedding", 15.00, 'Bed', 'Laundry', generateSVG("Bedding", 'Laundry'), now]);
+
+          // Re-insert types
+          await runQuery('INSERT INTO service_types (id, shopId, name, price, icon, updatedAt) VALUES (?, ?, ?, ?, ?, ?)', ['wf', shopId, 'Wash & Fold', 4.50, 'Droplet', now]);
+          await runQuery('INSERT INTO service_types (id, shopId, name, price, icon, updatedAt) VALUES (?, ?, ?, ?, ?, ?)', ['dc', shopId, 'Dry Clean', 7.25, 'Wind', now]);
+          await runQuery('INSERT INTO service_types (id, shopId, name, price, icon, updatedAt) VALUES (?, ?, ?, ?, ?, ?)', ['po', shopId, 'Pressing Only', 3.00, 'Layers', now]);
+
+          // Re-insert addons
+          await runQuery('INSERT INTO addons (id, shopId, name, price, icon, updatedAt) VALUES (?, ?, ?, ?, ?, ?)', ['sd', shopId, 'Scented Detergent', 0.50, 'Droplet', now]);
+          await runQuery('INSERT INTO addons (id, shopId, name, price, icon, updatedAt) VALUES (?, ?, ?, ?, ?, ?)', ['fs', shopId, 'Fabric Softener', 0.50, 'Sparkles', now]);
+          await runQuery('INSERT INTO addons (id, shopId, name, price, icon, updatedAt) VALUES (?, ?, ?, ?, ?, ?)', ['ex', shopId, 'Express 4h', 5.00, 'Zap', now]);
+
+          // Re-insert categories
+          await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat1', shopId, 'Laundry', 'Droplet', now]);
+          await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat2', shopId, 'Dry Cleaning', 'Wind', now]);
+          await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat3', shopId, 'Alterations', 'Scissors', now]);
+          await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat4', shopId, 'Premium', 'Sparkles', now]);
+
+          summaryList.push('Services & Categories: Re-seeded default inventory services');
+        }
+
+        await runQuery('COMMIT');
+      } catch (dbErr) {
+        await runQuery('ROLLBACK');
+        throw dbErr;
+      }
+
+      // Format audit log text for SUCCESS
+      const auditDetails = `Reset Type: ${resetType}. Result: Success. Reset Modules: [${modulesStr}]`;
+      if (window.electronAPI?.dbQuery) {
+        const auditId = 'AUD_' + Math.random().toString(36).substr(2, 9).toUpperCase();
+        await window.electronAPI.dbQuery(
+          'INSERT INTO audit_logs (id, event, details, userId, userRole, timestamp, device) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [auditId, 'SYSTEM_RESET', auditDetails, userName, userRole, new Date().toISOString(), 'Desktop-App']
+        );
+      }
+
+      // Add summary messages for settings
+      if (toReset.generalSettings) summaryList.push('General settings: Restored to defaults');
+      if (toReset.workflowStatuses) summaryList.push('Order Workflow Stages: Restored default 10 statuses');
+      if (toReset.presetDamageNotes) summaryList.push('Damage Notes: Restored default 6 templates');
+      if (toReset.companyInfo) summaryList.push('Company & Shop Info: Cleared details');
+      if (toReset.taxSettings) summaryList.push('Tax & UAE Compliance: Restored 5% VAT exclusive');
+      if (toReset.billTemplates) summaryList.push('Bill Templates & Terms: Restored standard invoice template');
+      if (toReset.waTemplates) summaryList.push('WhatsApp Templates: Restored default message formats');
+      if (toReset.printers) summaryList.push('Printers Configuration: Cleared tag and billing printers');
+      if (toReset.gateways) summaryList.push('Payment Gateways: Cleared Nomod/Stripe/Tap/Fatoorah credentials');
+
+      // Update actual setting context
+      await updateSettings(newSettings);
+
+      setResetSummary(summaryList);
+      setShowSuccessSummary(true);
+    } catch (err) {
+      console.error(err);
+      
+      // Format audit log text for FAILURE
+      const auditDetails = `Reset Type: ${resetType}. Result: Failed. Selected Modules: [${modulesStr}]. Error: ${err.message}`;
+      if (window.electronAPI?.dbQuery) {
+        try {
+          const auditId = 'AUD_' + Math.random().toString(36).substr(2, 9).toUpperCase();
+          await window.electronAPI.dbQuery(
+            'INSERT INTO audit_logs (id, event, details, userId, userRole, timestamp, device) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [auditId, 'SYSTEM_RESET_FAILED', auditDetails, userName, userRole, new Date().toISOString(), 'Desktop-App']
+          );
+        } catch (logErr) {
+          console.error('Failed to write failure audit log:', logErr);
+        }
+      }
+      
+      alert('Reset Failed: ' + err.message);
     }
   };
 
@@ -322,56 +805,7 @@ export default function Settings() {
     total: 35.1
   };
 
-  if (user.role === 'super_admin') {
-    return (
-      <div className={styles.settingsPage}>
-        <div className={styles.headerRow}>
-          <div className={styles.headerMain}>
-            <h1>Settings</h1>
-            <p>Database Administration & Maintenance</p>
-          </div>
-        </div>
-
-        <div className={styles.settingsGrid} style={{ display: 'block' }}>
-          <div className={styles.mainContent}>
-            <div className={styles.profileContainer}>
-              <div className={styles.card}>
-                <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem' }}>
-                  <div className={styles.backupIcon} style={{ background: '#F3E8FF', padding: '1rem', borderRadius: '12px' }}>
-                    <Upload size={32} color="#7C3AED" />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Import / Restore Database Backup</h3>
-                    <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
-                      Choose a previously exported backup file (<code>laundry_pos_backup.sqlite</code> or any <code>.sqlite</code>/<code>.db</code> backup) to restore all data. This will completely replace the active database and reload the application.
-                    </p>
-                    <button
-                      className={styles.saveBtn}
-                      style={{ background: '#7C3AED', padding: '0.75rem 1.5rem', border: 'none', color: 'white', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}
-                      onClick={async () => {
-                        if (window.electronAPI?.importDatabase) {
-                          if (confirm('WARNING: Importing a backup will completely replace your current database and restart the application view. Are you sure you want to proceed?')) {
-                            const result = await window.electronAPI.importDatabase();
-                            if (result.success) {
-                              alert('Database imported and restored successfully!');
-                            } else if (result.error !== 'Cancelled') {
-                              alert('Restore failed: ' + result.error);
-                            }
-                          }
-                        }
-                      }}
-                    >
-                      <Upload size={18} /> Choose Backup File & Restore
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  console.log("Settings rendering tabs:", tabs, "isSuperAdmin:", isSuperAdmin, "userRole:", user.role);
 
   return (
     <div className={styles.settingsPage}>
@@ -389,9 +823,9 @@ export default function Settings() {
 
       <div className={`${styles.tabsContainer} ${canScrollLeft ? styles.hasScrollLeft : ''} ${canScrollRight ? styles.hasScrollRight : ''}`}>
         {canScrollLeft && (
-          <button 
+          <button
             type="button"
-            className={`${styles.scrollArrow} ${styles.scrollArrowLeft}`} 
+            className={`${styles.scrollArrow} ${styles.scrollArrowLeft}`}
             onClick={() => scrollTabs('left')}
             aria-label="Scroll tabs left"
           >
@@ -412,9 +846,9 @@ export default function Settings() {
         </div>
 
         {canScrollRight && (
-          <button 
+          <button
             type="button"
-            className={`${styles.scrollArrow} ${styles.scrollArrowRight}`} 
+            className={`${styles.scrollArrow} ${styles.scrollArrowRight}`}
             onClick={() => scrollTabs('right')}
             aria-label="Scroll tabs right"
           >
@@ -426,6 +860,141 @@ export default function Settings() {
       <div className={styles.settingsGrid}>
         <div className={styles.mainContent}>
 
+
+          {activeTab === 'Payment Gateway' && (
+            <div className={styles.profileContainer}>
+              <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
+                <h2 className={styles.cardTitle}>Nomod Payment Gateway Settings</h2>
+                <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.25rem' }}>Configure API credentials and payment preferences for Nomod.</p>
+
+                <div className={styles.toggleWrapper} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid #F1F5F9', marginBottom: '0.75rem' }}>
+                  <div>
+                    <label style={{ fontWeight: 600, fontSize: '0.95rem' }}>Enable Nomod</label>
+                    <p style={{ fontSize: '0.8rem', color: '#64748B', margin: 0 }}>Use Nomod for POS payment link generation.</p>
+                  </div>
+                  <label className={styles.switch}>
+                    <input
+                      type="checkbox"
+                      checked={settings.enableNomod ?? false}
+                      onChange={(e) => updateSettings({ enableNomod: e.target.checked })}
+                    />
+                    <span className={`${styles.slider} ${styles.round}`}></span>
+                  </label>
+                </div>
+                {settings.enableNomod && !settings.nomodApiKey && (
+                  <div style={{ marginTop: '0.75rem', marginBottom: '1.25rem', padding: '0.6rem 0.9rem', background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: '8px', fontSize: '0.8rem', color: '#92400E', fontWeight: 600 }}>
+                    ⚠️ Demo Mode — No API key configured. A sandbox link will be generated. Add your Nomod API key below to exit demo mode.
+                  </div>
+                )}
+
+                <div className={styles.formGrid}>
+                  <div className={styles.formGroup}>
+                    <label>API Key</label>
+                    <input
+                      type="password"
+                      className={styles.inputField}
+                      placeholder="Live or Sandbox API Key (X-API-KEY)"
+                      value={settings.nomodApiKey || ''}
+                      onChange={(e) => updateSettings({ nomodApiKey: e.target.value })}
+                    />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>Merchant ID</label>
+                    <input
+                      type="text"
+                      className={styles.inputField}
+                      placeholder="Nomod Account / Merchant ID"
+                      value={settings.nomodMerchantId || ''}
+                      onChange={(e) => updateSettings({ nomodMerchantId: e.target.value })}
+                    />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>Environment</label>
+                    <select
+                      className={styles.inputField}
+                      value={settings.nomodEnv || 'sandbox'}
+                      onChange={(e) => updateSettings({ nomodEnv: e.target.value })}
+                    >
+                      <option value="sandbox">Sandbox</option>
+                      <option value="live">Live</option>
+                    </select>
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>Default Currency</label>
+                    <input
+                      type="text"
+                      className={styles.inputField}
+                      placeholder="e.g. AED"
+                      value={settings.nomodCurrency || 'AED'}
+                      onChange={(e) => updateSettings({ nomodCurrency: e.target.value })}
+                    />
+                  </div>
+                  <div className={styles.formGroup} style={{ gridColumn: 'span 2' }}>
+                    <label>Webhook Secret (Optional)</label>
+                    <input
+                      type="password"
+                      className={styles.inputField}
+                      placeholder="Nomod Webhook Signature Secret Key"
+                      value={settings.nomodWebhookSecret || ''}
+                      onChange={(e) => updateSettings({ nomodWebhookSecret: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Used to securely verify payment success notifications sent directly from Nomod.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'Import Backup' && (
+            <div className={styles.profileContainer}>
+              <div className={styles.card}>
+                <div className={styles.cardHeader}>
+                  <div>
+                    <h2 className={styles.cardTitle}>Import / Restore Database Backup</h2>
+                    <p style={{ fontSize: '0.85rem', color: '#64748B' }}>Choose a previously exported backup file to restore all data.</p>
+                  </div>
+                </div>
+                <div className={styles.maintenanceContent} style={{ marginTop: '2rem' }}>
+                  <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem' }}>
+                    <div className={styles.backupIcon} style={{ background: '#F3E8FF', padding: '1rem', borderRadius: '12px' }}>
+                      <Upload size={32} color="#7C3AED" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Import / Restore Database Backup</h3>
+                      <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                        Choose a previously exported backup file (`laundry_pos_backup.sqlite` or any `.sqlite`/`.db` backup) to restore all data.
+                        This will completely replace the active database and reload the application.
+                      </p>
+                      <button
+                        className={styles.saveBtn}
+                        style={{ background: '#7C3AED', padding: '0.75rem 1.5rem' }}
+                        onClick={async () => {
+                          if (window.electronAPI?.importDatabase) {
+                            if (confirm('WARNING: Importing a backup will completely replace your current database and restart the application view. Are you sure you want to proceed?')) {
+                              const result = await window.electronAPI.importDatabase();
+                              if (result.success) {
+                                alert('Database imported and restored successfully!');
+                              } else if (result.error !== 'Cancelled') {
+                                alert('Restore failed: ' + result.error);
+                              }
+                            }
+                          }
+                        }}
+                      >
+                        <Upload size={18} /> Choose Backup File & Restore
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'License Settings' && (
+            <Activation />
+          )}
 
           {activeTab === 'General' && (
             <div className={styles.profileContainer}>
@@ -1438,15 +2007,15 @@ export default function Settings() {
           )}
 
 
-          {activeTab === 'Payment Gateways' && (
+          {activeTab === 'Bank' && (
             <div className={styles.profileContainer}>
-              
+
               {isSuperAdmin && (
                 <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
                   <h2 className={styles.cardTitle}>Online Payment Links</h2>
                   <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.25rem' }}>Configure online payment link status.</p>
-                  
-                  <div className={styles.toggleWrapper} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0' }}>
+
+                  <div className={styles.toggleWrapper} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid #F1F5F9', marginBottom: '0.75rem' }}>
                     <div>
                       <label style={{ fontWeight: 600, fontSize: '0.95rem' }}>Enable Online Payment Links</label>
                       <p style={{ fontSize: '0.8rem', color: '#64748B', margin: 0 }}>Allows creating and sending payment links to customers.</p>
@@ -1460,8 +2029,26 @@ export default function Settings() {
                       <span className={`${styles.slider} ${styles.round}`}></span>
                     </label>
                   </div>
+
+                  <div className={styles.toggleWrapper} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0' }}>
+                    <div>
+                      <label style={{ fontWeight: 600, fontSize: '0.95rem' }}>Allow Managers to configure Nomod Payment Gateway</label>
+                      <p style={{ fontSize: '0.8rem', color: '#64748B', margin: 0 }}>Allows Managers to view, edit and manage Nomod settings.</p>
+                    </div>
+                    <label className={styles.switch}>
+                      <input
+                        type="checkbox"
+                        checked={settings.allowManagerNomodConfig ?? false}
+                        onChange={(e) => updateSettings({ allowManagerNomodConfig: e.target.checked })}
+                      />
+                      <span className={`${styles.slider} ${styles.round}`}></span>
+                    </label>
+                  </div>
                 </div>
               )}
+
+
+
 
               <div className={styles.card}>
                 <div className={styles.cardHeader}>
@@ -1495,10 +2082,24 @@ export default function Settings() {
                         </button>
                         <button
                           style={{ background: 'transparent', border: 'none', color: '#EF4444', cursor: 'pointer' }}
-                          onClick={() => {
-                            const newAccounts = settings.bankAccounts.filter((_, i) => i !== index);
-                            const newDefault = settings.defaultBankId === account.id ? '' : settings.defaultBankId;
-                            updateSettings({ bankAccounts: newAccounts, defaultBankId: newDefault });
+                          onClick={async () => {
+                            if (window.electronAPI?.dbQuery && account.id) {
+                              try {
+                                const res = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM account_transactions WHERE bankAccountId = ?', [account.id]);
+                                const count = res?.data?.[0]?.count || 0;
+                                if (count > 0) {
+                                  alert("Restricted: Cannot delete this bank account because it has associated transaction history.");
+                                  return;
+                                }
+                              } catch (err) {
+                                console.error("Error checking bank transactions:", err);
+                              }
+                            }
+                            if (window.confirm("Are you sure you want to delete this bank account?")) {
+                              const newAccounts = settings.bankAccounts.filter((_, i) => i !== index);
+                              const newDefault = settings.defaultBankId === account.id ? '' : settings.defaultBankId;
+                              updateSettings({ bankAccounts: newAccounts, defaultBankId: newDefault });
+                            }
                           }}
                         >
                           <Trash2 size={18} />
@@ -2160,6 +2761,491 @@ export default function Settings() {
               </div>
             </div>
           )}
+
+          {activeTab === 'Web Dashboard' && (
+            <div className={styles.profileContainer}>
+              <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
+                <h2 className={styles.cardTitle}>🌐 Web Dashboard — Branch Security Settings</h2>
+                <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.5rem' }}>
+                  Configure this branch's identity and security key for the online owner dashboard. The owner can view all branches live on a phone by logging in at the backend server's <strong>/dashboard</strong> URL.
+                </p>
+
+                <div style={{ background: 'linear-gradient(135deg, #EEF2FF, #F5F3FF)', border: '1px solid #C7D2FE', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
+                  <p style={{ fontSize: '0.8rem', color: '#3730A3', fontWeight: 600, margin: 0 }}>
+                    ℹ️ How it works: Each branch PC syncs using a unique security API Key. The owner logs in using their personal email/username and password. PINs are no longer used for security.
+                  </p>
+                </div>
+
+                <div className={styles.formGrid}>
+                  <div className={styles.formGroup}>
+                    <label>Branch Name <span style={{ color: '#6366F1', fontWeight: 600 }}>*</span></label>
+                    <input
+                      type="text"
+                      className={styles.inputField}
+                      placeholder="e.g., Dubai Mall Branch"
+                      value={settings.branchName || ''}
+                      onChange={(e) => updateSettings({ branchName: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.75rem', color: '#64748B', margin: '0.25rem 0 0' }}>This name appears on the owner's web dashboard.</p>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Branch ID <span style={{ color: '#6366F1', fontWeight: 600 }}>*</span></label>
+                    <input
+                      type="text"
+                      className={styles.inputField}
+                      placeholder="e.g., BRANCH_DUBAI_01"
+                      value={settings.branchId || ''}
+                      onChange={(e) => updateSettings({ branchId: e.target.value.toUpperCase().replace(/\s+/g, '_') })}
+                    />
+                    <p style={{ fontSize: '0.75rem', color: '#64748B', margin: '0.25rem 0 0' }}>Unique identifier — must be different for each branch. No spaces allowed.</p>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Branch Sync API Key <span style={{ color: '#6366F1', fontWeight: 600 }}>*</span></label>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input
+                        type="text"
+                        className={styles.inputField}
+                        style={{ fontFamily: 'monospace' }}
+                        placeholder="Generate a secure API Key"
+                        value={settings.branchApiKey || ''}
+                        onChange={(e) => updateSettings({ branchApiKey: e.target.value.trim() })}
+                      />
+                      <button
+                        type="button"
+                        className={styles.primaryBtn}
+                        style={{ whiteSpace: 'nowrap', padding: '0.5rem 1rem' }}
+                        onClick={() => {
+                          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+                          let key = 'LB_KEY_';
+                          for (let i = 0; i < 24; i++) {
+                            key += chars.charAt(Math.floor(Math.random() * chars.length));
+                          }
+                          updateSettings({ branchApiKey: key });
+                        }}
+                      >
+                        Generate Key
+                      </button>
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: '#64748B', margin: '0.25rem 0 0' }}>Cryptographically secure sync key. Enforces branch authenticity during database updates.</p>
+                  </div>
+                </div>
+
+                {/* Status indicator */}
+                {settings.branchName && settings.branchId && settings.branchApiKey && (
+                  <div style={{ marginTop: '1rem', background: '#F0FDF4', border: '1px solid #86EFAC', borderRadius: '10px', padding: '0.85rem 1rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <span style={{ color: '#16A34A', fontSize: '1.2rem' }}>✅</span>
+                    <div>
+                      <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#15803D', margin: 0 }}>Ready! This branch is secured.</p>
+                      <p style={{ fontSize: '0.75rem', color: '#16A34A', margin: 0 }}>
+                        Branch <strong>"{settings.branchName}"</strong> (ID: {settings.branchId}) will synchronize with the server using its secure API Key.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {(!settings.branchName || !settings.branchId || !settings.branchApiKey) && (
+                  <div style={{ marginTop: '1rem', background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: '10px', padding: '0.85rem 1rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <span style={{ color: '#D97706', fontSize: '1.2rem' }}>⚠️</span>
+                    <div>
+                      <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#92400E', margin: 0 }}>Incomplete setup</p>
+                      <p style={{ fontSize: '0.75rem', color: '#B45309', margin: 0 }}>Fill in all three fields above — Branch Name, Branch ID, and Branch Sync API Key — to activate secure sync.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className={styles.card}>
+                <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1E293B', marginBottom: '0.5rem' }}>Setup Instructions</h3>
+                <ol style={{ paddingLeft: '1.25rem', fontSize: '0.82rem', color: '#334155', lineHeight: '1.85', margin: 0 }}>
+                  <li>Set a <strong>unique Branch Name</strong> on each PC (e.g., "Dubai Mall", "Abu Dhabi")</li>
+                  <li>Set a <strong>unique Branch ID</strong> on each PC (e.g., "BRANCH_DUBAI", "BRANCH_ABU_DHABI")</li>
+                  <li>Generate a <strong>Branch Sync API Key</strong> by clicking the "Generate Key" button</li>
+                  <li>Make sure the app is <strong>syncing to the cloud</strong> (sync icon in the top bar)</li>
+                  <li>The owner logs in with their email/username and password at the dashboard URL to monitor performance</li>
+                </ol>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'Email Reports' && (
+            <EmailReportsSettings />
+          )}
+
+          {activeTab === 'System Reset' && (
+
+            <div className={styles.profileContainer}>
+              <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
+                <h2 className={styles.cardTitle}>System Reset Options</h2>
+                <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.25rem' }}>
+                  Reset system settings to defaults or wipe database records.
+                </p>
+                <div className={styles.resetWarningBanner}>
+                  <Info size={20} style={{ flexShrink: 0 }} />
+                  <div>
+                    <strong>Crucial System Operations:</strong> Resetting system preferences or clearing transactions is permanent and cannot be undone. Please ensure you have backed up any critical data first.
+                  </div>
+                </div>
+
+                <div className={styles.resetGrid}>
+                  {/* Factory Reset Card */}
+                  <div className={`${styles.resetCard} ${styles.resetDestructiveCard}`}>
+                    <div>
+                      <h3 className={styles.resetSectionTitle}>
+                        <Database size={20} color="#DC2626" /> Full Factory Reset
+                      </h3>
+                      <p className={styles.resetDescription}>
+                        Resets all configuration preferences to system defaults and completely erases all orders, payments, customers, ledger logs, and staff registers. This returns the application to a fresh installation state.
+                      </p>
+                    </div>
+                    <button
+                      className={`${styles.resetButton} ${styles.resetButtonPrimary}`}
+                      onClick={() => {
+                        setResetPinAction('factory');
+                        setShowResetPinModal(true);
+                      }}
+                    >
+                      <RefreshCw size={18} /> Execute Factory Reset
+                    </button>
+                  </div>
+
+                  {/* Custom Reset Card */}
+                  <div className={styles.resetCard}>
+                    <div>
+                      <h3 className={styles.resetSectionTitle}>
+                        <Sliders size={20} color="#2563EB" /> Custom Module Reset
+                      </h3>
+                      <p className={styles.resetDescription}>
+                        Selectively choose which specific configurations or database registers to restore or clear. Non-selected modules will remain untouched.
+                      </p>
+
+                      <div className={styles.checklistHeader}>
+                        <span className={styles.checklistTitle}>Select Modules to Reset</span>
+                        <div className={styles.checklistActions}>
+                          <button
+                            type="button"
+                            className={styles.checklistLink}
+                            onClick={() => {
+                              setResetOptions({
+                                generalSettings: true,
+                                workflowStatuses: true,
+                                presetDamageNotes: true,
+                                companyInfo: true,
+                                taxSettings: true,
+                                billTemplates: true,
+                                waTemplates: true,
+                                printers: true,
+                                gateways: true,
+                                ordersPayments: true,
+                                customers: true,
+                                services: true,
+                                expensesBank: true,
+                                staffPayroll: true
+                              });
+                            }}
+                          >
+                            Select All
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.checklistLink}
+                            onClick={() => {
+                              setResetOptions({
+                                generalSettings: false,
+                                workflowStatuses: false,
+                                presetDamageNotes: false,
+                                companyInfo: false,
+                                taxSettings: false,
+                                billTemplates: false,
+                                waTemplates: false,
+                                printers: false,
+                                gateways: false,
+                                ordersPayments: false,
+                                customers: false,
+                                services: false,
+                                expensesBank: false,
+                                staffPayroll: false
+                              });
+                            }}
+                          >
+                            Clear All
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={styles.resetChecklist}>
+                        {/* 1. General Settings */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.generalSettings ? styles.active : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, generalSettings: !prev.generalSettings }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.generalSettings}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel}>General System Settings</span>
+                            <span className={styles.resetSubLabel}>Resets language, date formats, overdue triggers, default payment options.</span>
+                          </div>
+                        </div>
+
+                        {/* 2. Order Workflow */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.workflowStatuses ? styles.active : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, workflowStatuses: !prev.workflowStatuses }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.workflowStatuses}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel}>Order Workflow Stages</span>
+                            <span className={styles.resetSubLabel}>Resets status stages list back to standard default statuses.</span>
+                          </div>
+                        </div>
+
+                        {/* 3. Preset Damage Notes */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.presetDamageNotes ? styles.active : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, presetDamageNotes: !prev.presetDamageNotes }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.presetDamageNotes}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel}>Preset Damage Notes</span>
+                            <span className={styles.resetSubLabel}>Restores the default list of pre-configured shirt/garment damage notes.</span>
+                          </div>
+                        </div>
+
+                        {/* 4. Company Profile */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.companyInfo ? styles.active : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, companyInfo: !prev.companyInfo }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.companyInfo}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel}>Company & Shop Profile</span>
+                            <span className={styles.resetSubLabel}>Clears logo, company name, address details, Emirate selection.</span>
+                          </div>
+                        </div>
+
+                        {/* 5. Tax & Compliance */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.taxSettings ? styles.active : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, taxSettings: !prev.taxSettings }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.taxSettings}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel}>Tax & UAE VAT Settings</span>
+                            <span className={styles.resetSubLabel}>Resets tax rates, TRN input, and UAE VAT exclusive configurations.</span>
+                          </div>
+                        </div>
+
+                        {/* 6. Invoice Templates */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.billTemplates ? styles.active : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, billTemplates: !prev.billTemplates }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.billTemplates}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel}>Invoice & Bill Templates</span>
+                            <span className={styles.resetSubLabel}>Resets terms text, delivery methods (hanger/fold), template layout.</span>
+                          </div>
+                        </div>
+
+                        {/* 7. WhatsApp Messages */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.waTemplates ? styles.active : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, waTemplates: !prev.waTemplates }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.waTemplates}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel}>WhatsApp Message Formats</span>
+                            <span className={styles.resetSubLabel}>Restores default text message templates for client notices.</span>
+                          </div>
+                        </div>
+
+                        {/* 8. Local Printer Config */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.printers ? styles.active : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, printers: !prev.printers }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.printers}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel}>Local Printer Mappings</span>
+                            <span className={styles.resetSubLabel}>Clears the tag and invoice printer selection.</span>
+                          </div>
+                        </div>
+
+                        {/* 9. Payment Gateways */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.gateways ? styles.active : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, gateways: !prev.gateways }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.gateways}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel}>Payment Gateways Config</span>
+                            <span className={styles.resetSubLabel}>Clears merchant API keys for Stripe, Tap, Nomod, Fatoorah.</span>
+                          </div>
+                        </div>
+
+                        {/* 10. Destructive: Orders & Payments */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.ordersPayments ? `${styles.active} ${styles.destructive}` : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, ordersPayments: !prev.ordersPayments }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.ordersPayments}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel} style={{ color: resetOptions.ordersPayments ? '#DC2626' : 'inherit' }}>
+                              Orders, Sales & Payments
+                            </span>
+                            <span className={styles.resetSubLabel}>Completely wipes the transaction table, order logs, payments, reconciliations.</span>
+                            <span className={styles.destructiveBadge}>Destructive</span>
+                          </div>
+                        </div>
+
+                        {/* 11. Destructive: Customer Directory */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.customers ? `${styles.active} ${styles.destructive}` : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, customers: !prev.customers }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.customers}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel} style={{ color: resetOptions.customers ? '#DC2626' : 'inherit' }}>
+                              Customer Directory
+                            </span>
+                            <span className={styles.resetSubLabel}>Permanently erases all customer profile records, phone numbers, and balances.</span>
+                            <span className={styles.destructiveBadge}>Destructive</span>
+                          </div>
+                        </div>
+
+                        {/* 12. Destructive: Services & Pricing */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.services ? `${styles.active} ${styles.destructive}` : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, services: !prev.services }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.services}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel} style={{ color: resetOptions.services ? '#DC2626' : 'inherit' }}>
+                              Services & Inventory Pricing
+                            </span>
+                            <span className={styles.resetSubLabel}>Clears custom services, categories, types, and restores default list of services.</span>
+                            <span className={styles.destructiveBadge}>Destructive</span>
+                          </div>
+                        </div>
+
+                        {/* 13. Destructive: Ledger & Cash Register */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.expensesBank ? `${styles.active} ${styles.destructive}` : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, expensesBank: !prev.expensesBank }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.expensesBank}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel} style={{ color: resetOptions.expensesBank ? '#DC2626' : 'inherit' }}>
+                              Ledger Accounts & Expenses
+                            </span>
+                            <span className={styles.resetSubLabel}>Deletes all logged store expenses and bank account transfer records.</span>
+                            <span className={styles.destructiveBadge}>Destructive</span>
+                          </div>
+                        </div>
+
+                        {/* 14. Destructive: Payroll Registers */}
+                        <div
+                          className={`${styles.resetChecklistItem} ${resetOptions.staffPayroll ? `${styles.active} ${styles.destructive}` : ''}`}
+                          onClick={() => setResetOptions(prev => ({ ...prev, staffPayroll: !prev.staffPayroll }))}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.resetCheckbox}
+                            checked={resetOptions.staffPayroll}
+                            onChange={() => {}}
+                          />
+                          <div className={styles.resetLabelGroup}>
+                            <span className={styles.resetLabel} style={{ color: resetOptions.staffPayroll ? '#DC2626' : 'inherit' }}>
+                              Staff & Payroll Registers
+                            </span>
+                            <span className={styles.resetSubLabel}>Clears employee registers, wage payout histories, and accrual sheets.</span>
+                            <span className={styles.destructiveBadge}>Destructive</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      className={`${styles.resetButton} ${styles.resetButtonSecondary}`}
+                      style={{ marginTop: '1.5rem' }}
+                      disabled={!Object.values(resetOptions).some(Boolean)}
+                      onClick={() => {
+                        setResetPinAction('custom');
+                        setShowResetPinModal(true);
+                      }}
+                    >
+                      <Save size={18} /> Execute Custom Reset
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
       {/* Cropper Modal */}
@@ -2282,6 +3368,328 @@ export default function Settings() {
                   Unlock
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* System Reset PIN Verification Modal */}
+      {showResetPinModal && (
+        <div className={styles.cropperModalOverlay} onClick={() => { setShowResetPinModal(false); setEnteredResetPin(''); setResetPinError(''); }}>
+          <div className={styles.cropperModal} style={{ width: '380px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.cropperHeader}>
+              <div className={styles.modalTitle}>
+                <Lock size={20} color="#DC2626" />
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1E293B', margin: 0 }}>Authorize System Reset</h2>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => { setShowResetPinModal(false); setEnteredResetPin(''); setResetPinError(''); }} />
+            </div>
+
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p style={{ fontSize: '0.85rem', color: '#64748B', margin: 0, lineHeight: '1.4' }}>
+                Please enter the 4-digit **Manager / Deletion PIN** to authorize this system reset operation.
+              </p>
+
+              <div className={styles.formGroup} style={{ margin: 0 }}>
+                <div className={styles.inputWrapper}>
+                  <Lock size={18} color="#94A3B8" />
+                  <input
+                    type="password"
+                    maxLength={4}
+                    className={styles.inputField}
+                    placeholder="••••"
+                    value={enteredResetPin}
+                    onChange={(e) => {
+                      setResetPinError('');
+                      setEnteredResetPin(e.target.value.replace(/\D/g, ''));
+                    }}
+                    autoFocus
+                    style={{ letterSpacing: '0.5rem', textAlign: 'center', fontSize: '1.25rem', fontWeight: 'bold' }}
+                  />
+                </div>
+                {resetPinError && (
+                  <p style={{ fontSize: '0.75rem', color: '#EF4444', margin: '0.25rem 0 0 0', fontWeight: '600' }}>
+                    {resetPinError}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className={styles.cropperControls} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', borderTop: '1px solid #F1F5F9' }}>
+              <div className={styles.cropperActions} style={{ width: '100%', gap: '0.75rem', display: 'flex' }}>
+                <button
+                  className={styles.secondaryBtn}
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    setShowResetPinModal(false);
+                    setEnteredResetPin('');
+                    setResetPinError('');
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={styles.primaryBtn}
+                  style={{ flex: 1, background: '#DC2626' }}
+                  onClick={() => {
+                    const correctPin = settings.orderDeletePin || '0000';
+                    if (enteredResetPin === correctPin) {
+                      setShowResetPinModal(false);
+                      setEnteredResetPin('');
+                      setResetPinError('');
+
+                      const isFactory = resetPinAction === 'factory';
+                      if (isFactory) {
+                        setShowBackupPrompt(true);
+                      } else {
+                        const isDestructive = resetOptions.ordersPayments || resetOptions.customers || resetOptions.services || resetOptions.expensesBank || resetOptions.staffPayroll;
+                        if (isDestructive) {
+                          setShowResetConfirmModal(true);
+                        } else {
+                          setShowFinalConfirmModal(true);
+                        }
+                      }
+                    } else {
+                      setResetPinError('Incorrect PIN! Access Denied.');
+                    }
+                  }}
+                >
+                  Verify PIN
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Backup Prompt Modal */}
+      {showBackupPrompt && (
+        <div className={styles.cropperModalOverlay} onClick={() => { setShowBackupPrompt(false); setBackupError(''); }}>
+          <div className={styles.cropperModal} style={{ width: '420px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.cropperHeader}>
+              <div className={styles.modalTitle}>
+                <Database size={20} color="#2563EB" />
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1E293B', margin: 0 }}>Export Backup First?</h2>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => { setShowBackupPrompt(false); setBackupError(''); }} />
+            </div>
+
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p style={{ fontSize: '0.85rem', color: '#64748B', margin: 0, lineHeight: '1.5' }}>
+                Before executing a Full Factory Reset, it is strongly recommended that you export a database backup file. This allows you to restore all your customer directory, pricing inventory, and order history if needed.
+              </p>
+              {backupError && (
+                <div style={{ padding: '0.6rem 0.9rem', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: '8px', fontSize: '0.8.rem', color: '#B91C1C', fontWeight: 600, lineHeight: '1.4' }}>
+                  ⚠️ {backupError}
+                </div>
+              )}
+            </div>
+
+            <div className={styles.cropperControls} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', borderTop: '1px solid #F1F5F9', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <button
+                className={styles.primaryBtn}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', background: '#2563EB' }}
+                onClick={async () => {
+                  setBackupError('');
+                  if (window.electronAPI?.backupDatabase) {
+                    const result = await window.electronAPI.backupDatabase();
+                    if (result && result.success) {
+                      setShowBackupPrompt(false);
+                      setShowResetConfirmModal(true);
+                    } else if (result && result.error === 'Cancelled') {
+                      setBackupError("Backup was cancelled. You can try again or click \"Reset Without Backup\" to continue.");
+                    } else {
+                      setBackupError(`Backup failed: ${result?.error || 'Unknown error'}. You can try again or click \"Reset Without Backup\" to continue.`);
+                    }
+                  } else {
+                    setBackupError("Backup API not available in this environment. You can click \"Reset Without Backup\" to continue.");
+                  }
+                }}
+              >
+                <Download size={16} /> Create Backup & Continue
+              </button>
+              <div style={{ display: 'flex', gap: '0.75rem', width: '100%' }}>
+                <button
+                  className={styles.secondaryBtn}
+                  style={{ flex: 1, border: '1px solid #FCA5A5', color: '#DC2626', background: '#FEF2F2' }}
+                  onClick={() => {
+                    setShowBackupPrompt(false);
+                    setBackupError('');
+                    setShowResetConfirmModal(true);
+                  }}
+                >
+                  Reset Without Backup
+                </button>
+                <button
+                  className={styles.secondaryBtn}
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    setShowBackupPrompt(false);
+                    setBackupError('');
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Confirmation Modal (typing RESET) */}
+      {showResetConfirmModal && (
+        <div className={styles.cropperModalOverlay} onClick={() => { setShowResetConfirmModal(false); setResetTextConfirmation(''); setResetConfirmError(''); }}>
+          <div className={styles.cropperModal} style={{ width: '400px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.cropperHeader}>
+              <div className={styles.modalTitle}>
+                <AlertCircle size={20} color="#DC2626" />
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1E293B', margin: 0 }}>Required Text Confirmation</h2>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => { setShowResetConfirmModal(false); setResetTextConfirmation(''); setResetConfirmError(''); }} />
+            </div>
+
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p style={{ fontSize: '0.85rem', color: '#64748B', margin: 0, lineHeight: '1.5' }}>
+                You have selected database modules that will permanently destroy transaction data. To authorize this reset, please type <strong>"RESET"</strong> in the box below.
+              </p>
+
+              <div className={styles.formGroup} style={{ margin: 0 }}>
+                <input
+                  type="text"
+                  placeholder="RESET"
+                  className={styles.inputField}
+                  value={resetTextConfirmation}
+                  onChange={(e) => {
+                    setResetConfirmError('');
+                    setResetTextConfirmation(e.target.value);
+                  }}
+                  autoFocus
+                  style={{ textAlign: 'center', fontWeight: 'bold', letterSpacing: '0.1rem', fontSize: '1.1rem' }}
+                />
+                {resetConfirmError && (
+                  <p style={{ fontSize: '0.75rem', color: '#EF4444', margin: '0.25rem 0 0 0', fontWeight: '600' }}>
+                    {resetConfirmError}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className={styles.cropperControls} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', borderTop: '1px solid #F1F5F9' }}>
+              <div className={styles.cropperActions} style={{ width: '100%', gap: '0.75rem', display: 'flex' }}>
+                <button
+                  className={styles.secondaryBtn}
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    setShowResetConfirmModal(false);
+                    setResetTextConfirmation('');
+                    setResetConfirmError('');
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={styles.primaryBtn}
+                  style={{ flex: 1, background: '#DC2626' }}
+                  disabled={resetTextConfirmation !== 'RESET'}
+                  onClick={() => {
+                    if (resetTextConfirmation === 'RESET') {
+                      setShowResetConfirmModal(false);
+                      setResetTextConfirmation('');
+                      setResetConfirmError('');
+                      setShowFinalConfirmModal(true);
+                    } else {
+                      setResetConfirmError('You must type exactly "RESET" in all capital letters.');
+                    }
+                  }}
+                >
+                  Continue
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Final Execution Confirmation Modal */}
+      {showFinalConfirmModal && (
+        <div className={styles.cropperModalOverlay} onClick={() => setShowFinalConfirmModal(false)}>
+          <div className={styles.cropperModal} style={{ width: '380px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.cropperHeader}>
+              <div className={styles.modalTitle}>
+                <AlertCircle size={20} color="#DC2626" />
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1E293B', margin: 0 }}>Final Warning</h2>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => setShowFinalConfirmModal(false)} />
+            </div>
+
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p style={{ fontSize: '0.85rem', color: '#DC2626', margin: 0, lineHeight: '1.5', fontWeight: 600 }}>
+                ⚠️ Warning: Are you absolutely sure? This is your final chance to cancel. Once executed, the database will be cleared of chosen modules, and setting preferences will revert instantly.
+              </p>
+            </div>
+
+            <div className={styles.cropperControls} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', borderTop: '1px solid #F1F5F9' }}>
+              <div className={styles.cropperActions} style={{ width: '100%', gap: '0.75rem', display: 'flex' }}>
+                <button
+                  className={styles.secondaryBtn}
+                  style={{ flex: 1 }}
+                  onClick={() => setShowFinalConfirmModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={styles.primaryBtn}
+                  style={{ flex: 1, background: '#DC2626' }}
+                  onClick={() => {
+                    setShowFinalConfirmModal(false);
+                    handleResetExecute();
+                  }}
+                >
+                  Confirm Reset
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Summary Modal */}
+      {showSuccessSummary && (
+        <div className={styles.cropperModalOverlay} onClick={() => setShowSuccessSummary(false)}>
+          <div className={styles.cropperModal} style={{ width: '460px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.cropperHeader}>
+              <div className={styles.modalTitle}>
+                <CheckCircle size={20} color="#10B981" />
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1E293B', margin: 0 }}>System Reset Successful</h2>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => setShowSuccessSummary(false)} />
+            </div>
+
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p style={{ fontSize: '0.85rem', color: '#64748B', margin: 0, lineHeight: '1.5' }}>
+                The reset operations have been executed successfully inside a secure SQLite database transaction and written to the system audit logs. Below is a detailed report of the modules reset:
+              </p>
+
+              <div style={{ maxHeight: '200px', overflowY: 'auto', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.75rem' }}>
+                <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8.rem', color: '#334155', lineHeight: '1.6' }}>
+                  {resetSummary.map((item, idx) => (
+                    <li key={idx}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div className={styles.cropperControls} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', borderTop: '1px solid #F1F5F9' }}>
+              <button
+                className={styles.primaryBtn}
+                style={{ width: '100%', background: '#10B981' }}
+                onClick={() => {
+                  setShowSuccessSummary(false);
+                  navigate('/dashboard');
+                }}
+              >
+                Finish & Exit
+              </button>
             </div>
           </div>
         </div>

@@ -210,7 +210,7 @@ export default function ZReport() {
     setShowCloseModal(true);
   };
 
-  const handleConfirmCloseShift = () => {
+  const handleConfirmCloseShift = async () => {
     if (!shiftState) return;
     const key = `shift_state_${selectedDate}`;
     const now = new Date();
@@ -235,6 +235,28 @@ export default function ZReport() {
     setUserEditedActualCash(true);
     localStorage.setItem(key, JSON.stringify(updated));
     setShowCloseModal(false);
+
+    // Automatically send daily email report at closing time
+    try {
+      if (window.electronAPI?.getEmailSettings && window.electronAPI?.testEmail) {
+        const emailSettings = await window.electronAPI.getEmailSettings();
+        if (emailSettings && emailSettings.enabled) {
+          const res = await window.electronAPI.testEmail();
+          if (res && res.success) {
+            alert("Shift closed successfully and daily business report emailed to owner.");
+          } else {
+            alert("Shift closed successfully. (Email report failed: " + (res.message || res.error || "unknown error") + ")");
+          }
+        } else {
+          alert("Shift closed successfully.");
+        }
+      } else {
+        alert("Shift closed successfully.");
+      }
+    } catch (err) {
+      console.error("Failed to send daily report email on shift close:", err);
+      alert("Shift closed successfully.");
+    }
   };
 
   // Interactive Cash Reconciliation Input
@@ -478,6 +500,7 @@ export default function ZReport() {
     let cardSales = 0;
     let upiSales = 0;
     let bankTransfer = 0;
+    let nomodSales = 0;
     let creditUnpaid = 0;
     let partialPayments = 0;
 
@@ -503,6 +526,7 @@ export default function ZReport() {
         cardSales += parseFloat(breakdown.card || 0);
         upiSales += parseFloat(breakdown.upi || 0);
         bankTransfer += parseFloat(breakdown.bank || 0);
+        nomodSales += parseFloat(breakdown.nomod || 0);
         creditUnpaid += due;
       } else {
         if (payStatusLower === 'credit') {
@@ -521,6 +545,8 @@ export default function ZReport() {
             // Best effort split Card vs Bank transfer
             cardSales += paid * 0.6;
             bankTransfer += paid * 0.4;
+          } else if (payMethodLower === 'nomod') {
+            nomodSales += paid;
           } else {
             cashSales += paid;
           }
@@ -734,9 +760,10 @@ export default function ZReport() {
       cardSales,
       upiSales,
       bankTransfer,
+      nomodSales,
       creditUnpaid,
       partialPayments,
-      totalCollected: cashSales + cardSales + upiSales + bankTransfer + partialPayments,
+      totalCollected: cashSales + cardSales + upiSales + bankTransfer + nomodSales + partialPayments,
       
       statusCounts,
       serviceSales,
@@ -801,6 +828,7 @@ export default function ZReport() {
       ["Collections", "Card Sales", zStats.cardSales.toFixed(2)],
       ["Collections", "UPI Sales", zStats.upiSales.toFixed(2)],
       ["Collections", "Bank Transfer", zStats.bankTransfer.toFixed(2)],
+      ["Collections", "Nomod Sales", zStats.nomodSales.toFixed(2)],
       ["Collections", "Credit Outstanding", zStats.creditUnpaid.toFixed(2)],
       ["Collections", "Partial Payments", zStats.partialPayments.toFixed(2)],
       ["Collections", "Total Collected", zStats.totalCollected.toFixed(2)],
@@ -1065,6 +1093,10 @@ export default function ZReport() {
                 <div className={styles.itemRow}>
                   <span>Bank Transfer</span>
                   <strong><CurrencySymbol /> {zStats.bankTransfer.toFixed(2)}</strong>
+                </div>
+                <div className={styles.itemRow}>
+                  <span>Nomod Sales</span>
+                  <strong><CurrencySymbol /> {zStats.nomodSales.toFixed(2)}</strong>
                 </div>
                 <div className={styles.itemRow}>
                   <span>Credit / Not Paid</span>
@@ -1645,6 +1677,10 @@ export default function ZReport() {
                 <div className={styles.ticketRow}>
                   <span>Bank Transfer:</span>
                   <span>{zStats.bankTransfer.toFixed(2)}</span>
+                </div>
+                <div className={styles.ticketRow}>
+                  <span>Nomod Sales:</span>
+                  <span>{zStats.nomodSales.toFixed(2)}</span>
                 </div>
                 <div className={styles.ticketRow}>
                   <span>Credit Orders:</span>

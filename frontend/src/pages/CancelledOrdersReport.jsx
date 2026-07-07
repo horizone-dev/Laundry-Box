@@ -192,33 +192,6 @@ export default function CancelledOrdersReport() {
         </div>
       </motion.div>
 
-      {/* ── KPI Cards ────────────────────────────────── */}
-      <motion.div className={styles.kpiGrid} variants={itemVariants}>
-        <KPICard
-          icon={<XCircle size={20} color="#EF4444" />}
-          bg="#FEF2F2"
-          label="Total Cancelled"
-          value={totalCancelled.toLocaleString()}
-          isCurrency={false}
-          subtext="Orders cancelled in period"
-        />
-        <KPICard
-          icon={<DollarSign size={20} color="#F59E0B" />}
-          bg="#FFFBEB"
-          label="Lost Revenue"
-          value={totalLostRevenue}
-          isCurrency={true}
-          subtext="Potential earnings missed"
-        />
-        <KPICard
-          icon={<Users size={20} color="#8B5CF6" />}
-          bg="#F5F3FF"
-          label="Affected Customers"
-          value={uniqueCustomers.toLocaleString()}
-          isCurrency={false}
-          subtext="Unique customers with cancellations"
-        />
-      </motion.div>
 
       {/* ── Table Card ───────────────────────────────── */}
       <motion.div className={styles.tableCard} variants={itemVariants}>
@@ -272,14 +245,15 @@ export default function CancelledOrdersReport() {
           </div>
         ) : (
           <>
-            <table className={styles.table}>
+          <div className="table-container">
+            <table className="base-table">
               <thead>
                 <tr>
                   <th>DATE</th>
                   <th>BILL NO.</th>
                   <th>CUSTOMER</th>
                   <th>ITEMS</th>
-                  <th className={styles.numCol}>AMOUNT</th>
+                  <th className="num-col">AMOUNT</th>
                   <th>CANCELLED AT</th>
                 </tr>
               </thead>
@@ -326,7 +300,7 @@ export default function CancelledOrdersReport() {
                       <td className={styles.itemsCell}>
                         {items || <span className={styles.dash}>—</span>}
                       </td>
-                      <td className={`${styles.numCol} ${styles.amountCell}`}>
+                      <td className={`num-col ${styles.amountCell}`}>
                         <CurrencySymbol size={11} /> {(o.totalAmount || 0).toFixed(2)}
                       </td>
                       <td className={styles.cancelledAtCell}>
@@ -340,13 +314,14 @@ export default function CancelledOrdersReport() {
               <tfoot>
                 <tr className={styles.totalsRow}>
                   <td colSpan="4" className={styles.totalsLabel}>TOTAL ({filteredOrders.length} orders)</td>
-                  <td className={`${styles.numCol} ${styles.totalsNum}`}>
+                  <td className={`num-col ${styles.totalsNum}`}>
                     <CurrencySymbol size={12} /> {totalLostRevenue.toFixed(2)}
                   </td>
                   <td />
                 </tr>
               </tfoot>
             </table>
+          </div>
 
             <Pagination
               currentPage={currentPage}

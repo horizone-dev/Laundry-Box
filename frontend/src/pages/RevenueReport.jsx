@@ -146,26 +146,6 @@ export default function RevenueReport() {
         </div>
       </div>
 
-      <div className={styles.kpiGrid}>
-        {stats.map((s, i) => (
-          <div key={i} className={styles.kpiCard}>
-            <div className={styles.cardHeader} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ background: s.bg, padding: '0.4rem', borderRadius: '12px' }}>
-                <s.icon size={20} color={s.color} />
-              </div>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#10B981', background: '#ECFDF5', padding: '0.25rem 0.5rem', borderRadius: '100px' }}>
-                +12.5%
-              </span>
-            </div>
-            <div style={{ marginTop: '0.5rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748B' }}>{s.label}</span>
-              <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1E293B', marginTop: '0.15rem' }}>
-                <CurrencySymbol size={18} /> {s.value.toLocaleString()}
-              </h2>
-            </div>
-          </div>
-        ))}
-      </div>
 
       <div className={styles.tableCard} style={{ marginTop: '0.75rem', background: 'white', borderRadius: '16px', padding: '0.75rem 1rem', border: '1px solid #E2E8F0' }}>
         <div className={styles.tableToolbar} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', gap: '1rem', flexWrap: 'wrap' }}>
@@ -205,62 +185,64 @@ export default function RevenueReport() {
           </div>
         </div>
 
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ textAlign: 'left', borderBottom: '1px solid #F1F5F9' }}>
-              <th style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.85rem' }}>DATE</th>
-              <th style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.85rem' }}>ORDER ID</th>
-              <th style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.85rem' }}>METHOD</th>
-              <th style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.85rem' }}>STATUS</th>
-              <th style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.85rem', textAlign: 'right' }}>AMOUNT</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paginatedPayments.map((p, i) => {
-              const { date: payDate, time: payTime } = formatDateTimeSplit(p.createdAt);
-              return (
-                <tr key={i} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                  <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.9rem', color: '#64748B', fontWeight: 600 }}>
-                    <div>{payDate}</div>
-                    {payTime && (
-                      <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '0.15rem', fontWeight: 500 }}>
-                        {payTime}
-                      </div>
-                    )}
-                  </td>
-                <td style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: '#1E293B' }}>{p.orderId || 'Direct Payment'}</td>
-                <td style={{ padding: '0.5rem 0.75rem' }}>
-                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                     {(() => {
-                       const m = p.method?.toUpperCase();
-                       if (m === 'CASH') return <Wallet size={14} color="#3B82F6" />;
-                       if (m === 'CARD') return <CreditCard size={14} color="#8B5CF6" />;
-                       if (m === 'UPI') return <Smartphone size={14} color="#F59E0B" />;
-                       return <Landmark size={14} color="#10B981" />;
-                     })()}
-                     <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{p.method}</span>
-                   </div>
-                </td>
-                <td style={{ padding: '0.5rem 0.75rem' }}>
-                  <span style={{ padding: '0.25rem 0.75rem', background: '#DCFCE7', color: '#166534', borderRadius: '100px', fontSize: '0.75rem', fontWeight: 700 }}>
-                    SUCCESS
-                  </span>
-                </td>
-                <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 800, color: '#1E293B' }}>
-                  <CurrencySymbol size={14} /> {p.amount.toFixed(2)}
-                </td>
-              </tr>
-            );
-            })}
-            {filteredPayments.length === 0 && (
+        <div className="table-container">
+          <table className="base-table">
+            <thead>
               <tr>
-                <td colSpan="5" style={{ padding: '3rem', textAlign: 'center', color: '#94A3B8', fontWeight: 600 }}>
-                  No revenue records found for the selected criteria.
-                </td>
+                <th>DATE</th>
+                <th>ORDER ID</th>
+                <th>METHOD</th>
+                <th>STATUS</th>
+                <th className="num-col">AMOUNT</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {paginatedPayments.map((p, i) => {
+                const { date: payDate, time: payTime } = formatDateTimeSplit(p.createdAt);
+                return (
+                  <tr key={i}>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{payDate}</div>
+                      {payTime && (
+                        <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '0.15rem', fontWeight: 500 }}>
+                          {payTime}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ fontWeight: 700 }}>{p.orderId || 'Direct Payment'}</td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        {(() => {
+                          const m = p.method?.toUpperCase();
+                          if (m === 'CASH') return <Wallet size={14} color="#3B82F6" />;
+                          if (m === 'CARD') return <CreditCard size={14} color="#8B5CF6" />;
+                          if (m === 'UPI') return <Smartphone size={14} color="#F59E0B" />;
+                          return <Landmark size={14} color="#10B981" />;
+                        })()}
+                        <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{p.method}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <span style={{ padding: '0.25rem 0.75rem', background: '#DCFCE7', color: '#166534', borderRadius: '100px', fontSize: '0.75rem', fontWeight: 700 }}>
+                        SUCCESS
+                      </span>
+                    </td>
+                    <td className="num-col" style={{ fontWeight: 800 }}>
+                      <CurrencySymbol size={14} /> {p.amount.toFixed(2)}
+                    </td>
+                  </tr>
+                );
+              })}
+              {filteredPayments.length === 0 && (
+                <tr>
+                  <td colSpan="5" style={{ padding: '3rem', textAlign: 'center', color: '#94A3B8', fontWeight: 600 }}>
+                    No revenue records found for the selected criteria.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
         {!loading && (
           <Pagination

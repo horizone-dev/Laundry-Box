@@ -19,6 +19,7 @@ import DeletedOrders from './pages/DeletedOrders';
 import ExpectedDeliveries from './pages/ExpectedDeliveries';
 import ServicesReport from './pages/ServicesReport';
 import Invoice from './pages/Invoice';
+import NomodHistory from './pages/NomodHistory';
 import Login from './pages/Login';
 import Users from './pages/Users';
 import Accounts from './pages/Accounts';
@@ -76,6 +77,7 @@ function App() {
             <Route path="z-report" element={<ZReport />} />
             <Route path="cancelled" element={<CancelledOrdersReport />} />
             <Route path="credit-overrides" element={<CreditOverridesReport />} />
+            <Route path="nomod-history" element={<NomodHistory />} />
           </Route>
           <Route path="expenses" element={<Expenses />} />
           <Route path="settings" element={<Settings />} />

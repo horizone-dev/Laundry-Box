@@ -5,8 +5,9 @@ import {
   X, ChevronDown, Shirt, Bed, Wind, Layers, Package,
   Droplet, Zap, Heart, Sparkles, User, CreditCard, Wallet,
   Gift, Printer, Receipt, Edit3, UserPlus, Phone, MapPin, Landmark,
-  Calendar, FileText, AlertTriangle, AlertCircle, Info, Lock, Clock, QrCode
+  Calendar, FileText, AlertTriangle, AlertCircle, Info, Lock, Clock, QrCode, BedDouble
 } from 'lucide-react';
+const Dress = Shirt;
 import axios from 'axios';
 import WhatsAppIcon from '../components/WhatsAppIcon';
 import { useSettings } from '../store/SettingsContext';
@@ -14,7 +15,9 @@ import CurrencySymbol from '../components/CurrencySymbol';
 import { DEFAULT_SHOP_ID, DEFAULT_BRANCH_ID, API_BASE_URL, CATEGORIES, PAYMENT_STATUS, ORDER_STATUS, PAYMENT_METHODS } from '../constants';
 import { t } from '../utils/translations';
 import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
+import { checkCreditLimit } from '../utils/creditLimit';
 import styles from './POS.module.css';
+import { QRCodeCanvas } from 'qrcode.react';
 
 
 export default function POS() {
@@ -29,9 +32,16 @@ export default function POS() {
 
   const [step, setStep] = useState('pos'); // pos, checkout
   const [cart, setCart] = useState([]);
+  const cartEndRef = React.useRef(null);
   const [selectedService, setSelectedService] = useState(null);
   const [serviceConfig, setServiceConfig] = useState({ selectedTypeIds: [], addons: [], qty: 1, customPrice: null, description: '', deliveryMethod: 'Hanger' });
   const [editingCartIdx, setEditingCartIdx] = useState(null); // index of cart item being edited
+
+  useEffect(() => {
+    if (cartEndRef.current) {
+      cartEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [cart.length]);
 
   const servicePricing = React.useMemo(() => {
     if (!selectedService || selectedService.isTemporary) return [];
@@ -72,6 +82,8 @@ export default function POS() {
   useEffect(() => {
     fetchPOSData();
   }, []);
+
+
 
   const fetchPOSData = async () => {
     if (window.electronAPI?.dbQuery) {
@@ -165,9 +177,11 @@ export default function POS() {
   const getIcon = (iconName, size = 24) => {
     const icons = {
       'Shirt': <Shirt size={size} />,
+      'Dress': <Dress size={size} />,
+      'Bed': <Bed size={size} />,
+      'BedDouble': <BedDouble size={size} />,
       'Heart': <Heart size={size} />,
       'Layers': <Layers size={size} />,
-      'Bed': <Bed size={size} />,
       'Wind': <Wind size={size} />,
       'Droplet': <Droplet size={size} />,
       'Sparkles': <Sparkles size={size} />,
@@ -198,8 +212,26 @@ export default function POS() {
   const [cardAmount, setCardAmount] = useState('');
   const [upiAmount, setUpiAmount] = useState('');
   const [bankAmount, setBankAmount] = useState('');
-  const [activePaymentField, setActivePaymentField] = useState('cash'); // 'cash' | 'card' | 'upi' | 'bank'
+  const [nomodAmount, setNomodAmount] = useState('');
+  const [activePaymentField, setActivePaymentField] = useState('cash'); // 'cash' | 'card' | 'upi' | 'bank' | 'nomod'
+  const [nomodLinkModal, setNomodLinkModal] = useState({ show: false, url: '', linkId: '', amount: 0 });
   const [printReceipt, setPrintReceipt] = useState(settings.autoPrint !== undefined ? settings.autoPrint : true);
+
+  useEffect(() => {
+    const handleNomodSuccess = (e) => {
+      const paidOrderId = e.detail?.orderId;
+      if (nomodLinkModal.show && (nomodLinkModal.orderId === paidOrderId || nomodLinkModal.linkId === paidOrderId)) {
+        alert("Nomod payment successfully verified!");
+        setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 });
+        setCart([]);
+        setSelectedCustomer(null);
+        setSpecialInstructions('');
+        navigate(`/invoice/${paidOrderId}?print=true`);
+      }
+    };
+    window.addEventListener('nomod-payment-success', handleNomodSuccess);
+    return () => window.removeEventListener('nomod-payment-success', handleNomodSuccess);
+  }, [nomodLinkModal]);
 
   useEffect(() => {
     if (settings.bankAccounts && settings.bankAccounts.length > 0) {
@@ -274,21 +306,6 @@ export default function POS() {
     if (!selectedCustomer || selectedCustomer.id === 'Walk-in') return false;
     if (!settings.enableCreditLimitProtection) return false;
 
-    // Fetch fresh customer details from DB to prevent stale balance issues
-    let freshBalance = selectedCustomer.balance || 0;
-    let freshCreditLimit = selectedCustomer.creditLimit || 0;
-    
-    if (window.electronAPI?.dbQuery) {
-      const custRes = await window.electronAPI.dbQuery(
-        'SELECT balance, creditLimit FROM customers WHERE id = ?',
-        [selectedCustomer.id]
-      );
-      if (custRes.success && custRes.data.length > 0) {
-        freshBalance = custRes.data[0].balance || 0;
-        freshCreditLimit = custRes.data[0].creditLimit || 0;
-      }
-    }
-
     // Determine old dueAmount if editing an order to prevent double-counting
     let oldDueAmount = 0;
     if (editOrderId && window.electronAPI?.dbQuery) {
@@ -305,43 +322,22 @@ export default function POS() {
       }
     }
 
-    // Use the new multi-payment state instead of the old single tenderedAmount
-    const totalPaidNow = parseFloat(cashAmount || 0) + parseFloat(cardAmount || 0) + parseFloat(upiAmount || 0) + parseFloat(bankAmount || 0);
+    const totalPaidNow = parseFloat(cashAmount || 0) + parseFloat(cardAmount || 0) + parseFloat(upiAmount || 0) + parseFloat(bankAmount || 0) + parseFloat(nomodAmount || 0);
     const isCreditOrPartial = paymentMethod === 'credit' || totalPaidNow < total;
     if (actionType === 'saveOrder' || (actionType === 'completePayment' && isCreditOrPartial)) {
-      const currentOutstanding = freshBalance;
-      const creditLimit = freshCreditLimit !== undefined && freshCreditLimit !== null && freshCreditLimit !== 0
-        ? freshCreditLimit
-        : (settings.defaultCreditLimit ?? 500);
-      // orderAmount is the amount that will remain unpaid (dueAmount)
       const orderAmount = actionType === 'completePayment' ? Math.max(0, total - totalPaidNow) : total;
       const netIncrease = orderAmount - oldDueAmount;
 
-      // If outstanding balance is not increasing, no need to block
       if (netIncrease <= 0) return false;
 
-      const newOutstanding = currentOutstanding + netIncrease;
-
-      // Block if ALREADY at/over limit OR if new order would exceed limit
-      if (currentOutstanding >= creditLimit || newOutstanding > creditLimit) {
-        const exceededAmount = newOutstanding > creditLimit
-          ? newOutstanding - creditLimit
-          : currentOutstanding - creditLimit + netIncrease;
-        const overrideAllowed = true;
-
-        // Pre-generate orderId if not already generated
+      const checkRes = await checkCreditLimit(selectedCustomer.id, netIncrease, settings);
+      if (checkRes.blocked) {
         const generatedId = pendingOrderId || '0001';
         setPendingOrderId(generatedId);
 
         setCreditWarningDetails({
-          orderId: generatedId,
-          customerName: selectedCustomer.name,
-          creditLimit,
-          currentOutstanding,
-          orderAmount: netIncrease,
-          newOutstanding,
-          exceededAmount: Math.max(0, exceededAmount),
-          overrideAllowed
+          ...checkRes.details,
+          orderId: generatedId
         });
         setPendingOrderAction(actionType);
         setShowCreditWarning(true);
@@ -573,7 +569,8 @@ export default function POS() {
   const cardVal = parseFloat(cardAmount || 0);
   const upiVal = parseFloat(upiAmount || 0);
   const bankVal = parseFloat(bankAmount || 0);
-  const totalPaid = cashVal + cardVal + upiVal + bankVal;
+  const nomodVal = parseFloat(nomodAmount || 0);
+  const totalPaid = cashVal + cardVal + upiVal + bankVal + nomodVal;
   const remainingDue = Math.max(0, total - totalPaid);
   const changeDue = Math.max(0, totalPaid - total);
 
@@ -794,12 +791,76 @@ export default function POS() {
     }));
   };
 
+  // Nomod Pay directly from POS sidebar (skips checkout, generates link for full total)
+  const handlePOSNomodPay = async () => {
+    if (!selectedCustomer) {
+      alert('Please select a customer to use Nomod Pay.');
+      return;
+    }
+    if (cart.length === 0) {
+      alert('Cart is empty.');
+      return;
+    }
+    if (!settings.enableNomod) return;
+
+    const orderId = pendingOrderId || '0001';
+    let linkId = `LNK-${Date.now().toString().slice(-4)}`;
+    let checkoutUrl = '';
+
+    try {
+      const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+      const checkoutRes = await window.electronAPI.createNomodCheckout({
+        amount: total,
+        currency: settings.nomodCurrency || 'AED',
+        customer: {
+          name: selectedCustomer.name || 'Customer',
+          phone: selectedCustomer.phone || ''
+        },
+        orderId: orderId,
+        userRole: currentUser.role || 'staff'
+      });
+
+      if (checkoutRes.success && checkoutRes.data && checkoutRes.data.url) {
+        checkoutUrl = checkoutRes.data.url;
+        if (checkoutRes.data.id) linkId = checkoutRes.data.id;
+      } else if (checkoutRes.error) {
+        console.warn('Nomod API failed in POS sidebar:', checkoutRes.error);
+        alert('Nomod Checkout API failed: ' + checkoutRes.error + '. Falling back to sandbox link.');
+      }
+    } catch (err) {
+      console.warn('Nomod IPC failed in POS sidebar:', err.message);
+    }
+
+    if (!checkoutUrl) {
+      checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${total}&reference=${linkId}`;
+    }
+
+    if (window.electronAPI?.logAuditEvent) {
+      const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+      window.electronAPI.logAuditEvent({
+        eventName: 'Payment Link Generated',
+        details: `Nomod payment link generated from POS sidebar for Order ${orderId}, Amount: ${total}`,
+        userId: currentUser.name || 'Staff',
+        userRole: currentUser.role || 'staff'
+      });
+    }
+
+    setNomodLinkModal({
+      show: true,
+      url: checkoutUrl,
+      linkId,
+      amount: total,
+      orderId
+    });
+  };
+
   const handleKeypadPress = (val) => {
     let currentValStr = '';
     if (activePaymentField === 'cash') currentValStr = cashAmount.toString();
     else if (activePaymentField === 'card') currentValStr = cardAmount.toString();
     else if (activePaymentField === 'upi') currentValStr = upiAmount.toString();
     else if (activePaymentField === 'bank') currentValStr = bankAmount.toString();
+    else if (activePaymentField === 'nomod') currentValStr = nomodAmount.toString();
 
     let newValStr = currentValStr;
     if (val === 'clear') {
@@ -818,9 +879,10 @@ export default function POS() {
     else if (activePaymentField === 'card') setCardAmount(newValStr);
     else if (activePaymentField === 'upi') setUpiAmount(newValStr);
     else if (activePaymentField === 'bank') setBankAmount(newValStr);
+    else if (activePaymentField === 'nomod') setNomodAmount(newValStr);
   };
 
-  const handleCompletePayment = async (isOverridden = false) => {
+  const handleCompletePayment = async (isOverridden = false, nomodCheckoutIdVal = null, nomodPaymentLinkVal = null) => {
     if (!isOverridden && (await checkCreditLimitBeforeAction('completePayment'))) {
       return;
     }
@@ -832,7 +894,8 @@ export default function POS() {
     const cardVal = parseFloat(cardAmount || 0);
     const upiVal = parseFloat(upiAmount || 0);
     const bankVal = parseFloat(bankAmount || 0);
-    const totalPaid = cashVal + cardVal + upiVal + bankVal;
+    const nomodVal = parseFloat(nomodAmount || 0);
+    const totalPaid = cashVal + cardVal + upiVal + bankVal + nomodVal;
 
     if (totalPaid > total + 0.01) {
       alert("Validation Error: Total Paid cannot exceed the Invoice Total!");
@@ -843,8 +906,10 @@ export default function POS() {
       return;
     }
 
-    const newPaidAmount = totalPaid;
-    const newDueAmount = Math.max(0, total - totalPaid);
+    let appliedAdvance = 0;
+
+    const newPaidAmount = totalPaid + appliedAdvance;
+    const newDueAmount = Math.max(0, total - newPaidAmount);
     
     let newPayStatus = PAYMENT_STATUS.PARTIAL;
     if (Math.abs(newPaidAmount - total) < 0.01) {
@@ -858,6 +923,8 @@ export default function POS() {
     if (cardVal > 0) paidMethods.push(PAYMENT_METHODS.CARD);
     if (upiVal > 0) paidMethods.push(PAYMENT_METHODS.UPI);
     if (bankVal > 0) paidMethods.push(PAYMENT_METHODS.BANK);
+    if (nomodVal > 0) paidMethods.push('Nomod');
+    if (appliedAdvance > 0) paidMethods.push('Advance');
 
     let newPayMethod = PAYMENT_METHODS.NOT_PAID;
     if (paidMethods.length === 1) {
@@ -872,8 +939,90 @@ export default function POS() {
       cash: cashVal,
       card: cardVal,
       upi: upiVal,
-      bank: bankVal
+      bank: bankVal,
+      nomod: nomodVal
     });
+
+    if (nomodVal > 0 && !isOverridden) {
+      let linkId = `LNK-${Date.now().toString().slice(-4)}`;
+      let checkoutUrl = '';
+      
+      // 1. Duplicate protection check: reuse active link if exists
+      if (window.electronAPI?.dbQuery) {
+        try {
+          const activeLnkRes = await window.electronAPI.dbQuery(
+            `SELECT * FROM payment_links WHERE (description LIKE ? OR id = ?) AND status IN ('Active', 'Pending') LIMIT 1`,
+            [`%${orderId}%`, `LNK-${orderId}`]
+          );
+          if (activeLnkRes.success && activeLnkRes.data.length > 0) {
+            checkoutUrl = activeLnkRes.data[0].url;
+            linkId = activeLnkRes.data[0].id;
+          }
+        } catch (dbErr) {
+          console.warn("Failed to check active payment link in POS:", dbErr);
+        }
+      }
+
+      if (!checkoutUrl) {
+        try {
+          const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+          const checkoutRes = await window.electronAPI.createNomodCheckout({
+            amount: nomodVal,
+            currency: settings.nomodCurrency || 'AED',
+            customer: {
+              name: selectedCustomer?.name || 'Customer',
+              phone: selectedCustomer?.phone || ''
+            },
+            orderId: orderId,
+            userRole: currentUser.role || 'staff'
+          });
+
+          if (checkoutRes.success && checkoutRes.data && checkoutRes.data.url) {
+            checkoutUrl = checkoutRes.data.url;
+            if (checkoutRes.data.id) {
+              linkId = checkoutRes.data.id;
+            }
+          } else if (checkoutRes.error) {
+            console.warn("Nomod Backend API failed:", checkoutRes.error);
+            alert("Nomod Checkout API connection failed: " + checkoutRes.error + ". Falling back to sandbox payment link.");
+          }
+        } catch (err) {
+          console.warn("Nomod Checkout IPC failed:", err.message);
+        }
+      }
+
+      if (!checkoutUrl) {
+        checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${nomodVal}&reference=${linkId}`;
+      }
+
+      // Log Audit Event
+      if (window.electronAPI?.logAuditEvent) {
+        const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+        window.electronAPI.logAuditEvent({
+          eventName: 'Payment Link Generated',
+          details: `Nomod payment link generated for Order ${orderId}, Amount: ${nomodVal}`,
+          userId: currentUser.name || 'Staff',
+          userRole: currentUser.role || 'staff'
+        });
+      }
+
+      setNomodLinkModal({
+        show: true,
+        url: checkoutUrl,
+        linkId,
+        amount: nomodVal,
+        orderId,
+        billNumber,
+        combinedExpectedDelivery,
+        paymentBreakdownJson,
+        newPayStatus,
+        newPaidAmount,
+        newDueAmount,
+        newPayMethod,
+        appliedAdvance
+      });
+      return;
+    }
 
     if (window.electronAPI?.dbQuery) {
       try {
@@ -895,7 +1044,8 @@ export default function POS() {
                `UPDATE orders SET 
                 customerId = ?, status = ?, totalAmount = ?, paidAmount = ?, dueAmount = ?, 
                 paymentStatus = ?, items = ?, expectedDeliveryDate = ?, specialInstructions = ?, 
-                updatedAt = ?, paymentMethod = ?, isSynced = 0, paymentBreakdown = ? 
+                updatedAt = ?, paymentMethod = ?, isSynced = 0, paymentBreakdown = ?,
+                nomodCheckoutId = ?, nomodPaymentLink = ? 
                 WHERE id = ?`,
                [
                  selectedCustomer ? selectedCustomer.id : 'Walk-in',
@@ -910,6 +1060,8 @@ export default function POS() {
                  getLocalISOString(),
                  newPayMethod,
                  paymentBreakdownJson,
+                 nomodCheckoutIdVal,
+                 nomodPaymentLinkVal,
                  editOrderId
                ]
              );
@@ -946,7 +1098,7 @@ export default function POS() {
                dueAmount: newDueAmount,
                paymentStatus: newPayStatus,
                paymentMethod: newPayMethod,
-               paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal },
+               paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal, nomod: nomodVal },
                items: cart,
                expectedDeliveryDate: combinedExpectedDelivery,
                specialInstructions
@@ -958,6 +1110,7 @@ export default function POS() {
                { name: 'Card', value: cardVal, accountType: 'BANK', icon: 'CreditCard' },
                { name: 'UPI', value: upiVal, accountType: 'BANK', icon: 'QrCode' },
                { name: 'Bank', value: bankVal, accountType: 'BANK', icon: 'Landmark' },
+               { name: 'Nomod', value: nomodVal, accountType: 'GATEWAY', icon: 'CreditCard' },
              ];
 
              for (const method of paymentMethodsList) {
@@ -1004,9 +1157,9 @@ export default function POS() {
           }
         }
 
-        const insertResult = await window.electronAPI.dbQuery(
-          `INSERT INTO orders (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, statusHistory, createdAt, isSynced, updatedAt, paymentMethod, expectedDeliveryDate, specialInstructions, paymentBreakdown) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         const insertResult = await window.electronAPI.dbQuery(
+          `INSERT INTO orders (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, items, statusHistory, createdAt, isSynced, updatedAt, paymentMethod, expectedDeliveryDate, specialInstructions, paymentBreakdown, nomodCheckoutId, nomodPaymentLink) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             orderId,
             DEFAULT_SHOP_ID,
@@ -1026,7 +1179,9 @@ export default function POS() {
             newPayMethod,
             combinedExpectedDelivery,
             specialInstructions,
-            paymentBreakdownJson
+            paymentBreakdownJson,
+            nomodCheckoutIdVal,
+            nomodPaymentLinkVal
           ]
         );
 
@@ -1057,6 +1212,39 @@ export default function POS() {
           }
           return; // STOP — do not proceed
         }
+        // Link unlinked advance payments if advance was applied
+        if (appliedAdvance > 0 && selectedCustomer) {
+          let remainingToLink = appliedAdvance;
+          const unlinkedPaymentsRes = await window.electronAPI.dbQuery(
+            "SELECT * FROM payments WHERE customerId = ? AND (orderId IS NULL OR orderId = '') AND amount > 0 ORDER BY createdAt ASC",
+            [selectedCustomer.id]
+          );
+          const unlinkedPayments = unlinkedPaymentsRes.success ? unlinkedPaymentsRes.data : [];
+
+          for (const payment of unlinkedPayments) {
+            if (remainingToLink <= 0) break;
+            
+            if (payment.amount <= remainingToLink) {
+              await window.electronAPI.dbQuery(
+                "UPDATE payments SET orderId = ?, updatedAt = ?, isSynced = 0 WHERE id = ?",
+                [orderId, getLocalISOString(), payment.id]
+              );
+              remainingToLink -= payment.amount;
+            } else {
+              const remainingUnlinkedAmount = payment.amount - remainingToLink;
+              await window.electronAPI.dbQuery(
+                "UPDATE payments SET amount = ?, updatedAt = ?, isSynced = 0 WHERE id = ?",
+                [remainingUnlinkedAmount, getLocalISOString(), payment.id]
+              );
+              await window.electronAPI.dbQuery(
+                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                [`PAY-${Date.now()}-LINKED`, selectedCustomer.id, orderId, DEFAULT_SHOP_ID, remainingToLink, payment.method, 'SUCCESS', payment.createdAt, getLocalISOString()]
+              );
+              remainingToLink = 0;
+            }
+          }
+        }
 
         // Sync to MongoDB Backend (Background invocation - non-blocking)
         axios.post(`${API_BASE_URL}/orders`, {
@@ -1073,7 +1261,7 @@ export default function POS() {
           dueAmount: newDueAmount,
           paymentStatus: newPayStatus,
           paymentMethod: newPayMethod,
-          paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal },
+          paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal, nomod: nomodVal },
           items: cart,
           statusHistory: [{ status: newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
           expectedDeliveryDate: combinedExpectedDelivery,
@@ -1097,7 +1285,7 @@ export default function POS() {
             dueAmount: newDueAmount,
             paymentStatus: newPayStatus,
             paymentMethod: newPayMethod,
-            paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal },
+            paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal, nomod: nomodVal },
             items: cart,
             statusHistory: [{ status: newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
             expectedDeliveryDate: combinedExpectedDelivery,
@@ -1105,11 +1293,14 @@ export default function POS() {
           }
         }));
 
-        if ((newPayStatus === PAYMENT_STATUS.CREDIT || newPayStatus === PAYMENT_STATUS.PARTIAL) && selectedCustomer) {
-          await window.electronAPI.dbQuery(
-            'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-            [newDueAmount, getLocalISOString(), selectedCustomer.id]
-          );
+        if (selectedCustomer) {
+          const balanceDiff = total - totalPaid;
+          if (balanceDiff !== 0) {
+            await window.electronAPI.dbQuery(
+              'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+              [balanceDiff, getLocalISOString(), selectedCustomer.id]
+            );
+          }
         }
 
         // Record Transactions in Accounts
@@ -1118,6 +1309,7 @@ export default function POS() {
           { name: 'Card', value: cardVal, accountType: 'BANK', icon: 'CreditCard' },
           { name: 'UPI', value: upiVal, accountType: 'BANK', icon: 'QrCode' },
           { name: 'Bank', value: bankVal, accountType: 'BANK', icon: 'Landmark' },
+          { name: 'Nomod', value: nomodVal, accountType: 'GATEWAY', icon: 'CreditCard' },
         ];
 
         for (const method of paymentMethodsList) {
@@ -1292,6 +1484,21 @@ export default function POS() {
           }
         }
 
+        let appliedAdvance = 0;
+
+        const newPaidAmount = appliedAdvance;
+        const newDueAmount = Math.max(0, total - newPaidAmount);
+
+        let newPayStatus = PAYMENT_STATUS.CREDIT;
+        if (newDueAmount === 0) {
+          newPayStatus = PAYMENT_STATUS.PAID;
+        } else if (newPaidAmount > 0) {
+          newPayStatus = PAYMENT_STATUS.PARTIAL;
+        }
+
+        const newPayMethod = newPaidAmount > 0 ? 'Advance' : PAYMENT_METHODS.NOT_PAID;
+        const newOrderStatus = newDueAmount === 0 ? ORDER_STATUS.CONFIRMED : ORDER_STATUS.PAYMENT_PENDING;
+
         const insertResult = await window.electronAPI.dbQuery(
           `INSERT INTO orders 
            (id, shopId, billNumber, branchId, customerId, status, totalAmount, paidAmount, dueAmount, items, statusHistory, createdAt, updatedAt, paymentStatus, isSynced, paymentMethod, expectedDeliveryDate, specialInstructions, paymentBreakdown) 
@@ -1302,17 +1509,17 @@ export default function POS() {
             billNumber,
             DEFAULT_BRANCH_ID,
             selectedCustomer ? selectedCustomer.id : 'Walk-in',
-            ORDER_STATUS.PAYMENT_PENDING,
+            newOrderStatus,
             total,
-            0,
-            total,
+            newPaidAmount,
+            newDueAmount,
             JSON.stringify(cart),
-            JSON.stringify([{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: getLocalISOString() }]),
+            JSON.stringify([{ status: newOrderStatus, updatedBy: 'POS System', timestamp: getLocalISOString() }]),
             getLocalISOString(),
             getLocalISOString(),
-            PAYMENT_STATUS.CREDIT,
+            newPayStatus,
             0,
-            PAYMENT_METHODS.NOT_PAID,
+            newPayMethod,
             combinedExpectedDelivery,
             specialInstructions,
             JSON.stringify({ cash: 0, card: 0, upi: 0, bank: 0 })
@@ -1327,13 +1534,13 @@ export default function POS() {
             const creditLimit = (selectedCustomer?.creditLimit && selectedCustomer.creditLimit !== 0)
               ? selectedCustomer.creditLimit
               : (settings.defaultCreditLimit ?? 500);
-            const newOutstanding = currentOutstanding + total;
+            const newOutstanding = currentOutstanding + newDueAmount;
             setCreditWarningDetails({
               orderId: orderId,
               customerName: selectedCustomer?.name,
               creditLimit,
               currentOutstanding,
-              orderAmount: total,
+              orderAmount: newDueAmount,
               newOutstanding,
               exceededAmount: Math.max(0, newOutstanding - creditLimit),
               overrideAllowed: true
@@ -1345,6 +1552,40 @@ export default function POS() {
             alert('Failed to save order: ' + (errMsg || 'Unknown error'));
           }
           return; // STOP — do not update balance or show success
+        }
+
+        // Link unlinked advance payments if advance was applied
+        if (appliedAdvance > 0 && selectedCustomer) {
+          let remainingToLink = appliedAdvance;
+          const unlinkedPaymentsRes = await window.electronAPI.dbQuery(
+            "SELECT * FROM payments WHERE customerId = ? AND (orderId IS NULL OR orderId = '') AND amount > 0 ORDER BY createdAt ASC",
+            [selectedCustomer.id]
+          );
+          const unlinkedPayments = unlinkedPaymentsRes.success ? unlinkedPaymentsRes.data : [];
+
+          for (const payment of unlinkedPayments) {
+            if (remainingToLink <= 0) break;
+            
+            if (payment.amount <= remainingToLink) {
+              await window.electronAPI.dbQuery(
+                "UPDATE payments SET orderId = ?, updatedAt = ?, isSynced = 0 WHERE id = ?",
+                [orderId, getLocalISOString(), payment.id]
+              );
+              remainingToLink -= payment.amount;
+            } else {
+              const remainingUnlinkedAmount = payment.amount - remainingToLink;
+              await window.electronAPI.dbQuery(
+                "UPDATE payments SET amount = ?, updatedAt = ?, isSynced = 0 WHERE id = ?",
+                [remainingUnlinkedAmount, getLocalISOString(), payment.id]
+              );
+              await window.electronAPI.dbQuery(
+                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                [`PAY-${Date.now()}-LINKED`, selectedCustomer.id, orderId, DEFAULT_SHOP_ID, remainingToLink, payment.method, 'SUCCESS', payment.createdAt, getLocalISOString()]
+              );
+              remainingToLink = 0;
+            }
+          }
         }
 
         // Update customer balance in DB
@@ -1365,14 +1606,14 @@ export default function POS() {
             customerPhone: selectedCustomer ? selectedCustomer.phone : '',
             shopId: DEFAULT_SHOP_ID,
             branchId: DEFAULT_BRANCH_ID,
-            status: ORDER_STATUS.PAYMENT_PENDING,
+            status: newOrderStatus,
             totalAmount: total,
-            paidAmount: 0,
-            dueAmount: total,
-            paymentStatus: PAYMENT_STATUS.CREDIT,
-            paymentMethod: PAYMENT_METHODS.NOT_PAID,
+            paidAmount: newPaidAmount,
+            dueAmount: newDueAmount,
+            paymentStatus: newPayStatus,
+            paymentMethod: newPayMethod,
             items: cart,
-            statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: getLocalISOString() }],
+            statusHistory: [{ status: newOrderStatus, updatedBy: 'POS System', timestamp: getLocalISOString() }],
             expectedDeliveryDate: combinedExpectedDelivery,
             specialInstructions
           }
@@ -1533,8 +1774,176 @@ export default function POS() {
             </div>
           </div>
 
-          <div>
-            <h3 className={styles.modalSectionTitle}>Mixed Payment Details (Click field to enter amount)</h3>
+          {nomodLinkModal.show ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
+              <div style={{ background: '#F8FAFC', padding: '1.25rem', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+                <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>PAYMENT AMOUNT (NOMOD)</span>
+                <h1 style={{ margin: '0.25rem 0 0 0', color: '#1E293B', fontSize: '2.25rem', fontWeight: 800 }}>
+                  {formatCurrency(nomodLinkModal.amount)}
+                </h1>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
+                <div style={{ padding: '12px', background: 'white', borderRadius: '12px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+                  <QRCodeCanvas 
+                    id="nomod-qr-canvas"
+                    value={nomodLinkModal.url}
+                    size={160}
+                    level="H"
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className={styles.saveBtn}
+                    style={{ background: '#475569', color: 'white', padding: '0.35rem 0.75rem', fontSize: '0.8rem', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                    onClick={() => {
+                      const canvas = document.getElementById('nomod-qr-canvas');
+                      if (canvas) {
+                        const win = window.open('', '', 'width=400,height=400');
+                        win.document.write(`<html><body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;"><img id="qr-img" src="${canvas.toDataURL()}" style="width:300px;height:300px;"/>
+                        <script>
+                          document.getElementById('qr-img').onload = function() {
+                            window.print();
+                            window.close();
+                          };
+                        </script>
+                        </body></html>`);
+                        win.document.close();
+                      }
+                    }}
+                  >
+                    Print QR
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.saveBtn}
+                    style={{ background: '#475569', color: 'white', padding: '0.35rem 0.75rem', fontSize: '0.8rem', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                    onClick={() => {
+                      const canvas = document.getElementById('nomod-qr-canvas');
+                      if (canvas) {
+                        const a = document.createElement('a');
+                        a.download = `QR-${nomodLinkModal.linkId}.png`;
+                        a.href = canvas.toDataURL();
+                        a.click();
+                      }
+                    }}
+                  >
+                    Save QR
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569' }}>Nomod Checkout URL</label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    className={styles.inputField}
+                    value={nomodLinkModal.url}
+                    style={{ flex: 1, background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0.5rem', fontSize: '0.85rem' }}
+                  />
+                  <button
+                    type="button"
+                    className={styles.saveBtn}
+                    style={{ background: '#475569', color: 'white', padding: '0.5rem 1rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(nomodLinkModal.url);
+                      alert("Payment Link copied to clipboard!");
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  className={styles.saveBtn}
+                  style={{ background: '#2563EB', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                  onClick={() => window.open(nomodLinkModal.url, '_blank')}
+                >
+                  Open Link
+                </button>
+                <button
+                  type="button"
+                  className={styles.saveBtn}
+                  style={{ background: '#10B981', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                  onClick={() => {
+                    const text = `Please pay ${formatCurrency(nomodLinkModal.amount)} for your laundry order using this link: ${nomodLinkModal.url}`;
+                    handleWhatsApp(selectedCustomer?.phone || '', text);
+                  }}
+                >
+                  WhatsApp
+                </button>
+                <button
+                  type="button"
+                  className={styles.saveBtn}
+                  style={{ background: '#4F46E5', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                  onClick={() => {
+                    const smsUrl = `sms:${selectedCustomer?.phone || ''}?body=${encodeURIComponent(`Please pay ${formatCurrency(nomodLinkModal.amount)} for your laundry order: ${nomodLinkModal.url}`)}`;
+                    window.open(smsUrl, '_blank');
+                  }}
+                >
+                  SMS
+                </button>
+                <button
+                  type="button"
+                  className={styles.saveBtn}
+                  style={{ background: '#EA580C', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                  onClick={() => {
+                    const emailUrl = `mailto:${selectedCustomer?.email || ''}?subject=Laundry Payment&body=Please pay ${formatCurrency(nomodLinkModal.amount)} using this link: ${nomodLinkModal.url}`;
+                    window.open(emailUrl, '_blank');
+                  }}
+                >
+                  Email
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem', borderTop: '1px solid #E2E8F0', paddingTop: '1.25rem' }}>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  style={{ flex: 1, padding: '0.85rem', border: '1px solid #CBD5E1', borderRadius: '8px', cursor: 'pointer', background: 'white' }}
+                  onClick={() => setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 })}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className={styles.completeBtn}
+                  style={{ flex: 1.5, background: '#10B981', color: 'white', padding: '0.85rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                  onClick={async () => {
+                    if (window.electronAPI?.dbQuery) {
+                      await window.electronAPI.dbQuery(
+                        `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
+                         VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?, ?)`,
+                        [
+                          nomodLinkModal.linkId,
+                          selectedCustomer ? selectedCustomer.id : 'Walk-in',
+                          selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+                          `Order #${nomodLinkModal.billNumber || nomodLinkModal.orderId}`,
+                          nomodLinkModal.amount,
+                          getLocalDateTime(),
+                          nomodLinkModal.url,
+                          nomodLinkModal.linkId
+                        ]
+                      );
+                    }
+                    
+                    setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 });
+                    handleCompletePayment(true, nomodLinkModal.linkId, nomodLinkModal.url);
+                  }}
+                >
+                  Confirm & Save
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <h3 className={styles.modalSectionTitle}>Mixed Payment Details (Click field to enter amount)</h3>
             <div className={styles.mixedPaymentGrid} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
               <div 
                 onClick={() => setActivePaymentField('cash')}
@@ -1631,8 +2040,35 @@ export default function POS() {
                   />
                 </div>
               </div>
+
+              {settings.enableNomod && (
+                <div 
+                  onClick={() => setActivePaymentField('nomod')}
+                  style={{
+                    background: activePaymentField === 'nomod' ? '#EFF6FF' : 'white',
+                    border: activePaymentField === 'nomod' ? '2px solid #2563EB' : '1px solid #E2E8F0',
+                    borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
+                    <CreditCard size={14} /> Nomod Payment Link
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
+                    <CurrencySymbol size={12} />
+                    <input 
+                      type="number" 
+                      placeholder="0.00" 
+                      value={nomodAmount} 
+                      onChange={(e) => setNomodAmount(e.target.value)} 
+                      onFocus={() => setActivePaymentField('nomod')}
+                      style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
+          )}
 
           {(cardVal > 0 || upiVal > 0 || bankVal > 0) && settings.bankAccounts?.length > 0 && (
             <div style={{ marginTop: '1rem' }}>
@@ -1678,7 +2114,7 @@ export default function POS() {
                 </div>
               </div>
 
-              <button className={styles.completeBtn} onClick={handleCompletePayment}>
+              <button className={styles.completeBtn} onClick={() => handleCompletePayment(false)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                   <Printer size={28} />
                   Complete Payment & {printReceipt ? 'Print' : 'Finalize'} Receipt
@@ -2020,6 +2456,7 @@ export default function POS() {
               </div>
             </div>
           ))}
+          <div ref={cartEndRef} />
         </div>
 
         <div className={styles.cartFooter}>
@@ -2041,12 +2478,14 @@ export default function POS() {
             >
               <ShoppingBag size={18} /> Save Bill
             </button>
-            {selectedCustomer && selectedCustomer.balance > 0 && (
+            {settings.enableNomod && (
               <button
                 className={styles.overdueBtn}
-                onClick={() => navigate(`/overdue-statement/${selectedCustomer.id}`)}
+                style={{ background: 'linear-gradient(135deg, #1D4ED8, #3B82F6)', color: 'white', border: 'none' }}
+                onClick={handlePOSNomodPay}
+                disabled={!selectedCustomer || cart.length === 0}
               >
-                <Printer size={18} /> {t('overdue', settings.language)} Receipt
+                <CreditCard size={18} /> Nomod Pay
               </button>
             )}
             <button
@@ -2694,6 +3133,170 @@ export default function POS() {
         </div>
       )}
 
+      {/* Nomod Link Modal Overlay (when triggered in POS page instead of Checkout screen) */}
+      {nomodLinkModal.show && step !== 'checkout' && (
+        <div className={styles.modalOverlay} onClick={() => setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 })}>
+          <div className={styles.modal} style={{ maxWidth: '480px', padding: '1.5rem' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <div className={styles.modalTitle}>
+                <CreditCard size={24} color="#2563EB" />
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Nomod Payment Link</h2>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 })} />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
+              <div style={{ background: '#F8FAFC', padding: '1.25rem', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+                <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>PAYMENT AMOUNT</span>
+                <h1 style={{ margin: '0.25rem 0 0 0', color: '#1E293B', fontSize: '2rem', fontWeight: 800 }}>
+                  {formatCurrency(nomodLinkModal.amount)}
+                </h1>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
+                <div style={{ padding: '12px', background: 'white', borderRadius: '12px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+                  <QRCodeCanvas 
+                    id="nomod-qr-canvas"
+                    value={nomodLinkModal.url}
+                    size={160}
+                    level="H"
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className={styles.saveBtn}
+                    style={{ background: '#475569', color: 'white', padding: '0.35rem 0.75rem', fontSize: '0.8rem', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                    onClick={() => {
+                      const canvas = document.getElementById('nomod-qr-canvas');
+                      if (canvas) {
+                        const win = window.open('', '', 'width=400,height=400');
+                        win.document.write(`<html><body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;"><img id="qr-img" src="${canvas.toDataURL()}" style="width:300px;height:300px;"/>
+                        <script>
+                          document.getElementById('qr-img').onload = function() {
+                            window.print();
+                            window.close();
+                          };
+                        </script>
+                        </body></html>`);
+                        win.document.close();
+                      }
+                    }}
+                  >
+                    Print QR
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.saveBtn}
+                    style={{ background: '#475569', color: 'white', padding: '0.35rem 0.75rem', fontSize: '0.8rem', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                    onClick={() => {
+                      const canvas = document.getElementById('nomod-qr-canvas');
+                      if (canvas) {
+                        const a = document.createElement('a');
+                        a.download = `QR-${nomodLinkModal.linkId}.png`;
+                        a.href = canvas.toDataURL();
+                        a.click();
+                      }
+                    }}
+                  >
+                    Save QR
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569' }}>Nomod Checkout URL</label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    className={styles.inputField}
+                    value={nomodLinkModal.url}
+                    style={{ flex: 1, background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0.5rem', fontSize: '0.85rem' }}
+                  />
+                  <button
+                    type="button"
+                    className={styles.saveBtn}
+                    style={{ background: '#475569', color: 'white', padding: '0.5rem 1rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(nomodLinkModal.url);
+                      alert("Payment Link copied to clipboard!");
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  className={styles.saveBtn}
+                  style={{ background: '#2563EB', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                  onClick={() => {
+                    if (window.electronAPI?.openExternal) {
+                      window.electronAPI.openExternal(nomodLinkModal.url);
+                    } else {
+                      window.open(nomodLinkModal.url, '_blank');
+                    }
+                  }}
+                >
+                  Open Link
+                </button>
+                <button
+                  type="button"
+                  className={styles.saveBtn}
+                  style={{ background: '#10B981', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                  onClick={() => {
+                    const text = `Please pay ${formatCurrency(nomodLinkModal.amount)} for your laundry order using this link: ${nomodLinkModal.url}`;
+                    handleWhatsApp(selectedCustomer?.phone || '', text);
+                  }}
+                >
+                  WhatsApp
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem', borderTop: '1px solid #E2E8F0', paddingTop: '1.25rem' }}>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  style={{ flex: 1, padding: '0.85rem', border: '1px solid #CBD5E1', borderRadius: '8px', cursor: 'pointer', background: 'white' }}
+                  onClick={() => setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 })}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className={styles.completeBtn}
+                  style={{ flex: 1.5, background: '#10B981', color: 'white', padding: '0.85rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                  onClick={async () => {
+                    if (window.electronAPI?.dbQuery) {
+                      await window.electronAPI.dbQuery(
+                        `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
+                         VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?, ?)`,
+                        [
+                          nomodLinkModal.linkId,
+                          selectedCustomer ? selectedCustomer.id : 'Walk-in',
+                          selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+                          `Order #${nomodLinkModal.orderId}`,
+                          nomodLinkModal.amount,
+                          getLocalDateTime(),
+                          nomodLinkModal.url,
+                          nomodLinkModal.linkId
+                        ]
+                      );
+                    }
+                    setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 });
+                    handleCompletePayment(true, nomodLinkModal.linkId, nomodLinkModal.url);
+                  }}
+                >
+                  Confirm & Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

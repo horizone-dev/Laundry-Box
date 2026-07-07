@@ -258,3 +258,56 @@ input[type="radio"] {
     padding: 8px !important;
   }
 }
+
+/* Premium Unified Tables styling */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 16px;
+  border: 1px solid #E2E8F0;
+  background: #FFFFFF;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+}
+
+.base-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.base-table th {
+  background-color: #F8FAFC;
+  padding: 0.75rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid #E2E8F0;
+}
+
+.base-table td {
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  color: #334155;
+  border-bottom: 1px solid #F1F5F9;
+  font-weight: 500;
+  vertical-align: middle;
+  transition: background-color 0.2s ease;
+}
+
+.base-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.base-table tbody tr:hover td {
+  background-color: #F8FAFC;
+}
+
+.base-table .num-col {
+  text-align: right;
+}
+
+.base-table .center-col {
+  text-align: center;
+}

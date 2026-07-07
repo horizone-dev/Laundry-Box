@@ -362,42 +362,6 @@ export default function DailyTaxReport() {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className={styles.kpiGrid}>
-        {/* Output Tax Card */}
-        <div className={`${styles.kpiCard} ${styles.salesCard}`}>
-          <div className={styles.cardHeader}>
-            <div className={styles.iconBox} style={{ background: '#EFF6FF' }}>
-              <ArrowUpRight size={20} color="#2563EB" />
-            </div>
-            {settings.trn && <span className={styles.trnBadge}>TRN: {settings.trn}</span>}
-          </div>
-          <div>
-            <span className={styles.kpiLabel}>Total Output Tax</span>
-            <h2 className={styles.kpiValue}>
-              <CurrencySymbol size={20} /> {totals.salesTax.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </h2>
-            <p className={styles.kpiSubtext}>VAT collected from customer sales</p>
-          </div>
-        </div>
-
-        {/* Input Tax Card */}
-        <div className={`${styles.kpiCard} ${styles.expenseCard}`}>
-          <div className={styles.cardHeader}>
-            <div className={styles.iconBox} style={{ background: '#FEE2E2' }}>
-              <ArrowDownRight size={20} color="#EF4444" />
-            </div>
-            <span className={styles.trnBadge}>Rate: {settings.taxRate}%</span>
-          </div>
-          <div>
-            <span className={styles.kpiLabel}>Total Input Tax</span>
-            <h2 className={styles.kpiValue}>
-              <CurrencySymbol size={20} /> {totals.expensesTax.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </h2>
-            <p className={styles.kpiSubtext}>VAT paid on operations &amp; expenses</p>
-          </div>
-        </div>
-      </div>
 
 
       {/* Detailed Statement Table Card */}
@@ -440,15 +404,15 @@ export default function DailyTaxReport() {
         </div>
 
         {/* The Data Table */}
-        <div className={styles.tableContainer}>
-          <table className={styles.taxTable}>
+        <div className="table-container">
+          <table className="base-table">
             <thead>
               <tr>
                 <th style={{ textAlign: isRtl ? 'right' : 'left' }}>{t('date', settings.language)}</th>
-                <th style={{ textAlign: 'right' }}>{t('totalSales', settings.language)} (Gross)</th>
-                <th style={{ textAlign: 'right' }}>{t('salestax', settings.language)} (Output)</th>
-                <th style={{ textAlign: 'right' }}>{t('expenses', settings.language)} (Gross)</th>
-                <th style={{ textAlign: 'right' }}>{t('expensetax', settings.language)} (Input)</th>
+                <th className="num-col">{t('totalSales', settings.language)} (Gross)</th>
+                <th className="num-col">{t('salestax', settings.language)} (Output)</th>
+                <th className="num-col">{t('expenses', settings.language)} (Gross)</th>
+                <th className="num-col">{t('expensetax', settings.language)} (Input)</th>
               </tr>
             </thead>
             <tbody>
@@ -462,16 +426,16 @@ export default function DailyTaxReport() {
                     <td className={styles.dateCell}>
                       {formatDate(`${day.date}T00:00:00Z`)}
                     </td>
-                    <td className={styles.amountCol}>
+                    <td className="num-col">
                       <CurrencySymbol size={12} /> {day.salesGross.toFixed(2)}
                     </td>
-                    <td className={`${styles.amountCol} ${styles.salesTaxCell}`}>
+                    <td className={`num-col ${styles.salesTaxCell}`}>
                       + <CurrencySymbol size={12} /> {day.salesTax.toFixed(2)}
                     </td>
-                    <td className={styles.amountCol}>
+                    <td className="num-col">
                       <CurrencySymbol size={12} /> {day.expensesGross.toFixed(2)}
                     </td>
-                    <td className={`${styles.amountCol} ${styles.expenseTaxCell}`}>
+                    <td className={`num-col ${styles.expenseTaxCell}`}>
                       - <CurrencySymbol size={12} /> {day.expensesTax.toFixed(2)}
                     </td>
                   </tr>

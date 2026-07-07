@@ -152,7 +152,7 @@
 
 .ordersBadge {
   background: #EFF6FF;
-  color: #2563EB;
+  color: var(--primary);
   font-weight: 700;
   font-size: 0.75rem;
   padding: 0.3rem 0.6rem;
@@ -208,9 +208,9 @@
 }
 
 .pageBtn.active {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
 }
 
 .kpiGrid {
@@ -258,7 +258,7 @@
 }
 
 .kpiCardPrimary {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
 }
 
@@ -273,7 +273,7 @@
   align-items: center;
   justify-content: center;
   background: #F1F5F9;
-  color: #2563EB;
+  color: var(--primary);
   flex-shrink: 0;
 }
 
@@ -422,10 +422,10 @@
 }
 
 .inputWrapper:focus-within {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .inputWrapper input {
@@ -447,7 +447,7 @@
 }
 
 .primaryBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
   border: none;
   padding: 0.75rem 1.5rem;
@@ -459,7 +459,7 @@
 }
 
 .primaryBtn:hover {
-  background: #1D4ED8;
+  background: var(--primary-hover);
   transform: translateY(-1px);
 }
 
@@ -566,7 +566,7 @@
 
 .searchResultBalance {
   font-weight: 800;
-  color: #2563EB;
+  color: var(--primary);
 }
 
 .pageBtn:disabled {

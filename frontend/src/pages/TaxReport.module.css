@@ -73,7 +73,7 @@
 .trnBadge {
   font-size: 0.75rem;
   font-weight: 700;
-  color: #2563EB;
+  color: var(--primary);
   background: #EFF6FF;
   padding: 0.25rem 0.6rem;
   border-radius: 100px;
@@ -214,7 +214,7 @@
 }
 
 .searchInput:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
@@ -237,7 +237,7 @@
 }
 
 .filterSelect:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
   background: white;
 }
 
@@ -264,7 +264,7 @@
 }
 
 .dateInput:focus {
-  border-color: #2563EB;
+  border-color: var(--primary);
 }
 
 /* Table styling */
@@ -301,7 +301,7 @@
 
 .refCell {
   font-weight: 700;
-  color: #2563EB;
+  color: var(--primary);
   text-decoration: none;
   cursor: pointer;
 }
@@ -487,8 +487,8 @@
 }
 
 .paginationActiveBtn {
-  background: #2563EB;
+  background: var(--primary);
   color: white;
-  border-color: #2563EB;
+  border-color: var(--primary);
   box-shadow: 0 2px 4px rgba(37, 99, 235, 0.15);
 }

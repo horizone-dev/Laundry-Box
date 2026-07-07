@@ -21,6 +21,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   requestRefocus: () => ipcRenderer.send('request-refocus'),
   getPrinters: () => ipcRenderer.invoke('get-printers'),
   printHtml: (options) => ipcRenderer.invoke('print-html', options),
+  createNomodCheckout: (options) => ipcRenderer.invoke('create-nomod-checkout', options),
+  retrieveNomodCheckoutStatus: (options) => ipcRenderer.invoke('retrieve-nomod-checkout-status', options),
+  logAuditEvent: (options) => ipcRenderer.invoke('log-audit-event', options),
+  getEmailSettings: () => ipcRenderer.invoke('get-email-settings'),
+  saveEmailSettings: (settings) => ipcRenderer.invoke('save-email-settings', settings),
+  testEmail: () => ipcRenderer.invoke('test-email'),
 });
 
 // Override native alert to show custom HTML/CSS Toast notifications, confirm to refocus, and print for silent routing
