@@ -635,13 +635,15 @@ async function sendEmailReport(retryCount = 0) {
         FROM customers 
         WHERE balance > 0 OR balance < 0
       `).all();
-      const outstandingHtml = generateOutstandingHtml(customers, stats.dateStr);
-      const pdf = await renderPdf(outstandingHtml);
-      attachments.push({
-        filename: `Customer-Outstanding-${stats.dateStr.replace(/ /g, '-')}.pdf`,
-        content: pdf,
-        contentType: 'application/pdf'
-      });
+      if (customers.length > 0) {
+        const outstandingHtml = generateOutstandingHtml(customers, stats.dateStr);
+        const pdf = await renderPdf(outstandingHtml);
+        attachments.push({
+          filename: `Customer-Outstanding-${stats.dateStr.replace(/ /g, '-')}.pdf`,
+          content: pdf,
+          contentType: 'application/pdf'
+        });
+      }
     }
 
     let transporter = nodemailer.createTransport({
