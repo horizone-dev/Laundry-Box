@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   backupDatabase: () => ipcRenderer.invoke('backup-database'),
   importDatabase: () => ipcRenderer.invoke('import-database'),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+  getDesktopPath: () => ipcRenderer.invoke('get-desktop-path'),
   silentBackup: (targetPath) => ipcRenderer.invoke('silent-backup', targetPath),
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),
   downloadUpdate: () => ipcRenderer.send('download-update'),

@@ -141,9 +141,18 @@ export function SettingsProvider({ children }) {
     if (window.electronAPI?.dbQuery) {
       try {
         const result = await window.electronAPI.dbQuery('SELECT * FROM shops LIMIT 1', []);
-        if (result.success && result.data.length > 0) {
           const shop = result.data[0];
           const shopSettings = typeof shop.settings === 'string' ? JSON.parse(shop.settings) : shop.settings;
+
+          let defaultBackupPath = shopSettings?.autoBackupPath || '';
+          if (!defaultBackupPath && window.electronAPI?.getDesktopPath) {
+            try {
+              defaultBackupPath = await window.electronAPI.getDesktopPath();
+            } catch (err) {
+              console.error("Failed to get desktop path:", err);
+            }
+          }
+
           setSettings({
             companyName: shop.name || 'Laundry Box',
             companyNameAr: shopSettings?.companyNameAr || '',
@@ -181,7 +190,7 @@ export function SettingsProvider({ children }) {
             },
             bankAccounts: shopSettings?.bankAccounts || [],
             defaultBankId: shopSettings?.defaultBankId || '',
-            autoBackupPath: shopSettings?.autoBackupPath || '',
+            autoBackupPath: defaultBackupPath,
             autoBackupInterval: shopSettings?.autoBackupInterval ?? 60,
             lastBackupTime: shopSettings?.lastBackupTime || '',
             language: shopSettings?.language || 'English',

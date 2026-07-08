@@ -1370,6 +1370,11 @@ ipcMain.handle('import-database', async () => {
   }
 });
 
+// Retrieve desktop path
+ipcMain.handle('get-desktop-path', () => {
+  return app.getPath('desktop');
+});
+
 // Select folder for auto backup
 ipcMain.handle('select-folder', async () => {
   try {
