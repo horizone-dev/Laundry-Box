@@ -141,6 +141,7 @@ export function SettingsProvider({ children }) {
     if (window.electronAPI?.dbQuery) {
       try {
         const result = await window.electronAPI.dbQuery('SELECT * FROM shops LIMIT 1', []);
+        if (result.success && result.data.length > 0) {
           const shop = result.data[0];
           const shopSettings = typeof shop.settings === 'string' ? JSON.parse(shop.settings) : shop.settings;
 
