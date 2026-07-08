@@ -19,6 +19,24 @@ process.on('unhandledRejection', (reason) => {
 const { spawn } = require('child_process');
 const { initDB, getDB, closeDB, generateServiceSVG } = require('./database');
 const emailService = require('./emailService');
+const nomodService = require('./backend/services/nomodService');
+
+// Configuration for payment status tracking
+const PAYMENT_TRACKING_CONFIG = {
+  fastIntervalMs: 10000,          // Polling interval in phase 1 (10s)
+  slowIntervalMs: 30000,          // Polling interval in phase 2 (30s)
+  transitionThresholdMs: 120000,  // When to switch from fast to slow (2 minutes)
+  maxTrackingDurationMs: 600000,  // Maximum duration to track a payment (10 minutes)
+  resumeWindowMs: 2700000         // Time window for resuming pending links on startup (45 minutes)
+};
+
+// Global tracker map and logger
+const activeTrackers = new Map();
+
+function logTracker(orderId, message, level = 'info') {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] [payment-tracker] [${level.toUpperCase()}] [Order: ${orderId}] ${message}`);
+}
 
 let mainWindow;
 let backendProcess;
@@ -205,6 +223,10 @@ app.whenReady().then(async () => {
   // -> then UI load
   createWindow();
 
+  // Resume tracking for recent pending payments and show reminder
+  resumeRecentPendingTrackers();
+  showPendingPaymentsReminder();
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -219,9 +241,23 @@ app.on('window-all-closed', () => {
 });
 
 app.on('quit', () => {
+  console.log('[payment-tracker] [INFO] App quit. Clearing all active payment status trackers.');
+  for (const [orderId, tracker] of activeTrackers.entries()) {
+    clearTimeout(tracker.timeoutId);
+  }
+  activeTrackers.clear();
+
   if (backendProcess) {
     backendProcess.kill();
   }
+});
+
+app.on('will-quit', () => {
+  console.log('[payment-tracker] [INFO] App will quit. Clearing all active payment status trackers.');
+  for (const [orderId, tracker] of activeTrackers.entries()) {
+    clearTimeout(tracker.timeoutId);
+  }
+  activeTrackers.clear();
 });
 
 // Offline/online handling
@@ -611,6 +647,448 @@ ipcMain.handle('retrieve-nomod-checkout-status', async (event, { checkoutId, use
     return { success: true, data };
   } catch (err) {
     console.error("retrieve-nomod-checkout-status failed:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Payment status tracking logic
+
+async function checkPaymentStatusInternal(orderId, checkoutId) {
+  try {
+    const db = getDB();
+    const shopResult = db.prepare('SELECT settings FROM shops LIMIT 1').get();
+    const settings = shopResult && shopResult.settings ? JSON.parse(shopResult.settings) : {};
+    const apiKey = settings.nomodApiKey;
+
+    logTracker(orderId, `Requesting checkout status from Nomod service for checkoutId: ${checkoutId}`, 'debug');
+    const res = await nomodService.getCheckoutStatus(checkoutId, apiKey);
+    
+    if (!res.success) {
+      logTracker(orderId, `Nomod checkout status request failed: ${res.error} (type: ${res.errorType || 'unknown'})`, 'warn');
+      
+      if (res.errorType === 'unauthorized') {
+        logTracker(orderId, `Stopping tracker due to 401 Unauthorized credentials error.`, 'error');
+        return { isFinal: true, stopReason: 'unauthorized' };
+      }
+      if (res.errorType === 'notFound') {
+        logTracker(orderId, `Checkout not found (404). Stopping tracker and marking status as Failed.`, 'error');
+        const nowStr = new Date().toISOString();
+        
+        const dbTransaction = db.transaction(() => {
+          if (orderId.startsWith('SETTLE-')) {
+            db.prepare(`UPDATE payment_links SET status = 'Failed' WHERE checkoutId = ?`).run(checkoutId);
+          } else {
+            db.prepare(`UPDATE orders SET nomodPaymentStatus = 'Failed', isSynced = 0, updatedAt = ? WHERE id = ?`).run(nowStr, orderId);
+            db.prepare(`UPDATE payment_links SET status = 'Failed' WHERE checkoutId = ?`).run(checkoutId);
+          }
+        });
+        dbTransaction();
+        
+        if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+          mainWindow.webContents.send('payment-status-changed', { orderId, checkoutId, status: 'Failed' });
+        }
+        return { isFinal: true, stopReason: 'notFound' };
+      }
+      
+      return { isFinal: false, stopReason: 'network_error' };
+    }
+
+    const { status, paidAt, transactionReference, rawData } = res;
+    const isFinal = ['Paid', 'Failed', 'Expired', 'Cancelled'].includes(status);
+    const nowStr = new Date().toISOString();
+
+    if (orderId && orderId.startsWith('SETTLE-')) {
+      const linkRecord = db.prepare('SELECT status, customerId, customerName, amount FROM payment_links WHERE checkoutId = ?').get(checkoutId);
+      const currentNomodStatus = linkRecord ? linkRecord.status : 'Pending';
+
+      if (currentNomodStatus === 'Paid') {
+        logTracker(orderId, `Settlement payment already marked as Paid. Skipping.`, 'info');
+        return { isFinal: true, stopReason: 'already_paid' };
+      }
+
+      if (status !== currentNomodStatus) {
+        logTracker(orderId, `Status changed for settlement link: ${currentNomodStatus} -> ${status}`, 'info');
+
+        if (status === 'Paid') {
+          const dbTransaction = db.transaction(() => {
+            db.prepare(`
+              UPDATE payment_links 
+              SET status = 'Paid', 
+                  paidAt = ?, 
+                  transactionReference = ? 
+              WHERE checkoutId = ?
+            `).run(paidAt || nowStr, transactionReference || '', checkoutId);
+
+            if (linkRecord) {
+              const customerId = linkRecord.customerId;
+              const customerName = linkRecord.customerName || 'Walk-in Customer';
+              const amount = linkRecord.amount;
+
+              const bills = db.prepare(`
+                SELECT id, totalAmount, paidAmount, dueAmount 
+                FROM orders 
+                WHERE customerId = ? 
+                  AND paymentStatus IN ('Pending', 'Partial') 
+                  AND status != 'Cancelled' 
+                ORDER BY createdAt ASC
+              `).all(customerId);
+
+              let remaining = amount;
+              for (const bill of bills) {
+                if (remaining <= 0) break;
+                const due = bill.dueAmount ?? (bill.totalAmount - (bill.paidAmount || 0));
+                if (due <= 0) continue;
+
+                const allocate = Math.min(remaining, due);
+                const newPaid = (bill.paidAmount || 0) + allocate;
+                const newDue = due - allocate;
+                const newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+
+                db.prepare(`
+                  UPDATE orders 
+                  SET paidAmount = ?, 
+                      dueAmount = ?, 
+                      paymentStatus = ?, 
+                      isSynced = 0, 
+                      updatedAt = ? 
+                  WHERE id = ?
+                `).run(newPaid, newDue, newStatus, nowStr, bill.id);
+
+                const payId = `PAY-NOMOD-SETTLE-${bill.id}-${checkoutId}`;
+                const exists = db.prepare('SELECT COUNT(*) as count FROM payments WHERE id = ?').get(payId).count;
+                if (exists === 0) {
+                  db.prepare(`
+                    INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
+                    VALUES (?, ?, ?, ?, ?, 'Nomod', 'SUCCESS', ?, 0, ?)
+                  `).run(payId, customerId, bill.id, 'SHOP_01', allocate, paidAt || nowStr, nowStr);
+                } else {
+                  logTracker(orderId, `Duplicate payment record check: payment ${payId} already exists. Skipping insert.`, 'warn');
+                }
+
+                remaining -= allocate;
+              }
+
+              if (remaining > 0) {
+                const advPayId = `PAY-ADV-NOMOD-${checkoutId}`;
+                const exists = db.prepare('SELECT COUNT(*) as count FROM payments WHERE id = ?').get(advPayId).count;
+                if (exists === 0) {
+                  db.prepare(`
+                    INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
+                    VALUES (?, ?, ?, ?, ?, 'Nomod', 'SUCCESS', ?, 0, ?)
+                  `).run(advPayId, customerId, null, 'SHOP_01', remaining, paidAt || nowStr, nowStr);
+                } else {
+                  logTracker(orderId, `Duplicate payment record check: advance payment ${advPayId} already exists. Skipping insert.`, 'warn');
+                }
+              }
+
+              db.prepare(`
+                UPDATE customers 
+                SET balance = balance - ?, 
+                    isSynced = 0, 
+                    updatedAt = ? 
+                WHERE id = ?
+              `).run(amount, nowStr, customerId);
+
+              const txnId = `TXN-NOMOD-SETTLE-${checkoutId}`;
+              const txnExists = db.prepare('SELECT COUNT(*) as count FROM account_transactions WHERE id = ?').get(txnId).count;
+              if (txnExists === 0) {
+                const _nowT = new Date(paidAt || nowStr);
+                const txnTimestamp = `${_nowT.getFullYear()}-${String(_nowT.getMonth() + 1).padStart(2, '0')}-${String(_nowT.getDate()).padStart(2, '0')} ${String(_nowT.getHours()).padStart(2, '0')}:${String(_nowT.getMinutes()).padStart(2, '0')}:${String(_nowT.getSeconds()).padStart(2, '0')}`;
+                
+                db.prepare(`
+                  INSERT INTO account_transactions 
+                  (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+                  VALUES (?, 'SHOP_01', 'GATEWAY', 'INCOME', 'Sales Settlement', ?, ?, ?, 0, ?, 'CreditCard', NULL)
+                `).run(
+                  txnId,
+                  amount,
+                  `Settlement for Customer ${customerName} via Nomod`,
+                  txnTimestamp,
+                  nowStr
+                );
+              }
+            }
+          });
+
+          try {
+            dbTransaction();
+            logTracker(orderId, `Database transaction succeeded for paid settlement.`, 'info');
+          } catch (err) {
+            logTracker(orderId, `Database transaction failed: ${err.message}. Rolled back.`, 'error');
+            throw err;
+          }
+
+          try {
+            const { runDataHealer } = require('./database');
+            runDataHealer(db);
+            logTracker(orderId, `Reconciliation runDataHealer successfully executed.`, 'info');
+          } catch (healErr) {
+            logTracker(orderId, `Healer run failed: ${healErr.message}`, 'error');
+          }
+        } else {
+          db.prepare(`UPDATE payment_links SET status = ? WHERE checkoutId = ?`).run(status, checkoutId);
+        }
+
+        const customerName = linkRecord ? linkRecord.customerName : 'Customer';
+        const amount = linkRecord ? linkRecord.amount : 0;
+
+        if (status === 'Paid') {
+          logTracker(orderId, `Displaying native OS success notification for settlement of customer ${customerName}`, 'info');
+          const { Notification } = require('electron');
+          if (Notification.isSupported()) {
+            new Notification({
+              title: '✅ Payment Received Successfully',
+              body: `Customer: ${customerName}\nInvoice: ${orderId}\nAmount: AED ${amount.toFixed(2)}`
+            }).show();
+          }
+        }
+
+        if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+          mainWindow.webContents.send('payment-status-changed', {
+            orderId,
+            checkoutId,
+            status,
+            customerId: linkRecord ? linkRecord.customerId : 'all',
+            customerName,
+            amount,
+            rawData
+          });
+        }
+      }
+    } else {
+      const order = db.prepare('SELECT nomodPaymentStatus, totalAmount, customerId, shopId, paymentStatus FROM orders WHERE id = ?').get(orderId);
+      if (!order) {
+        logTracker(orderId, `Order not found in database.`, 'warn');
+        return { isFinal: true, stopReason: 'order_missing' };
+      }
+
+      const currentNomodStatus = order.nomodPaymentStatus;
+
+      if (order.paymentStatus === 'Paid') {
+        logTracker(orderId, `Order is already marked as Paid. Skipping.`, 'info');
+        return { isFinal: true, stopReason: 'already_paid' };
+      }
+
+      if (status !== currentNomodStatus) {
+        logTracker(orderId, `Status changed: ${currentNomodStatus} -> ${status}`, 'info');
+
+        if (status === 'Paid') {
+          const dbTransaction = db.transaction(() => {
+            db.prepare(`
+              UPDATE orders 
+              SET paymentStatus = 'Paid', 
+                  paidAmount = totalAmount, 
+                  dueAmount = 0, 
+                  paymentMethod = 'Nomod', 
+                  paidAt = ?, 
+                  nomodPaymentStatus = 'Paid', 
+                  nomodCheckoutId = ?, 
+                  isSynced = 0, 
+                  updatedAt = ? 
+              WHERE id = ?
+            `).run(paidAt || nowStr, checkoutId, nowStr, orderId);
+
+            db.prepare(`
+              UPDATE payment_links 
+              SET status = 'Paid', 
+                  paidAt = ?, 
+                  transactionReference = ? 
+              WHERE checkoutId = ?
+            `).run(paidAt || nowStr, transactionReference || '', checkoutId);
+
+            const payId = `PAY-NOMOD-${checkoutId}`;
+            const exists = db.prepare('SELECT COUNT(*) as count FROM payments WHERE id = ?').get(payId).count;
+            if (exists === 0) {
+              db.prepare(`
+                INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
+                VALUES (?, ?, ?, ?, ?, 'Nomod', 'SUCCESS', ?, 0, ?)
+              `).run(payId, order.customerId || 'Walk-in', orderId, order.shopId || 'SHOP_01', order.totalAmount, paidAt || nowStr, nowStr);
+            } else {
+              logTracker(orderId, `Duplicate payment record check: payment ${payId} already exists. Skipping insert.`, 'warn');
+            }
+
+            const txnId = `TXN-NOMOD-${checkoutId}`;
+            const txnExists = db.prepare('SELECT COUNT(*) as count FROM account_transactions WHERE id = ?').get(txnId).count;
+            if (txnExists === 0) {
+              const _nowT = new Date(paidAt || nowStr);
+              const txnTimestamp = `${_nowT.getFullYear()}-${String(_nowT.getMonth() + 1).padStart(2, '0')}-${String(_nowT.getDate()).padStart(2, '0')} ${String(_nowT.getHours()).padStart(2, '0')}:${String(_nowT.getMinutes()).padStart(2, '0')}:${String(_nowT.getSeconds()).padStart(2, '0')}`;
+              
+              db.prepare(`
+                INSERT INTO account_transactions 
+                (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+                VALUES (?, 'SHOP_01', 'GATEWAY', 'INCOME', 'Sales', ?, ?, ?, 0, ?, 'CreditCard', NULL)
+              `).run(
+                txnId,
+                order.totalAmount,
+                `Payment for Order ${orderId} via Nomod`,
+                txnTimestamp,
+                nowStr
+              );
+            }
+          });
+
+          try {
+            dbTransaction();
+            logTracker(orderId, `Database transaction succeeded for paid order.`, 'info');
+          } catch (err) {
+            logTracker(orderId, `Database transaction failed: ${err.message}. Rolled back.`, 'error');
+            throw err;
+          }
+
+          try {
+            const { runDataHealer } = require('./database');
+            runDataHealer(db);
+            logTracker(orderId, `Reconciliation runDataHealer successfully executed.`, 'info');
+          } catch (healErr) {
+            logTracker(orderId, `Healer run failed: ${healErr.message}`, 'error');
+          }
+        } else {
+          db.prepare(`
+            UPDATE orders 
+            SET nomodPaymentStatus = ?, 
+                isSynced = 0, 
+                updatedAt = ? 
+            WHERE id = ?
+          `).run(status, nowStr, orderId);
+
+          db.prepare(`
+            UPDATE payment_links 
+            SET status = ? 
+            WHERE checkoutId = ?
+          `).run(status, checkoutId);
+        }
+
+        const customerNameResult = db.prepare('SELECT name FROM customers WHERE id = ?').get(order.customerId);
+        const customerName = customerNameResult ? customerNameResult.name : 'Customer';
+        const amount = order.totalAmount || 0;
+
+        if (status === 'Paid') {
+          logTracker(orderId, `Displaying native OS success notification for order ${orderId}`, 'info');
+          const { Notification } = require('electron');
+          if (Notification.isSupported()) {
+            new Notification({
+              title: '✅ Payment Received Successfully',
+              body: `Customer: ${customerName}\nInvoice: ${orderId}\nAmount: AED ${amount.toFixed(2)}`
+            }).show();
+          }
+        }
+
+        if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+          mainWindow.webContents.send('payment-status-changed', {
+            orderId,
+            checkoutId,
+            status,
+            customerName,
+            amount,
+            rawData
+          });
+        }
+      }
+    }
+
+    return { isFinal, stopReason: isFinal ? 'final_status' : null };
+  } catch (err) {
+    logTracker(orderId, `Failed checking status: ${err.message}`, 'error');
+    return { isFinal: false, stopReason: 'exception' };
+  }
+}
+
+function startPaymentTrackingInternal(orderId, checkoutId) {
+  if (!checkoutId) return;
+
+  if (activeTrackers.has(orderId)) {
+    logTracker(orderId, `Resetting tracker for order ${orderId}`, 'info');
+    clearTimeout(activeTrackers.get(orderId).timeoutId);
+  }
+
+  logTracker(orderId, `Starting status tracking for checkoutId ${checkoutId}`, 'info');
+  const startTime = Date.now();
+
+  const poll = async () => {
+    const elapsed = Date.now() - startTime;
+    if (elapsed > PAYMENT_TRACKING_CONFIG.maxTrackingDurationMs) {
+      logTracker(orderId, `Stopping polling: reached maximum tracking duration of ${PAYMENT_TRACKING_CONFIG.maxTrackingDurationMs / 60000} mins.`, 'info');
+      activeTrackers.delete(orderId);
+      return;
+    }
+
+    let interval = PAYMENT_TRACKING_CONFIG.slowIntervalMs;
+    if (elapsed <= PAYMENT_TRACKING_CONFIG.transitionThresholdMs) {
+      interval = PAYMENT_TRACKING_CONFIG.fastIntervalMs;
+    }
+
+    try {
+      const { isFinal, stopReason } = await checkPaymentStatusInternal(orderId, checkoutId);
+      if (isFinal) {
+        logTracker(orderId, `Stop polling: final status achieved or stop signal received (${stopReason}).`, 'info');
+        activeTrackers.delete(orderId);
+        return;
+      }
+    } catch (err) {
+      logTracker(orderId, `Polling check error: ${err.message}. Retrying on cycle.`, 'error');
+    }
+
+    logTracker(orderId, `Scheduling next poll in ${interval / 1000} seconds...`, 'debug');
+    const timeoutId = setTimeout(poll, interval);
+    activeTrackers.set(orderId, { timeoutId, startTime, checkoutId });
+  };
+
+  poll();
+}
+
+function stopPaymentTrackingInternal(orderId) {
+  if (activeTrackers.has(orderId)) {
+    logTracker(orderId, `Stopping tracking for order ${orderId}`, 'info');
+    clearTimeout(activeTrackers.get(orderId).timeoutId);
+    activeTrackers.delete(orderId);
+  }
+}
+
+function resumeRecentPendingTrackers() {
+  try {
+    const db = getDB();
+    const resumeThresholdTime = new Date(Date.now() - PAYMENT_TRACKING_CONFIG.resumeWindowMs).toISOString();
+    const recentPending = db.prepare(`
+      SELECT id as orderId, nomodCheckoutId as checkoutId 
+      FROM orders 
+      WHERE nomodPaymentStatus = 'Pending' 
+        AND nomodCheckoutId IS NOT NULL 
+        AND nomodCheckoutId != ''
+        AND createdAt >= ?
+    `).all(resumeThresholdTime);
+
+    console.log(`[payment-tracker] [INFO] Resuming tracking for ${recentPending.length} pending checkouts from the last ${PAYMENT_TRACKING_CONFIG.resumeWindowMs / 60000} mins.`);
+    for (const item of recentPending) {
+      startPaymentTrackingInternal(item.orderId, item.checkoutId);
+    }
+  } catch (err) {
+    console.error("[payment-tracker] [ERROR] Failed to resume recent pending trackers:", err);
+  }
+}
+
+ipcMain.on('start-payment-tracking', (event, { orderId, checkoutId }) => {
+  startPaymentTrackingInternal(orderId, checkoutId);
+});
+
+ipcMain.on('stop-payment-tracking', (event, { orderId }) => {
+  stopPaymentTrackingInternal(orderId);
+});
+
+ipcMain.handle('check-payment-status-now', async (event, { orderId, checkoutId }) => {
+  try {
+    const { isFinal, stopReason } = await checkPaymentStatusInternal(orderId, checkoutId);
+    if (isFinal) {
+      stopPaymentTrackingInternal(orderId);
+    }
+    const db = getDB();
+    if (orderId.startsWith('SETTLE-')) {
+      const link = db.prepare('SELECT status FROM payment_links WHERE checkoutId = ?').get(checkoutId);
+      return { success: true, status: link ? link.status : 'Pending' };
+    } else {
+      const order = db.prepare('SELECT nomodPaymentStatus FROM orders WHERE id = ?').get(orderId);
+      return { success: true, status: order ? order.nomodPaymentStatus : 'Pending' };
+    }
+  } catch (err) {
     return { success: false, error: err.message };
   }
 });
@@ -1197,3 +1675,30 @@ ipcMain.handle('save-email-settings', async (event, settings) => {
 ipcMain.handle('test-email', async () => {
   return await emailService.sendEmailReport(0);
 });
+
+function showPendingPaymentsReminder() {
+  try {
+    const db = getDB();
+    const result = db.prepare("SELECT COUNT(*) as count FROM payment_links WHERE status = 'Pending'").get();
+    const count = result ? result.count : 0;
+    if (count > 0) {
+      logTracker('SYSTEM', `Displaying pending payment reminder for ${count} links`, 'info');
+      const { Notification } = require('electron');
+      if (Notification.isSupported()) {
+        const notification = new Notification({
+          title: '🔔 Pending Payments Reminder',
+          body: `You have ${count} pending payment links awaiting payment.`
+        });
+        notification.on('click', () => {
+          logTracker('SYSTEM', `Pending payments reminder clicked. Directing user to pending page.`, 'info');
+          if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+            mainWindow.webContents.send('navigate-to-pending-payments');
+          }
+        });
+        notification.show();
+      }
+    }
+  } catch (err) {
+    console.error("[payment-tracker] [ERROR] Failed to show pending payments reminder:", err);
+  }
+}

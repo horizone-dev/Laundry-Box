@@ -25,10 +25,16 @@ export default function OutstandingBills() {
   const [dateRange, setDateRange] = useState('All');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   useEffect(() => {
     fetchOutstandingBills();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterType, dateRange, customStart, customEnd]);
 
   const fetchOutstandingBills = async () => {
     try {
@@ -87,6 +93,9 @@ export default function OutstandingBills() {
 
   const totalOutstanding = filteredBills.reduce((sum, b) => sum + (b.dueAmount || b.totalAmount || 0), 0);
   const overdueCount = filteredBills.filter(b => isOverdue(b)).length;
+
+  const totalPages = Math.ceil(filteredBills.length / itemsPerPage);
+  const paginatedBills = filteredBills.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handleExportCSV = () => {
     const headers = ['Order ID', 'Bill Number', 'Customer Name', 'Customer Phone', 'Date', 'Status', 'Total Amount', 'Due Amount'];
@@ -232,7 +241,7 @@ export default function OutstandingBills() {
             </tr>
           </thead>
           <tbody>
-            {filteredBills.map(bill => (
+            {paginatedBills.map(bill => (
               <tr key={bill.id} className={isOverdue(bill) ? styles.overdueRow : ''}>
                 <td className={styles.boldText}>{bill.id}</td>
                 <td>
@@ -264,7 +273,7 @@ export default function OutstandingBills() {
                 </td>
               </tr>
             ))}
-            {filteredBills.length === 0 && (
+            {paginatedBills.length === 0 && (
               <tr>
                 <td colSpan="7" className={styles.noData}>
                   {loading ? 'Loading...' : 'No outstanding bills found.'}
@@ -273,6 +282,47 @@ export default function OutstandingBills() {
             )}
           </tbody>
         </table>
+
+        {totalPages > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', borderTop: '1px solid #E2E8F0', background: 'white', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
+            <span style={{ fontSize: '0.85rem', color: '#64748B' }}>
+              Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredBills.length)} of {filteredBills.length} entries
+            </span>
+            <div style={{ display: 'flex', gap: '0.25rem' }}>
+              <button 
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                style={{ padding: '0.4rem 0.8rem', border: '1px solid #E2E8F0', borderRadius: '6px', background: currentPage === 1 ? '#F8FAFC' : 'white', color: currentPage === 1 ? '#94A3B8' : '#334155', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', fontSize: '0.85rem', fontWeight: 500 }}
+              >
+                Previous
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                if (page === 1 || page === totalPages || (page >= currentPage - 1 && page <= currentPage + 1)) {
+                  return (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      style={{ padding: '0.4rem 0.8rem', border: '1px solid #E2E8F0', borderRadius: '6px', background: currentPage === page ? '#4F46E5' : 'white', color: currentPage === page ? 'white' : '#334155', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}
+                    >
+                      {page}
+                    </button>
+                  );
+                }
+                if (page === currentPage - 2 || page === currentPage + 2) {
+                  return <span key={page} style={{ padding: '0.4rem 0.2rem', color: '#64748B' }}>...</span>;
+                }
+                return null;
+              })}
+              <button 
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                style={{ padding: '0.4rem 0.8rem', border: '1px solid #E2E8F0', borderRadius: '6px', background: currentPage === totalPages ? '#F8FAFC' : 'white', color: currentPage === totalPages ? '#94A3B8' : '#334155', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', fontSize: '0.85rem', fontWeight: 500 }}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

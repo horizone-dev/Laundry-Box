@@ -16,6 +16,7 @@ import { getLocalDateTime, getLocalISOString } from '../utils/dateUtils';
 import styles from './MainLayout.module.css';
 import { checkCreditLimit } from '../utils/creditLimit';
 import { QRCodeCanvas } from 'qrcode.react';
+import { paymentService } from '../services/paymentService';
 
 const API_BASE = API_BASE_URL;
 
@@ -177,6 +178,33 @@ export default function MainLayout() {
     }, 60000);
     return () => clearInterval(syncInterval);
   }, [isOnline]);
+
+  // Payment status changed global listener & OS Notification click redirect
+  useEffect(() => {
+    const unsubscribe = paymentService.subscribe((data) => {
+      if (data.status === 'Paid') {
+        const custName = data.customerName || 'Customer';
+        const orderId = data.orderId;
+        const amountPaid = data.amount ? `${settings.currencySymbol || 'AED'} ${data.amount.toFixed(2)}` : 'N/A';
+        showToast(
+          `✅ Payment Received Successfully\n\nCustomer: ${custName}\nInvoice: ${orderId}\nAmount: ${amountPaid}`,
+          'success'
+        );
+      }
+    });
+
+    let unsubscribeNav = () => {};
+    if (window.electronAPI && window.electronAPI.onNavigateToPendingPayments) {
+      unsubscribeNav = window.electronAPI.onNavigateToPendingPayments(() => {
+        navigate('/pending');
+      });
+    }
+
+    return () => {
+      unsubscribe();
+      unsubscribeNav();
+    };
+  }, [settings, navigate]);
 
   // Software Update Checker and Listener Effect
   useEffect(() => {
@@ -1522,7 +1550,7 @@ export default function MainLayout() {
       {deliveryToast && (
         <div className={deliveryToast.type === 'error' ? styles.toastNotificationError : styles.toastNotification}>
           {deliveryToast.type === 'error' ? <AlertTriangle size={18} /> : <CheckCircle size={18} />}
-          <span>{deliveryToast.message}</span>
+          <span style={{ whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>{deliveryToast.message}</span>
         </div>
       )}
     </div>

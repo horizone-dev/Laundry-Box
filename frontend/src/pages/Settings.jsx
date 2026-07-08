@@ -30,7 +30,7 @@ export default function Settings() {
 
   const [activeTab, setActiveTab] = useState(
     isSuperAdmin
-      ? (tabParam || 'Payment Gateway')
+      ? (tabParam || 'Nomod')
       : (tabParam === 'Maintenance' && !(isSuperAdmin || isManager)) || (tabParam === 'Software Update' && !(isSuperAdmin || isManager))
         ? 'General'
         : (tabParam || 'General')
@@ -104,30 +104,6 @@ export default function Settings() {
   const [lastCheckTime, setLastCheckTime] = useState(localStorage.getItem('update_last_check') || '');
   const [currentVersion, setCurrentVersion] = useState('1.0.0');
 
-  // Nomod History States
-  const [nomodTxns, setNomodTxns] = useState([]);
-  const [nomodAudits, setNomodAudits] = useState([]);
-  const [nomodSearch, setNomodSearch] = useState('');
-  const [nomodLoading, setNomodLoading] = useState(false);
-
-  useEffect(() => {
-    if (activeTab === 'Nomod History') {
-      fetchNomodData();
-    }
-  }, [activeTab]);
-
-  const fetchNomodData = async () => {
-    if (!window.electronAPI?.dbQuery) return;
-    setNomodLoading(true);
-    try {
-      const txnsRes = await window.electronAPI.dbQuery(`SELECT * FROM nomod_transactions ORDER BY createdAt DESC`);
-      setNomodTxns(txnsRes);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setNomodLoading(false);
-    }
-  };
 
   const handleAddDamageNote = () => {
     const trimmed = newDamageNoteInput.trim();
@@ -288,25 +264,22 @@ export default function Settings() {
 
   if (!isAuthorized) return null;
 
-  const tabs = isSuperAdmin
-    ? ['Email Reports', 'Payment Gateway', 'Import Backup', 'System Reset']
-    : [
-        'General',
-        'Order Workflow',
-        'Company Info',
-        'Tax Settings',
-        'Bill Templates',
-        'Bank',
-        ...((isManager && settings.allowManagerNomodConfig) ? ['Payment Gateway'] : []),
-        'WhatsApp Config',
-        'Damage Notes',
-        'Printers',
-        ...(isManager ? ['Maintenance'] : []),
-        ...(isManager ? ['Software Update'] : []),
-        'Web Dashboard',
-        'Email Reports',
-        'System Reset'
-      ];
+  const tabs = [
+    'General',
+    'Order Workflow',
+    'Company Info',
+    'Tax Settings',
+    'Bill Templates',
+    'Bank',
+    ...(isSuperAdmin ? ['Nomod'] : (isManager && settings.allowManagerNomodConfig ? ['Nomod'] : [])),
+
+    'WhatsApp Config',
+    'Damage Notes',
+    'Printers',
+    ...(isSuperAdmin || isManager ? ['Maintenance', 'Software Update'] : []),
+    'Email Reports',
+    ...(isSuperAdmin ? ['Import Backup', 'System Reset'] : (isManager ? ['System Reset'] : []))
+  ];
 
   const onCropComplete = (croppedArea, croppedAreaPixels) => {
     setCroppedAreaPixels(croppedAreaPixels);
@@ -414,7 +387,7 @@ export default function Settings() {
         billTemplates: 'Invoice Templates',
         waTemplates: 'WhatsApp Templates',
         printers: 'Printers',
-        gateways: 'Payment Gateways',
+        gateways: 'Nomod Config',
         ordersPayments: 'Orders & Payments',
         customers: 'Customers',
         services: 'Services & Products',
@@ -762,7 +735,7 @@ export default function Settings() {
       if (toReset.billTemplates) summaryList.push('Bill Templates & Terms: Restored standard invoice template');
       if (toReset.waTemplates) summaryList.push('WhatsApp Templates: Restored default message formats');
       if (toReset.printers) summaryList.push('Printers Configuration: Cleared tag and billing printers');
-      if (toReset.gateways) summaryList.push('Payment Gateways: Cleared Nomod/Stripe/Tap/Fatoorah credentials');
+      if (toReset.gateways) summaryList.push('Nomod: Cleared Nomod credentials');
 
       // Update actual setting context
       await updateSettings(newSettings);
@@ -861,7 +834,7 @@ export default function Settings() {
         <div className={styles.mainContent}>
 
 
-          {activeTab === 'Payment Gateway' && (
+          {activeTab === 'Nomod' && (
             <div className={styles.profileContainer}>
               <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
                 <h2 className={styles.cardTitle}>Nomod Payment Gateway Settings</h2>
@@ -2032,7 +2005,7 @@ export default function Settings() {
 
                   <div className={styles.toggleWrapper} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0' }}>
                     <div>
-                      <label style={{ fontWeight: 600, fontSize: '0.95rem' }}>Allow Managers to configure Nomod Payment Gateway</label>
+                      <label style={{ fontWeight: 600, fontSize: '0.95rem' }}>Allow Managers to configure Nomod</label>
                       <p style={{ fontSize: '0.8rem', color: '#64748B', margin: 0 }}>Allows Managers to view, edit and manage Nomod settings.</p>
                     </div>
                     <label className={styles.switch}>
@@ -2060,7 +2033,7 @@ export default function Settings() {
                     className={styles.saveBtn}
                     style={{ background: '#2563EB', fontSize: '0.8rem', padding: '0.5rem 1rem' }}
                     onClick={() => {
-                      const newAccounts = [...(settings.bankAccounts || []), { id: Date.now().toString(), bankName: '', accountNumber: '', iban: '' }];
+                      const newAccounts = [...(settings.bankAccounts || []), { id: Date.now().toString(), bankName: '', accountNumber: '', iban: '', isActive: true }];
                       updateSettings({ bankAccounts: newAccounts });
                     }}
                   >
@@ -2070,8 +2043,19 @@ export default function Settings() {
 
                 <div className={styles.bankAccountsList} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1.5rem' }}>
                   {(settings.bankAccounts || []).map((account, index) => (
-                    <div key={index} className={`${styles.bankAccountItem} ${settings.defaultBankId === account.id ? styles.defaultBank : ''}`} style={{ border: '1px solid #E2E8F0', padding: '1.5rem', borderRadius: '12px', position: 'relative' }}>
+                    <div key={index} className={`${styles.bankAccountItem} ${settings.defaultBankId === account.id ? styles.defaultBank : ''}`} style={{ border: '1px solid #E2E8F0', padding: '1.5rem', borderRadius: '12px', position: 'relative', opacity: account.isActive === false ? 0.6 : 1 }}>
                       <div className={styles.bankItemActions} style={{ position: 'absolute', top: '1rem', right: '1rem', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                        <button
+                          className={styles.defaultToggle}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', color: account.isActive === false ? '#10B981' : '#64748B', fontWeight: 700, fontSize: '0.8rem' }}
+                          onClick={() => {
+                            const newAccounts = [...settings.bankAccounts];
+                            newAccounts[index].isActive = account.isActive === false ? true : false;
+                            updateSettings({ bankAccounts: newAccounts });
+                          }}
+                        >
+                          {account.isActive === false ? 'Activate' : 'Deactivate'}
+                        </button>
                         <button
                           className={styles.defaultToggle}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', color: settings.defaultBankId === account.id ? '#F59E0B' : '#94A3B8', fontWeight: 700, fontSize: '0.8rem' }}
@@ -2762,113 +2746,6 @@ export default function Settings() {
             </div>
           )}
 
-          {activeTab === 'Web Dashboard' && (
-            <div className={styles.profileContainer}>
-              <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
-                <h2 className={styles.cardTitle}>🌐 Web Dashboard — Branch Security Settings</h2>
-                <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.5rem' }}>
-                  Configure this branch's identity and security key for the online owner dashboard. The owner can view all branches live on a phone by logging in at the backend server's <strong>/dashboard</strong> URL.
-                </p>
-
-                <div style={{ background: 'linear-gradient(135deg, #EEF2FF, #F5F3FF)', border: '1px solid #C7D2FE', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
-                  <p style={{ fontSize: '0.8rem', color: '#3730A3', fontWeight: 600, margin: 0 }}>
-                    ℹ️ How it works: Each branch PC syncs using a unique security API Key. The owner logs in using their personal email/username and password. PINs are no longer used for security.
-                  </p>
-                </div>
-
-                <div className={styles.formGrid}>
-                  <div className={styles.formGroup}>
-                    <label>Branch Name <span style={{ color: '#6366F1', fontWeight: 600 }}>*</span></label>
-                    <input
-                      type="text"
-                      className={styles.inputField}
-                      placeholder="e.g., Dubai Mall Branch"
-                      value={settings.branchName || ''}
-                      onChange={(e) => updateSettings({ branchName: e.target.value })}
-                    />
-                    <p style={{ fontSize: '0.75rem', color: '#64748B', margin: '0.25rem 0 0' }}>This name appears on the owner's web dashboard.</p>
-                  </div>
-
-                  <div className={styles.formGroup}>
-                    <label>Branch ID <span style={{ color: '#6366F1', fontWeight: 600 }}>*</span></label>
-                    <input
-                      type="text"
-                      className={styles.inputField}
-                      placeholder="e.g., BRANCH_DUBAI_01"
-                      value={settings.branchId || ''}
-                      onChange={(e) => updateSettings({ branchId: e.target.value.toUpperCase().replace(/\s+/g, '_') })}
-                    />
-                    <p style={{ fontSize: '0.75rem', color: '#64748B', margin: '0.25rem 0 0' }}>Unique identifier — must be different for each branch. No spaces allowed.</p>
-                  </div>
-
-                  <div className={styles.formGroup}>
-                    <label>Branch Sync API Key <span style={{ color: '#6366F1', fontWeight: 600 }}>*</span></label>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <input
-                        type="text"
-                        className={styles.inputField}
-                        style={{ fontFamily: 'monospace' }}
-                        placeholder="Generate a secure API Key"
-                        value={settings.branchApiKey || ''}
-                        onChange={(e) => updateSettings({ branchApiKey: e.target.value.trim() })}
-                      />
-                      <button
-                        type="button"
-                        className={styles.primaryBtn}
-                        style={{ whiteSpace: 'nowrap', padding: '0.5rem 1rem' }}
-                        onClick={() => {
-                          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-                          let key = 'LB_KEY_';
-                          for (let i = 0; i < 24; i++) {
-                            key += chars.charAt(Math.floor(Math.random() * chars.length));
-                          }
-                          updateSettings({ branchApiKey: key });
-                        }}
-                      >
-                        Generate Key
-                      </button>
-                    </div>
-                    <p style={{ fontSize: '0.75rem', color: '#64748B', margin: '0.25rem 0 0' }}>Cryptographically secure sync key. Enforces branch authenticity during database updates.</p>
-                  </div>
-                </div>
-
-                {/* Status indicator */}
-                {settings.branchName && settings.branchId && settings.branchApiKey && (
-                  <div style={{ marginTop: '1rem', background: '#F0FDF4', border: '1px solid #86EFAC', borderRadius: '10px', padding: '0.85rem 1rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <span style={{ color: '#16A34A', fontSize: '1.2rem' }}>✅</span>
-                    <div>
-                      <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#15803D', margin: 0 }}>Ready! This branch is secured.</p>
-                      <p style={{ fontSize: '0.75rem', color: '#16A34A', margin: 0 }}>
-                        Branch <strong>"{settings.branchName}"</strong> (ID: {settings.branchId}) will synchronize with the server using its secure API Key.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {(!settings.branchName || !settings.branchId || !settings.branchApiKey) && (
-                  <div style={{ marginTop: '1rem', background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: '10px', padding: '0.85rem 1rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <span style={{ color: '#D97706', fontSize: '1.2rem' }}>⚠️</span>
-                    <div>
-                      <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#92400E', margin: 0 }}>Incomplete setup</p>
-                      <p style={{ fontSize: '0.75rem', color: '#B45309', margin: 0 }}>Fill in all three fields above — Branch Name, Branch ID, and Branch Sync API Key — to activate secure sync.</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className={styles.card}>
-                <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1E293B', marginBottom: '0.5rem' }}>Setup Instructions</h3>
-                <ol style={{ paddingLeft: '1.25rem', fontSize: '0.82rem', color: '#334155', lineHeight: '1.85', margin: 0 }}>
-                  <li>Set a <strong>unique Branch Name</strong> on each PC (e.g., "Dubai Mall", "Abu Dhabi")</li>
-                  <li>Set a <strong>unique Branch ID</strong> on each PC (e.g., "BRANCH_DUBAI", "BRANCH_ABU_DHABI")</li>
-                  <li>Generate a <strong>Branch Sync API Key</strong> by clicking the "Generate Key" button</li>
-                  <li>Make sure the app is <strong>syncing to the cloud</strong> (sync icon in the top bar)</li>
-                  <li>The owner logs in with their email/username and password at the dashboard URL to monitor performance</li>
-                </ol>
-              </div>
-            </div>
-          )}
-
           {activeTab === 'Email Reports' && (
             <EmailReportsSettings />
           )}
@@ -2910,335 +2787,55 @@ export default function Settings() {
                     </button>
                   </div>
 
-                  {/* Custom Reset Card */}
+                  {/* Clear Transactions Card */}
                   <div className={styles.resetCard}>
                     <div>
-                      <h3 className={styles.resetSectionTitle}>
-                        <Sliders size={20} color="#2563EB" /> Custom Module Reset
+                      <h3 className={styles.resetSectionTitle} style={{ color: '#EA580C' }}>
+                        <Database size={20} /> Clear All Transactions
                       </h3>
                       <p className={styles.resetDescription}>
-                        Selectively choose which specific configurations or database registers to restore or clear. Non-selected modules will remain untouched.
+                        Deletes all Orders, Payments, Expenses, and Ledger Logs. Keeps your Customers, Services, and System Settings intact. Useful for starting a new financial year.
                       </p>
-
-                      <div className={styles.checklistHeader}>
-                        <span className={styles.checklistTitle}>Select Modules to Reset</span>
-                        <div className={styles.checklistActions}>
-                          <button
-                            type="button"
-                            className={styles.checklistLink}
-                            onClick={() => {
-                              setResetOptions({
-                                generalSettings: true,
-                                workflowStatuses: true,
-                                presetDamageNotes: true,
-                                companyInfo: true,
-                                taxSettings: true,
-                                billTemplates: true,
-                                waTemplates: true,
-                                printers: true,
-                                gateways: true,
-                                ordersPayments: true,
-                                customers: true,
-                                services: true,
-                                expensesBank: true,
-                                staffPayroll: true
-                              });
-                            }}
-                          >
-                            Select All
-                          </button>
-                          <button
-                            type="button"
-                            className={styles.checklistLink}
-                            onClick={() => {
-                              setResetOptions({
-                                generalSettings: false,
-                                workflowStatuses: false,
-                                presetDamageNotes: false,
-                                companyInfo: false,
-                                taxSettings: false,
-                                billTemplates: false,
-                                waTemplates: false,
-                                printers: false,
-                                gateways: false,
-                                ordersPayments: false,
-                                customers: false,
-                                services: false,
-                                expensesBank: false,
-                                staffPayroll: false
-                              });
-                            }}
-                          >
-                            Clear All
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className={styles.resetChecklist}>
-                        {/* 1. General Settings */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.generalSettings ? styles.active : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, generalSettings: !prev.generalSettings }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.generalSettings}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel}>General System Settings</span>
-                            <span className={styles.resetSubLabel}>Resets language, date formats, overdue triggers, default payment options.</span>
-                          </div>
-                        </div>
-
-                        {/* 2. Order Workflow */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.workflowStatuses ? styles.active : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, workflowStatuses: !prev.workflowStatuses }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.workflowStatuses}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel}>Order Workflow Stages</span>
-                            <span className={styles.resetSubLabel}>Resets status stages list back to standard default statuses.</span>
-                          </div>
-                        </div>
-
-                        {/* 3. Preset Damage Notes */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.presetDamageNotes ? styles.active : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, presetDamageNotes: !prev.presetDamageNotes }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.presetDamageNotes}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel}>Preset Damage Notes</span>
-                            <span className={styles.resetSubLabel}>Restores the default list of pre-configured shirt/garment damage notes.</span>
-                          </div>
-                        </div>
-
-                        {/* 4. Company Profile */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.companyInfo ? styles.active : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, companyInfo: !prev.companyInfo }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.companyInfo}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel}>Company & Shop Profile</span>
-                            <span className={styles.resetSubLabel}>Clears logo, company name, address details, Emirate selection.</span>
-                          </div>
-                        </div>
-
-                        {/* 5. Tax & Compliance */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.taxSettings ? styles.active : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, taxSettings: !prev.taxSettings }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.taxSettings}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel}>Tax & UAE VAT Settings</span>
-                            <span className={styles.resetSubLabel}>Resets tax rates, TRN input, and UAE VAT exclusive configurations.</span>
-                          </div>
-                        </div>
-
-                        {/* 6. Invoice Templates */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.billTemplates ? styles.active : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, billTemplates: !prev.billTemplates }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.billTemplates}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel}>Invoice & Bill Templates</span>
-                            <span className={styles.resetSubLabel}>Resets terms text, delivery methods (hanger/fold), template layout.</span>
-                          </div>
-                        </div>
-
-                        {/* 7. WhatsApp Messages */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.waTemplates ? styles.active : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, waTemplates: !prev.waTemplates }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.waTemplates}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel}>WhatsApp Message Formats</span>
-                            <span className={styles.resetSubLabel}>Restores default text message templates for client notices.</span>
-                          </div>
-                        </div>
-
-                        {/* 8. Local Printer Config */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.printers ? styles.active : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, printers: !prev.printers }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.printers}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel}>Local Printer Mappings</span>
-                            <span className={styles.resetSubLabel}>Clears the tag and invoice printer selection.</span>
-                          </div>
-                        </div>
-
-                        {/* 9. Payment Gateways */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.gateways ? styles.active : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, gateways: !prev.gateways }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.gateways}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel}>Payment Gateways Config</span>
-                            <span className={styles.resetSubLabel}>Clears merchant API keys for Stripe, Tap, Nomod, Fatoorah.</span>
-                          </div>
-                        </div>
-
-                        {/* 10. Destructive: Orders & Payments */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.ordersPayments ? `${styles.active} ${styles.destructive}` : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, ordersPayments: !prev.ordersPayments }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.ordersPayments}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel} style={{ color: resetOptions.ordersPayments ? '#DC2626' : 'inherit' }}>
-                              Orders, Sales & Payments
-                            </span>
-                            <span className={styles.resetSubLabel}>Completely wipes the transaction table, order logs, payments, reconciliations.</span>
-                            <span className={styles.destructiveBadge}>Destructive</span>
-                          </div>
-                        </div>
-
-                        {/* 11. Destructive: Customer Directory */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.customers ? `${styles.active} ${styles.destructive}` : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, customers: !prev.customers }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.customers}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel} style={{ color: resetOptions.customers ? '#DC2626' : 'inherit' }}>
-                              Customer Directory
-                            </span>
-                            <span className={styles.resetSubLabel}>Permanently erases all customer profile records, phone numbers, and balances.</span>
-                            <span className={styles.destructiveBadge}>Destructive</span>
-                          </div>
-                        </div>
-
-                        {/* 12. Destructive: Services & Pricing */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.services ? `${styles.active} ${styles.destructive}` : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, services: !prev.services }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.services}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel} style={{ color: resetOptions.services ? '#DC2626' : 'inherit' }}>
-                              Services & Inventory Pricing
-                            </span>
-                            <span className={styles.resetSubLabel}>Clears custom services, categories, types, and restores default list of services.</span>
-                            <span className={styles.destructiveBadge}>Destructive</span>
-                          </div>
-                        </div>
-
-                        {/* 13. Destructive: Ledger & Cash Register */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.expensesBank ? `${styles.active} ${styles.destructive}` : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, expensesBank: !prev.expensesBank }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.expensesBank}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel} style={{ color: resetOptions.expensesBank ? '#DC2626' : 'inherit' }}>
-                              Ledger Accounts & Expenses
-                            </span>
-                            <span className={styles.resetSubLabel}>Deletes all logged store expenses and bank account transfer records.</span>
-                            <span className={styles.destructiveBadge}>Destructive</span>
-                          </div>
-                        </div>
-
-                        {/* 14. Destructive: Payroll Registers */}
-                        <div
-                          className={`${styles.resetChecklistItem} ${resetOptions.staffPayroll ? `${styles.active} ${styles.destructive}` : ''}`}
-                          onClick={() => setResetOptions(prev => ({ ...prev, staffPayroll: !prev.staffPayroll }))}
-                        >
-                          <input
-                            type="checkbox"
-                            className={styles.resetCheckbox}
-                            checked={resetOptions.staffPayroll}
-                            onChange={() => {}}
-                          />
-                          <div className={styles.resetLabelGroup}>
-                            <span className={styles.resetLabel} style={{ color: resetOptions.staffPayroll ? '#DC2626' : 'inherit' }}>
-                              Staff & Payroll Registers
-                            </span>
-                            <span className={styles.resetSubLabel}>Clears employee registers, wage payout histories, and accrual sheets.</span>
-                            <span className={styles.destructiveBadge}>Destructive</span>
-                          </div>
-                        </div>
-                      </div>
                     </div>
                     <button
                       className={`${styles.resetButton} ${styles.resetButtonSecondary}`}
-                      style={{ marginTop: '1.5rem' }}
-                      disabled={!Object.values(resetOptions).some(Boolean)}
                       onClick={() => {
+                        setResetOptions({
+                          generalSettings: false, workflowStatuses: false, presetDamageNotes: false, companyInfo: false,
+                          taxSettings: false, billTemplates: false, waTemplates: false, printers: false, gateways: false,
+                          ordersPayments: true, customers: false, services: false, expensesBank: true, staffPayroll: true
+                        });
                         setResetPinAction('custom');
                         setShowResetPinModal(true);
                       }}
                     >
-                      <Save size={18} /> Execute Custom Reset
+                      <Database size={18} /> Clear Transactions Only
+                    </button>
+                  </div>
+
+                  {/* Reset Settings Card */}
+                  <div className={styles.resetCard}>
+                    <div>
+                      <h3 className={styles.resetSectionTitle} style={{ color: '#2563EB' }}>
+                        <Sliders size={20} /> Reset System Settings
+                      </h3>
+                      <p className={styles.resetDescription}>
+                        Resets configurations like Tax, Invoice Templates, and Printers back to system defaults. Does not delete any transaction, service, or customer data.
+                      </p>
+                    </div>
+                    <button
+                      className={`${styles.resetButton} ${styles.resetButtonSecondary}`}
+                      onClick={() => {
+                        setResetOptions({
+                          generalSettings: true, workflowStatuses: true, presetDamageNotes: true, companyInfo: false,
+                          taxSettings: true, billTemplates: true, waTemplates: true, printers: true, gateways: true,
+                          ordersPayments: false, customers: false, services: false, expensesBank: false, staffPayroll: false
+                        });
+                        setResetPinAction('custom');
+                        setShowResetPinModal(true);
+                      }}
+                    >
+                      <Sliders size={18} /> Reset Settings Only
                     </button>
                   </div>
                 </div>

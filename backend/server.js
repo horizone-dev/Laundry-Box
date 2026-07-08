@@ -9,7 +9,6 @@ const authRoutes      = require('./routes/auth');
 const syncRoutes      = require('./routes/sync');
 const orderRoutes     = require('./routes/orders');
 const roleRoutes      = require('./routes/roles');
-const dashboardRoutes = require('./routes/dashboard');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -67,9 +66,6 @@ const loginLimiter = rateLimit({
   message: { success: false, message: 'Too many login attempts, please try again after 15 minutes' }
 });
 
-// Serve static dashboard files from backend/public
-app.use(express.static(path.join(__dirname, 'public')));
-
 // Log all requests
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
@@ -93,21 +89,11 @@ app.use('/api/sync',      apiLimiter, syncRoutes);
 app.use('/api/orders',    apiLimiter, orderRoutes);
 app.use('/api/roles',     roleRoutes);
 
-// Protect dashboard login route specifically with stricter rate limits
-app.use('/api/dashboard/login', loginLimiter);
-app.use('/api/dashboard', dashboardRoutes);
-
-// Serve dashboard HTML at /dashboard
-app.get('/dashboard', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
-});
-
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Laundry Box Backend Running' });
 });
 
 app.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
-  console.log(`📊 Branch Dashboard: http://localhost:${PORT}/dashboard`);
   console.log('--- REFRESHED SCHEMA ACTIVE: SECURE AUTHENTICATION ---');
 });

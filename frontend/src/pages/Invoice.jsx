@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, X, Printer, Send, FileText, Tag } from 'lucide-react';
+import { ArrowLeft, X, Printer, Send, FileText, Tag, RefreshCw, AlertCircle } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import InvoiceTemplate from '../components/InvoiceTemplate';
 import DressTag from '../components/DressTag';
 import { getLocalDateTime } from '../utils/dateUtils';
 import styles from './Invoice.module.css';
+import { paymentService } from '../services/paymentService';
 
 export default function Invoice() {
   const { id } = useParams();
@@ -16,6 +17,14 @@ export default function Invoice() {
   const [isPrintingTags, setIsPrintingTags] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const invoiceRef = React.useRef();
+
+  const getDaysPending = (dateStr) => {
+    if (!dateStr) return 0;
+    const created = new Date(dateStr);
+    const diffTime = Math.abs(new Date() - created);
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
 
   useEffect(() => {
     const fetchOrder = async () => {
@@ -33,9 +42,11 @@ export default function Invoice() {
           let rawOrder = null;
           for (const variant of idVariations) {
             const res = await window.electronAPI.dbQuery(
-              `SELECT orders.*, customers.name as customerName, customers.phone as customerPhone 
+              `SELECT orders.*, customers.name as customerName, customers.phone as customerPhone,
+                      payment_links.date AS nomodLinkDate
                FROM orders 
                LEFT JOIN customers ON orders.customerId = customers.id 
+               LEFT JOIN payment_links ON orders.nomodCheckoutId = payment_links.checkoutId
                WHERE orders.id = ? OR orders.billNumber = ?`,
               [variant, variant]
             );
@@ -198,7 +209,15 @@ export default function Invoice() {
     };
 
     fetchOrder();
-  }, [id, settings]);
+
+    const unsubscribe = paymentService.subscribe(({ orderId, status }) => {
+      if (orderId === id || orderId === id.replace('#', '') || (order && orderId === order.id)) {
+        fetchOrder();
+      }
+    });
+
+    return () => unsubscribe();
+  }, [id, settings, order]);
 
   // Auto-print if query param is set
   useEffect(() => {
@@ -353,6 +372,8 @@ export default function Invoice() {
                 checkoutIdVal
               ]
             );
+            
+            paymentService.startTracking(order.id, checkoutIdVal);
             paymentLinkUrl = url;
           }
         } catch (err) {
@@ -408,6 +429,105 @@ export default function Invoice() {
       <div ref={invoiceRef}>
         <InvoiceTemplate order={order} settings={settings} onOrderUpdate={(updated) => setOrder(updated)} />
       </div>
+
+      {order && order.nomodCheckoutId && (
+        <div style={{ maxWidth: '800px', margin: '1rem auto', padding: '1rem 2rem', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={{ background: '#EFF6FF', color: '#1E40AF', border: '1px solid #BFDBFE', padding: '0.35rem 0.75rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 700 }}>
+              Nomod Status: {order.nomodPaymentStatus}
+            </span>
+            {order.nomodPaymentStatus === 'Pending' && getDaysPending(order.nomodLinkDate) >= (settings.pendingPaymentWarningDays || 3) && (
+              <span style={{ background: '#FFFBEB', color: '#B45309', border: '1px solid #FDE68A', padding: '0.35rem 0.75rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <AlertCircle size={14} /> Link Pending {getDaysPending(order.nomodLinkDate)} Days
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            {order.nomodPaymentStatus === 'Pending' && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '0.85rem', fontWeight: 700 }}
+                onClick={async () => {
+                  const res = await paymentService.checkNow(order.id, order.nomodCheckoutId);
+                  if (res.success) {
+                    alert(`Nomod status is: ${res.status}`);
+                  } else {
+                    alert("Status check failed: " + res.error);
+                  }
+                }}
+              >
+                <RefreshCw size={14} /> Check Status
+              </button>
+            )}
+            {(order.nomodPaymentStatus === 'Pending' || order.nomodPaymentStatus === 'Expired' || order.nomodPaymentStatus === 'Failed') && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '0.85rem', fontWeight: 700, background: '#EC4899', borderColor: '#EC4899' }}
+                onClick={async () => {
+                  if (!window.electronAPI) return;
+                  try {
+                    if (order.nomodCheckoutId) {
+                      await window.electronAPI.dbQuery(
+                        "UPDATE payment_links SET status = 'Expired' WHERE checkoutId = ?",
+                        [order.nomodCheckoutId]
+                      );
+                      paymentService.stopTracking(order.id);
+                    }
+
+                    const linkId = `LNK-${order.billNumber || Date.now().toString().slice(-4)}-${Date.now().toString().slice(-3)}`;
+                    const due = order.dueAmount ?? (order.totalAmount - (order.paidAmount || 0));
+
+                    const checkoutRes = await window.electronAPI.createNomodCheckout({
+                      amount: due,
+                      currency: settings.nomodCurrency || 'AED',
+                      customer: { name: order.customerName || order.customer, phone: order.customerPhone },
+                      orderId: order.id
+                    });
+
+                    if (checkoutRes.success && checkoutRes.data) {
+                      const newUrl = checkoutRes.data.url;
+                      const newCheckoutId = checkoutRes.data.id || linkId;
+
+                      const dateStr = getLocalDateTime();
+                      await window.electronAPI.dbQuery(
+                        `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
+                         VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?, ?)`,
+                        [
+                          linkId,
+                          order.customerId || 'Walk-in',
+                          order.customerName || order.customer || 'Walk-in Customer',
+                          `Order #${order.billNumber || order.id}`,
+                          due,
+                          dateStr,
+                          newUrl,
+                          newCheckoutId
+                        ]
+                      );
+
+                      await window.electronAPI.dbQuery(
+                        "UPDATE orders SET nomodCheckoutId = ?, nomodPaymentStatus = 'Pending', updatedAt = ? WHERE id = ?",
+                        [newCheckoutId, new Date().toISOString(), order.id]
+                      );
+
+                      paymentService.startTracking(order.id, newCheckoutId);
+                      alert("New Nomod payment link generated!");
+                      window.location.reload();
+                    } else {
+                      alert("Failed to generate link: " + (checkoutRes.error || "Unknown error"));
+                    }
+                  } catch (err) {
+                    alert("Error: " + err.message);
+                  }
+                }}
+              >
+                <Send size={14} /> Resend Link
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className={styles.footerActions} style={{ maxWidth: '800px', margin: '0 auto 2rem auto', padding: '0 2rem' }}>
         <button className={styles.printBtn} onClick={() => window.print()}>

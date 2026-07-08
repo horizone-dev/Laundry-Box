@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   Search, Filter, ChevronLeft, ChevronRight, Calendar,
   Clock, Package, CheckCircle, AlertCircle, ChevronDown,
-  X, Printer, CreditCard, Wallet, User, History, QrCode, Phone, DollarSign, Truck, Trash2, AlertTriangle, Info, Lock, Edit3
+  X, Printer, CreditCard, Wallet, User, History, QrCode, Phone, DollarSign, Truck, Trash2, AlertTriangle, Info, Lock, Edit3, Layers,
+  RefreshCw, Send
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
@@ -18,6 +19,7 @@ import CurrencySymbol from '../components/CurrencySymbol';
 import DressTag from '../components/DressTag';
 import styles from './Orders.module.css';
 import { checkCreditLimit } from '../utils/creditLimit';
+import { paymentService } from '../services/paymentService';
 
 const API_BASE = API_BASE_URL;
 
@@ -78,9 +80,112 @@ export default function Orders({ isPendingView = false }) {
   // Filtering logic
   const [showPayModal, setShowPayModal] = useState(false);
   const [payMethod, setPayMethod] = useState('Cash');
+  const [cashAmount, setCashAmount] = useState('');
+  const [cardAmount, setCardAmount] = useState('');
+  const [upiAmount, setUpiAmount] = useState('');
+  const [bankAmount, setBankAmount] = useState('');
+  const [discountAmount, setDiscountAmount] = useState('');
+
+  const cashVal = parseFloat(cashAmount) || 0;
+  const cardVal = parseFloat(cardAmount) || 0;
+  const upiVal = parseFloat(upiAmount) || 0;
+  const bankVal = parseFloat(bankAmount) || 0;
+  const discVal = parseFloat(discountAmount) || 0;
+
+  useEffect(() => {
+    if (!showPayModal) {
+      setCashAmount('');
+      setCardAmount('');
+      setUpiAmount('');
+      setBankAmount('');
+      setDiscountAmount('');
+      setPayMethod('Cash');
+    }
+  }, [showPayModal]);
+
+  useEffect(() => {
+    const unsubscribe = paymentService.subscribe(({ orderId, status }) => {
+      fetchOrders();
+      if (status === 'Paid') {
+        alert(`Payment successful for Order: ${orderId}`);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   const [nomodLinkModal, setNomodLinkModal] = useState({ show: false, url: '', linkId: '', amount: 0 });
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [pendingSubFilter, setPendingSubFilter] = useState('All'); // 'All', 'Pending', 'Overdue'
+  const [sortBy, setSortBy] = useState('date'); // 'date', 'payment'
+
+  const getDaysPending = (dateStr) => {
+    if (!dateStr) return 0;
+    const created = new Date(dateStr);
+    const diffTime = Math.abs(new Date() - created);
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
+  const handleResendPaymentLink = async (order) => {
+    if (!window.electronAPI) return;
+    try {
+      const userStr = sessionStorage.getItem('user') || '{}';
+      const currentUser = JSON.parse(userStr);
+
+      if (order.nomodCheckoutId) {
+        await window.electronAPI.dbQuery(
+          "UPDATE payment_links SET status = 'Expired' WHERE checkoutId = ?",
+          [order.nomodCheckoutId]
+        );
+        paymentService.stopTracking(order.id);
+      }
+
+      const linkId = `LNK-${order.billNumber || Date.now().toString().slice(-4)}-${Date.now().toString().slice(-3)}`;
+      const due = order.dueAmount ?? (order.totalAmount - (order.paidAmount || 0));
+
+      const checkoutRes = await window.electronAPI.createNomodCheckout({
+        amount: due,
+        currency: settings.nomodCurrency || 'AED',
+        customer: { name: order.customerName, phone: order.customerPhone },
+        orderId: order.id
+      });
+
+      if (checkoutRes.success && checkoutRes.data) {
+        const newUrl = checkoutRes.data.url;
+        const newCheckoutId = checkoutRes.data.id || linkId;
+
+        const dateStr = getLocalDateTime();
+        await window.electronAPI.dbQuery(
+          `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
+           VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?, ?)`,
+          [
+            linkId,
+            order.customerId || 'Walk-in',
+            order.customerName || 'Walk-in Customer',
+            `Order #${order.billNumber || order.id}`,
+            due,
+            dateStr,
+            newUrl,
+            newCheckoutId
+          ]
+        );
+
+        await window.electronAPI.dbQuery(
+          "UPDATE orders SET nomodCheckoutId = ?, nomodPaymentStatus = 'Pending', updatedAt = ? WHERE id = ?",
+          [newCheckoutId, new Date().toISOString(), order.id]
+        );
+
+        paymentService.startTracking(order.id, newCheckoutId);
+        alert("New Nomod payment link generated and tracking started!");
+        fetchOrders();
+      } else {
+        alert("Failed to generate new payment link: " + (checkoutRes.error || "Unknown error"));
+      }
+    } catch (err) {
+      console.error("Resend payment link exception:", err);
+      alert("Error generating new payment link: " + err.message);
+    }
+  };
   const [workflowFilter, setWorkflowFilter] = useState('All'); // 'All', 'Confirmed', 'Processing', 'Ready', 'Delivered', 'Cancelled'
   const [isPrintingTags, setIsPrintingTags] = useState(false);
   const [dateRange, setDateRange] = useState('All');
@@ -106,7 +211,7 @@ export default function Orders({ isPendingView = false }) {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, isPendingView, pendingSubFilter, workflowFilter, dateRange, customStart, customEnd]);
+  }, [searchTerm, isPendingView, pendingSubFilter, workflowFilter, dateRange, customStart, customEnd, sortBy]);
 
   useEffect(() => {
     const handleNomodSuccess = (e) => {
@@ -369,7 +474,7 @@ export default function Orders({ isPendingView = false }) {
 
   useEffect(() => {
     fetchOrders();
-  }, [searchTerm]);
+  }, [searchTerm, sortBy]);
 
   const fetchOrders = async () => {
     try {
@@ -386,9 +491,12 @@ export default function Orders({ isPendingView = false }) {
               orders.paymentStatus, orders.status, orders.paymentMethod, 
               orders.items, orders.statusHistory, orders.expectedDeliveryDate, orders.specialInstructions, orders.branchId,
               orders.createdAt, orders.updatedAt, orders.isSynced,
+              orders.nomodPaymentStatus, orders.nomodCheckoutId,
+              payment_links.date AS nomodLinkDate, payment_links.url AS nomodLinkUrl,
               0 AS isDeleted, NULL AS refundStatus, NULL AS refundMethod, NULL AS returnedAt, NULL AS payments
             FROM orders 
             LEFT JOIN customers ON orders.customerId = customers.id
+            LEFT JOIN payment_links ON orders.nomodCheckoutId = payment_links.checkoutId
 
             UNION ALL
 
@@ -399,6 +507,8 @@ export default function Orders({ isPendingView = false }) {
               deleted_orders.originalPaymentStatus AS paymentStatus, 'Deleted' AS status, deleted_orders.originalPaymentMethod AS paymentMethod, 
               deleted_orders.items, NULL AS statusHistory, NULL AS expectedDeliveryDate, NULL AS specialInstructions, NULL AS branchId,
               deleted_orders.deletedAt AS createdAt, deleted_orders.deletedAt AS updatedAt, 1 AS isSynced,
+              NULL AS nomodPaymentStatus, NULL AS nomodCheckoutId,
+              NULL AS nomodLinkDate, NULL AS nomodLinkUrl,
               1 AS isDeleted, deleted_orders.refundStatus, deleted_orders.refundMethod, deleted_orders.returnedAt, deleted_orders.payments
             FROM deleted_orders
           ) AS all_orders
@@ -409,7 +519,11 @@ export default function Orders({ isPendingView = false }) {
           const term = `%${searchTerm}%`;
           params = [term, term, term, term, term, term];
         }
-        query += ' ORDER BY createdAt DESC';
+        if (sortBy === 'payment') {
+          query += " ORDER BY CASE WHEN paymentStatus = 'Paid' THEN 0 ELSE 1 END, updatedAt DESC, createdAt DESC";
+        } else {
+          query += ' ORDER BY createdAt DESC';
+        }
         const res = await window.electronAPI.dbQuery(query, params);
         if (res.success) {
           setOrders(res.data);
@@ -547,6 +661,8 @@ export default function Orders({ isPendingView = false }) {
       const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
       const currentLoggedInUser = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
 
+      let linkedPayments = [];
+
       // A. Delete locally from SQLite (if electron app)
       if (window.electronAPI?.dbQuery) {
         // 1. Before deleting payments, query linked payment details so we can save them in audit log
@@ -555,7 +671,7 @@ export default function Orders({ isPendingView = false }) {
           'SELECT id, amount, createdAt, method FROM payments WHERE orderId = ?',
           [orderToDelete.id]
         );
-        const linkedPayments = linkedPaymentsRes.success ? linkedPaymentsRes.data : [];
+        linkedPayments = linkedPaymentsRes.success ? linkedPaymentsRes.data : [];
 
         // 2. Insert into deleted_orders audit log
         const isPaid = orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus);
@@ -832,59 +948,114 @@ export default function Orders({ isPendingView = false }) {
 
       // 1. Local DB Updates (Perform this FIRST)
       if (window.electronAPI?.dbQuery) {
+        let actualPaid = amountToPay;
+        let newPayStatus = 'Paid';
+        let newDue = 0;
+        let newPaid = selectedOrder.totalAmount;
+        let finalPayMethod = payMethod;
+
+        if (payMethod === 'Mixed') {
+          actualPaid = cashVal + cardVal + upiVal + bankVal;
+          if (actualPaid + discVal < amountToPay) {
+            newDue = amountToPay - (actualPaid + discVal);
+            newPaid = selectedOrder.totalAmount - newDue;
+            newPayStatus = newDue > 0 ? 'Partial' : 'Paid';
+          } else {
+            newPaid = selectedOrder.totalAmount;
+            newDue = 0;
+            newPayStatus = 'Paid';
+          }
+        } else {
+          if (discVal > 0) {
+            actualPaid = Math.max(0, amountToPay - discVal);
+            if (actualPaid + discVal < amountToPay) {
+              newDue = amountToPay - (actualPaid + discVal);
+              newPaid = selectedOrder.totalAmount - newDue;
+              newPayStatus = newDue > 0 ? 'Partial' : 'Paid';
+            } else {
+              newPaid = selectedOrder.totalAmount;
+              newDue = 0;
+              newPayStatus = 'Paid';
+            }
+          }
+        }
+
+        const finalNextStatus = (newDue === 0 && ['Payment Pending', 'Credit', 'Pending'].includes(selectedOrder.status)) ? 'Confirmed' : selectedOrder.status;
+
         // Update Local Order
         await window.electronAPI.dbQuery(
           'UPDATE orders SET status = ?, paymentStatus = ?, paidAmount = ?, dueAmount = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          [nextStatus, 'Paid', selectedOrder.totalAmount, 0, payMethod, getLocalISOString(), selectedOrder.id]
+          [finalNextStatus, newPayStatus, newPaid, newDue, finalPayMethod, getLocalISOString(), selectedOrder.id]
         );
 
         // Update Customer Balance if it was Credit/Pending/Partial
         const wasUnpaid = selectedOrder.paymentStatus === 'Credit' || selectedOrder.paymentStatus === 'Partial' || (selectedOrder.dueAmount !== undefined && selectedOrder.dueAmount > 0);
-        if (wasUnpaid && selectedOrder.customerId) {
+        if (wasUnpaid && selectedOrder.customerId && selectedOrder.customerId !== 'Walk-in') {
+          const reduction = amountToPay - newDue;
           await window.electronAPI.dbQuery(
             'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-            [amountToPay, getLocalISOString(), selectedOrder.customerId]
+            [reduction, getLocalISOString(), selectedOrder.customerId]
           );
         }
 
-        const txnId = `TXN-${Date.now()}`;
-        const _now2 = new Date();
-        const txnTimestamp = `${_now2.getFullYear()}-${String(_now2.getMonth() + 1).padStart(2, '0')}-${String(_now2.getDate()).padStart(2, '0')} ${String(_now2.getHours()).padStart(2, '0')}:${String(_now2.getMinutes()).padStart(2, '0')}`;
+        const txnTimestamp = getLocalDateTime();
 
-        const mappedBankId = payMethod === 'Card'
-          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
-          : (payMethod === 'UPI'
-            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
-            : (payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
-
-        await window.electronAPI.dbQuery(
-          `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, (payMethod === 'Bank' || payMethod === 'Card' || payMethod === 'UPI') ? 'BANK' : (payMethod === 'Nomod' ? 'GATEWAY' : 'CASH'), 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${selectedOrder.id}${payMethod === 'Card' ? ' (Card)' : (payMethod === 'UPI' ? ' (UPI)' : '')}`, txnTimestamp, 0, getLocalISOString(), 'DollarSign', mappedBankId]
-        );
-
-        // Record card commission if applicable
-        if (payMethod === 'Card' && settings.cardCommission > 0) {
-          const commissionRate = parseFloat(settings.cardCommission || 0);
-          const commissionAmount = amountToPay * (commissionRate / 100);
-          const commTxnId = `TXN-COMM-${Date.now()}`;
-          const commDesc = `Card Commission for Order ${selectedOrder.id}`;
-          await window.electronAPI.dbQuery(
-            `INSERT INTO account_transactions 
-             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, 0, getLocalISOString(), 'Percent', mappedBankId]
-          );
+        // Prepare splits
+        let splits = [];
+        if (payMethod === 'Mixed') {
+          if (cashVal > 0) splits.push({ method: 'Cash', amount: cashVal });
+          if (cardVal > 0) splits.push({ method: 'Card', amount: cardVal });
+          if (upiVal > 0) splits.push({ method: 'UPI', amount: upiVal });
+          if (bankVal > 0) splits.push({ method: 'Bank', amount: bankVal });
+        } else {
+          if (actualPaid > 0) splits.push({ method: payMethod, amount: actualPaid });
+        }
+        if (discVal > 0) {
+          splits.push({ method: 'Discount', amount: discVal });
         }
 
-        // Record Payment in payments table
-        const currentTimestamp = getLocalISOString();
-        await window.electronAPI.dbQuery(
-          `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-          [`PAY-HEAL-${selectedOrder.id}`, selectedOrder.customerId || 'Walk-in', selectedOrder.id, DEFAULT_SHOP_ID, amountToPay, payMethod, 'SUCCESS', currentTimestamp, currentTimestamp]
-        );
+        for (const split of splits) {
+          if (split.method === 'Discount') {
+            const splitTxnId = `TXN-${Date.now()}-Discount`;
+            await window.electronAPI.dbQuery(
+              `INSERT INTO account_transactions 
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+              [splitTxnId, DEFAULT_SHOP_ID, 'CASH', 'EXPENSE', 'Discount Given', split.amount, `Discount for Order ${selectedOrder.id}`, txnTimestamp, getLocalISOString(), 'DollarSign']
+            );
+          } else {
+            const splitTxnId = `TXN-${Date.now()}-${split.method}`;
+            const mappedBankId = split.method === 'Card' ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : (split.method === 'UPI' ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : (split.method === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
+            const accountType = (split.method === 'Bank' || split.method === 'Card' || split.method === 'UPI') ? 'BANK' : 'CASH';
+
+            await window.electronAPI.dbQuery(
+              `INSERT INTO account_transactions 
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+              [splitTxnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales Settlement', split.amount, `Payment for Order ${selectedOrder.id}${split.method === 'Card' ? ' (Card)' : (split.method === 'UPI' ? ' (UPI)' : '')}`, txnTimestamp, getLocalISOString(), 'DollarSign', mappedBankId]
+            );
+
+            if (split.method === 'Card' && settings.cardCommission > 0) {
+              const commissionRate = parseFloat(settings.cardCommission || 0);
+              const commissionAmount = split.amount * (commissionRate / 100);
+              const commTxnId = `TXN-COMM-${Date.now()}`;
+              await window.electronAPI.dbQuery(
+                `INSERT INTO account_transactions 
+                 (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+                [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, `Card Commission for Order ${selectedOrder.id}`, txnTimestamp, getLocalISOString(), 'Percent', mappedBankId]
+              );
+            }
+
+            // Record Payment in payments table
+            const currentTimestamp = getLocalISOString();
+            await window.electronAPI.dbQuery(
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+              [`PAY-HEAL-${selectedOrder.id}-${split.method}-${Date.now()}`, selectedOrder.customerId || 'Walk-in', selectedOrder.id, DEFAULT_SHOP_ID, split.amount, split.method, 'SUCCESS', currentTimestamp, currentTimestamp]
+            );
+          }
+        }
 
         // Call the healer to automatically reconcile customer balance
         if (window.electronAPI?.runDataHealer) {
@@ -893,12 +1064,18 @@ export default function Orders({ isPendingView = false }) {
       }
 
       // 2. Update Local React State immediately
+      const actualPaidState = payMethod === 'Mixed' ? cashVal + cardVal + upiVal + bankVal : (amountToPay - discVal);
+      const newDueState = amountToPay - actualPaidState - discVal;
+      const newPaidState = selectedOrder.totalAmount - Math.max(0, newDueState);
+      const newPayStatusState = newDueState > 0 ? 'Partial' : 'Paid';
+      const nextStatusState = (newDueState <= 0 && ['Payment Pending', 'Credit', 'Pending'].includes(selectedOrder.status)) ? 'Confirmed' : selectedOrder.status;
+
       const updatedOrder = {
         ...selectedOrder,
-        status: nextStatus,
-        paymentStatus: 'Paid',
-        paidAmount: selectedOrder.totalAmount,
-        dueAmount: 0,
+        status: nextStatusState,
+        paymentStatus: newPayStatusState,
+        paidAmount: newPaidState,
+        dueAmount: Math.max(0, newDueState),
         paymentMethod: payMethod
       };
       setOrders(prev => prev.map(o => o.id === selectedOrder.id ? updatedOrder : o));
@@ -906,10 +1083,10 @@ export default function Orders({ isPendingView = false }) {
 
       // 3. Sync to Backend
       const syncPromise = axios.patch(`${API_BASE}/orders/${encodeURIComponent(selectedOrder.id)}/status`, {
-        status: nextStatus,
-        paymentStatus: 'Paid',
-        paidAmount: selectedOrder.totalAmount,
-        dueAmount: 0,
+        status: nextStatusState,
+        paymentStatus: newPayStatusState,
+        paidAmount: newPaidState,
+        dueAmount: Math.max(0, newDueState),
         updatedBy: 'Admin Staff'
       }).catch(syncErr => {
         console.warn('Backend sync deferred (local payment already recorded):', syncErr.message);
@@ -1076,6 +1253,17 @@ export default function Orders({ isPendingView = false }) {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'white', border: '1px solid #E2E8F0', borderRadius: '10px', padding: '0 0.75rem', height: '40px', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}>
+            <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>SORT:</span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              style={{ border: 'none', background: 'transparent', fontSize: '0.8rem', fontWeight: 700, color: '#1E293B', cursor: 'pointer', outline: 'none' }}
+            >
+              <option value="date">Latest Order</option>
+              <option value="payment">Latest Payment</option>
+            </select>
           </div>
           <button className={styles.settleBtn} onClick={() => navigate('/settlement')}>
             <DollarSign size={18} /> {t('settlebill', settings.language)}
@@ -1315,6 +1503,11 @@ export default function Orders({ isPendingView = false }) {
                   </div>
 
                   <div className={styles.listStatusSection}>
+                    {order.nomodCheckoutId && order.nomodPaymentStatus === 'Pending' && getDaysPending(order.nomodLinkDate) >= (settings.pendingPaymentWarningDays || 3) && (
+                      <span className={styles.listBadgeOverdue} style={{ background: '#F59E0B', color: 'white', display: 'inline-flex', alignItems: 'center', gap: '4px', marginBottom: '4px', padding: '0.2rem 0.4rem', fontSize: '0.65rem' }}>
+                        <AlertCircle size={10} /> Link Pending {getDaysPending(order.nomodLinkDate)}d
+                      </span>
+                    )}
                     {isOverdue(order) ? (
                       <span className={styles.listBadgeOverdue}>{t('overdue', settings.language)}</span>
                     ) : (
@@ -1324,6 +1517,36 @@ export default function Orders({ isPendingView = false }) {
                   </div>
 
                   <div className={styles.listActionsSection}>
+                    {order.nomodCheckoutId && order.nomodPaymentStatus === 'Pending' && (
+                      <button
+                        type="button"
+                        className={styles.listCollectBtn}
+                        style={{ background: '#0EA5E9', color: 'white', display: 'flex', alignItems: 'center', gap: '4px', padding: '0.4rem 0.6rem' }}
+                        onClick={async () => {
+                          const res = await paymentService.checkNow(order.id, order.nomodCheckoutId);
+                          if (res.success) {
+                            alert(`Nomod payment status is: ${res.status}`);
+                            fetchOrders();
+                          } else {
+                            alert("Failed to check status: " + res.error);
+                          }
+                        }}
+                        title="Check Payment Status Now"
+                      >
+                        <RefreshCw size={14} /> Check
+                      </button>
+                    )}
+                    {order.nomodCheckoutId && (order.nomodPaymentStatus === 'Pending' || order.nomodPaymentStatus === 'Expired' || order.nomodPaymentStatus === 'Failed') && (
+                      <button
+                        type="button"
+                        className={styles.listCollectBtn}
+                        style={{ background: '#EC4899', color: 'white', display: 'flex', alignItems: 'center', gap: '4px', padding: '0.4rem 0.6rem' }}
+                        onClick={() => handleResendPaymentLink(order)}
+                        title="Generate and Resend Payment Link"
+                      >
+                        <Send size={14} /> Resend
+                      </button>
+                    )}
                     <button
                       className={styles.listCollectBtn}
                       onClick={() => {
@@ -1475,9 +1698,52 @@ export default function Orders({ isPendingView = false }) {
                               <CheckCircle size={14} /> {t('paid', settings.language)}
                             </span>
                           ) : (
-                            <span className={styles.creditActionBadge}>
-                              <AlertCircle size={14} /> {order.paymentStatus ? t(order.paymentStatus.toLowerCase(), settings.language) : t('notPaid', settings.language)}
-                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                              <span className={styles.creditActionBadge}>
+                                <AlertCircle size={14} /> {order.paymentStatus ? t(order.paymentStatus.toLowerCase(), settings.language) : t('notPaid', settings.language)}
+                              </span>
+                              {order.nomodCheckoutId && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
+                                  {order.nomodPaymentStatus === 'Pending' && getDaysPending(order.nomodLinkDate) >= (settings.pendingPaymentWarningDays || 3) && (
+                                    <span className={styles.statusBadge} style={{ background: '#FFFBEB', color: '#B45309', border: '1px solid #FDE68A', padding: '0.15rem 0.35rem', fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                      <AlertTriangle size={10} /> Pending {getDaysPending(order.nomodLinkDate)}d
+                                    </span>
+                                  )}
+                                  <div style={{ display: 'flex', gap: '4px', marginTop: '2px' }}>
+                                    {order.nomodPaymentStatus === 'Pending' && (
+                                      <button
+                                        type="button"
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          const res = await paymentService.checkNow(order.id, order.nomodCheckoutId);
+                                          if (res.success) {
+                                            alert(`Nomod status is: ${res.status}`);
+                                            fetchOrders();
+                                          } else {
+                                            alert("Failed checking status: " + res.error);
+                                          }
+                                        }}
+                                        style={{ padding: '2px 6px', fontSize: '0.65rem', background: '#3B82F6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '2px' }}
+                                      >
+                                        <RefreshCw size={10} /> Check
+                                      </button>
+                                    )}
+                                    {(order.nomodPaymentStatus === 'Pending' || order.nomodPaymentStatus === 'Expired' || order.nomodPaymentStatus === 'Failed') && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleResendPaymentLink(order);
+                                        }}
+                                        style={{ padding: '2px 6px', fontSize: '0.65rem', background: '#EC4899', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '2px' }}
+                                      >
+                                        <Send size={10} /> Resend
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1679,8 +1945,58 @@ export default function Orders({ isPendingView = false }) {
                         </div>
                       </div>
 
-
-                    </>
+                      {selectedOrder.nomodCheckoutId && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0', marginTop: '1rem', textAlign: 'left' }}>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <CreditCard size={14} /> Nomod Payment Link
+                          </span>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
+                            <span style={{ fontSize: '0.85rem', color: '#475569' }}>Nomod Status:</span>
+                            <span style={{ 
+                              fontWeight: 'bold', 
+                              fontSize: '0.85rem',
+                              color: selectedOrder.nomodPaymentStatus === 'Paid' ? '#16A34A' : (selectedOrder.nomodPaymentStatus === 'Pending' ? '#2563EB' : '#DC2626')
+                            }}>
+                              {selectedOrder.nomodPaymentStatus}
+                            </span>
+                          </div>
+                          {selectedOrder.nomodLinkDate && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.8rem', color: '#64748B' }}>Generated:</span>
+                              <span style={{ fontSize: '0.8rem', color: '#1E293B' }}>{formatDateTime(selectedOrder.nomodLinkDate)}</span>
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: '8px', marginTop: '0.4rem' }}>
+                            {selectedOrder.nomodPaymentStatus === 'Pending' && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const res = await paymentService.checkNow(selectedOrder.id, selectedOrder.nomodCheckoutId);
+                                  if (res.success) {
+                                    alert(`Nomod payment status is: ${res.status}`);
+                                    setSelectedOrder(prev => ({ ...prev, nomodPaymentStatus: res.status, paymentStatus: res.status === 'Paid' ? 'Paid' : prev.paymentStatus }));
+                                    fetchOrders();
+                                  } else {
+                                    alert("Failed checking status: " + res.error);
+                                  }
+                                }}
+                                style={{ flex: 1, padding: '6px 12px', fontSize: '0.8rem', background: '#3B82F6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                              >
+                                Check Status
+                              </button>
+                            )}
+                            {(selectedOrder.nomodPaymentStatus === 'Pending' || selectedOrder.nomodPaymentStatus === 'Expired' || selectedOrder.nomodPaymentStatus === 'Failed') && (
+                              <button
+                                type="button"
+                                onClick={() => handleResendPaymentLink(selectedOrder)}
+                                style={{ flex: 1, padding: '6px 12px', fontSize: '0.8rem', background: '#EC4899', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                              >
+                                Resend Link
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )} </>
                   )}
 
                   <div className={styles.actionBtns}>
@@ -1789,6 +2105,38 @@ export default function Orders({ isPendingView = false }) {
                   <QrCode size={24} />
                   <span>{t('upi', settings.language)}</span>
                 </div>
+                <div
+                  className={`${styles.payOption} ${payMethod === 'Mixed' ? styles.payOptionActive : ''}`}
+                  onClick={() => setPayMethod('Mixed')}
+                >
+                  <Layers size={24} />
+                  <span>Mixed</span>
+                </div>
+              </div>
+
+              {payMethod === 'Mixed' && (
+                <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>Cash Amount</label>
+                    <input type="number" value={cashAmount} onChange={e => setCashAmount(e.target.value)} style={{ width: '120px', padding: '0.4rem', border: '1px solid #CBD5E1', borderRadius: '6px' }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>Card Amount</label>
+                    <input type="number" value={cardAmount} onChange={e => setCardAmount(e.target.value)} style={{ width: '120px', padding: '0.4rem', border: '1px solid #CBD5E1', borderRadius: '6px' }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>UPI Amount</label>
+                    <input type="number" value={upiAmount} onChange={e => setUpiAmount(e.target.value)} style={{ width: '120px', padding: '0.4rem', border: '1px solid #CBD5E1', borderRadius: '6px' }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>Bank Transfer</label>
+                    <input type="number" value={bankAmount} onChange={e => setBankAmount(e.target.value)} style={{ width: '120px', padding: '0.4rem', border: '1px solid #CBD5E1', borderRadius: '6px' }} />
+                  </div>
+                </div>
+              )}
+              <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#FFFBEB', padding: '1rem', borderRadius: '8px', border: '1px solid #FEF08A' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#92400E' }}>Discount / Waive</label>
+                <input type="number" value={discountAmount} onChange={e => setDiscountAmount(e.target.value)} placeholder="0.00" style={{ width: '120px', padding: '0.4rem', border: '1px solid #FDE047', borderRadius: '6px' }} />
               </div>
 
               <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem' }}>
@@ -2212,6 +2560,8 @@ export default function Orders({ isPendingView = false }) {
                   
                   setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 });
                   alert("Nomod payment link saved successfully. The system will verify status automatically in the background.");
+                  
+                  paymentService.startTracking(selectedOrder.id, nomodLinkModal.linkId);
                   fetchOrders();
                 }}
                 style={{ flex: 1.5 }}

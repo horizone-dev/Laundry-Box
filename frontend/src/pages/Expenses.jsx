@@ -239,61 +239,10 @@ export default function Expenses() {
         </div>
       </div>
 
-      <div className={styles.kpiGrid}>
-        <div className={styles.kpiCard}>
-          <span className={styles.kpiLabel}>Total Expenses</span>
-          <span className={styles.kpiValue}><CurrencySymbol size={22} /> {filteredExpenses.reduce((s, e) => s + e.amount, 0).toLocaleString()}</span>
-          <span className={styles.kpiTrend}>
-            <TrendingDown size={14} /> 
-            {selectedDateRange === 'All' ? 'Tracking all time' : `Tracking: ${selectedDateRange}`}
-          </span>
-        </div>
-        <div className={styles.kpiCard}>
-          <span className={styles.kpiLabel}>Recent Transaction</span>
-          <span className={styles.kpiValue}><CurrencySymbol size={22} /> {filteredExpenses[0]?.amount?.toLocaleString() || '0.00'}</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
-            <span style={{ fontSize: '0.8rem', color: '#64748B', fontWeight: 600 }}>{filteredExpenses[0]?.title || 'No matching transactions'}</span>
-          </div>
-        </div>
-        <div className={styles.kpiCard}>
-          <span className={styles.kpiLabel}>Count</span>
-          <span className={styles.kpiValue}>{filteredExpenses.length}</span>
-          <div style={{ height: '6px', background: '#F1F5F9', borderRadius: '3px', marginTop: '1rem', width: '100%' }}>
-            <div 
-              style={{ 
-                width: expenses.length > 0 ? `${(filteredExpenses.length / expenses.length) * 100}%` : '0%', 
-                height: '100%', 
-                background: '#2563EB', 
-                borderRadius: '3px',
-                transition: 'width 0.3s ease'
-              }}
-            ></div>
-          </div>
-        </div>
-        <div className={`${styles.kpiCard} ${styles.primaryCard}`}>
-          <span className={styles.kpiLabel}>Expense Status</span>
-          <span className={styles.kpiValue}>Updated</span>
-          <div className={styles.budgetFooter}>
-            All records synchronized <ArrowRight size={14} />
-          </div>
-        </div>
-      </div>
 
       <div className={styles.tableCard}>
         <div className={styles.tableHeader}>
           <div className={styles.tableFilters}>
-            <div 
-              className={`${styles.filterTab} ${selectedDateRange === 'All' ? styles.active : ''}`}
-              onClick={() => setSelectedDateRange('All')}
-            >
-              All Time
-            </div>
-            <div 
-              className={`${styles.filterTab} ${selectedDateRange === 'This Month' ? styles.active : ''}`}
-              onClick={() => setSelectedDateRange('This Month')}
-            >
-              This Month
-            </div>
           </div>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <div className={styles.filterWrapper}>

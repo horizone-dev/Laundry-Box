@@ -333,15 +333,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <span className={styles.metaValue}>{order.billNumber}</span>
             </div>
           )}
-          <div className={styles.metaRow}>
-            <span className={styles.metaLabelEnAr}>{formatLabel('Payment Status', 'حالة الدفع')}:</span>
-            <span className={styles.metaValue} style={{ 
-              fontWeight: 'bold', 
-              color: getInvoiceStatus() === 'Paid' ? '#16A34A' : (getInvoiceStatus() === 'Partial' ? '#D97706' : '#DC2626')
-            }}>
-              {formatLabel(getInvoiceStatus(), getInvoiceStatus() === 'Paid' ? 'مدفوع' : (getInvoiceStatus() === 'Partial' ? 'مدفوع جزئياً' : 'آجل / ذمم'))}
-            </span>
-          </div>
+
         </div>
         <div className={styles.metaRightColumn}>
           <div className={styles.metaRow}>

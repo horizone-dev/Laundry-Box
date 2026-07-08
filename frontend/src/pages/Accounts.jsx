@@ -750,6 +750,7 @@ export default function Accounts() {
     const orderRef = linkFormData.description.trim() || `Ref #${Math.floor(1000 + Math.random() * 9000)}`;
     const amountVal = parseFloat(linkFormData.amount);
 
+    let checkoutId = linkId;
     let checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${amountVal}&reference=${linkId}`;
     if (window.electronAPI?.createNomodCheckout) {
       try {
@@ -765,6 +766,7 @@ export default function Accounts() {
         });
         if (checkoutRes.success && checkoutRes.data?.url) {
           checkoutUrl = checkoutRes.data.url;
+          checkoutId = checkoutRes.data.id || linkId;
         } else if (checkoutRes.error) {
           console.warn("Nomod API failed, falling back to sandbox link:", checkoutRes.error);
         }
@@ -788,10 +790,16 @@ export default function Accounts() {
     if (window.electronAPI?.dbQuery) {
       try {
         await window.electronAPI.dbQuery(
-          `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) 
-           VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?)`,
-          [newLink.id, newLink.customerId, newLink.customerName, newLink.description, newLink.amount, newLink.date, newLink.url]
+          `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
+           VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?, ?)`,
+          [newLink.id, newLink.customerId, newLink.customerName, newLink.description, newLink.amount, newLink.date, newLink.url, checkoutId]
         );
+        if (window.electronAPI?.startPaymentTracking) {
+          window.electronAPI.startPaymentTracking({
+            orderId: `SETTLE-${newLink.id}`,
+            checkoutId: checkoutId
+          });
+        }
         fetchData();
       } catch (err) {
         console.error("Database payment link insert failed:", err);
@@ -1278,7 +1286,9 @@ export default function Accounts() {
             <div className={styles.detailHeader}>
               <h2>
                 Payments for accounts "{activeAccountType === 'CASH' ? 'Cash' : (
-                  settings.bankAccounts?.find(b => b.id === activeBankAccountId)?.bankName || 'Bank'
+                  activeAccountType === 'GATEWAY' ? 'Nomod Payment Link' : (
+                    settings.bankAccounts?.find(b => b.id === activeBankAccountId)?.bankName || 'Bank'
+                  )
                 )}"
               </h2>
 

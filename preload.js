@@ -23,6 +23,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   printHtml: (options) => ipcRenderer.invoke('print-html', options),
   createNomodCheckout: (options) => ipcRenderer.invoke('create-nomod-checkout', options),
   retrieveNomodCheckoutStatus: (options) => ipcRenderer.invoke('retrieve-nomod-checkout-status', options),
+  startPaymentTracking: (options) => ipcRenderer.send('start-payment-tracking', options),
+  stopPaymentTracking: (options) => ipcRenderer.send('stop-payment-tracking', options),
+  checkPaymentStatusNow: (options) => ipcRenderer.invoke('check-payment-status-now', options),
+  onPaymentStatusChanged: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('payment-status-changed', subscription);
+    return () => ipcRenderer.off('payment-status-changed', subscription);
+  },
+  onNavigateToPendingPayments: (callback) => {
+    const subscription = (event) => callback();
+    ipcRenderer.on('navigate-to-pending-payments', subscription);
+    return () => ipcRenderer.off('navigate-to-pending-payments', subscription);
+  },
   logAuditEvent: (options) => ipcRenderer.invoke('log-audit-event', options),
   getEmailSettings: () => ipcRenderer.invoke('get-email-settings'),
   saveEmailSettings: (settings) => ipcRenderer.invoke('save-email-settings', settings),

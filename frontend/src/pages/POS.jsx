@@ -18,6 +18,7 @@ import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
 import { checkCreditLimit } from '../utils/creditLimit';
 import styles from './POS.module.css';
 import { QRCodeCanvas } from 'qrcode.react';
+import { paymentService } from '../services/paymentService';
 
 
 export default function POS() {
@@ -845,6 +846,8 @@ export default function POS() {
       });
     }
 
+    paymentService.startTracking(orderId, linkId);
+
     setNomodLinkModal({
       show: true,
       url: checkoutUrl,
@@ -1005,6 +1008,8 @@ export default function POS() {
           userRole: currentUser.role || 'staff'
         });
       }
+
+      paymentService.startTracking(orderId, linkId);
 
       setNomodLinkModal({
         show: true,
@@ -2081,8 +2086,8 @@ export default function POS() {
                   value={selectedBank}
                   onChange={(e) => setSelectedBank(e.target.value)}
                 >
-                  {settings.bankAccounts.map((acc, idx) => (
-                    <option key={idx} value={acc.bankName}>{acc.bankName}</option>
+                  {settings.bankAccounts.filter(acc => acc.isActive !== false).map((acc, idx) => (
+                    <option key={idx} value={acc.id || acc.bankName}>{acc.bankName}</option>
                   ))}
                 </select>
               </div>

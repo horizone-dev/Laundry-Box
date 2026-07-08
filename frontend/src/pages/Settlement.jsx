@@ -18,6 +18,7 @@ import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
 import styles from './Settlement.module.css';
 import { QRCodeCanvas } from 'qrcode.react';
 import { checkCreditLimit } from '../utils/creditLimit';
+import { paymentService } from '../services/paymentService';
 
 export default function Settlement() {
   const location = useLocation();
@@ -1303,8 +1304,10 @@ export default function Settlement() {
                       value={selectedBank}
                       onChange={(e) => setSelectedBank(e.target.value)}
                     >
-                      {settings.bankAccounts.map((acc, idx) => (
-                        <option key={idx} value={acc.bankName}>{acc.bankName}</option>
+                      {settings.bankAccounts.filter(acc => acc.isActive !== false).map((acc, idx) => (
+                        <option key={idx} value={acc.id || acc.bankName}>
+                          {acc.bankName}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -1573,6 +1576,8 @@ export default function Settlement() {
                     );
                   }
                   
+                  paymentService.startTracking(`SETTLE-${selectedCustomer.id.substring(0, 5)}`, nomodLinkModal.linkId);
+
                   setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 });
                   alert("Nomod payment link saved successfully. The system will verify status automatically in the background.");
                   if (selectedCustomer?.id) {

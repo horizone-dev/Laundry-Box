@@ -488,6 +488,14 @@ function initDB(appPath) {
       db.exec("ALTER TABLE orders ADD COLUMN paidAt TEXT;");
     }
 
+    const payLinkCols = db.prepare("PRAGMA table_info(payment_links)").all();
+    if (!payLinkCols.some(col => col.name === 'paidAt')) {
+      db.exec("ALTER TABLE payment_links ADD COLUMN paidAt TEXT;");
+    }
+    if (!payLinkCols.some(col => col.name === 'transactionReference')) {
+      db.exec("ALTER TABLE payment_links ADD COLUMN transactionReference TEXT;");
+    }
+
     const payCols = db.prepare("PRAGMA table_info(payments)").all();
     if (!payCols.some(col => col.name === 'customerId')) {
       db.exec("ALTER TABLE payments ADD COLUMN customerId TEXT;");
