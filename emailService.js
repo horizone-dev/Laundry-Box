@@ -97,11 +97,13 @@ function saveEmailSettings(settingsData) {
 
   const existing = db.prepare('SELECT id FROM email_settings WHERE id = ?').get('1');
 
-  const includePdf = settingsData.includePdf !== undefined ? (settingsData.includePdf ? 1 : 0) : 1;
-  const includeSalesCsv = settingsData.includeSalesCsv ? 1 : 0;
-  const includeExpensesCsv = settingsData.includeExpensesCsv ? 1 : 0;
-  const includeCollectionsCsv = settingsData.includeCollectionsCsv ? 1 : 0;
-  const includeOutstandingCsv = settingsData.includeOutstandingCsv ? 1 : 0;
+  const includePdf = (settingsData.includePdf === true || settingsData.includePdf === 1 || settingsData.includePdf === 'true') ? 1 : 0;
+  const includeSalesCsv = (settingsData.includeSalesCsv === true || settingsData.includeSalesCsv === 1 || settingsData.includeSalesCsv === 'true') ? 1 : 0;
+  const includeExpensesCsv = (settingsData.includeExpensesCsv === true || settingsData.includeExpensesCsv === 1 || settingsData.includeExpensesCsv === 'true') ? 1 : 0;
+  const includeCollectionsCsv = (settingsData.includeCollectionsCsv === true || settingsData.includeCollectionsCsv === 1 || settingsData.includeCollectionsCsv === 'true') ? 1 : 0;
+  const includeOutstandingCsv = (settingsData.includeOutstandingCsv === true || settingsData.includeOutstandingCsv === 1 || settingsData.includeOutstandingCsv === 'true') ? 1 : 0;
+
+  console.log('Saving email settings with data:', { includePdf, includeSalesCsv, includeExpensesCsv });
 
   if (existing) {
     if (buffer) {

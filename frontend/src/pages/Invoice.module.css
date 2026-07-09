@@ -1156,8 +1156,6 @@
     max-width: 100% !important;
     width: 100% !important;
     margin: 0 !important;
-    page-break-inside: avoid;
-    break-inside: avoid;
   }
 
   /* Reduce logo sizing and alignment for compact printing */

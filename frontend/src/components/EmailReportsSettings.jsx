@@ -55,11 +55,11 @@ export default function EmailReportsSettings() {
             smtpPort: defaultPort || 465,
             username: settings.username || '',
             password: settings.password || '',
-            includePdf: settings.includePdf !== 0,
-            includeSalesCsv: settings.includeSalesCsv === 1,
-            includeExpensesCsv: settings.includeExpensesCsv === 1,
-            includeCollectionsCsv: settings.includeCollectionsCsv === 1,
-            includeOutstandingCsv: settings.includeOutstandingCsv === 1
+            includePdf: settings.includePdf !== 0 && settings.includePdf !== false,
+            includeSalesCsv: settings.includeSalesCsv === 1 || settings.includeSalesCsv === true,
+            includeExpensesCsv: settings.includeExpensesCsv === 1 || settings.includeExpensesCsv === true,
+            includeCollectionsCsv: settings.includeCollectionsCsv === 1 || settings.includeCollectionsCsv === true,
+            includeOutstandingCsv: settings.includeOutstandingCsv === 1 || settings.includeOutstandingCsv === true
           });
         }
       }
