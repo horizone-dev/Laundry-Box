@@ -250,7 +250,15 @@ webFrame.executeJavaScript(`
             css += rules.map(function(r) { return r.cssText; }).join('\\n') + '\\n';
           } catch (_) {}
         }
-        const html = document.body.innerHTML;
+        const clone = document.body.cloneNode(true);
+        const images = clone.getElementsByTagName('img');
+        const originalImages = document.body.getElementsByTagName('img');
+        for (let i = 0; i < images.length; i++) {
+          if (originalImages[i].src) {
+            images[i].src = originalImages[i].src;
+          }
+        }
+        const html = clone.innerHTML;
 
         if (window.electronAPI && typeof window.electronAPI.printHtml === 'function') {
           window.electronAPI.printHtml({ html: html, css: css, printerName: selectedPrinter })

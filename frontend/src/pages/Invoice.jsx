@@ -262,7 +262,15 @@ export default function Invoice() {
       }
 
       // ── Get the fully-rendered invoice HTML ──
-      const html = invoiceRef.current.outerHTML;
+      const clone = invoiceRef.current.cloneNode(true);
+      const images = clone.getElementsByTagName('img');
+      const originalImages = invoiceRef.current.getElementsByTagName('img');
+      for (let i = 0; i < images.length; i++) {
+        if (originalImages[i].src) {
+          images[i].src = originalImages[i].src; // Force absolute URL
+        }
+      }
+      const html = clone.outerHTML;
 
       const result = await window.electronAPI.printToPDF({ filename, html, css });
       return result.success;
