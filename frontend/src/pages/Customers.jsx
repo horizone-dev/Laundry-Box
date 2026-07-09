@@ -373,7 +373,18 @@ export default function Customers() {
 
         setShowPaymentModal(false);
         setPaymentData({ amount: '', method: 'Cash' });
-        fetchCustomers();
+        await fetchCustomers();
+
+        if (viewMode === 'insight' && selectedCustomer) {
+          const freshCustRes = await window.electronAPI.dbQuery(
+            "SELECT c.*, IFNULL(SUM(CASE WHEN o.status != 'Cancelled' THEN o.totalAmount ELSE 0 END), 0) as totalSales FROM customers c LEFT JOIN orders o ON c.id = o.customerId WHERE c.id = ? GROUP BY c.id",
+            [selectedCustomer.id]
+          );
+          if (freshCustRes.success && freshCustRes.data.length > 0) {
+            handleViewCustomerInsight(freshCustRes.data[0]);
+          }
+        }
+        
         alert(`Settlement complete! Remaining unallocated: ${remainingPayment.toFixed(2)}`);
       } catch (err) {
         console.error("Payment error:", err);
