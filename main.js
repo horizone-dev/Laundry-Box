@@ -1794,6 +1794,8 @@ ipcMain.handle('print-html', async (event, { html, css, printerName }) => {
       printWin.webContents.print({
         silent: true,
         printBackground: true,
+        margins: { marginType: 'none' },
+        scaleFactor: 100,
         deviceName: (printerName === 'System Default Printer' || !printerName) ? '' : printerName
       }, (success, failureReason) => {
         resolve({ success, error: failureReason });
