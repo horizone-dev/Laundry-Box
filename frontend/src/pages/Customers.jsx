@@ -606,15 +606,36 @@ export default function Customers() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <span style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E3A8A', textTransform: 'uppercase', letterSpacing: '0.05em' }}>📋 Customer Insight</span>
           </div>
-          <button 
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '50%', border: '1px solid #CBD5E1', background: 'white', cursor: 'pointer', transition: 'all 0.2s' }}
-            onClick={() => {
-              setViewMode('list');
-              setSelectedCustomer(null);
-            }}
-          >
-            <X size={20} color="#64748B" />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <button
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#10B981', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
+              onClick={() => {
+                const autoAmount = selectedCustomer.balance > 0 ? selectedCustomer.balance : '';
+                setPaymentData({ amount: autoAmount.toString(), method: 'Cash' });
+                setShowPaymentModal(true);
+              }}
+            >
+              <DollarSign size={16} /> Settle Payment
+            </button>
+            <button
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#3B82F6', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
+              onClick={() => {
+                setEditCreditLimitValue((selectedCustomer.creditLimit || 0).toString());
+                setShowEditCreditLimitModal(true);
+              }}
+            >
+              <CreditCard size={16} /> Edit Credit Limit
+            </button>
+            <button 
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '50%', border: '1px solid #CBD5E1', background: 'white', cursor: 'pointer', transition: 'all 0.2s' }}
+              onClick={() => {
+                setViewMode('list');
+                setSelectedCustomer(null);
+              }}
+            >
+              <X size={20} color="#64748B" />
+            </button>
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '1.5rem', alignItems: 'start' }}>
@@ -974,15 +995,16 @@ export default function Customers() {
                       <Edit2 size={18} />
                     </button>
                     <button 
-                      style={{ background: 'none', border: 'none', color: '#6366F1', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                      style={{ background: 'none', border: 'none', color: '#10B981', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                       onClick={() => {
                         setSelectedCustomer(customer);
-                        setEditCreditLimitValue((customer.creditLimit || 0).toString());
-                        setShowEditCreditLimitModal(true);
+                        const autoAmount = customer.balance > 0 ? customer.balance : '';
+                        setPaymentData({ amount: autoAmount.toString(), method: 'Cash' });
+                        setShowPaymentModal(true);
                       }}
-                      title="Edit Credit Limit"
+                      title="Settle Payment"
                     >
-                      <CreditCard size={18} />
+                      <DollarSign size={18} />
                     </button>
                     <button 
                       style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
