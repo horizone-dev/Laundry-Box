@@ -768,16 +768,7 @@ export default function Customers() {
                                 <DollarSign size={16} />
                               </button>
                             )}
-                            {/* Cancel/Delete Order */}
-                            {bill.paymentStatus !== 'Paid' && (
-                              <button 
-                                style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer' }}
-                                onClick={() => handleCancelOrder(bill)}
-                                title="Cancel order"
-                              >
-                                <X size={16} />
-                              </button>
-                            )}
+                            {/* Cancel/Delete Order button removed as per requirements */}
                           </div>
                         </td>
                       </tr>
