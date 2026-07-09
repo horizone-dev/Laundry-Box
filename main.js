@@ -1403,10 +1403,10 @@ ipcMain.handle('print-to-pdf', async (event, options) => {
     // Delay to let Chromium layout/repaint the DOM before exporting
     await new Promise(resolve => setTimeout(resolve, 250));
 
-    // Print to PDF — exact A5: 148mm × 210mm
+    // Print to PDF — exact A5
     const data = await printWin.webContents.printToPDF({
       printBackground: true,
-      pageSize: { width: 148000, height: 210000 },
+      pageSize: 'A5',
       landscape: false,
       marginsType: 1,
     });
