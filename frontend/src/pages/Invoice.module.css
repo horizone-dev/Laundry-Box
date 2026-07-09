@@ -1416,26 +1416,27 @@
 
 /* ── Header ── */
 .thermalHeader {
-  position: relative;
   width: 100%;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  text-align: center;
+  justify-content: space-between;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid #000;
   margin-bottom: 0.35rem;
-  gap: 0.2rem;
+  gap: 0.25rem;
 }
 .thermalQrCorner {
-  position: absolute;
-  top: 0;
-  right: 0;
-  line-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 50px;
 }
 .thermalLogoWrap {
   display: flex;
-  justify-content: center;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 50px;
 }
 .thermalLogo {
   max-height: 48px;
@@ -1443,11 +1444,12 @@
   object-fit: contain;
 }
 .thermalCompanyBlock {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  text-align: center;
   align-items: center;
   gap: 0.1rem;
-  width: 100%;
 }
 .thermalCompanyName {
   font-size: 1rem;

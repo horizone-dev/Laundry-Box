@@ -256,11 +256,6 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
       {/* 1. Header */}
       {isCompact ? (
         <div className={styles.thermalHeader}>
-          {showQrCode && (
-            <div className={styles.thermalQrCorner}>
-              <QRCodeSVG value={order.id.toString()} size={48} />
-            </div>
-          )}
           {showLogo && (
             <div className={styles.thermalLogoWrap}>
               {settings.logo ? (
@@ -282,6 +277,11 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             {settings.phone && <div className={styles.thermalCompanyMeta}>Tel: {settings.phone}</div>}
             {settings.email && <div className={styles.thermalCompanyMeta}>{settings.email}</div>}
           </div>
+          {showQrCode && (
+            <div className={styles.thermalQrCorner}>
+              <QRCodeSVG value={order.id.toString()} size={48} />
+            </div>
+          )}
         </div>
       ) : (
         <div className={styles.invoiceHeaderBilingual}>
