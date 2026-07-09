@@ -1132,8 +1132,8 @@
 
 @media print {
   @page {
-    size: 148mm 210mm;   /* Exact A5: Width 148mm × Height 210mm */
-    margin: 5mm;        /* 5mm edge-to-edge layout margin */
+    size: auto;
+    margin: 0;
   }
 
   .invoicePage {
@@ -1694,6 +1694,13 @@
 
 /* ── @media print: thermal-optimized ── */
 @media print {
+  .template_compact, .template_compact * {
+    color: #000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    -webkit-font-smoothing: none !important;
+    text-rendering: optimizeSpeed !important;
+  }
   .template_compact {
     box-shadow: none !important;
     border: none !important;
@@ -1704,14 +1711,8 @@
     font-size: 0.72rem !important;
     background: white !important;
     font-family: 'Courier New', Courier, monospace !important;
+    font-weight: 700 !important;
   }
   .thermalItem { page-break-inside: avoid; break-inside: avoid; }
   .thermalTotalsBlock { page-break-inside: avoid; break-inside: avoid; }
-  .thermalItemName,
-  .thermalTotalBold,
-  .thermalGrandTotal {
-    color: #000 !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
 }
