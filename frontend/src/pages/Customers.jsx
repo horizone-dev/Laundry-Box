@@ -468,7 +468,8 @@ export default function Customers() {
           "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' ORDER BY createdAt DESC",
           [customer.id]
         );
-        const bills = result.success ? result.data : [];
+        let bills = result.success ? result.data : [];
+        bills.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         setCustomerBills(bills.filter(b => b.status !== 'Cancelled'));
         setCustomerReturns(bills.filter(b => b.status === 'Cancelled'));
 
@@ -476,7 +477,9 @@ export default function Customers() {
           "SELECT * FROM payments WHERE customerId = ? ORDER BY createdAt DESC",
           [customer.id]
         );
-        setCustomerPayments(paymentsRes.success ? paymentsRes.data : []);
+        let payments = paymentsRes.success ? paymentsRes.data : [];
+        payments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        setCustomerPayments(payments);
 
         const totalSales = bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
         const salesReturn = bills.filter(b => b.status === 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
