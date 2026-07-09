@@ -977,14 +977,15 @@ export default function Customers() {
                   <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', alignItems: 'center' }}>
                     <button 
                       style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                      onClick={() => handleViewCustomerInsight(customer)}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleViewCustomerInsight(customer); }}
                       title="View Details"
                     >
                       <Eye size={18} />
                     </button>
                     <button 
                       style={{ background: 'none', border: 'none', color: '#F59E0B', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.preventDefault(); e.stopPropagation();
                         setSelectedCustomer(customer);
                         setEditingCustomer(customer);
                         setFormData({ name: customer.name, phone: customer.phone, address: customer.address || '' });
@@ -996,7 +997,8 @@ export default function Customers() {
                     </button>
                     <button 
                       style={{ background: 'none', border: 'none', color: '#10B981', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.preventDefault(); e.stopPropagation();
                         setSelectedCustomer(customer);
                         const autoAmount = customer.balance > 0 ? customer.balance : '';
                         setPaymentData({ amount: autoAmount.toString(), method: 'Cash' });
@@ -1008,7 +1010,7 @@ export default function Customers() {
                     </button>
                     <button 
                       style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                      onClick={() => handleDeleteCustomer(customer.id)}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteCustomer(customer.id); }}
                       title="Delete Customer"
                     >
                       <Trash2 size={18} />
