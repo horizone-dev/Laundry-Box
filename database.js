@@ -4,23 +4,60 @@ const fs = require('fs');
 
 let db;
 
+function logDB(message, error = null) {
+  const timestamp = new Date().toISOString();
+  let logText = `[${timestamp}] [Database] ${message}\n`;
+  if (error) {
+    logText += `Stack Trace: ${error.stack || error}\n`;
+  }
+  console.log(`[Database] ${message}`);
+  try {
+    const appDataPath = process.env.APPDATA || (process.platform === 'darwin' ? path.join(process.env.HOME, 'Library/Application Support') : path.join(process.env.HOME, '.config'));
+    const logDirectory = path.join(appDataPath, 'Laundry Box');
+    if (!fs.existsSync(logDirectory)) {
+      fs.mkdirSync(logDirectory, { recursive: true });
+    }
+    const logPath = path.join(logDirectory, 'startup.log');
+    fs.appendFileSync(logPath, logText);
+  } catch (err) {
+    console.error('Failed to write to startup.log inside database.js:', err);
+  }
+}
+
 function initDB(appPath) {
   // Use app data directory for production or local root for development
   const dbPath = path.join(appPath, 'laundry_pos.sqlite');
-  db = new Database(dbPath, { verbose: console.log });
+  logDB(`Connecting to SQLite database at: ${dbPath}`);
+  
+  try {
+    db = new Database(dbPath, { verbose: (str) => console.log(`[Database SQL] ${str}`) });
+    logDB(`SQLite database connected successfully.`);
+  } catch (err) {
+    logDB(`CRITICAL ERROR: Failed to open SQLite database`, err);
+    throw err;
+  }
   
   try {
     if (fs.existsSync(dbPath)) {
       fs.chmodSync(dbPath, 0o600);
+      logDB("Strict database file permissions (0o600) set successfully.");
     }
   } catch (err) {
-    console.warn("Failed to set strict database file permissions:", err.message);
+    logDB("Warning: Failed to set strict database file permissions:", err);
   }
 
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  db.pragma('cache_size = 10000');
-  db.pragma('foreign_keys = ON');
+  logDB("Configuring database pragmas (WAL, synchronous=NORMAL, cache_size=10000, foreign_keys=ON)...");
+  try {
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    db.pragma('cache_size = 10000');
+    db.pragma('foreign_keys = ON');
+    logDB("Pragmas configured successfully.");
+  } catch (pragmaErr) {
+    logDB("Error configuring database pragmas:", pragmaErr);
+  }
+
+  logDB("Initializing database schema tables...");
 
   // Initialize tables
   db.exec(`
@@ -648,9 +685,14 @@ function initDB(appPath) {
     // ───────────────────────────────────────────────────────────────────
 
     // Data Healer: Run on init
+    logDB("Running Database Data Healer on initialization...");
     runDataHealer(db);
+    logDB("Database Data Healer completed successfully.");
+    logDB("All database tables initialized and migrations finished successfully.");
   } catch (err) {
+    logDB("CRITICAL ERROR: Database migrations failed", err);
     console.error("Migrations failed:", err);
+    throw err;
   }
 }
 
@@ -668,13 +710,16 @@ function runDataHealer(db) {
     // Fix inconsistent paymentStatus mathematically
     db.exec(`UPDATE orders SET paymentStatus = 'Credit', isSynced = 0, updatedAt = '${timestamp}' WHERE (paidAmount = 0 OR paidAmount IS NULL) AND paymentStatus != 'Credit';`);
     db.exec(`UPDATE orders SET paymentStatus = 'Partial', isSynced = 0, updatedAt = '${timestamp}' WHERE paidAmount > 0 AND paidAmount < totalAmount AND paymentStatus != 'Partial';`);
-    db.exec(`UPDATE orders SET paymentStatus = 'Paid', isSynced = 0, updatedAt = '${timestamp}' WHERE paidAmount >= totalAmount AND paymentStatus != 'Paid';`);
+    db.exec(`UPDATE orders SET paymentStatus = 'Paid', dueAmount = 0, isSynced = 0, updatedAt = '${timestamp}' WHERE paidAmount >= totalAmount AND (paymentStatus != 'Paid' OR dueAmount > 0);`);
     db.exec(`UPDATE orders SET status = 'Confirmed', isSynced = 0, updatedAt = '${timestamp}' WHERE dueAmount <= 0 AND status = 'Payment Pending';`);
 
     // 2. Data Healer: Only fix dueAmount if it's mathematically wrong, but don't overwrite Status unless confirmed
     db.exec(`UPDATE orders 
             SET dueAmount = totalAmount - IFNULL(paidAmount, 0), isSynced = 0, updatedAt = '${timestamp}'
             WHERE ABS(dueAmount - (totalAmount - IFNULL(paidAmount, 0))) > 0.01;`);
+            
+    // Wipe micro-decimal dust
+    db.exec(`UPDATE orders SET dueAmount = 0 WHERE dueAmount > 0 AND dueAmount < 0.01;`);
 
     // Heal already-corrupted credit/partial orders against payments table
     console.log("Healing mismatched order paid/due amounts against payments table...");

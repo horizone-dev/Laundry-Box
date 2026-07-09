@@ -33,6 +33,8 @@
       "main.js",
       "preload.js",
       "database.js",
+      "emailService.js",
+      "backend/services/nomodService.js",
       "package.json",
       "frontend/dist/**/*"
     ],

@@ -571,9 +571,16 @@ export default function POS() {
   const upiVal = parseFloat(upiAmount || 0);
   const bankVal = parseFloat(bankAmount || 0);
   const nomodVal = parseFloat(nomodAmount || 0);
-  const totalPaid = cashVal + cardVal + upiVal + bankVal + nomodVal;
+  const totalPaidManual = cashVal + cardVal + upiVal + bankVal + nomodVal;
+  
+  let appliedAdvanceUI = 0;
+  if (selectedCustomer && selectedCustomer.balance < 0) {
+    appliedAdvanceUI = Math.min(Math.max(0, total - totalPaidManual), Math.abs(selectedCustomer.balance));
+  }
+  
+  const totalPaid = totalPaidManual + appliedAdvanceUI;
   const remainingDue = Math.max(0, total - totalPaid);
-  const changeDue = Math.max(0, totalPaid - total);
+  const changeDue = Math.max(0, totalPaidManual - total);
 
   const handleWhatsApp = (phone, text = null) => {
     if (!phone) return;
@@ -910,6 +917,9 @@ export default function POS() {
     }
 
     let appliedAdvance = 0;
+    if (selectedCustomer && selectedCustomer.balance < 0) {
+      appliedAdvance = Math.min(Math.max(0, total - totalPaid), Math.abs(selectedCustomer.balance));
+    }
 
     const newPaidAmount = totalPaid + appliedAdvance;
     const newDueAmount = Math.max(0, total - newPaidAmount);
@@ -1490,6 +1500,9 @@ export default function POS() {
         }
 
         let appliedAdvance = 0;
+        if (selectedCustomer && selectedCustomer.balance < 0) {
+          appliedAdvance = Math.min(total, Math.abs(selectedCustomer.balance));
+        }
 
         const newPaidAmount = appliedAdvance;
         const newDueAmount = Math.max(0, total - newPaidAmount);
@@ -1771,13 +1784,20 @@ export default function POS() {
             </div>
             <div className={styles.amountBox}>
               <span className={styles.amountBoxLabel}>Total Paid</span>
-              <span className={styles.amountBoxValue} style={{ color: '#10B981' }}><CurrencySymbol size={16} /> {totalPaid.toFixed(2)}</span>
+              <span className={styles.amountBoxValue} style={{ color: '#10B981' }}><CurrencySymbol size={16} /> {totalPaidManual.toFixed(2)}</span>
             </div>
             <div className={`${styles.amountBox} ${remainingDue > 0 ? styles.amountBoxChange : ''}`}>
               <span className={styles.amountBoxLabel}>Remaining Due</span>
               <span className={styles.amountBoxValue} style={{ color: remainingDue > 0 ? '#EF4444' : '#10B981' }}><CurrencySymbol size={16} /> {remainingDue.toFixed(2)}</span>
             </div>
           </div>
+          
+          {appliedAdvanceUI > 0 && (
+            <div style={{ background: '#ECFDF5', border: '1px solid #34D399', borderRadius: '8px', padding: '0.75rem', marginTop: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#065F46', fontSize: '0.85rem', fontWeight: 600 }}>Advance Automatically Applied:</span>
+              <span style={{ color: '#059669', fontSize: '1.1rem', fontWeight: 800 }}>-<CurrencySymbol size={14} /> {appliedAdvanceUI.toFixed(2)}</span>
+            </div>
+          )}
 
           {nomodLinkModal.show ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>

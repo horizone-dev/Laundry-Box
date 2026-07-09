@@ -493,21 +493,24 @@ export default function Settlement() {
               const currentDue = bill.dueAmount > 0 ? bill.dueAmount : (bill.totalAmount - (bill.paidAmount || 0));
               if (currentDue <= 0) continue;
 
+              const currentDueCents = Math.round(currentDue * 100);
+              let remainingCents = Math.round(remaining * 100);
+
               let allocate = 0;
               let newStatus = 'Paid';
               let newDue = 0;
               let newPaid = (bill.paidAmount || 0);
 
-              if (remaining >= currentDue) {
-                allocate = currentDue;
-                remaining -= currentDue;
+              if (remainingCents >= currentDueCents) {
+                allocate = currentDue; // clear exact float due
+                remaining = (remainingCents - currentDueCents) / 100;
                 newPaid += allocate;
                 newDue = 0;
                 newStatus = 'Paid';
               } else {
                 allocate = remaining;
                 newPaid += allocate;
-                newDue = currentDue - remaining;
+                newDue = (currentDueCents - remainingCents) / 100;
                 remaining = 0;
                 newStatus = 'Partial';
               }

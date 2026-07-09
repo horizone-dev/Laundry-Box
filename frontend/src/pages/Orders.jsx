@@ -369,12 +369,13 @@ export default function Orders({ isPendingView = false }) {
 
   const getPaymentMethodTranslation = (method) => {
     if (!method) return '';
-    if (method === 'Cash' || method.toUpperCase() === 'CASH') return t('cashaccount', settings.language);
-    if (method === 'Bank' || method.toUpperCase() === 'BANK') return t('bankaccount', settings.language);
+    if (method === 'Cash' || method.toUpperCase() === 'CASH') return 'Cash';
+    if (method === 'Bank' || method.toUpperCase() === 'BANK') return 'Bank';
     if (method === 'Card' || method.toUpperCase() === 'CARD') return t('card', settings.language);
     if (method === 'UPI' || method.toUpperCase() === 'UPI') return t('upi', settings.language);
     if (method === 'Not Paid') return t('notPaid', settings.language) || 'Not Paid';
     if (method === 'Mixed') return 'Mixed';
+    if (method === 'Advance' || method.toUpperCase() === 'ADVANCE') return 'Advance';
     return method;
   };
 
@@ -1642,9 +1643,10 @@ export default function Orders({ isPendingView = false }) {
                             order.paymentMethod === 'Cash' ? styles.methodCash :
                               order.paymentMethod === 'Bank' ? styles.methodOther :
                                 order.paymentMethod === 'Mixed' ? styles.methodOther :
-                                  styles.methodOther
-                          }>
-                            {order.paymentMethod}
+                                  order.paymentMethod === 'Advance' ? styles.methodAdvance || styles.methodOther :
+                                    styles.methodOther
+                          } style={order.paymentMethod === 'Advance' && !styles.methodAdvance ? { background: '#E0E7FF', color: '#4338CA', padding: '0.25rem 0.6rem', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '600' } : {}}>
+                            {getPaymentMethodTranslation(order.paymentMethod)}
                           </span>
                         ) : (
                           <span style={{ color: '#94A3B8' }}>-</span>

@@ -2,23 +2,68 @@ const { app, BrowserWindow, ipcMain, net, shell, dialog, Menu } = require('elect
 const fs = require('fs');
 const path = require('path');
 
-// Global error handlers to log main process exceptions
+// Diagnostic Startup Logger
+function logStartup(message, error = null) {
+  const timestamp = new Date().toISOString();
+  let logText = `[${timestamp}] ${message}\n`;
+  if (error) {
+    logText += `Stack Trace: ${error.stack || error}\n`;
+  }
+  console.log(message);
+  try {
+    let appDataPath = process.env.APPDATA;
+    if (!appDataPath) {
+      if (process.platform === 'darwin') {
+        appDataPath = path.join(process.env.HOME || '', 'Library/Application Support');
+      } else {
+        appDataPath = path.join(process.env.HOME || '', '.config');
+      }
+    }
+    const logDirectory = path.join(appDataPath, 'Laundry Box');
+    if (!fs.existsSync(logDirectory)) {
+      fs.mkdirSync(logDirectory, { recursive: true });
+    }
+    const logPath = path.join(logDirectory, 'startup.log');
+    fs.appendFileSync(logPath, logText);
+  } catch (err) {
+    console.error('Failed to write to startup.log:', err);
+  }
+}
+
+logStartup('==================================================');
+logStartup('Application initialization started (main process).');
+
+// Global error handlers to log main process exceptions and terminate the process cleanly
 process.on('uncaughtException', (err) => {
   try {
-    const logPath = path.join(app.getPath('userData'), 'startup.log');
-    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Uncaught Exception: ${err.stack || err}\n`);
+    const errorMsg = err ? (err.stack || err.message || err) : 'Unknown error';
+    logStartup(`CRITICAL UNCAUGHT EXCEPTION: ${errorMsg}`);
+    dialog.showErrorBox(
+      'Laundry Box - Startup Crash',
+      `A critical unhandled exception occurred during startup:\n\n${errorMsg}\n\nThe application will now close.`
+    );
   } catch (_) {}
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
   try {
-    const logPath = path.join(app.getPath('userData'), 'startup.log');
-    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Unhandled Rejection: ${reason}\n`);
+    const errorMsg = reason instanceof Error ? (reason.stack || reason.message) : reason;
+    logStartup(`CRITICAL UNHANDLED REJECTION: ${errorMsg}`);
+    dialog.showErrorBox(
+      'Laundry Box - Promise Rejection',
+      `An unhandled Promise rejection occurred during startup:\n\n${errorMsg}\n\nThe application will now close.`
+    );
   } catch (_) {}
+  process.exit(1);
 });
+
 const { spawn } = require('child_process');
+logStartup('Importing database module...');
 const { initDB, getDB, closeDB, generateServiceSVG } = require('./database');
+logStartup('Importing email service module...');
 const emailService = require('./emailService');
+logStartup('Importing payment checkout service module...');
 const nomodService = require('./backend/services/nomodService');
 
 // Configuration for payment status tracking
@@ -42,19 +87,41 @@ let mainWindow;
 let backendProcess;
 
 function createWindow() {
+  logStartup('Creating BrowserWindow instance...');
+  const preloadPath = path.join(__dirname, 'preload.js');
+  logStartup(`Verifying preload script existence at: ${preloadPath}`);
+  if (!fs.existsSync(preloadPath)) {
+    const err = new Error(`Preload script not found: ${preloadPath}`);
+    logStartup('CRITICAL PRELOAD ERROR', err);
+    throw err;
+  }
+
+  const isDev = !app.isPackaged;
+  const indexPath = path.join(__dirname, 'frontend/dist/index.html');
+  if (!isDev) {
+    logStartup(`Verifying production index.html existence at: ${indexPath}`);
+    if (!fs.existsSync(indexPath)) {
+      const err = new Error(`Production index.html file not found: ${indexPath}`);
+      logStartup('CRITICAL RENDERER ERROR', err);
+      throw err;
+    }
+  }
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    show: false, // Start hidden to prevent visual flickering
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false,
-      preload: path.join(__dirname, 'preload.js')
+      preload: preloadPath
     }
   });
 
   // Remove default window menu bar (File, Edit, View, Window)
   mainWindow.setMenu(null);
+  logStartup('BrowserWindow menu bar removed.');
 
   // Lock down navigation to local resources only
   mainWindow.webContents.on('will-navigate', (event, url) => {
@@ -64,6 +131,7 @@ function createWindow() {
       if (parsedUrl.protocol !== 'file:' && !allowedHosts.includes(parsedUrl.hostname)) {
         event.preventDefault();
         console.warn(`Blocked unauthorized navigation to: ${url}`);
+        logStartup(`Security warning: Blocked unauthorized navigation to ${url}`);
       }
     } catch (e) {
       event.preventDefault();
@@ -80,9 +148,13 @@ function createWindow() {
     ];
     const isAllowed = allowedPrefixes.some(prefix => url.startsWith(prefix));
     if (isAllowed) {
-      shell.openExternal(url).catch(err => console.error("Failed to open link:", err));
+      shell.openExternal(url).catch(err => {
+        console.error("Failed to open link:", err);
+        logStartup(`Error opening external link: ${url}`, err);
+      });
     } else {
       console.warn(`Blocked attempt to open external window: ${url}`);
+      logStartup(`Security warning: Blocked attempt to open external window: ${url}`);
     }
     return { action: 'deny' };
   });
@@ -96,25 +168,45 @@ function createWindow() {
 
   // Log any page load failures
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
-    try {
-      fs.appendFileSync(path.join(app.getPath('userData'), 'startup.log'), `[${new Date().toISOString()}] Page Load Failed: ${errorDescription} (Code: ${errorCode}) URL: ${validatedURL}\n`);
-    } catch (_) {}
+    logStartup(`CRITICAL: Page load failed: ${errorDescription} (Code: ${errorCode}) URL: ${validatedURL}`);
   });
 
-  // Check if we are in dev mode
-  const isDev = !app.isPackaged;
+  // Log when renderer process is terminated
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    logStartup(`CRITICAL: BrowserWindow renderer process gone. Reason: ${details.reason}, Exit Code: ${details.exitCode}`);
+  });
+
+  // Show window once it is fully ready
+  mainWindow.once('ready-to-show', () => {
+    logStartup('BrowserWindow: ready-to-show event fired. Displaying main window.');
+    mainWindow.show();
+  });
   
   if (isDev) {
+    logStartup('Opening DevTools in development mode...');
     mainWindow.webContents.openDevTools();
+    logStartup('Loading development server URL: http://localhost:5173...');
     mainWindow.loadURL('http://localhost:5173').catch(err => {
-      console.log('Vite not ready, retrying in 2s...');
+      logStartup('Vite not ready, retrying in 2s...', err);
       setTimeout(() => mainWindow.loadURL('http://localhost:5173'), 2000);
     });
   } else {
-    mainWindow.loadFile(path.join(__dirname, 'frontend/dist/index.html'));
+    logStartup(`Loading production UI file: ${indexPath}...`);
+    mainWindow.loadFile(indexPath).catch(err => {
+      logStartup(`CRITICAL ERROR: Failed to load production index.html`, err);
+    });
   }
 
+  mainWindow.on('focus', () => {
+    logStartup('BrowserWindow event: focus');
+  });
+
+  mainWindow.on('blur', () => {
+    logStartup('BrowserWindow event: blur');
+  });
+
   mainWindow.on('closed', () => {
+    logStartup('BrowserWindow event: closed. Destroying window instance.');
     mainWindow = null;
   });
 }
@@ -125,51 +217,83 @@ function startBackend() {
     ? path.join(__dirname, 'backend', 'server.js')
     : path.join(process.resourcesPath, 'backend', 'server.js');
 
-  console.log('Starting backend process...');
-  backendProcess = spawn(process.execPath, [scriptPath], {
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PORT: '3000' }
-  });
+  logStartup(`Backend process startup requested. Script path: ${scriptPath}`);
+  
+  if (!fs.existsSync(scriptPath)) {
+    logStartup(`CRITICAL ERROR: Backend script not found at ${scriptPath}`);
+    return;
+  }
 
-  backendProcess.stdout.on('data', (data) => {
-    console.log(`Backend: ${data}`);
-  });
+  logStartup(`Spawning backend process running: ${process.execPath} with ELECTRON_RUN_AS_NODE=1...`);
+  try {
+    backendProcess = spawn(process.execPath, [scriptPath], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PORT: '3000' }
+    });
+    
+    logStartup(`Backend process spawned successfully. PID: ${backendProcess.pid}`);
 
-  backendProcess.stderr.on('data', (data) => {
-    console.error(`Backend Error: ${data}`);
-  });
+    backendProcess.stdout.on('data', (data) => {
+      logStartup(`Backend Process stdout: ${data.toString().trim()}`);
+    });
 
-  backendProcess.on('error', (err) => {
-    console.error('Failed to start backend process:', err);
-  });
+    backendProcess.stderr.on('data', (data) => {
+      logStartup(`Backend Process stderr: ${data.toString().trim()}`);
+    });
+
+    backendProcess.on('error', (err) => {
+      logStartup('Backend Process failed to start or experienced an error:', err);
+    });
+
+    backendProcess.on('close', (code, signal) => {
+      logStartup(`Backend Process closed: Code = ${code}, Signal = ${signal}`);
+    });
+    
+    backendProcess.on('exit', (code, signal) => {
+      logStartup(`Backend Process exited: Code = ${code}, Signal = ${signal}`);
+    });
+  } catch (err) {
+    logStartup('CRITICAL ERROR: Failed to spawn backend child process', err);
+  }
 }
 
 async function waitForServer(url, timeout = 10000) {
   const start = Date.now();
-  console.log("Checking server health...");
+  logStartup(`Initiating health check for local server at: ${url} (Timeout: ${timeout}ms)...`);
   
   while (true) {
     try {
       const response = await new Promise((resolve, reject) => {
-        const request = net.request(url);
+        // Enforce network timeout on health checks to prevent infinite socket hanging
+        const request = net.request({
+          url: url,
+          timeout: 2000
+        });
+        
         request.on('response', (res) => {
           resolve(res.statusCode === 200);
         });
+        
         request.on('error', (err) => {
           reject(err);
         });
+        
+        request.on('login', () => {
+          resolve(false);
+        });
+        
         request.end();
       });
       
       if (response) {
-        console.log("Server is ready!");
+        logStartup("Server is ready! Health check succeeded.");
         return true;
       }
     } catch (err) {
-      // Ignore errors and retry
+      logStartup(`Health check attempt failed: ${err.message || err}. Retrying in 500ms...`);
     }
 
     if (Date.now() - start > timeout) {
-      console.error("Server ready check timed out.");
+      logStartup("WARNING: Server health check timed out. Proceeding to display main window anyway.");
       return false;
     }
 
@@ -178,15 +302,39 @@ async function waitForServer(url, timeout = 10000) {
 }
 
 app.whenReady().then(async () => {
-  console.log("Starting system...");
-  initDB(app.getPath('userData'));
-  emailService.initScheduler();
+  logStartup('System initialization: app whenReady fired.');
+  
+  // Register global app lifecycle gone handlers
+  app.on('render-process-gone', (event, webContents, details) => {
+    logStartup(`CRITICAL: Renderer process terminated unexpectedly. Reason: ${details.reason}, Exit Code: ${details.exitCode}`);
+  });
+
+  app.on('child-process-gone', (event, details) => {
+    logStartup(`CRITICAL: App child process terminated unexpectedly. Name: ${details.name}, Type: ${details.type}, Reason: ${details.reason}, Exit Code: ${details.exitCode}`);
+  });
+
+  logStartup('Connecting to SQLite database...');
+  try {
+    initDB(app.getPath('userData'));
+    logStartup('SQLite Database connection and migrations completed.');
+  } catch (dbErr) {
+    logStartup('CRITICAL ERROR: Failed to initialize SQLite database', dbErr);
+    throw dbErr; // Let the process error handlers catch it and exit cleanly
+  }
+  
+  logStartup('Initializing Email service scheduler...');
+  try {
+    emailService.initScheduler();
+    logStartup('Email service scheduler initialized successfully.');
+  } catch (emailErr) {
+    logStartup('Warning: Email service scheduler failed to start:', emailErr);
+  }
   
   // Seed initial data if tables are empty
   const db = getDB();
   const serviceCount = db.prepare('SELECT COUNT(*) as count FROM services').get().count;
   if (serviceCount === 0) {
-    console.log("Seeding initial POS data...");
+    logStartup("Database is empty. Seeding initial POS services and category data...");
     const shopId = 'SHOP_01';
     const now = new Date().toISOString();
     
@@ -212,6 +360,7 @@ app.whenReady().then(async () => {
     insertCategory.run('cat2', shopId, 'Dry Cleaning', 'Wind', now);
     insertCategory.run('cat3', shopId, 'Alterations', 'Scissors', now);
     insertCategory.run('cat4', shopId, 'Premium', 'Sparkles', now);
+    logStartup("Database seeding completed.");
   }
 
   // App open -> server auto start
@@ -224,10 +373,12 @@ app.whenReady().then(async () => {
   createWindow();
 
   // Resume tracking for recent pending payments and show reminder
+  logStartup("Resuming active tracking for recent pending checkouts...");
   resumeRecentPendingTrackers();
   showPendingPaymentsReminder();
 
   app.on('activate', () => {
+    logStartup('App event: activate');
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
@@ -235,7 +386,9 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  logStartup('App event: window-all-closed');
   if (process.platform !== 'darwin') {
+    logStartup('Quitting application.');
     app.quit();
   }
 });

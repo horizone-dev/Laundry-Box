@@ -68,12 +68,33 @@ export default function Invoice() {
             const paidAmount = rawOrder.paidAmount || 0;
             const dueAmount = rawOrder.dueAmount ?? (rawOrder.totalAmount - paidAmount);
 
+            let parsedBreakdown = null;
+            try {
+              if (rawOrder.paymentBreakdown && rawOrder.paymentBreakdown !== 'null') {
+                parsedBreakdown = typeof rawOrder.paymentBreakdown === 'string'
+                  ? JSON.parse(rawOrder.paymentBreakdown)
+                  : rawOrder.paymentBreakdown;
+              }
+            } catch (e) {
+              console.error("Failed to parse paymentBreakdown:", e);
+            }
+
             let totalBalance = 0;
             let previousBalance = 0;
 
             if (rawOrder.customerId && rawOrder.customerId !== 'Walk-in') {
               totalBalance = customerBalance;
-              previousBalance = totalBalance - dueAmount;
+              
+              let totalPaidManual = paidAmount;
+              if (parsedBreakdown) {
+                totalPaidManual = (parseFloat(parsedBreakdown.cash) || 0) +
+                                  (parseFloat(parsedBreakdown.card) || 0) +
+                                  (parseFloat(parsedBreakdown.upi) || 0) +
+                                  (parseFloat(parsedBreakdown.bank) || 0) +
+                                  (parseFloat(parsedBreakdown.nomod) || 0);
+              }
+              const balanceDiff = rawOrder.totalAmount - totalPaidManual;
+              previousBalance = totalBalance - balanceDiff;
             } else {
               totalBalance = dueAmount;
               previousBalance = 0;
@@ -118,19 +139,7 @@ export default function Invoice() {
               status: rawOrder.status,
               paymentStatus: rawOrder.paymentStatus,
               paymentMethod: rawOrder.paymentMethod,
-              paymentBreakdown: (() => {
-                let parsed = null;
-                try {
-                  if (rawOrder.paymentBreakdown && rawOrder.paymentBreakdown !== 'null') {
-                    parsed = typeof rawOrder.paymentBreakdown === 'string'
-                      ? JSON.parse(rawOrder.paymentBreakdown)
-                      : rawOrder.paymentBreakdown;
-                  }
-                } catch (e) {
-                  console.error("Failed to parse paymentBreakdown:", e);
-                }
-                return parsed;
-              })(),
+              paymentBreakdown: parsedBreakdown,
               items: (() => {
                 let parsed = [];
                 try {

@@ -84,6 +84,9 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
     }
   }
 
+  const advanceDeducted = (order.previousBalance || 0) < 0 ? Math.min(computedTotal, Math.abs(order.previousBalance)) : 0;
+  const manualPaid = Math.max(0, (order.paidAmount || 0) - advanceDeducted);
+
   // ── Item edit helpers ──
   const updateItem = (idx, field, value) => {
     setItems(prev => {
@@ -252,29 +255,33 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
 
       {/* 1. Header */}
       {isCompact ? (
-        <div className={styles.compactHeader}>
+        <div className={styles.thermalHeader}>
+          {showQrCode && (
+            <div className={styles.thermalQrCorner}>
+              <QRCodeSVG value={order.id.toString()} size={48} />
+            </div>
+          )}
           {showLogo && (
-            <div className={styles.compactHeaderLeft}>
+            <div className={styles.thermalLogoWrap}>
               {settings.logo ? (
-                <img src={settings.logo} alt="Logo" className={styles.invoiceLogoCompact} />
+                <img src={settings.logo} alt="Logo" className={styles.thermalLogo} />
               ) : (
-                <img src={defaultLogo} alt="Logo" className={styles.invoiceLogoCompact} onError={(e) => { e.target.style.display = 'none'; }} />
+                <img src={defaultLogo} alt="Logo" className={styles.thermalLogo} onError={(e) => { e.target.style.display = 'none'; }} />
               )}
             </div>
           )}
-          <div className={styles.companyInfoCompact}>
-            <h2>{settings.companyName || 'Laundry Box'}</h2>
-            <p>{settings.address || 'Address not set'}</p>
-            {settings.phone && <p>Tel: {settings.phone}</p>}
-            {settings.email && <p>Email: {settings.email}</p>}
+          <div className={styles.thermalCompanyBlock}>
+            <div className={styles.thermalCompanyName}>{settings.companyName || 'Laundry Box'}</div>
+            {showBilingual && settings.companyNameAr && (
+              <div className={styles.thermalCompanyNameAr} dir="rtl">{settings.companyNameAr}</div>
+            )}
+            {settings.address && <div className={styles.thermalCompanyMeta}>{settings.address}</div>}
+            {showBilingual && settings.addressAr && (
+              <div className={styles.thermalCompanyMeta} dir="rtl">{settings.addressAr}</div>
+            )}
+            {settings.phone && <div className={styles.thermalCompanyMeta}>Tel: {settings.phone}</div>}
+            {settings.email && <div className={styles.thermalCompanyMeta}>{settings.email}</div>}
           </div>
-          {showQrCode && (
-            <div className={styles.compactHeaderRight}>
-              <div className={styles.qrWrapperCompact}>
-                <QRCodeSVG value={order.id.toString()} size={55} />
-              </div>
-            </div>
-          )}
         </div>
       ) : (
         <div className={styles.invoiceHeaderBilingual}>
@@ -387,196 +394,249 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
 
 
 
-      {/* 5. Items Table */}
-      <table className={styles.itemsTableBilingual}>
-        <thead>
-          <tr>
-            <th style={{ width: '5%' }}></th>
-            <th style={{ width: editMode ? '17%' : '20%', textAlign: 'left' }}>
-              <div>ITEM NAME</div>
-              {showBilingual && <div className={styles.thAr}>اسم الصنف</div>}
-            </th>
-            <th style={{ width: editMode ? '11%' : '12%', textAlign: 'left' }}>
-              <div>PACKAGE</div>
-              {showBilingual && <div className={styles.thAr}>التغليف</div>}
-            </th>
-            <th style={{ width: '18%', textAlign: 'left' }}>
-              <div>ADD-ONS</div>
-              {showBilingual && <div className={styles.thAr}>الإضافات</div>}
-            </th>
-            <th style={{ width: '14%', textAlign: 'left' }}>
-              <div>SERVICE</div>
-              {showBilingual && <div className={styles.thAr}>الخدمة</div>}
-            </th>
-            <th style={{ width: '6%', textAlign: 'center' }}>
-              <div>QTY</div>
-              {showBilingual && <div className={styles.thAr}>الكمية</div>}
-            </th>
-            <th style={{ width: '12%', textAlign: 'center' }}>
-              <div>PRICE</div>
-              {showBilingual && <div className={styles.thAr}>السعر</div>}
-            </th>
-            <th style={{ width: '15%', textAlign: 'right' }}>
-              <div>TOTAL</div>
-              {showBilingual && <div className={styles.thAr}>الإجمالي</div>}
-            </th>
-            {editMode && <th style={{ width: '4%' }} data-noprint="true"></th>}
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item, idx) => (
-            <tr
-              key={idx}
-              draggable
-              onDragStart={(e) => handleDragStart(e, idx)}
-              onDragOver={(e) => handleDragOver(e, idx)}
-              onDrop={(e) => handleDrop(e, idx)}
-              onDragEnd={handleDragEnd}
-              style={{
-                background: dragOverIndex === idx ? 'rgba(59,130,246,0.08)' : 'transparent',
-                borderTop: dragOverIndex === idx ? '2px solid #3B82F6' : undefined,
-                cursor: editMode ? 'default' : 'grab',
-                transition: 'background 0.15s'
-              }}
-            >
-              {/* Grip handle */}
-              <td style={{ textAlign: 'center', padding: '0.4rem 0.2rem', color: '#CBD5E1' }}>
-                <GripVertical size={14} style={{ cursor: 'grab' }} />
-              </td>
-
-              {/* Item Name */}
-              <td>
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <EditableCell
-                    editing={editMode}
-                    value={item.name}
-                    onChange={(v) => updateItem(idx, 'name', v)}
-                    className={styles.itemName}
-                  />
-                  {item.description && (
-                    <div style={{ fontSize: '0.75rem', color: '#DC2626', fontWeight: 600, marginTop: '0.15rem', display: 'block' }}>
-                      ⚠️ {item.description}
-                    </div>
-                  )}
-                </div>
-              </td>
-
-              {/* Package Column */}
-              <td>
+      {/* 5. Items */}
+      {isCompact ? (
+        /* ── Thermal: stacked item cards ── */
+        <div className={styles.thermalItemsList}>
+          {items.map((item, idx) => {
+            const typesList = item.types && item.types.length > 0
+              ? item.types
+              : item.sub
+                ? item.sub.split(' + ').map(n => ({ name: n }))
+                : [];
+            const addonsList = item.addons && item.addons.length > 0 ? item.addons : [];
+            const lineTotal = (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0);
+            return (
+              <div key={idx} className={styles.thermalItem}>
+                {/* Service name — wraps naturally */}
+                <div className={styles.thermalItemName}>{item.name}</div>
+                {/* Treatment / service types on one line */}
+                {typesList.length > 0 && (
+                  <div className={styles.thermalItemTypes}>
+                    {typesList.map(t => t.name).join(' · ')}
+                  </div>
+                )}
+                {/* Add-ons inline — never letter-by-letter */}
+                {addonsList.length > 0 && (
+                  <div className={styles.thermalItemAddons}>+ {addonsList.join(', ')}</div>
+                )}
+                {/* Delivery method */}
                 {item.deliveryMethod && (
-                  <div style={{ fontSize: '0.72rem', color: '#16A34A', fontWeight: 700, lineHeight: 1.4 }}>
+                  <div className={styles.thermalItemDelivery}>
                     📦 {(() => {
                       const matchedMethod = settings.deliveryMethods?.find(m => m.name === item.deliveryMethod);
                       const arTranslation = matchedMethod ? matchedMethod.nameAr : (item.deliveryMethod === 'Hanger' ? 'علاقة' : (item.deliveryMethod === 'Folded' ? 'مطوي' : (item.deliveryMethod === 'Bagged' ? 'مكيس' : '')));
-                      return formatLabel(item.deliveryMethod, arTranslation || item.deliveryMethod);
+                      return showBilingual && arTranslation ? `${item.deliveryMethod} / ${arTranslation}` : item.deliveryMethod;
                     })()}
                   </div>
                 )}
-              </td>
-
-              {/* Add-ons */}
-              <td>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
-                  {item.addons && item.addons.length > 0 ? (
-                    item.addons.map((a, ai) => (
-                      <div key={ai} style={{ fontSize: '0.72rem', color: '#2563EB', fontWeight: 700, lineHeight: 1.4 }}>
-                        + {a}
-                      </div>
-                    ))
-                  ) : (
-                    <span style={{ color: '#94A3B8', fontSize: '0.75rem' }}>-</span>
-                  )}
+                {/* Special note */}
+                {item.description && (
+                  <div className={styles.thermalItemNote}>⚠️ {item.description}</div>
+                )}
+                {/* Qty × Price = Total — always single line, price right-aligned */}
+                <div className={styles.thermalItemQtyRow}>
+                  <span className={styles.thermalItemQtyText}>
+                    Qty: {item.qty} &times; {(parseFloat(item.price) || 0).toFixed(2)}
+                  </span>
+                  <span className={styles.thermalItemTotal}>{lineTotal.toFixed(2)}</span>
                 </div>
-              </td>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* ── Standard: multi-column table ── */
+        <table className={styles.itemsTableBilingual}>
+          <thead>
+            <tr>
+              <th style={{ width: '5%' }}></th>
+              <th style={{ width: editMode ? '17%' : '20%', textAlign: 'left' }}>
+                <div>ITEM NAME</div>
+                {showBilingual && <div className={styles.thAr}>اسم الصنف</div>}
+              </th>
+              <th style={{ width: editMode ? '11%' : '12%', textAlign: 'left' }}>
+                <div>PACKAGE</div>
+                {showBilingual && <div className={styles.thAr}>التغليف</div>}
+              </th>
+              <th style={{ width: '18%', textAlign: 'left' }}>
+                <div>ADD-ONS</div>
+                {showBilingual && <div className={styles.thAr}>الإضافات</div>}
+              </th>
+              <th style={{ width: '14%', textAlign: 'left' }}>
+                <div>SERVICE</div>
+                {showBilingual && <div className={styles.thAr}>الخدمة</div>}
+              </th>
+              <th style={{ width: '6%', textAlign: 'center' }}>
+                <div>QTY</div>
+                {showBilingual && <div className={styles.thAr}>الكمية</div>}
+              </th>
+              <th style={{ width: '12%', textAlign: 'center' }}>
+                <div>PRICE</div>
+                {showBilingual && <div className={styles.thAr}>السعر</div>}
+              </th>
+              <th style={{ width: '15%', textAlign: 'right' }}>
+                <div>TOTAL</div>
+                {showBilingual && <div className={styles.thAr}>الإجمالي</div>}
+              </th>
+              {editMode && <th style={{ width: '4%' }} data-noprint="true"></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, idx) => (
+              <tr
+                key={idx}
+                draggable
+                onDragStart={(e) => handleDragStart(e, idx)}
+                onDragOver={(e) => handleDragOver(e, idx)}
+                onDrop={(e) => handleDrop(e, idx)}
+                onDragEnd={handleDragEnd}
+                style={{
+                  background: dragOverIndex === idx ? 'rgba(59,130,246,0.08)' : 'transparent',
+                  borderTop: dragOverIndex === idx ? '2px solid #3B82F6' : undefined,
+                  cursor: editMode ? 'default' : 'grab',
+                  transition: 'background 0.15s'
+                }}
+              >
+                {/* Grip handle */}
+                <td style={{ textAlign: 'center', padding: '0.4rem 0.2rem', color: '#CBD5E1' }}>
+                  <GripVertical size={14} style={{ cursor: 'grab' }} />
+                </td>
 
-              {/* Service (Treatments / Service Types) */}
-              <td>
-                {editMode ? (
-                  <EditableCell
-                    editing={editMode}
-                    value={item.sub || item.category}
-                    onChange={(v) => updateItem(idx, 'sub', v)}
-                    className={styles.itemServiceType}
-                  />
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                    {(() => {
-                      const typesList = item.types && item.types.length > 0
-                        ? item.types
-                        : item.sub
-                          ? item.sub.split(' + ').map(n => ({ name: n }))
-                          : [];
-                      return typesList.length > 0 ? (
-                        <div>
-                          {typesList.map((t, ti) => (
-                            <div key={ti} style={{ fontSize: '0.75rem', color: '#1E293B', fontWeight: 600, lineHeight: 1.4 }} className={styles.itemServiceType}>
-                              {t.name}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <span style={{ color: '#94A3B8', fontSize: '0.75rem' }}>-</span>
-                      );
-                    })()}
+                {/* Item Name */}
+                <td>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <EditableCell
+                      editing={editMode}
+                      value={item.name}
+                      onChange={(v) => updateItem(idx, 'name', v)}
+                      className={styles.itemName}
+                    />
+                    {item.description && (
+                      <div style={{ fontSize: '0.75rem', color: '#DC2626', fontWeight: 600, marginTop: '0.15rem', display: 'block' }}>
+                        ⚠️ {item.description}
+                      </div>
+                    )}
                   </div>
-                )}
-              </td>
+                </td>
 
-              {/* Qty */}
-              <td style={{ textAlign: 'center' }} className={styles.cellValue}>
-                <EditableCell
-                  editing={editMode}
-                  value={item.qty}
-                  onChange={(v) => updateItem(idx, 'qty', v)}
-                  type="number"
-                  align="center"
-                />
-              </td>
+                {/* Package Column */}
+                <td>
+                  {item.deliveryMethod && (
+                    <div style={{ fontSize: '0.72rem', color: '#16A34A', fontWeight: 700, lineHeight: 1.4 }}>
+                      📦 {(() => {
+                        const matchedMethod = settings.deliveryMethods?.find(m => m.name === item.deliveryMethod);
+                        const arTranslation = matchedMethod ? matchedMethod.nameAr : (item.deliveryMethod === 'Hanger' ? 'علاقة' : (item.deliveryMethod === 'Folded' ? 'مطوي' : (item.deliveryMethod === 'Bagged' ? 'مكيس' : '')));
+                        return formatLabel(item.deliveryMethod, arTranslation || item.deliveryMethod);
+                      })()}
+                    </div>
+                  )}
+                </td>
 
-              {/* Price */}
-              <td style={{ textAlign: 'center' }} className={styles.cellValue}>
-                {editMode ? (
+                {/* Add-ons */}
+                <td>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+                    {item.addons && item.addons.length > 0 ? (
+                      item.addons.map((a, ai) => (
+                        <div key={ai} style={{ fontSize: '0.72rem', color: '#2563EB', fontWeight: 700, lineHeight: 1.4 }}>
+                          + {a}
+                        </div>
+                      ))
+                    ) : (
+                      <span style={{ color: '#94A3B8', fontSize: '0.75rem' }}>-</span>
+                    )}
+                  </div>
+                </td>
+
+                {/* Service (Treatments / Service Types) */}
+                <td>
+                  {editMode ? (
+                    <EditableCell
+                      editing={editMode}
+                      value={item.sub || item.category}
+                      onChange={(v) => updateItem(idx, 'sub', v)}
+                      className={styles.itemServiceType}
+                    />
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                      {(() => {
+                        const typesList = item.types && item.types.length > 0
+                          ? item.types
+                          : item.sub
+                            ? item.sub.split(' + ').map(n => ({ name: n }))
+                            : [];
+                        return typesList.length > 0 ? (
+                          <div>
+                            {typesList.map((t, ti) => (
+                              <div key={ti} style={{ fontSize: '0.75rem', color: '#1E293B', fontWeight: 600, lineHeight: 1.4 }} className={styles.itemServiceType}>
+                                {t.name}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94A3B8', fontSize: '0.75rem' }}>-</span>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </td>
+
+                {/* Qty */}
+                <td style={{ textAlign: 'center' }} className={styles.cellValue}>
                   <EditableCell
                     editing={editMode}
-                    value={item.price}
-                    onChange={(v) => updateItem(idx, 'price', v)}
+                    value={item.qty}
+                    onChange={(v) => updateItem(idx, 'qty', v)}
                     type="number"
                     align="center"
                   />
-                ) : (
-                  <><CurrencySymbol size={11} /> {item.price.toFixed(2)}</>
-                )}
-              </td>
-
-              {/* Total (auto-calculated) */}
-              <td style={{ textAlign: 'right' }} className={styles.cellTotal}>
-                <CurrencySymbol size={11} /> {((parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0)).toFixed(2)}
-              </td>
-
-              {/* Delete row button (edit mode only) */}
-              {editMode && (
-                <td data-noprint="true" style={{ textAlign: 'center', padding: '0.2rem' }}>
-                  <button
-                    onClick={() => deleteItem(idx)}
-                    style={{
-                      background: '#FEF2F2',
-                      border: '1px solid #FCA5A5',
-                      borderRadius: 6,
-                      color: '#EF4444',
-                      cursor: 'pointer',
-                      padding: '0.2rem 0.35rem',
-                      display: 'flex',
-                      alignItems: 'center'
-                    }}
-                  >
-                    <Trash2 size={13} />
-                  </button>
                 </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+
+                {/* Price */}
+                <td style={{ textAlign: 'center' }} className={styles.cellValue}>
+                  {editMode ? (
+                    <EditableCell
+                      editing={editMode}
+                      value={item.price}
+                      onChange={(v) => updateItem(idx, 'price', v)}
+                      type="number"
+                      align="center"
+                    />
+                  ) : (
+                    <><CurrencySymbol size={11} /> {item.price.toFixed(2)}</>
+                  )}
+                </td>
+
+                {/* Total (auto-calculated) */}
+                <td style={{ textAlign: 'right' }} className={styles.cellTotal}>
+                  <CurrencySymbol size={11} /> {((parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0)).toFixed(2)}
+                </td>
+
+                {/* Delete row button (edit mode only) */}
+                {editMode && (
+                  <td data-noprint="true" style={{ textAlign: 'center', padding: '0.2rem' }}>
+                    <button
+                      onClick={() => deleteItem(idx)}
+                      style={{
+                        background: '#FEF2F2',
+                        border: '1px solid #FCA5A5',
+                        borderRadius: 6,
+                        color: '#EF4444',
+                        cursor: 'pointer',
+                        padding: '0.2rem 0.35rem',
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
       {/* Add row button (edit mode only) */}
       {editMode && (
@@ -590,162 +650,245 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
       )}
 
       {/* 6. Totals, Terms, Bank, QR Code */}
-      <div className={styles.bottomBilingualSection}>
-        {!isCompact && (showQrCode || (showBankDetails && settings.bankAccounts && settings.bankAccounts.length > 0)) && (
-          <div className={styles.trackingAndBankDetails}>
-            {showQrCode && (
-              <div className={styles.complianceQrBox}>
-                <div className={styles.qrWrapper}>
-                  <QRCodeSVG value={order.id.toString()} size={85} />
+      {isCompact ? (
+        /* ── Thermal: single-column totals ── */
+        <div className={styles.thermalTotalsBlock}>
+          {computedDiscount > 0.01 && (
+            <div className={styles.thermalTotalRow}>
+              <span>{formatLabel('Items Total', 'إجمالي المواد')}</span>
+              <span><CurrencySymbol size={10} /> {itemsTotal.toFixed(2)}</span>
+            </div>
+          )}
+          {computedDiscount > 0.01 && (
+            <div className={styles.thermalTotalRow}>
+              <span>{formatLabel('Discount', 'الخصم')}</span>
+              <span className={styles.thermalTotalRed}>- <CurrencySymbol size={10} /> {computedDiscount.toFixed(2)}</span>
+            </div>
+          )}
+          <div className={styles.thermalTotalRow}>
+            <span>{formatLabel('Subtotal', 'قبل الضريبة')}</span>
+            <span><CurrencySymbol size={10} /> {computedSubtotal.toFixed(2)}</span>
+          </div>
+          <div className={styles.thermalTotalRow}>
+            <span>{formatLabel(`VAT (${settings.isTaxEnabled ? settings.taxRate : 0}%)`, 'الضريبة')}</span>
+            <span><CurrencySymbol size={10} /> {computedTax.toFixed(2)}</span>
+          </div>
+          <div className={`${styles.thermalTotalRow} ${styles.thermalTotalBold}`}>
+            <span>{formatLabel('TOTAL', 'الإجمالي')}</span>
+            <span><CurrencySymbol size={11} /> {computedTotal.toFixed(2)}</span>
+          </div>
+          <div className={styles.thermalDividerDash} />
+          {manualPaid > 0 && (
+            <div className={styles.thermalTotalRow}>
+              <span>{formatLabel('Paid', 'المدفوع')}</span>
+              <span><CurrencySymbol size={10} /> {manualPaid.toFixed(2)}</span>
+            </div>
+          )}
+          {(order.previousBalance || 0) < 0 ? (
+            <>
+              <div className={styles.thermalTotalRow}>
+                <span>{formatLabel('Advance Available', 'رصيد مسبق')}</span>
+                <span><CurrencySymbol size={10} /> {Math.abs(order.previousBalance).toFixed(2)}</span>
+              </div>
+              {advanceDeducted > 0 && (
+                <div className={styles.thermalTotalRow}>
+                  <span>{formatLabel('Advance Deducted', 'الرصيد المخصوم')}</span>
+                  <span className={styles.thermalTotalRed}>- <CurrencySymbol size={10} /> {advanceDeducted.toFixed(2)}</span>
                 </div>
-              </div>
-            )}
-            {showBankDetails && settings.bankAccounts && settings.bankAccounts.length > 0 && (
-              <div className={styles.bankTransferDetailsBox}>
-                <h4>BANK TRANSFER DETAILS</h4>
-                {settings.bankAccounts.map((account, idx) => (
-                  <div
-                    key={account.id || idx}
-                    className={`${styles.bankAccountRow} ${settings.defaultBankId === account.id ? styles.defaultBankRow : ''}`}
-                  >
-                    <div className={styles.bankName}>
-                      {account.bankName}
-                      {settings.defaultBankId === account.id && <span className={styles.defaultBankBadge}>Default</span>}
-                    </div>
-                    <div className={styles.bankNumbers}>
-                      <span>A/C: {account.accountNumber}</span>
-                      {account.iban && <span>IBAN: {account.iban}</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Totals summary — auto-recalculated when editing */}
-        <div className={styles.totalsBilingualBox}>
-          <div className={styles.totalsSubCard}>
-            <div className={styles.totalsSubCardHeader}>
-              <span>INVOICE CHARGES</span>
-              {showBilingual && <span>رسوم الفاتورة</span>}
-            </div>
-            {computedDiscount > 0.01 && (
-              <div className={styles.totalRowBilingual}>
-                <span>{formatLabel('Items Total', 'إجمالي المواد')}</span>
-                <span className={styles.totalVal}><CurrencySymbol size={11} /> {itemsTotal.toFixed(2)}</span>
-              </div>
-            )}
-            {computedDiscount > 0.01 && (
-              <div className={styles.totalRowBilingual}>
-                <span>{formatLabel('Discount', 'الخصم')}</span>
-                <span className={styles.totalVal} style={{ color: '#DC2626' }}>- <CurrencySymbol size={11} /> {computedDiscount.toFixed(2)}</span>
-              </div>
-            )}
-            <div className={styles.totalRowBilingual}>
-              <span>{formatLabel('Before VAT', 'قبل الضريبة')}</span>
-              <span className={styles.totalVal}><CurrencySymbol size={11} /> {computedSubtotal.toFixed(2)}</span>
-            </div>
-            <div className={styles.totalRowBilingual}>
-              <span>{formatLabel(`VAT (${settings.isTaxEnabled ? settings.taxRate : 0}%)`, 'الضريبة')}</span>
-              <span className={styles.totalVal}><CurrencySymbol size={11} /> {computedTax.toFixed(2)}</span>
-            </div>
-            <div className={`${styles.totalRowBilingual} ${styles.highlightRow}`}>
-              <span>{formatLabel('Total (Inc. VAT)', 'الإجمالي شامل الضريبة')}</span>
-              <span className={styles.totalVal}><CurrencySymbol size={11} /> {computedTotal.toFixed(2)}</span>
-            </div>
-            {computedTotal - (order.paidAmount || 0) > 0 && (
-              <div className={styles.totalRowBilingual} style={{ color: '#E11D48', fontWeight: 'bold', background: '#FFF1F2', padding: '0.2rem 0.5rem', borderRadius: '4px', marginTop: '0.25rem' }}>
-                <span>{formatLabel('Invoice Due', 'المستحق للفاتورة')}</span>
-                <span className={styles.totalVal}><CurrencySymbol size={11} /> {Math.max(0, computedTotal - (order.paidAmount || 0)).toFixed(2)}</span>
-              </div>
-            )}
-          </div>
-
-          <div className={styles.totalsSubCard}>
-            <div className={styles.totalsSubCardHeader}>
-              <span>ACCOUNT STATEMENT</span>
-              {showBilingual && <span>كشف الحساب</span>}
-            </div>
-            <div className={styles.totalRowBilingual}>
-              <span>{formatLabel('Total Paid', 'المبلغ المدفوع')}</span>
-              <span className={styles.totalVal}><CurrencySymbol size={11} /> {(order.paidAmount || 0).toFixed(2)}</span>
-            </div>
-            {(() => {
-              const breakdown = order.paymentBreakdown;
-              const hasBreakdown = breakdown && (
-                (breakdown.cash && breakdown.cash > 0) ||
-                (breakdown.card && breakdown.card > 0) ||
-                (breakdown.upi && breakdown.upi > 0) ||
-                (breakdown.bank && breakdown.bank > 0)
-              );
-              if (hasBreakdown) {
-                return (
-                  <div style={{ borderTop: '1px dashed #CBD5E1', marginTop: '0.25rem', paddingTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.15rem', width: '100%' }}>
-                    <span style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 600 }}>
-                      {formatLabel('Payment Details', 'تفاصيل الدفع')}:
-                    </span>
-                    {breakdown.cash > 0 && (
-                      <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
-                        <span>- {formatLabel('Cash', 'نقداً')}</span>
-                        <span><CurrencySymbol size={9} /> {breakdown.cash.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {breakdown.card > 0 && (
-                      <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
-                        <span>- {formatLabel('Card', 'بطاقة')}</span>
-                        <span><CurrencySymbol size={9} /> {breakdown.card.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {breakdown.upi > 0 && (
-                      <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
-                        <span>- {formatLabel('UPI', 'يو بي آي')}</span>
-                        <span><CurrencySymbol size={9} /> {breakdown.upi.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {breakdown.bank > 0 && (
-                      <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
-                        <span>- {formatLabel('Bank Transfer', 'تحويل بنكي')}</span>
-                        <span><CurrencySymbol size={9} /> {breakdown.bank.toFixed(2)}</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              } else if (order.paymentMethod && order.paymentMethod !== 'Not Paid') {
-                return (
-                  <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
-                    <span>{formatLabel('Paid Via', 'طريقة الدفع')}</span>
-                    <span>{order.paymentMethod}</span>
-                  </div>
-                );
-              }
-              return null;
-            })()}
-            <div className={styles.totalRowBilingual}>
+              )}
+            </>
+          ) : (order.previousBalance || 0) > 0 ? (
+            <div className={styles.thermalTotalRow}>
               <span>{formatLabel('Previous Balance', 'الرصيد السابق')}</span>
-              <span className={styles.totalVal}><CurrencySymbol size={11} /> {(order.previousBalance || 0).toFixed(2)}</span>
+              <span><CurrencySymbol size={10} /> {(order.previousBalance || 0).toFixed(2)}</span>
             </div>
-            <div className={`${styles.grandTotalBilingualRow} ${order.totalBalance > 0 ? styles.balanceOverdue : styles.balancePaid}`}>
-              <div className={styles.grandLabelCol}>
-                <span className={styles.grandLabelEn}>Total Balance</span>
-                {showBilingual && <span className={styles.grandLabelAr}>الرصيد الإجمالي</span>}
+          ) : null}
+          <div className={`${styles.thermalTotalRow} ${styles.thermalGrandTotal} ${order.totalBalance > 0 ? styles.thermalBalanceDue : styles.thermalBalancePaid}`}>
+            <span>{formatLabel('Balance', 'الرصيد')}</span>
+            <span><CurrencySymbol size={12} /> {(order.totalBalance || 0).toFixed(2)}</span>
+          </div>
+          {/* Payment method */}
+          {order.paymentMethod && order.paymentMethod !== 'Not Paid' && (
+            <div className={styles.thermalPayMethod}>
+              {formatLabel('Via', 'عبر')}: {order.paymentMethod}
+            </div>
+          )}
+          {/* Bank details */}
+          {showBankDetails && settings.bankAccounts && settings.bankAccounts.length > 0 && (
+            <div className={styles.thermalBankBlock}>
+              <div className={styles.thermalBankTitle}>BANK TRANSFER DETAILS</div>
+              {settings.bankAccounts.map((account, bidx) => (
+                <div key={account.id || bidx} className={styles.thermalBankRow}>
+                  <strong>{account.bankName}</strong>: {account.accountNumber}
+                  {account.iban && <span className={styles.thermalBankIban}>IBAN: {account.iban}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ── Standard: two-column totals with QR + bank ── */
+        <div className={styles.bottomBilingualSection}>
+          {(showQrCode || (showBankDetails && settings.bankAccounts && settings.bankAccounts.length > 0)) && (
+            <div className={styles.trackingAndBankDetails}>
+              {showQrCode && (
+                <div className={styles.complianceQrBox}>
+                  <div className={styles.qrWrapper}>
+                    <QRCodeSVG value={order.id.toString()} size={85} />
+                  </div>
+                </div>
+              )}
+              {showBankDetails && settings.bankAccounts && settings.bankAccounts.length > 0 && (
+                <div className={styles.bankTransferDetailsBox}>
+                  <h4>BANK TRANSFER DETAILS</h4>
+                  {settings.bankAccounts.map((account, idx) => (
+                    <div
+                      key={account.id || idx}
+                      className={`${styles.bankAccountRow} ${settings.defaultBankId === account.id ? styles.defaultBankRow : ''}`}
+                    >
+                      <div className={styles.bankName}>
+                        {account.bankName}
+                        {settings.defaultBankId === account.id && <span className={styles.defaultBankBadge}>Default</span>}
+                      </div>
+                      <div className={styles.bankNumbers}>
+                        <span>A/C: {account.accountNumber}</span>
+                        {account.iban && <span>IBAN: {account.iban}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Totals summary — auto-recalculated when editing */}
+          <div className={styles.totalsBilingualBox}>
+            <div className={styles.totalsSubCard}>
+              <div className={styles.totalsSubCardHeader}>
+                <span>INVOICE CHARGES</span>
+                {showBilingual && <span>رسوم الفاتورة</span>}
               </div>
-              <span className={styles.grandVal}><CurrencySymbol size={14} /> {(order.totalBalance || 0).toFixed(2)}</span>
+              {computedDiscount > 0.01 && (
+                <div className={styles.totalRowBilingual}>
+                  <span>{formatLabel('Items Total', 'إجمالي المواد')}</span>
+                  <span className={styles.totalVal}><CurrencySymbol size={11} /> {itemsTotal.toFixed(2)}</span>
+                </div>
+              )}
+              {computedDiscount > 0.01 && (
+                <div className={styles.totalRowBilingual}>
+                  <span>{formatLabel('Discount', 'الخصم')}</span>
+                  <span className={styles.totalVal} style={{ color: '#DC2626' }}>- <CurrencySymbol size={11} /> {computedDiscount.toFixed(2)}</span>
+                </div>
+              )}
+              <div className={styles.totalRowBilingual}>
+                <span>{formatLabel('Before VAT', 'قبل الضريبة')}</span>
+                <span className={styles.totalVal}><CurrencySymbol size={11} /> {computedSubtotal.toFixed(2)}</span>
+              </div>
+              <div className={styles.totalRowBilingual}>
+                <span>{formatLabel(`VAT (${settings.isTaxEnabled ? settings.taxRate : 0}%)`, 'الضريبة')}</span>
+                <span className={styles.totalVal}><CurrencySymbol size={11} /> {computedTax.toFixed(2)}</span>
+              </div>
+              <div className={`${styles.totalRowBilingual} ${styles.highlightRow}`}>
+                <span>{formatLabel('Total (Inc. VAT)', 'الإجمالي شامل الضريبة')}</span>
+                <span className={styles.totalVal}><CurrencySymbol size={11} /> {computedTotal.toFixed(2)}</span>
+              </div>
+              {computedTotal - (order.paidAmount || 0) > 0 && (
+                <div className={styles.totalRowBilingual} style={{ color: '#E11D48', fontWeight: 'bold', background: '#FFF1F2', padding: '0.2rem 0.5rem', borderRadius: '4px', marginTop: '0.25rem' }}>
+                  <span>{formatLabel('Invoice Due', 'المستحق للفاتورة')}</span>
+                  <span className={styles.totalVal}><CurrencySymbol size={11} /> {Math.max(0, computedTotal - (order.paidAmount || 0)).toFixed(2)}</span>
+                </div>
+              )}
+            </div>
+
+            <div className={styles.totalsSubCard}>
+              <div className={styles.totalsSubCardHeader}>
+                <span>ACCOUNT STATEMENT</span>
+                {showBilingual && <span>كشف الحساب</span>}
+              </div>
+              {manualPaid > 0 && (
+                <div className={styles.totalRowBilingual}>
+                  <span>{formatLabel('Total Paid', 'المبلغ المدفوع')}</span>
+                  <span className={styles.totalVal}><CurrencySymbol size={11} /> {manualPaid.toFixed(2)}</span>
+                </div>
+              )}
+              {(() => {
+                const breakdown = order.paymentBreakdown;
+                const hasBreakdown = breakdown && (
+                  (breakdown.cash && breakdown.cash > 0) ||
+                  (breakdown.card && breakdown.card > 0) ||
+                  (breakdown.upi && breakdown.upi > 0) ||
+                  (breakdown.bank && breakdown.bank > 0)
+                );
+                if (hasBreakdown) {
+                  return (
+                    <div style={{ borderTop: '1px dashed #CBD5E1', marginTop: '0.25rem', paddingTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.15rem', width: '100%' }}>
+                      <span style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 600 }}>
+                        {formatLabel('Payment Details', 'تفاصيل الدفع')}:
+                      </span>
+                      {breakdown.cash > 0 && (
+                        <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                          <span>- {formatLabel('Cash', 'نقداً')}</span>
+                          <span><CurrencySymbol size={9} /> {breakdown.cash.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {breakdown.card > 0 && (
+                        <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                          <span>- {formatLabel('Card', 'بطاقة')}</span>
+                          <span><CurrencySymbol size={9} /> {breakdown.card.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {breakdown.upi > 0 && (
+                        <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                          <span>- {formatLabel('UPI', 'يو بي آي')}</span>
+                          <span><CurrencySymbol size={9} /> {breakdown.upi.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {breakdown.bank > 0 && (
+                        <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                          <span>- {formatLabel('Bank Transfer', 'تحويل بنكي')}</span>
+                          <span><CurrencySymbol size={9} /> {breakdown.bank.toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                } else if (order.paymentMethod && order.paymentMethod !== 'Not Paid') {
+                  return (
+                    <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                      <span>{formatLabel('Paid Via', 'طريقة الدفع')}</span>
+                      <span>{order.paymentMethod}</span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+              {(order.previousBalance || 0) < 0 ? (
+                <>
+                  <div className={styles.totalRowBilingual}>
+                    <span>{formatLabel('Advance Available', 'رصيد مسبق')}</span>
+                    <span className={styles.totalVal}><CurrencySymbol size={11} /> {Math.abs(order.previousBalance).toFixed(2)}</span>
+                  </div>
+                  {advanceDeducted > 0 && (
+                    <div className={styles.totalRowBilingual}>
+                      <span>{formatLabel('Advance Deducted', 'الرصيد المخصوم')}</span>
+                      <span className={styles.totalVal} style={{ color: '#EF4444' }}>- <CurrencySymbol size={11} /> {advanceDeducted.toFixed(2)}</span>
+                    </div>
+                  )}
+                </>
+              ) : (order.previousBalance || 0) > 0 ? (
+                <div className={styles.totalRowBilingual}>
+                  <span>{formatLabel('Previous Balance', 'الرصيد السابق')}</span>
+                  <span className={styles.totalVal}><CurrencySymbol size={11} /> {(order.previousBalance || 0).toFixed(2)}</span>
+                </div>
+              ) : null}
+              <div className={`${styles.grandTotalBilingualRow} ${order.totalBalance > 0 ? styles.balanceOverdue : styles.balancePaid}`}>
+                <div className={styles.grandLabelCol}>
+                  <span className={styles.grandLabelEn}>Total Balance</span>
+                  {showBilingual && <span className={styles.grandLabelAr}>الرصيد الإجمالي</span>}
+                </div>
+                <span className={styles.grandVal}><CurrencySymbol size={14} /> {(order.totalBalance || 0).toFixed(2)}</span>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Bank Details for Compact */}
-      {isCompact && showBankDetails && settings.bankAccounts && settings.bankAccounts.length > 0 && (
-        <div className={styles.bankDetailsCompact}>
-          <div className={styles.bankDetailsTitleCompact}>BANK TRANSFER DETAILS</div>
-          {settings.bankAccounts.map((account, idx) => (
-            <div key={account.id || idx} className={styles.bankAccountRowCompact}>
-              <strong>{account.bankName}</strong>: {account.accountNumber}
-              {account.iban && <span style={{ display: 'block', fontSize: '0.7rem', color: '#64748B' }}>IBAN: {account.iban}</span>}
-            </div>
-          ))}
         </div>
       )}
 

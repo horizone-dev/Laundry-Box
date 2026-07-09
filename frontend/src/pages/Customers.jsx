@@ -279,20 +279,23 @@ export default function Customers() {
             const currentDue = bill.dueAmount > 0 ? bill.dueAmount : (bill.totalAmount - (bill.paidAmount || 0));
             if (currentDue <= 0) continue;
 
+            const currentDueCents = Math.round(currentDue * 100);
+            let remainingPaymentCents = Math.round(remainingPayment * 100);
+
             let paymentForThisBill = 0;
             let newStatus = bill.paymentStatus || 'Credit';
             let newDue = currentDue;
             let newPaid = bill.paidAmount || 0;
 
-            if (remainingPayment >= currentDue) {
-              paymentForThisBill = currentDue;
-              remainingPayment -= currentDue;
+            if (remainingPaymentCents >= currentDueCents) {
+              paymentForThisBill = currentDue; // clear exact float due
+              remainingPayment = (remainingPaymentCents - currentDueCents) / 100;
               newDue = 0;
               newPaid += paymentForThisBill;
               newStatus = 'Paid';
             } else {
               paymentForThisBill = remainingPayment;
-              newDue -= remainingPayment;
+              newDue = (currentDueCents - remainingPaymentCents) / 100;
               newPaid += remainingPayment;
               remainingPayment = 0;
               newStatus = 'Partial';
