@@ -270,9 +270,25 @@ export default function Customers() {
           [selectedCustomer.id]
         );
 
+        let billsToProcess = [];
         if (billsRes.success && billsRes.data.length > 0) {
-          console.log(`Found ${billsRes.data.length} pending bills.`);
-          for (const bill of billsRes.data) {
+          billsToProcess = billsRes.data;
+        }
+
+        if (selectedBillForPayment) {
+          billsToProcess = billsToProcess.filter(b => b.id !== selectedBillForPayment.id);
+          // fetch the latest state of the selected bill just in case
+          const selBillRes = await window.electronAPI.dbQuery("SELECT * FROM orders WHERE id = ?", [selectedBillForPayment.id]);
+          if (selBillRes.success && selBillRes.data.length > 0) {
+            billsToProcess.unshift(selBillRes.data[0]);
+          } else {
+            billsToProcess.unshift(selectedBillForPayment);
+          }
+        }
+
+        if (billsToProcess.length > 0) {
+          console.log(`Found ${billsToProcess.length} pending bills.`);
+          for (const bill of billsToProcess) {
             if (remainingPayment <= 0) break;
 
             // Handle legacy data where dueAmount might be 0 but status is Credit
