@@ -637,7 +637,7 @@ export default function Customers() {
         {/* Insight Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.75rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E3A8A', textTransform: 'uppercase', letterSpacing: '0.05em' }}>📋 Customer Insight</span>
+            <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>📋 Customer Insight</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <button
@@ -694,7 +694,7 @@ export default function Customers() {
             <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.25rem 0' }} />
 
             <div>
-              <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: '#1E3A8A', textTransform: 'uppercase', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.5rem', marginBottom: '1rem', letterSpacing: '0.05em' }}>Sale Details</h3>
+              <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.5rem', marginBottom: '1rem', letterSpacing: '0.05em' }}>Sale Details</h3>
               
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
                 <span style={{ color: '#64748B', fontWeight: 600 }}>Total Sales</span>
@@ -724,19 +724,19 @@ export default function Customers() {
           <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #E2E8F0', padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
             <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
               <button 
-                style={{ border: 'none', background: insightTab === 'sales' ? '#1E3A8A' : 'transparent', color: insightTab === 'sales' ? 'white' : '#64748B', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', transition: 'all 0.2s' }}
+                style={{ border: 'none', background: insightTab === 'sales' ? 'var(--primary)' : 'transparent', color: insightTab === 'sales' ? 'white' : '#64748B', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', transition: 'all 0.2s' }}
                 onClick={() => setInsightTab('sales')}
               >
                 Sales
               </button>
               <button 
-                style={{ border: 'none', background: insightTab === 'payments' ? '#1E3A8A' : 'transparent', color: insightTab === 'payments' ? 'white' : '#64748B', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', transition: 'all 0.2s' }}
+                style={{ border: 'none', background: insightTab === 'payments' ? 'var(--primary)' : 'transparent', color: insightTab === 'payments' ? 'white' : '#64748B', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', transition: 'all 0.2s' }}
                 onClick={() => setInsightTab('payments')}
               >
                 Payments
               </button>
               <button 
-                style={{ border: 'none', background: insightTab === 'returns' ? '#1E3A8A' : 'transparent', color: insightTab === 'returns' ? 'white' : '#64748B', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', transition: 'all 0.2s' }}
+                style={{ border: 'none', background: insightTab === 'returns' ? 'var(--primary)' : 'transparent', color: insightTab === 'returns' ? 'white' : '#64748B', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', transition: 'all 0.2s' }}
                 onClick={() => setInsightTab('returns')}
               >
                 Returns
@@ -875,7 +875,7 @@ export default function Customers() {
               <form onSubmit={handlePayment}>
                 <div className={styles.modalBody}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem', background: '#F1F5F9', borderRadius: '12px', marginBottom: '0.5rem' }}>
-                    <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '1.2rem', fontWeight: 800 }}>
+                    <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '1.2rem', fontWeight: 800 }}>
                       {selectedCustomer.name.charAt(0)}
                     </div>
                     <div>
@@ -1245,7 +1245,7 @@ export default function Customers() {
                     width: '48px', 
                     height: '48px', 
                     borderRadius: '50%', 
-                    background: '#2563EB', 
+                    background: 'var(--primary)', 
                     display: 'flex', 
                     alignItems: 'center', 
                     justifySelf: 'center',
@@ -1409,7 +1409,7 @@ export default function Customers() {
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>CURRENT CREDIT LIMIT</div>
-                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#2563EB' }}>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)' }}>
                       <CurrencySymbol size={16} /> {(selectedCustomer.creditLimit || 0).toFixed(2)}
                       {selectedCustomer.creditLimit === 0 && <span style={{ fontSize: '0.7rem', color: '#94A3B8', marginLeft: '0.25rem' }}>(using shop default: {settings.defaultCreditLimit})</span>}
                     </div>
@@ -1478,7 +1478,7 @@ export default function Customers() {
               </div>
               <div className={styles.modalFooter}>
                 <button type="button" className={styles.secondaryBtn} onClick={() => { setShowEditCreditLimitModal(false); setSelectedCustomer(null); }}>Cancel</button>
-                <button type="submit" className={styles.primaryBtn} style={{ background: '#2563EB' }}>Save Credit Limit</button>
+                <button type="submit" className={styles.primaryBtn} style={{ background: 'var(--primary)' }}>Save Credit Limit</button>
               </div>
             </form>
           </div>
