@@ -397,7 +397,7 @@ export default function Customers() {
             [selectedCustomer.id]
           );
           if (freshCustRes.success && freshCustRes.data.length > 0) {
-            handleViewCustomerInsight(freshCustRes.data[0]);
+            await handleViewCustomerInsight(freshCustRes.data[0]);
           }
         }
         
@@ -760,8 +760,8 @@ export default function Customers() {
                         <td style={{ fontWeight: 700 }}>{bill.billNumber || bill.id}</td>
                         <td>{formatDate(bill.createdAt)}</td>
                         <td><CurrencySymbol size={13} /> {(bill.totalAmount || 0).toFixed(2)}</td>
-                        <td style={{ fontWeight: 700, color: (bill.dueAmount || 0) > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
-                          {(bill.dueAmount || 0) > 0 ? 'CREDIT' : 'PAID'}
+                        <td style={{ fontWeight: 700, color: (bill.dueAmount || 0) <= 0 ? 'var(--secondary)' : ((bill.paidAmount || 0) > 0 ? 'var(--warning)' : 'var(--danger)') }}>
+                          {(bill.dueAmount || 0) <= 0 ? 'PAID' : ((bill.paidAmount || 0) > 0 ? 'PARTIAL' : 'CREDIT')}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', alignItems: 'center' }}>
