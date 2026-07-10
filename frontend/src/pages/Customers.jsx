@@ -401,7 +401,9 @@ export default function Customers() {
           }
         }
         
-        alert(`Settlement complete! Remaining unallocated: ${remainingPayment.toFixed(2)}`);
+        setTimeout(() => {
+          alert(`Settlement complete! Remaining unallocated: ${remainingPayment.toFixed(2)}`);
+        }, 100);
       } catch (err) {
         console.error("Payment error:", err);
         alert("Payment failed. Please check console for details.");
@@ -638,7 +640,7 @@ export default function Customers() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <button
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#10B981', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--secondary)', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
               onClick={() => {
                 const autoAmount = selectedCustomer.balance > 0 ? selectedCustomer.balance : '';
                 setPaymentData({ amount: autoAmount.toString(), method: 'Cash' });
@@ -648,7 +650,7 @@ export default function Customers() {
               <DollarSign size={16} /> Settle Payment
             </button>
             <button
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#3B82F6', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--primary)', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
               onClick={() => {
                 setEditCreditLimitValue((selectedCustomer.creditLimit || 0).toString());
                 setShowEditCreditLimitModal(true);
@@ -700,7 +702,7 @@ export default function Customers() {
 
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
                 <span style={{ color: '#64748B', fontWeight: 600 }}>Pending Due</span>
-                <span style={{ fontWeight: 800, color: selectedCustomer.balance > 0 ? '#EF4444' : '#10B981' }}>
+                <span style={{ fontWeight: 800, color: selectedCustomer.balance > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
                   {(selectedCustomer.balance || 0).toFixed(2)}
                 </span>
               </div>
@@ -758,14 +760,14 @@ export default function Customers() {
                         <td style={{ fontWeight: 700 }}>{bill.billNumber || bill.id}</td>
                         <td>{formatDate(bill.createdAt)}</td>
                         <td><CurrencySymbol size={13} /> {(bill.totalAmount || 0).toFixed(2)}</td>
-                        <td style={{ fontWeight: 700, color: (bill.dueAmount || 0) > 0 ? '#EF4444' : '#10B981' }}>
+                        <td style={{ fontWeight: 700, color: (bill.dueAmount || 0) > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
                           {(bill.dueAmount || 0) > 0 ? 'CREDIT' : 'PAID'}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', alignItems: 'center' }}>
                             {/* View Order Detail */}
                             <button 
-                              style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer' }}
+                              style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer' }}
                               onClick={() => {
                                 navigate(`/invoice/${bill.id}`);
                               }}
@@ -776,7 +778,7 @@ export default function Customers() {
                             {/* Settle Order */}
                             {bill.dueAmount > 0 && (
                               <button 
-                                style={{ background: 'none', border: 'none', color: '#F59E0B', cursor: 'pointer' }}
+                                style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
                                 onClick={() => {
                                   setSelectedBillForPayment(bill);
                                   setPaymentData({ amount: bill.dueAmount.toString(), method: 'Cash' });
@@ -844,7 +846,7 @@ export default function Customers() {
                         <td>{formatDate(ret.createdAt)}</td>
                         <td><CurrencySymbol size={13} /> {(ret.totalAmount || 0).toFixed(2)}</td>
                         <td>
-                          <span style={{ color: '#EF4444', fontWeight: 700, fontSize: '0.8rem' }}>CANCELLED</span>
+                          <span style={{ color: 'var(--danger)', fontWeight: 700, fontSize: '0.8rem' }}>CANCELLED</span>
                         </td>
                       </tr>
                     )) : (
@@ -918,7 +920,7 @@ export default function Customers() {
 
                 <div className={styles.modalFooter}>
                   <button type="button" className={styles.secondaryBtn} onClick={() => { setShowPaymentModal(false); setSelectedBillForPayment(null); }}>Cancel</button>
-                  <button type="submit" className={styles.primaryBtn} style={{ background: '#10B981' }}>Complete Settlement</button>
+                  <button type="submit" className={styles.primaryBtn} style={{ background: 'var(--secondary)' }}>Complete Settlement</button>
                 </div>
               </form>
             </div>
@@ -991,20 +993,20 @@ export default function Customers() {
                 <td style={{ fontWeight: 600, color: '#475569' }}>
                   {(customer.totalSales || 0).toFixed(2)}
                 </td>
-                <td style={{ fontWeight: 700, color: (customer.balance || 0) > 0 ? '#EF4444' : '#10B981' }}>
+                <td style={{ fontWeight: 700, color: (customer.balance || 0) > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
                   {(customer.balance || 0).toFixed(2)}
                 </td>
                 <td data-noprint="true" style={{ textAlign: 'center' }}>
                   <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', alignItems: 'center' }}>
                     <button 
-                      style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                      style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleViewCustomerInsight(customer); }}
                       title="View Details"
                     >
                       <Eye size={18} />
                     </button>
                     <button 
-                      style={{ background: 'none', border: 'none', color: '#F59E0B', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                      style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                       onClick={(e) => {
                         e.preventDefault(); e.stopPropagation();
                         setSelectedCustomer(customer);
@@ -1017,7 +1019,7 @@ export default function Customers() {
                       <Edit2 size={18} />
                     </button>
                     <button 
-                      style={{ background: 'none', border: 'none', color: '#10B981', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                      style={{ background: 'none', border: 'none', color: 'var(--secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                       onClick={(e) => {
                         e.preventDefault(); e.stopPropagation();
                         setSelectedCustomer(customer);
@@ -1030,7 +1032,7 @@ export default function Customers() {
                       <DollarSign size={18} />
                     </button>
                     <button 
-                      style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                      style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteCustomer(customer.id); }}
                       title="Delete Customer"
                     >
@@ -1140,7 +1142,7 @@ export default function Customers() {
                     : selectedCustomer?.balance < 0 
                       ? 'Prepaid Advance: ' 
                       : 'Customer Balance: '}
-                  <strong style={{ color: (selectedCustomer?.balance || 0) > 0 ? '#EF4444' : (selectedCustomer?.balance || 0) < 0 ? '#10B981' : '#64748B' }}>
+                  <strong style={{ color: (selectedCustomer?.balance || 0) > 0 ? 'var(--danger)' : (selectedCustomer?.balance || 0) < 0 ? 'var(--secondary)' : '#64748B' }}>
                     {selectedCustomer?.balance !== 0 ? (
                       <>
                         <CurrencySymbol size={16} /> {Math.abs(selectedCustomer?.balance || 0).toFixed(2)}
@@ -1178,7 +1180,7 @@ export default function Customers() {
                             : (bill.paidAmount || 0).toFixed(2)
                         }
                       </td>
-                      <td><span style={{ color: (bill.dueAmount || 0) > 0 ? '#EF4444' : 'inherit' }}><CurrencySymbol size={14} /> {(bill.dueAmount || 0).toFixed(2)}</span></td>
+                      <td><span style={{ color: (bill.dueAmount || 0) > 0 ? 'var(--danger)' : 'inherit' }}><CurrencySymbol size={14} /> {(bill.dueAmount || 0).toFixed(2)}</span></td>
                       <td>
                         <span className={`${styles.statusBadge} ${getStatusClass(
                           (bill.paidAmount || 0) === 0 
@@ -1261,7 +1263,7 @@ export default function Customers() {
                         : selectedCustomer?.balance < 0 
                           ? 'Prepaid Advance: ' 
                           : 'Customer Balance: '}
-                      <strong style={{ color: (selectedCustomer?.balance || 0) > 0 ? '#EF4444' : (selectedCustomer?.balance || 0) < 0 ? '#10B981' : '#64748B' }}>
+                      <strong style={{ color: (selectedCustomer?.balance || 0) > 0 ? 'var(--danger)' : (selectedCustomer?.balance || 0) < 0 ? 'var(--secondary)' : '#64748B' }}>
                         {selectedCustomer?.balance !== 0 ? (
                           <>
                             <CurrencySymbol size={14} /> {Math.abs(selectedCustomer?.balance || 0).toFixed(2)}
@@ -1309,7 +1311,7 @@ export default function Customers() {
 
               <div className={styles.modalFooter}>
                 <button type="button" className={styles.secondaryBtn} onClick={() => setShowPaymentModal(false)}>Cancel</button>
-                <button type="submit" className={styles.primaryBtn} style={{ background: '#10B981' }}>
+                <button type="submit" className={styles.primaryBtn} style={{ background: 'var(--secondary)' }}>
                   Complete Settlement
                 </button>
               </div>
@@ -1400,7 +1402,7 @@ export default function Customers() {
                 }}>
                   <div>
                     <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>CURRENT BALANCE</div>
-                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: (selectedCustomer.balance || 0) > 0 ? '#EF4444' : '#10B981' }}>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: (selectedCustomer.balance || 0) > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
                       <CurrencySymbol size={16} /> {Math.abs(selectedCustomer.balance || 0).toFixed(2)}
                     </div>
                   </div>
@@ -1487,7 +1489,7 @@ export default function Customers() {
           <div className={styles.statusModal} style={{ maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ background: '#FEF2F2', borderBottom: '1px solid #FEE2E2', padding: '1.25rem 1.5rem', borderRadius: '12px 12px 0 0' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <AlertTriangle size={24} color="#EF4444" />
+                <AlertTriangle size={24} color="var(--danger)" />
                 <div>
                   <h2 style={{ color: '#991B1B', margin: 0, fontSize: '1.25rem' }}>Credit Limit Exceeded</h2>
                   <p style={{ color: '#B91C1C', margin: 0, fontSize: '0.8rem' }}>This customer has exceeded their credit threshold.</p>
@@ -1518,7 +1520,7 @@ export default function Customers() {
                     <span style={{ color: '#64748B', fontWeight: 600 }}>New Outstanding Balance:</span>
                     <span style={{ color: '#1E293B', fontWeight: 700 }}><CurrencySymbol size={14} /> {creditWarningDetails.newOutstanding.toFixed(2)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--danger)', fontWeight: 700 }}>
                     <span>Exceeded Amount:</span>
                     <span><CurrencySymbol size={14} /> {creditWarningDetails.exceededAmount.toFixed(2)}</span>
                   </div>
@@ -1541,7 +1543,7 @@ export default function Customers() {
                       />
                     </div>
                     {managerPinError && (
-                      <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.25rem', fontWeight: 600 }}>{managerPinError}</p>
+                      <p style={{ color: 'var(--danger)', fontSize: '0.8rem', marginTop: '0.25rem', fontWeight: 600 }}>{managerPinError}</p>
                     )}
                   </div>
                 ) : (
