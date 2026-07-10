@@ -389,6 +389,7 @@ export default function Customers() {
 
         setShowPaymentModal(false);
         setPaymentData({ amount: '', method: 'Cash' });
+        setSelectedBillForPayment(null);
         await fetchCustomers();
 
         if (viewMode === 'insight' && selectedCustomer) {
@@ -403,7 +404,7 @@ export default function Customers() {
         
         setTimeout(() => {
           alert(`Settlement complete! Remaining unallocated: ${remainingPayment.toFixed(2)}`);
-        }, 100);
+        }, 300);
       } catch (err) {
         console.error("Payment error:", err);
         alert("Payment failed. Please check console for details.");
@@ -702,8 +703,8 @@ export default function Customers() {
 
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
                 <span style={{ color: '#64748B', fontWeight: 600 }}>Pending Due</span>
-                <span style={{ fontWeight: 800, color: selectedCustomer.balance > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
-                  {(selectedCustomer.balance || 0).toFixed(2)}
+                <span style={{ fontWeight: 800, color: selectedCustomerStats.pendingDue > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
+                  {(selectedCustomerStats.pendingDue || 0).toFixed(2)}
                 </span>
               </div>
 
@@ -1402,8 +1403,8 @@ export default function Customers() {
                 }}>
                   <div>
                     <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>CURRENT BALANCE</div>
-                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: (selectedCustomer.balance || 0) > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
-                      <CurrencySymbol size={16} /> {Math.abs(selectedCustomer.balance || 0).toFixed(2)}
+                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: (selectedCustomerStats.pendingDue || 0) > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
+                      <CurrencySymbol size={16} /> {Math.abs(selectedCustomerStats.pendingDue || 0).toFixed(2)}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
