@@ -13,6 +13,7 @@ import CurrencySymbol from '../components/CurrencySymbol';
 import { getLocalISOString, getLocalDateStr } from '../utils/dateUtils';
 import styles from './Customers.module.css';
 import { checkCreditLimit } from '../utils/creditLimit';
+import InvoiceTemplate from '../components/InvoiceTemplate';
 
 export default function Customers() {
   const navigate = useNavigate();
@@ -50,6 +51,7 @@ export default function Customers() {
   const [customerPayments, setCustomerPayments] = useState([]);
   const [customerReturns, setCustomerReturns] = useState([]);
   const [selectedBillForPayment, setSelectedBillForPayment] = useState(null);
+  const [selectedInvoiceForView, setSelectedInvoiceForView] = useState(null);
   const [selectedCustomerStats, setSelectedCustomerStats] = useState({
     totalSales: 0,
     pendingDue: 0,
@@ -71,6 +73,7 @@ export default function Customers() {
         setShowPaymentModal(false);
         setShowQuickSettleModal(false);
         setShowEditCreditLimitModal(false);
+        setSelectedInvoiceForView(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -78,7 +81,7 @@ export default function Customers() {
   }, []);
 
   useEffect(() => {
-    const isAnyOpen = showModal || showBillsModal || showPaymentModal || showQuickSettleModal || showEditCreditLimitModal;
+    const isAnyOpen = showModal || showBillsModal || showPaymentModal || showQuickSettleModal || showEditCreditLimitModal || selectedInvoiceForView;
     if (isAnyOpen) {
       document.body.style.overflow = 'hidden';
     } else {
@@ -87,7 +90,7 @@ export default function Customers() {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [showModal, showBillsModal, showPaymentModal, showQuickSettleModal, showEditCreditLimitModal]);
+  }, [showModal, showBillsModal, showPaymentModal, showQuickSettleModal, showEditCreditLimitModal, selectedInvoiceForView]);
 
   const fetchCustomers = async () => {
     if (window.electronAPI?.dbQuery) {
@@ -770,7 +773,29 @@ export default function Customers() {
                             <button 
                               style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer' }}
                               onClick={() => {
-                                navigate(`/invoice/${bill.id}`);
+                                let parsedItems = [];
+                                try {
+                                  if (bill.items && bill.items !== 'null') {
+                                    parsedItems = typeof bill.items === 'string' ? JSON.parse(bill.items) : bill.items;
+                                  }
+                                } catch (e) {
+                                  console.error('Failed to parse items for invoice view:', e);
+                                }
+                                
+                                let parsedBreakdown = null;
+                                try {
+                                  if (bill.paymentBreakdown && bill.paymentBreakdown !== 'null') {
+                                    parsedBreakdown = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
+                                  }
+                                } catch (e) {
+                                  console.error('Failed to parse paymentBreakdown for invoice view:', e);
+                                }
+
+                                setSelectedInvoiceForView({
+                                  ...bill,
+                                  items: parsedItems,
+                                  paymentBreakdown: parsedBreakdown
+                                });
                               }}
                               title="View details"
                             >
@@ -1577,6 +1602,34 @@ export default function Customers() {
           </div>
         </div>
       )}
+
+      {/* INVOICE VIEW MODAL */}
+      {selectedInvoiceForView && (
+        <div className={styles.modalOverlay} onClick={() => setSelectedInvoiceForView(null)} style={{ zIndex: 10000 }}>
+          <div className={styles.modal} style={{ maxWidth: '800px', width: '95%', maxHeight: '90vh', overflowY: 'auto', padding: 0 }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader} style={{ position: 'sticky', top: 0, background: 'white', zIndex: 10, padding: '1.25rem 1.5rem', borderBottom: '1px solid #E2E8F0' }}>
+              <div>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E293B' }}>Invoice #{selectedInvoiceForView.billNumber || `${settings.invoicePrefix || ''}${selectedInvoiceForView.id}`}</h2>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => setSelectedInvoiceForView(null)} />
+            </div>
+            <div className={styles.modalBody} style={{ padding: '1.5rem', background: '#F8FAFC' }}>
+              <div style={{ background: 'white', borderRadius: '12px', overflow: 'hidden', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}>
+                <InvoiceTemplate 
+                  order={selectedInvoiceForView} 
+                  settings={settings} 
+                  editable={false} 
+                  onOrderUpdate={(updated) => { 
+                    fetchCustomerBills(selectedCustomer?.id); 
+                    setSelectedInvoiceForView(prev => ({ ...prev, ...updated })); 
+                  }} 
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
