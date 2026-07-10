@@ -816,7 +816,101 @@ function runDataHealer(db) {
               WHERE deleted_orders.customerId = customers.id AND deleted_orders.refundStatus = 'Refund Pending'
             ), 0);`);
 
-    // Auto-application of customer advances and unapplied payments has been disabled to prevent mutating historical order statuses without explicit action.
+    // Auto-application of customer advances and unapplied payments
+    console.log("Auto-applying customer advances to oldest unpaid invoices...");
+    const customersWithAdvance = db.prepare(`
+      SELECT customerId, SUM(amount) as unapplied
+      FROM payments
+      WHERE (orderId IS NULL OR orderId = '')
+      GROUP BY customerId
+      HAVING unapplied > 0.01
+    `).all();
+
+    for (const cust of customersWithAdvance) {
+      let advance = cust.unapplied;
+
+      const unpaidOrders = db.prepare(`
+        SELECT id, totalAmount, paidAmount, dueAmount, paymentStatus
+        FROM orders
+        WHERE customerId = ? AND paymentStatus IN ('Credit', 'Partial') AND dueAmount > 0
+        ORDER BY createdAt ASC
+      `).all(cust.customerId);
+
+      for (const order of unpaidOrders) {
+        if (advance <= 0.01) break; // Use up advance until mathematically zero
+        
+        let due = order.dueAmount;
+        let paymentToApply = Math.min(advance, due);
+
+        advance -= paymentToApply;
+        let newPaid = order.paidAmount + paymentToApply;
+        let newDue = Math.max(0, order.totalAmount - newPaid);
+        let newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+
+        // Update the order
+        db.prepare(`UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, isSynced = 0, updatedAt = ? WHERE id = ?`)
+          .run(newPaid, newDue, newStatus, timestamp, order.id);
+
+        // Deduct from advance pool by creating a negative unlinked payment (so customer balance remains perfectly accurate)
+        db.prepare(`INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`).run(
+          `PAY-ADV-USE-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+          cust.customerId,
+          null,
+          'SHOP_01',
+          -paymentToApply,
+          'System Auto',
+          'SUCCESS',
+          timestamp,
+          timestamp
+        );
+
+        // Add a positive payment linked to the specific order (so the invoice has a proper payment history matching actualPaid)
+        db.prepare(`INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`).run(
+          `PAY-AUTO-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+          cust.customerId,
+          order.id,
+          'SHOP_01',
+          paymentToApply,
+          'System Auto',
+          'SUCCESS',
+          timestamp,
+          timestamp
+        );
+        
+        console.log(`Auto-applied ${paymentToApply} to order ${order.id}. New status: ${newStatus}`);
+      }
+    }
+
+    // Final Recalculate customer balances just in case the above changed something structurally
+    db.exec(`UPDATE customers SET balance = (
+              SELECT IFNULL(SUM(dueAmount), 0) 
+              FROM orders 
+              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+            ) - IFNULL((
+              SELECT SUM(amount) 
+              FROM payments 
+              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+            ), 0) - IFNULL((
+              SELECT SUM(paidAmount)
+              FROM deleted_orders
+              WHERE deleted_orders.customerId = customers.id AND deleted_orders.refundStatus = 'Refund Pending'
+            ), 0), isSynced = 0, updatedAt = '${timestamp}'
+            WHERE balance != (
+              SELECT IFNULL(SUM(dueAmount), 0) 
+              FROM orders 
+              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+            ) - IFNULL((
+              SELECT SUM(amount) 
+              FROM payments 
+              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+            ), 0) - IFNULL((
+              SELECT SUM(paidAmount)
+              FROM deleted_orders
+              WHERE deleted_orders.customerId = customers.id AND deleted_orders.refundStatus = 'Refund Pending'
+            ), 0);`);
+
 
 
     // 4. Pre-populate Categories if empty
