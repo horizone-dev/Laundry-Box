@@ -468,8 +468,8 @@ export default function Customers() {
           [newLimit, getLocalISOString(), selectedCustomer.id]
         );
         fetchCustomers();
+        setSelectedCustomer(prev => ({ ...prev, creditLimit: newLimit }));
         setShowEditCreditLimitModal(false);
-        setSelectedCustomer(null);
         setEditCreditLimitValue('0');
         setManagerPinValue('');
         setManagerPinError('');
@@ -1406,14 +1406,14 @@ export default function Customers() {
 
       {/* Edit Credit Limit Modal */}
       {showEditCreditLimitModal && selectedCustomer && (
-        <div className={styles.modalOverlay} onClick={() => { setShowEditCreditLimitModal(false); setSelectedCustomer(null); }}>
+        <div className={styles.modalOverlay} onClick={() => { setShowEditCreditLimitModal(false); }}>
           <div className={styles.modal} style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div>
                 <h2>Edit Credit Limit</h2>
                 <p>Set individual credit limit for <strong>{selectedCustomer.name}</strong></p>
               </div>
-              <X size={24} className={styles.closeBtn} onClick={() => { setShowEditCreditLimitModal(false); setSelectedCustomer(null); }} />
+              <X size={24} className={styles.closeBtn} onClick={() => { setShowEditCreditLimitModal(false); }} />
             </div>
             <form onSubmit={handleUpdateCreditLimit}>
               <div className={styles.modalBody}>
