@@ -28,6 +28,30 @@ export default function Customers() {
   const [customerBills, setCustomerBills] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [paymentData, setPaymentData] = useState({ amount: '', method: 'Cash' });
+  const [splitCash, setSplitCash] = useState('');
+  const [splitCard, setSplitCard] = useState('');
+  const [splitUPI, setSplitUPI] = useState('');
+  const [splitBank, setSplitBank] = useState('');
+
+  useEffect(() => {
+    if (paymentData.method === 'Multipayment') {
+      const cashVal = parseFloat(splitCash) || 0;
+      const cardVal = parseFloat(splitCard) || 0;
+      const upiVal = parseFloat(splitUPI) || 0;
+      const bankVal = parseFloat(splitBank) || 0;
+      const total = cashVal + cardVal + upiVal + bankVal;
+      setPaymentData(prev => ({ ...prev, amount: total > 0 ? total.toFixed(2) : '' }));
+    }
+  }, [splitCash, splitCard, splitUPI, splitBank, paymentData.method]);
+
+  useEffect(() => {
+    if (!showPaymentModal) {
+      setSplitCash('');
+      setSplitCard('');
+      setSplitUPI('');
+      setSplitBank('');
+    }
+  }, [showPaymentModal]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchName, setSearchName] = useState('');
@@ -50,6 +74,13 @@ export default function Customers() {
   const [insightTab, setInsightTab] = useState('sales'); // 'sales', 'payments', 'returns'
   const [customerPayments, setCustomerPayments] = useState([]);
   const [customerReturns, setCustomerReturns] = useState([]);
+  const [selectedPaymentForAction, setSelectedPaymentForAction] = useState(null);
+  const [showPaymentViewModal, setShowPaymentViewModal] = useState(false);
+  const [showPaymentEditModal, setShowPaymentEditModal] = useState(false);
+  const [editPaymentMethod, setEditPaymentMethod] = useState('Cash');
+  const [editPaymentAmount, setEditPaymentAmount] = useState('');
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinActionTarget, setPinActionTarget] = useState(null);
   const [selectedBillForPayment, setSelectedBillForPayment] = useState(null);
   const [selectedInvoiceForView, setSelectedInvoiceForView] = useState(null);
   const [selectedCustomerStats, setSelectedCustomerStats] = useState({
@@ -261,130 +292,143 @@ export default function Customers() {
 
     if (window.electronAPI?.dbQuery) {
       try {
-        let remainingPayment = parseFloat(paymentData.amount);
-        const totalPaid = remainingPayment;
+        const totalPaid = parseFloat(paymentData.amount);
         const timestamp = getLocalISOString();
 
         console.log(`Starting settlement for ${selectedCustomer.name}. Amount: ${totalPaid}`);
 
-        // 1. Fetch oldest unpaid/partial bills first (FIFO)
-        const billsRes = await window.electronAPI.dbQuery(
-          "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND (dueAmount > 0 OR paymentStatus = 'Credit' OR paymentStatus = 'Partial') ORDER BY createdAt ASC",
-          [selectedCustomer.id]
-        );
-
-        let billsToProcess = [];
-        if (billsRes.success && billsRes.data.length > 0) {
-          billsToProcess = billsRes.data;
+        // Prepare splits
+        let splits = [];
+        if (paymentData.method === 'Multipayment') {
+          const cashVal = parseFloat(splitCash) || 0;
+          const cardVal = parseFloat(splitCard) || 0;
+          const upiVal = parseFloat(splitUPI) || 0;
+          const bankVal = parseFloat(splitBank) || 0;
+          if (cashVal > 0) splits.push({ method: 'Cash', amount: cashVal });
+          if (cardVal > 0) splits.push({ method: 'Card', amount: cardVal });
+          if (upiVal > 0) splits.push({ method: 'UPI', amount: upiVal });
+          if (bankVal > 0) splits.push({ method: 'Bank', amount: bankVal });
+        } else {
+          splits.push({ method: paymentData.method, amount: totalPaid });
         }
 
-        if (selectedBillForPayment) {
-          billsToProcess = billsToProcess.filter(b => b.id !== selectedBillForPayment.id);
-          // fetch the latest state of the selected bill just in case
-          const selBillRes = await window.electronAPI.dbQuery("SELECT * FROM orders WHERE id = ?", [selectedBillForPayment.id]);
-          if (selBillRes.success && selBillRes.data.length > 0) {
-            billsToProcess.unshift(selBillRes.data[0]);
-          } else {
-            billsToProcess.unshift(selectedBillForPayment);
+        let totalRemaining = 0;
+
+        // Process splits sequentially
+        for (const split of splits) {
+          let remainingPayment = split.amount;
+
+          // 1. Fetch oldest unpaid/partial bills first (FIFO)
+          const billsRes = await window.electronAPI.dbQuery(
+            "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND (dueAmount > 0 OR paymentStatus = 'Credit' OR paymentStatus = 'Partial') ORDER BY createdAt ASC",
+            [selectedCustomer.id]
+          );
+
+          let billsToProcess = [];
+          if (billsRes.success && billsRes.data.length > 0) {
+            billsToProcess = billsRes.data;
           }
-        }
 
-        if (billsToProcess.length > 0) {
-          console.log(`Found ${billsToProcess.length} pending bills.`);
-          for (const bill of billsToProcess) {
-            if (remainingPayment <= 0) break;
-
-            // Handle legacy data where dueAmount might be 0 but status is Credit
-            const currentDue = bill.dueAmount > 0 ? bill.dueAmount : (bill.totalAmount - (bill.paidAmount || 0));
-            if (currentDue <= 0) continue;
-
-            const currentDueCents = Math.round(currentDue * 100);
-            let remainingPaymentCents = Math.round(remainingPayment * 100);
-
-            let paymentForThisBill = 0;
-            let newStatus = bill.paymentStatus || 'Credit';
-            let newDue = currentDue;
-            let newPaid = bill.paidAmount || 0;
-
-            if (remainingPaymentCents >= currentDueCents) {
-              paymentForThisBill = currentDue; // clear exact float due
-              remainingPayment = (remainingPaymentCents - currentDueCents) / 100;
-              newDue = 0;
-              newPaid += paymentForThisBill;
-              newStatus = 'Paid';
+          if (selectedBillForPayment) {
+            billsToProcess = billsToProcess.filter(b => b.id !== selectedBillForPayment.id);
+            const selBillRes = await window.electronAPI.dbQuery("SELECT * FROM orders WHERE id = ?", [selectedBillForPayment.id]);
+            if (selBillRes.success && selBillRes.data.length > 0) {
+              billsToProcess.unshift(selBillRes.data[0]);
             } else {
-              paymentForThisBill = remainingPayment;
-              newDue = (currentDueCents - remainingPaymentCents) / 100;
-              newPaid += remainingPayment;
-              remainingPayment = 0;
-              newStatus = 'Partial';
+              billsToProcess.unshift(selectedBillForPayment);
             }
+          }
 
-            console.log(`Applying ${paymentForThisBill} to bill ${bill.id}. New status: ${newStatus}`);
+          if (billsToProcess.length > 0) {
+            console.log(`Found ${billsToProcess.length} pending bills.`);
+            for (const bill of billsToProcess) {
+              if (remainingPayment <= 0) break;
 
-            // Update Bill
-            await window.electronAPI.dbQuery(
-              'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-              [newPaid, newDue, newStatus, paymentData.method, timestamp, bill.id]
-            );
+              const currentDue = bill.dueAmount > 0 ? bill.dueAmount : (bill.totalAmount - (bill.paidAmount || 0));
+              if (currentDue <= 0) continue;
 
-            // Record Payment Entry linked to Bill
+              const currentDueCents = Math.round(currentDue * 100);
+              let remainingPaymentCents = Math.round(remainingPayment * 100);
+
+              let paymentForThisBill = 0;
+              let newStatus = bill.paymentStatus || 'Credit';
+              let newDue = currentDue;
+              let newPaid = bill.paidAmount || 0;
+
+              if (remainingPaymentCents >= currentDueCents) {
+                paymentForThisBill = currentDue;
+                remainingPayment = (remainingPaymentCents - currentDueCents) / 100;
+                newDue = 0;
+                newPaid += paymentForThisBill;
+                newStatus = 'Paid';
+              } else {
+                paymentForThisBill = remainingPayment;
+                newDue = (currentDueCents - remainingPaymentCents) / 100;
+                newPaid += remainingPayment;
+                remainingPayment = 0;
+                newStatus = 'Partial';
+              }
+
+              console.log(`Applying ${paymentForThisBill} to bill ${bill.id}. New status: ${newStatus}`);
+
+              await window.electronAPI.dbQuery(
+                'UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+                [newPaid, newDue, newStatus, split.method, timestamp, bill.id]
+              );
+
+              await window.electronAPI.dbQuery(
+                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                [`PAY-${Date.now()}-${bill.id}-${split.method}`, selectedCustomer.id, bill.id, DEFAULT_SHOP_ID, paymentForThisBill, split.method, 'SUCCESS', timestamp, timestamp]
+              );
+            }
+          }
+
+          if (remainingPayment > 0) {
             await window.electronAPI.dbQuery(
               `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-              [`PAY-${Date.now()}-${bill.id}`, selectedCustomer.id, bill.id, DEFAULT_SHOP_ID, paymentForThisBill, paymentData.method, 'SUCCESS', timestamp, timestamp]
+              [`PAY-ADV-${Date.now()}-${split.method}`, selectedCustomer.id, null, DEFAULT_SHOP_ID, remainingPayment, split.method, 'SUCCESS', timestamp, timestamp]
             );
           }
-        } else {
-          console.log("No specific bills found to settle, applying to general balance.");
-        }
 
-        // If there's remaining unapplied payment (excess / advance payment), record it as an unlinked payment
-        if (remainingPayment > 0) {
-          await window.electronAPI.dbQuery(
-            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-            [`PAY-ADV-${Date.now()}`, selectedCustomer.id, null, DEFAULT_SHOP_ID, remainingPayment, paymentData.method, 'SUCCESS', timestamp, timestamp]
-          );
-        }
+          totalRemaining += remainingPayment;
 
-        // 2. Update overall customer balance
-        await window.electronAPI.dbQuery(
-          'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          [totalPaid, timestamp, selectedCustomer.id]
-        );
+          const txnId = `TXN-${Date.now()}-${split.method}`;
+          const _nowC = new Date();
+          const txnTimestamp = `${_nowC.getFullYear()}-${String(_nowC.getMonth()+1).padStart(2,'0')}-${String(_nowC.getDate()).padStart(2,'0')} ${String(_nowC.getHours()).padStart(2,'0')}:${String(_nowC.getMinutes()).padStart(2,'0')}`;
+          
+          const mappedBankId = split.method === 'Card'
+            ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+            : (split.method === 'UPI'
+              ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+              : (split.method === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
 
-        // 3. Record Transaction in Accounts
-        const txnId = `TXN-${Date.now()}`;
-        const _nowC = new Date();
-        const txnTimestamp = `${_nowC.getFullYear()}-${String(_nowC.getMonth()+1).padStart(2,'0')}-${String(_nowC.getDate()).padStart(2,'0')} ${String(_nowC.getHours()).padStart(2,'0')}:${String(_nowC.getMinutes()).padStart(2,'0')}`;
-        
-        const mappedBankId = paymentData.method === 'Card'
-          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
-          : (paymentData.method === 'UPI'
-            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
-            : (paymentData.method === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
-
-        await window.electronAPI.dbQuery(
-          `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, (paymentData.method === 'Bank' || paymentData.method === 'Card' || paymentData.method === 'UPI') ? 'BANK' : 'CASH', 'INCOME', 'Credit Settlement', totalPaid, `Settlement from ${selectedCustomer.name}`, txnTimestamp, 0, timestamp, 'DollarSign', mappedBankId]
-        );
-
-        // Record card commission if applicable
-        if (paymentData.method === 'Card' && settings.cardCommission > 0) {
-          const commissionRate = parseFloat(settings.cardCommission || 0);
-          const commissionAmount = totalPaid * (commissionRate / 100);
-          const commTxnId = `TXN-COMM-${Date.now()}`;
-          const commDesc = `Card Commission for Credit Settlement ${selectedCustomer.name}`;
           await window.electronAPI.dbQuery(
             `INSERT INTO account_transactions 
              (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, 0, timestamp, 'Percent', mappedBankId]
+            [txnId, DEFAULT_SHOP_ID, (split.method === 'Bank' || split.method === 'Card' || split.method === 'UPI') ? 'BANK' : 'CASH', 'INCOME', 'Credit Settlement', split.amount, `Settlement from ${selectedCustomer.name} (${split.method})`, txnTimestamp, 0, timestamp, 'DollarSign', mappedBankId]
           );
+
+          if (split.method === 'Card' && settings.cardCommission > 0) {
+            const commissionRate = parseFloat(settings.cardCommission || 0);
+            const commissionAmount = split.amount * (commissionRate / 100);
+            const commTxnId = `TXN-COMM-${Date.now()}-${split.method}`;
+            const commDesc = `Card Commission for Credit Settlement ${selectedCustomer.name}`;
+            await window.electronAPI.dbQuery(
+              `INSERT INTO account_transactions 
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, 0, timestamp, 'Percent', mappedBankId]
+            );
+          }
         }
+
+        await window.electronAPI.dbQuery(
+          'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+          [totalPaid, timestamp, selectedCustomer.id]
+        );
 
         if (window.electronAPI?.runDataHealer) {
           await window.electronAPI.runDataHealer();
@@ -406,7 +450,7 @@ export default function Customers() {
         }
         
         setTimeout(() => {
-          alert(`Settlement complete! Remaining unallocated: ${remainingPayment.toFixed(2)}`);
+          alert(`Settlement complete! Remaining unallocated: ${totalRemaining.toFixed(2)}`);
         }, 300);
       } catch (err) {
         console.error("Payment error:", err);
@@ -445,6 +489,36 @@ export default function Customers() {
     }
   };
 
+  const formatPaymentId = (pay) => {
+    if (!pay || !pay.id) return '';
+    if (pay.orderId) return `PAY-${pay.orderId}`;
+    
+    const parts = pay.id.split('-');
+    const lastPart = parts[parts.length - 1];
+    
+    // Find a numeric suffix or fallback to a short part
+    let suffix = lastPart;
+    if (['Cash', 'Card', 'UPI', 'Bank', 'Multipayment', 'Discount'].includes(lastPart) && parts.length > 2) {
+      suffix = parts[parts.length - 2];
+    }
+    
+    if (suffix.length > 6) {
+      suffix = suffix.substring(suffix.length - 4);
+    }
+    
+    if (parts.includes('ADV')) {
+      return `ADV-${suffix}`;
+    }
+    if (parts.includes('AUTO')) {
+      return `AUTO-${suffix}`;
+    }
+    if (parts.includes('QUIC')) {
+      return `QUIC-${suffix}`;
+    }
+    
+    return pay.id.length > 12 ? pay.id.substring(0, 6) + '...' + pay.id.substring(pay.id.length - 4) : pay.id;
+  };
+
   const handleUpdateCreditLimit = async (e) => {
     e.preventDefault();
     if (!selectedCustomer) return;
@@ -468,7 +542,9 @@ export default function Customers() {
           [newLimit, getLocalISOString(), selectedCustomer.id]
         );
         fetchCustomers();
-        setSelectedCustomer(prev => ({ ...prev, creditLimit: newLimit }));
+        const updated = { ...selectedCustomer, creditLimit: newLimit };
+        setSelectedCustomer(updated);
+        handleViewCustomerInsight(updated);
         setShowEditCreditLimitModal(false);
         setEditCreditLimitValue('0');
         setManagerPinValue('');
@@ -477,6 +553,307 @@ export default function Customers() {
         console.error('Update credit limit error:', err);
         alert('Failed to update credit limit.');
       }
+    }
+  };
+
+  const handleVerifyPinAction = (e) => {
+    e.preventDefault();
+    const correctPin = settings.orderDeletePin || '0000';
+    if (String(managerPinValue) !== String(correctPin)) {
+      setManagerPinError("Incorrect Manager PIN! Access Denied.");
+      return;
+    }
+    setManagerPinError('');
+    setManagerPinValue('');
+    setShowPinModal(false);
+
+    if (pinActionTarget === 'delete_payment' && selectedPaymentForAction) {
+      handleDeletePaymentRecord(selectedPaymentForAction.id);
+    } else if (pinActionTarget === 'edit_payment' && selectedPaymentForAction) {
+      setShowPaymentEditModal(true);
+    }
+  };
+
+  const handleViewPaymentDetails = async (pay) => {
+    if (!pay) return;
+    if (pay.orderId) {
+      try {
+        const orderRes = await window.electronAPI.dbQuery(
+          "SELECT orders.*, customers.name as customerName, customers.phone as customerPhone FROM orders LEFT JOIN customers ON orders.customerId = customers.id WHERE orders.id = ? OR orders.billNumber = ?",
+          [pay.orderId, pay.orderId]
+        );
+        if (orderRes.success && orderRes.data.length > 0) {
+          const rawOrder = orderRes.data[0];
+          let parsedItems = [];
+          try {
+            if (rawOrder.items) {
+              parsedItems = typeof rawOrder.items === 'string' ? JSON.parse(rawOrder.items) : rawOrder.items;
+            }
+          } catch (e) {}
+          let parsedBreakdown = null;
+          try {
+            if (rawOrder.paymentBreakdown) {
+              parsedBreakdown = typeof rawOrder.paymentBreakdown === 'string' ? JSON.parse(rawOrder.paymentBreakdown) : rawOrder.paymentBreakdown;
+            }
+          } catch (e) {}
+          
+          const formatDateTime = (dateVal) => {
+            if (!dateVal) return 'N/A';
+            const formattedDate = formatDate(dateVal);
+            if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return formattedDate;
+            let d = new Date(dateVal);
+            let hours = d.getHours();
+            const minutes = String(d.getMinutes()).padStart(2, '0');
+            let ampm = settings.timeFormat === '12h' ? (hours >= 12 ? ' PM' : ' AM') : '';
+            if (settings.timeFormat === '12h') {
+              hours = hours % 12 || 12;
+            }
+            return `${formattedDate} ${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
+          };
+
+          setSelectedInvoiceForView({
+            ...rawOrder,
+            id: rawOrder.id,
+            billNumber: rawOrder.billNumber || '',
+            date: formatDateTime(rawOrder.createdAt),
+            customer: rawOrder.customerName || rawOrder.customerId,
+            customerId: rawOrder.customerId,
+            customerPhone: rawOrder.customerPhone || '',
+            residency: 'Customer Residency',
+            status: rawOrder.status,
+            paymentStatus: rawOrder.paymentStatus,
+            paymentMethod: rawOrder.paymentMethod || 'Not Paid',
+            total: rawOrder.totalAmount,
+            paidAmount: rawOrder.paidAmount || 0,
+            dueAmount: rawOrder.dueAmount ?? (rawOrder.totalAmount - (rawOrder.paidAmount || 0)),
+            items: parsedItems,
+            paymentBreakdown: parsedBreakdown,
+            totalBalance: selectedCustomer?.balance || 0,
+            previousBalance: (selectedCustomer?.balance || 0) - (rawOrder.totalAmount - (rawOrder.paidAmount || 0))
+          });
+        } else {
+          setSelectedPaymentForAction(pay);
+          setShowPaymentViewModal(true);
+        }
+      } catch (err) {
+        console.error("View payment invoice error:", err);
+        setSelectedPaymentForAction(pay);
+        setShowPaymentViewModal(true);
+      }
+    } else {
+      setSelectedPaymentForAction(pay);
+      setShowPaymentViewModal(true);
+    }
+  };
+
+  const handleDeletePaymentRecord = async (paymentId) => {
+    const payment = customerPayments.find(p => p.id === paymentId);
+    if (!payment) return;
+    if (!window.confirm("Are you sure you want to delete this payment? The customer balance will increase.")) return;
+    
+    setLoading(true);
+    const timestamp = getLocalISOString();
+    
+    try {
+      await window.electronAPI.dbQuery("BEGIN TRANSACTION");
+
+      if (payment.orderId) {
+        const orderRes = await window.electronAPI.dbQuery("SELECT * FROM orders WHERE id = ?", [payment.orderId]);
+        if (orderRes.success && orderRes.data.length > 0) {
+          const bill = orderRes.data[0];
+          const newPaidAmount = Math.max(0, (bill.paidAmount || 0) - payment.amount);
+          const newDueAmount = (bill.dueAmount || 0) + payment.amount;
+          const newStatus = newPaidAmount <= 0 ? 'Credit' : 'Partial';
+
+          let paymentBreakdown = {};
+          try {
+            if (bill.paymentBreakdown) {
+              paymentBreakdown = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
+            }
+          } catch (e) {}
+
+          const methodKey = payment.method.toLowerCase();
+          if (paymentBreakdown[methodKey] !== undefined) {
+            paymentBreakdown[methodKey] = Math.max(0, (paymentBreakdown[methodKey] || 0) - payment.amount);
+          }
+
+          let activeMethods = Object.keys(paymentBreakdown).filter(k => k !== 'discount' && k !== 'advance' && paymentBreakdown[k] > 0);
+          const keyMap = { cash: 'Cash', card: 'Card', upi: 'UPI', bank: 'Bank Transfer' };
+          let finalMethodName = 'Multipayment';
+          if (activeMethods.length === 1) {
+            finalMethodName = keyMap[activeMethods[0]] || 'Cash';
+          } else if (activeMethods.length === 0) {
+            finalMethodName = 'Not Paid';
+          }
+
+          await window.electronAPI.dbQuery(
+            "UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
+            [newPaidAmount, newDueAmount, newStatus, finalMethodName, JSON.stringify(paymentBreakdown), timestamp, payment.orderId]
+          );
+        }
+      }
+
+      await window.electronAPI.dbQuery(
+        "UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?",
+        [payment.amount, timestamp, selectedCustomer.id]
+      );
+
+      await window.electronAPI.dbQuery("DELETE FROM payments WHERE id = ?", [payment.id]);
+
+      const payDate = new Date(payment.createdAt);
+      const datePrefix = `${payDate.getFullYear()}-${String(payDate.getMonth()+1).padStart(2,'0')}-${String(payDate.getDate()).padStart(2,'0')} ${String(payDate.getHours()).padStart(2,'0')}:${String(payDate.getMinutes()).padStart(2,'0')}`;
+      
+      const txnRes = await window.electronAPI.dbQuery(
+        "SELECT id FROM account_transactions WHERE amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
+        [payment.amount, `%${selectedCustomer.name}%`, `${datePrefix.substring(0, 10)}%`]
+      );
+
+      if (txnRes.success && txnRes.data.length > 0) {
+        await window.electronAPI.dbQuery("DELETE FROM account_transactions WHERE id = ?", [txnRes.data[0].id]);
+      }
+
+      await window.electronAPI.dbQuery("COMMIT");
+
+      const updatedCustomerRes = await window.electronAPI.dbQuery("SELECT * FROM customers WHERE id = ?", [selectedCustomer.id]);
+      if (updatedCustomerRes.success && updatedCustomerRes.data.length > 0) {
+        setSelectedCustomer(updatedCustomerRes.data[0]);
+        await handleViewCustomerInsight(updatedCustomerRes.data[0]);
+      }
+      fetchCustomers();
+      alert("Payment record deleted successfully!");
+    } catch (err) {
+      await window.electronAPI.dbQuery("ROLLBACK");
+      console.error("Delete payment error:", err);
+      alert("Failed to delete payment.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSavePaymentEdit = async () => {
+    if (!selectedPaymentForAction) return;
+    const payment = selectedPaymentForAction;
+    const oldMethod = payment.method;
+    const newMethod = editPaymentMethod;
+    const oldAmount = parseFloat(payment.amount) || 0;
+    const newAmount = parseFloat(editPaymentAmount) || 0;
+
+    if (newAmount <= 0) {
+      alert("Please enter a valid amount greater than 0.");
+      return;
+    }
+
+    if (oldMethod === newMethod && oldAmount === newAmount) {
+      setShowPaymentEditModal(false);
+      return;
+    }
+
+    setLoading(true);
+    const timestamp = getLocalISOString();
+    const diff = newAmount - oldAmount;
+    
+    try {
+      await window.electronAPI.dbQuery("BEGIN TRANSACTION");
+
+      // 1. Update payments table
+      await window.electronAPI.dbQuery(
+        "UPDATE payments SET method = ?, amount = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
+        [newMethod, newAmount, timestamp, payment.id]
+      );
+
+      // 2. Adjust customer balance
+      await window.electronAPI.dbQuery(
+        "UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?",
+        [diff, timestamp, selectedCustomer.id]
+      );
+
+      // 3. Update orders table if linked
+      if (payment.orderId) {
+        const orderRes = await window.electronAPI.dbQuery("SELECT * FROM orders WHERE id = ?", [payment.orderId]);
+        if (orderRes.success && orderRes.data.length > 0) {
+          const order = orderRes.data[0];
+          let paymentBreakdown = {};
+          try {
+            if (order.paymentBreakdown) {
+              paymentBreakdown = typeof order.paymentBreakdown === 'string' ? JSON.parse(order.paymentBreakdown) : order.paymentBreakdown;
+            }
+          } catch (e) {}
+
+          const oldKey = oldMethod.toLowerCase();
+          const newKey = newMethod.toLowerCase();
+
+          // Adjust payment breakdown
+          if (paymentBreakdown[oldKey] !== undefined) {
+            paymentBreakdown[oldKey] = Math.max(0, (paymentBreakdown[oldKey] || 0) - oldAmount);
+          }
+          paymentBreakdown[newKey] = (paymentBreakdown[newKey] || 0) + newAmount;
+
+          let activeMethods = Object.keys(paymentBreakdown).filter(k => k !== 'discount' && k !== 'advance' && paymentBreakdown[k] > 0);
+          const keyMap = { cash: 'Cash', card: 'Card', upi: 'UPI', bank: 'Bank Transfer' };
+          let finalMethodName = 'Multipayment';
+          if (activeMethods.length === 1) {
+            finalMethodName = keyMap[activeMethods[0]] || 'Cash';
+          }
+
+          const newPaidAmount = (order.paidAmount || 0) + diff;
+          const newDueAmount = (order.dueAmount || 0) - diff;
+
+          let newPaymentStatus = 'Partial';
+          if (newPaidAmount >= order.totalAmount) {
+            newPaymentStatus = 'Paid';
+          } else if (newPaidAmount <= 0) {
+            newPaymentStatus = 'Pending';
+          }
+
+          await window.electronAPI.dbQuery(
+            "UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
+            [newPaidAmount, newDueAmount, newPaymentStatus, finalMethodName, JSON.stringify(paymentBreakdown), timestamp, payment.orderId]
+          );
+        }
+      }
+
+      // 4. Update account_transactions table
+      const payDate = new Date(payment.createdAt);
+      const datePrefix = `${payDate.getFullYear()}-${String(payDate.getMonth()+1).padStart(2,'0')}-${String(payDate.getDate()).padStart(2,'0')} ${String(payDate.getHours()).padStart(2,'0')}:${String(payDate.getMinutes()).padStart(2,'0')}`;
+      
+      const txnRes = await window.electronAPI.dbQuery(
+        "SELECT id FROM account_transactions WHERE amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
+        [oldAmount, `%${selectedCustomer.name}%`, `${datePrefix.substring(0, 10)}%`]
+      );
+
+      if (txnRes.success && txnRes.data.length > 0) {
+        const txnId = txnRes.data[0].id;
+        const newAccountType = (newMethod === 'Bank' || newMethod === 'Card' || newMethod === 'UPI') ? 'BANK' : 'CASH';
+        const mappedBankId = newMethod === 'Card'
+          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+          : (newMethod === 'UPI'
+            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+            : (newMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
+        
+        await window.electronAPI.dbQuery(
+          "UPDATE account_transactions SET amount = ?, accountType = ?, description = ?, bankAccountId = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
+          [newAmount, newAccountType, `Settlement from ${selectedCustomer.name} (${newMethod})`, mappedBankId, timestamp, txnId]
+        );
+      }
+
+      await window.electronAPI.dbQuery("COMMIT");
+
+      setShowPaymentEditModal(false);
+      setSelectedPaymentForAction(null);
+      
+      const updatedCustomerRes = await window.electronAPI.dbQuery("SELECT * FROM customers WHERE id = ?", [selectedCustomer.id]);
+      if (updatedCustomerRes.success && updatedCustomerRes.data.length > 0) {
+        setSelectedCustomer(updatedCustomerRes.data[0]);
+        await handleViewCustomerInsight(updatedCustomerRes.data[0]);
+      }
+      fetchCustomers();
+      alert("Payment updated successfully!");
+    } catch (err) {
+      await window.electronAPI.dbQuery("ROLLBACK");
+      console.error("Edit payment error:", err);
+      alert("Failed to update payment.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -684,7 +1061,18 @@ export default function Customers() {
 
             <div>
               <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Phone</div>
-              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#334155' }}>{selectedCustomer.phone || '—'}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#334155' }}>{selectedCustomer.phone || '—'}</span>
+                {selectedCustomer.phone && (
+                  <button
+                    style={{ background: 'none', border: 'none', color: '#25D366', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+                    onClick={() => handleWhatsApp(selectedCustomer.phone, selectedCustomer.balance)}
+                    title="Send via WhatsApp"
+                  >
+                    <WhatsAppIcon size={16} />
+                  </button>
+                )}
+              </div>
             </div>
 
 
@@ -692,6 +1080,14 @@ export default function Customers() {
             <div>
               <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Address</div>
               <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#334155', lineHeight: '1.4' }}>{selectedCustomer.address || '—'}</div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Credit Limit</div>
+              <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--primary)' }}>
+                <CurrencySymbol size={14} /> {(selectedCustomer.creditLimit || 0).toFixed(2)}
+                {selectedCustomer.creditLimit === 0 && <span style={{ fontSize: '0.7rem', color: '#94A3B8', marginLeft: '0.25rem' }}>(Shop default: {settings.defaultCreditLimit})</span>}
+              </div>
             </div>
 
             <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.25rem 0' }} />
@@ -791,10 +1187,48 @@ export default function Customers() {
                                   console.error('Failed to parse paymentBreakdown for invoice view:', e);
                                 }
 
+                                const formatDateTime = (dateVal) => {
+                                  if (!dateVal) return 'N/A';
+                                  const formattedDate = formatDate(dateVal);
+                                  if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return formattedDate;
+                                  let d;
+                                  try {
+                                    d = new Date(dateVal);
+                                  } catch (e) {
+                                    return formattedDate;
+                                  }
+                                  if (isNaN(d.getTime())) return formattedDate;
+                                  let hours = d.getHours();
+                                  const minutes = String(d.getMinutes()).padStart(2, '0');
+                                  let ampm = '';
+                                  if (settings.timeFormat === '12h') {
+                                    ampm = hours >= 12 ? ' PM' : ' AM';
+                                    hours = hours % 12;
+                                    hours = hours ? hours : 12;
+                                  }
+                                  const formattedTime = `${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
+                                  return `${formattedDate} ${formattedTime}`;
+                                };
+
                                 setSelectedInvoiceForView({
                                   ...bill,
+                                  id: bill.id,
+                                  billNumber: bill.billNumber || '',
+                                  date: formatDateTime(bill.createdAt),
+                                  customer: selectedCustomer?.name || bill.customerId,
+                                  customerId: bill.customerId,
+                                  customerPhone: selectedCustomer?.phone || '',
+                                  residency: 'Customer Residency',
+                                  status: bill.status,
+                                  paymentStatus: bill.paymentStatus,
+                                  paymentMethod: bill.paymentMethod || 'Not Paid',
+                                  total: bill.totalAmount,
+                                  paidAmount: bill.paidAmount || 0,
+                                  dueAmount: bill.dueAmount ?? (bill.totalAmount - (bill.paidAmount || 0)),
                                   items: parsedItems,
-                                  paymentBreakdown: parsedBreakdown
+                                  paymentBreakdown: parsedBreakdown,
+                                  totalBalance: selectedCustomer?.balance || 0,
+                                  previousBalance: (selectedCustomer?.balance || 0) - (bill.totalAmount - (bill.paidAmount || 0))
                                 });
                               }}
                               title="View details"
@@ -835,21 +1269,62 @@ export default function Customers() {
                       <th style={{ background: '#F8FAFC' }}>Amount</th>
                       <th style={{ background: '#F8FAFC' }}>Method</th>
                       <th style={{ background: '#F8FAFC' }}>Status</th>
+                      <th style={{ background: '#F8FAFC', width: '120px', textAlign: 'center' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {customerPayments.length > 0 ? customerPayments.map((pay) => (
                       <tr key={pay.id}>
-                        <td style={{ fontWeight: 700 }}>{pay.id}</td>
+                        <td style={{ fontWeight: 700 }} title={pay.id}>{formatPaymentId(pay)}</td>
                         <td>{formatDate(pay.createdAt)}</td>
                         <td><CurrencySymbol size={13} /> {(pay.amount || 0).toFixed(2)}</td>
                         <td style={{ fontWeight: 600 }}>{pay.method}</td>
                         <td>
                           <span className={styles.statusPaid} style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', background: '#DCFCE7', color: '#15803D', fontSize: '0.75rem', fontWeight: 700 }}>SUCCESS</span>
                         </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                            <button
+                              style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer' }}
+                              onClick={(e) => {
+                                e.preventDefault(); e.stopPropagation();
+                                handleViewPaymentDetails(pay);
+                              }}
+                              title="View Payment"
+                            >
+                              <Eye size={16} />
+                            </button>
+                            <button
+                              style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
+                              onClick={(e) => {
+                                e.preventDefault(); e.stopPropagation();
+                                setSelectedPaymentForAction(pay);
+                                setEditPaymentMethod(pay.method || 'Cash');
+                                setEditPaymentAmount(pay.amount ? pay.amount.toString() : '');
+                                setPinActionTarget('edit_payment');
+                                setShowPinModal(true);
+                              }}
+                              title="Edit Payment"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}
+                              onClick={(e) => {
+                                e.preventDefault(); e.stopPropagation();
+                                setSelectedPaymentForAction(pay);
+                                setPinActionTarget('delete_payment');
+                                setShowPinModal(true);
+                              }}
+                              title="Delete Payment"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     )) : (
-                      <tr><td colSpan="5" style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>No payment records found.</td></tr>
+                      <tr><td colSpan="6" style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>No payment records found.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -921,6 +1396,7 @@ export default function Customers() {
                         required 
                         autoFocus
                         placeholder="0.00"
+                        disabled={paymentData.method === 'Multipayment'}
                         value={paymentData.amount}
                         onChange={(e) => setPaymentData({...paymentData, amount: e.target.value})}
                       />
@@ -939,14 +1415,326 @@ export default function Customers() {
                         <option value="Cash">Cash Payment</option>
                         <option value="Card">Card Payment</option>
                         <option value="UPI">UPI Payment</option>
+                        <option value="Bank">Bank Transfer</option>
+                        <option value="Multipayment">Multipayment</option>
                       </select>
                     </div>
                   </div>
+
+                  {paymentData.method === 'Multipayment' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '1rem', background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Cash</label>
+                        <input type="number" placeholder="0.00" value={splitCash} onChange={(e) => setSplitCash(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Card</label>
+                        <input type="number" placeholder="0.00" value={splitCard} onChange={(e) => setSplitCard(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>UPI</label>
+                        <input type="number" placeholder="0.00" value={splitUPI} onChange={(e) => setSplitUPI(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Bank</label>
+                        <input type="number" placeholder="0.00" value={splitBank} onChange={(e) => setSplitBank(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className={styles.modalFooter}>
                   <button type="button" className={styles.secondaryBtn} onClick={() => { setShowPaymentModal(false); setSelectedBillForPayment(null); }}>Cancel</button>
                   <button type="submit" className={styles.primaryBtn} style={{ background: 'var(--secondary)' }}>Complete Settlement</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* INVOICE VIEW MODAL */}
+        {selectedInvoiceForView && (
+          <div className={styles.modalOverlay} onClick={() => setSelectedInvoiceForView(null)} style={{ zIndex: 10000 }}>
+            <div className={styles.modal} style={{ maxWidth: '800px', width: '95%', maxHeight: '90vh', overflowY: 'auto', padding: 0 }} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader} style={{ position: 'sticky', top: 0, background: 'white', zIndex: 10, padding: '1.25rem 1.5rem', borderBottom: '1px solid #E2E8F0' }}>
+                <div>
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E293B' }}>Invoice #{selectedInvoiceForView.billNumber || `${settings.invoicePrefix || ''}${selectedInvoiceForView.id}`}</h2>
+                </div>
+                <X size={24} className={styles.closeBtn} onClick={() => setSelectedInvoiceForView(null)} />
+              </div>
+              <div className={styles.modalBody} style={{ padding: '1.5rem', background: '#F8FAFC' }}>
+                <div style={{ background: 'white', borderRadius: '12px', overflow: 'hidden', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}>
+                  <InvoiceTemplate 
+                    order={selectedInvoiceForView} 
+                    settings={settings} 
+                    editable={false} 
+                    onOrderUpdate={(updated) => { 
+                      fetchCustomerBills(selectedCustomer?.id); 
+                      setSelectedInvoiceForView(prev => ({ ...prev, ...updated })); 
+                    }} 
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* View Payment Details Modal */}
+        {showPaymentViewModal && selectedPaymentForAction && (
+          <div className={styles.modalOverlay} onClick={() => setShowPaymentViewModal(false)}>
+            <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
+                <div>
+                  <h2 style={{ color: '#0F172A' }}>Payment Details</h2>
+                  <p>Receipt ID: {selectedPaymentForAction.id}</p>
+                </div>
+                <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentViewModal(false)} />
+              </div>
+              <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Amount</span>
+                    <span style={{ fontWeight: 700, color: '#0F172A' }}><CurrencySymbol size={14}/> {(parseFloat(selectedPaymentForAction.amount) || 0).toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Method</span>
+                    <span style={{ fontWeight: 700, color: '#0F172A' }}>{selectedPaymentForAction.method}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Date</span>
+                    <span style={{ fontWeight: 700, color: '#0F172A' }}>{formatDate(selectedPaymentForAction.createdAt)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
+                    <span style={{ color: '#64748B', fontWeight: 600 }}>Linked Order</span>
+                    <span style={{ fontWeight: 700, color: '#0F172A' }}>{selectedPaymentForAction.orderId || 'Settlement (Advance)'}</span>
+                  </div>
+                </div>
+              </div>
+              <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end' }}>
+                <button 
+                  style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                  onClick={() => setShowPaymentViewModal(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Payment Modal */}
+        {showPaymentEditModal && selectedPaymentForAction && (
+          <div className={styles.modalOverlay} onClick={() => setShowPaymentEditModal(false)}>
+            <div className={styles.modal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
+                <div>
+                  <h2 style={{ color: '#0F172A' }}>Edit Payment</h2>
+                  <p>Change payment details</p>
+                </div>
+                <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentEditModal(false)} />
+              </div>
+              <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
+                <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
+                  <label>Payment Amount</label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    required
+                    value={editPaymentAmount}
+                    onChange={(e) => setEditPaymentAmount(e.target.value)}
+                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem' }}
+                  />
+                </div>
+                <div className={styles.formGroup}>
+                  <label>Payment Method</label>
+                  <select 
+                    value={editPaymentMethod} 
+                    onChange={(e) => setEditPaymentMethod(e.target.value)}
+                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem' }}
+                  >
+                    <option value="Cash">Cash</option>
+                    <option value="Card">Card</option>
+                    <option value="UPI">UPI</option>
+                    <option value="Bank">Bank Transfer</option>
+                  </select>
+                </div>
+              </div>
+              <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button 
+                  style={{ padding: '0.5rem 1rem', background: 'white', color: '#475569', border: '1px solid #CBD5E1', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                  onClick={() => setShowPaymentEditModal(false)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                  onClick={handleSavePaymentEdit}
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Payment Action Secure PIN Modal */}
+        {showPinModal && (
+          <div className={styles.modalOverlay} onClick={() => setShowPinModal(false)}>
+            <div className={styles.modal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
+                <div>
+                  <h2 style={{ color: '#0F172A' }}>Security Verification</h2>
+                  <p>Enter Settings PIN to proceed</p>
+                </div>
+                <X size={24} className={styles.closeBtn} onClick={() => setShowPinModal(false)} />
+              </div>
+              <form onSubmit={handleVerifyPinAction}>
+                <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
+                  <div className={styles.formGroup}>
+                    <label>Secure PIN</label>
+                    <div className={styles.inputWrapper}>
+                      <Lock size={18} />
+                      <input 
+                        type="password"
+                        maxLength={4}
+                        required
+                        autoFocus
+                        placeholder="••••"
+                        value={managerPinValue}
+                        onChange={(e) => {
+                          setManagerPinValue(e.target.value.replace(/\D/g, ''));
+                          setManagerPinError('');
+                        }}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    {managerPinError && (
+                      <p style={{ color: '#DC2626', fontSize: '0.75rem', fontWeight: 600, marginTop: '0.25rem' }}>
+                        {managerPinError}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                  <button 
+                    type="button"
+                    style={{ padding: '0.5rem 1rem', background: 'white', color: '#475569', border: '1px solid #CBD5E1', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                    onClick={() => setShowPinModal(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Verify PIN
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Credit Limit Modal */}
+        {showEditCreditLimitModal && selectedCustomer && (
+          <div className={styles.modalOverlay} onClick={() => { setShowEditCreditLimitModal(false); }}>
+            <div className={styles.modal} style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div>
+                  <h2>Edit Credit Limit</h2>
+                  <p>Set individual credit limit for <strong>{selectedCustomer.name}</strong></p>
+                </div>
+                <X size={24} className={styles.closeBtn} onClick={() => { setShowEditCreditLimitModal(false); }} />
+              </div>
+              <form onSubmit={handleUpdateCreditLimit}>
+                <div className={styles.modalBody}>
+                  <div style={{
+                    background: '#F8FAFC',
+                    borderRadius: '12px',
+                    padding: '1rem 1.25rem',
+                    marginBottom: '1rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>CURRENT BALANCE</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: (selectedCustomerStats.pendingDue || 0) > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
+                        <CurrencySymbol size={16} /> {Math.abs(selectedCustomerStats.pendingDue || 0).toFixed(2)}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>CURRENT CREDIT LIMIT</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)' }}>
+                        <CurrencySymbol size={16} /> {(selectedCustomer.creditLimit || 0).toFixed(2)}
+                        {selectedCustomer.creditLimit === 0 && <span style={{ fontSize: '0.7rem', color: '#94A3B8', marginLeft: '0.25rem' }}>(using shop default: {settings.defaultCreditLimit})</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label>New Credit Limit</label>
+                    <div className={styles.inputWrapper}>
+                      <CreditCard size={18} />
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        required
+                        autoFocus
+                        placeholder="e.g. 500.00"
+                        value={editCreditLimitValue}
+                        onChange={(e) => setEditCreditLimitValue(e.target.value)}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <p style={{ fontSize: '0.7rem', color: '#64748B', marginTop: '0.25rem' }}>
+                      Set to 0 to use the shop default limit ({settings.defaultCreditLimit} {settings.currencySymbol}).
+                    </p>
+                  </div>
+
+                  <div className={styles.formGroup} style={{ marginTop: '1rem' }}>
+                    <label>Manager PIN</label>
+                    <div className={styles.inputWrapper}>
+                      <Lock size={18} />
+                      <input
+                        type="password"
+                        maxLength={4}
+                        required
+                        placeholder="••••"
+                        value={managerPinValue}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, ''); // only digits
+                          setManagerPinValue(val);
+                          setManagerPinError('');
+                        }}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    {managerPinError && (
+                      <p style={{ color: '#DC2626', fontSize: '0.75rem', fontWeight: 600, marginTop: '0.25rem' }}>
+                        {managerPinError}
+                      </p>
+                    )}
+                  </div>
+
+                  {parseFloat(editCreditLimitValue) > 0 && parseFloat(editCreditLimitValue) <= (selectedCustomer.balance || 0) && (
+                    <div style={{
+                      background: '#FEF2F2',
+                      border: '1px solid #FECACA',
+                      borderRadius: '8px',
+                      padding: '0.75rem 1rem',
+                      fontSize: '0.8rem',
+                      color: '#DC2626',
+                      marginTop: '0.5rem'
+                    }}>
+                      ⚠️ Warning: The new limit ({parseFloat(editCreditLimitValue).toFixed(2)}) is less than or equal to the current balance ({(selectedCustomer.balance || 0).toFixed(2)}). Future orders will require Manager Override.
+                    </div>
+                  )}
+                </div>
+                <div className={styles.modalFooter}>
+                  <button type="button" className={styles.secondaryBtn} onClick={() => { setShowEditCreditLimitModal(false); }}>Cancel</button>
+                  <button type="submit" className={styles.primaryBtn} style={{ background: 'var(--primary)' }}>Save Credit Limit</button>
                 </div>
               </form>
             </div>
@@ -1057,6 +1845,15 @@ export default function Customers() {
                     >
                       <DollarSign size={18} />
                     </button>
+                    {customer.phone && (
+                      <button 
+                        style={{ background: 'none', border: 'none', color: '#25D366', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleWhatsApp(customer.phone, customer.balance); }}
+                        title="Send via WhatsApp"
+                      >
+                        <WhatsAppIcon size={18} />
+                      </button>
+                    )}
                     <button 
                       style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteCustomer(customer.id); }}
@@ -1312,6 +2109,7 @@ export default function Customers() {
                       required 
                       autoFocus
                       placeholder="0.00"
+                      disabled={paymentData.method === 'Multipayment'}
                       value={paymentData.amount}
                       onChange={(e) => setPaymentData({...paymentData, amount: e.target.value})}
                     />
@@ -1330,9 +2128,32 @@ export default function Customers() {
                       <option value="Cash">Cash Payment</option>
                       <option value="Card">Card Payment</option>
                       <option value="UPI">UPI Payment</option>
+                      <option value="Bank">Bank Transfer</option>
+                      <option value="Multipayment">Multipayment</option>
                     </select>
                   </div>
                 </div>
+
+                {paymentData.method === 'Multipayment' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '1rem', background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Cash</label>
+                      <input type="number" placeholder="0.00" value={splitCash} onChange={(e) => setSplitCash(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Card</label>
+                      <input type="number" placeholder="0.00" value={splitCard} onChange={(e) => setSplitCard(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>UPI</label>
+                      <input type="number" placeholder="0.00" value={splitUPI} onChange={(e) => setSplitUPI(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Bank</label>
+                      <input type="number" placeholder="0.00" value={splitBank} onChange={(e) => setSplitBank(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className={styles.modalFooter}>
@@ -1502,7 +2323,7 @@ export default function Customers() {
                 )}
               </div>
               <div className={styles.modalFooter}>
-                <button type="button" className={styles.secondaryBtn} onClick={() => { setShowEditCreditLimitModal(false); setSelectedCustomer(null); }}>Cancel</button>
+                <button type="button" className={styles.secondaryBtn} onClick={() => { setShowEditCreditLimitModal(false); }}>Cancel</button>
                 <button type="submit" className={styles.primaryBtn} style={{ background: 'var(--primary)' }}>Save Credit Limit</button>
               </div>
             </form>
@@ -1597,6 +2418,162 @@ export default function Customers() {
                     Approve Override
                   </button>
                 )}
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* View Payment Details Modal */}
+      {showPaymentViewModal && selectedPaymentForAction && (
+        <div className={styles.modalOverlay} onClick={() => setShowPaymentViewModal(false)}>
+          <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
+              <div>
+                <h2 style={{ color: '#0F172A' }}>Payment Details</h2>
+                <p>Receipt ID: {selectedPaymentForAction.id}</p>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentViewModal(false)} />
+            </div>
+            <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Amount</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}><CurrencySymbol size={14}/> {(parseFloat(selectedPaymentForAction.amount) || 0).toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Method</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{selectedPaymentForAction.method}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Date</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{formatDate(selectedPaymentForAction.createdAt)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
+                  <span style={{ color: '#64748B', fontWeight: 600 }}>Linked Order</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{selectedPaymentForAction.orderId || 'Settlement (Advance)'}</span>
+                </div>
+              </div>
+            </div>
+            <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end' }}>
+              <button 
+                style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                onClick={() => setShowPaymentViewModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Payment Modal */}
+      {showPaymentEditModal && selectedPaymentForAction && (
+        <div className={styles.modalOverlay} onClick={() => setShowPaymentEditModal(false)}>
+          <div className={styles.modal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
+              <div>
+                <h2 style={{ color: '#0F172A' }}>Edit Payment</h2>
+                <p>Change payment details</p>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentEditModal(false)} />
+            </div>
+            <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
+              <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
+                <label>Payment Amount</label>
+                <input 
+                  type="number"
+                  step="0.01"
+                  required
+                  value={editPaymentAmount}
+                  onChange={(e) => setEditPaymentAmount(e.target.value)}
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem' }}
+                />
+              </div>
+              <div className={styles.formGroup}>
+                <label>Payment Method</label>
+                <select 
+                  value={editPaymentMethod} 
+                  onChange={(e) => setEditPaymentMethod(e.target.value)}
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem' }}
+                >
+                  <option value="Cash">Cash</option>
+                  <option value="Card">Card</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Bank">Bank Transfer</option>
+                </select>
+              </div>
+            </div>
+            <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button 
+                style={{ padding: '0.5rem 1rem', background: 'white', color: '#475569', border: '1px solid #CBD5E1', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                onClick={() => setShowPaymentEditModal(false)}
+              >
+                Cancel
+              </button>
+              <button 
+                style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                onClick={handleSavePaymentEdit}
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Action Secure PIN Modal */}
+      {showPinModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowPinModal(false)}>
+          <div className={styles.modal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
+              <div>
+                <h2 style={{ color: '#0F172A' }}>Security Verification</h2>
+                <p>Enter Settings PIN to proceed</p>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => setShowPinModal(false)} />
+            </div>
+            <form onSubmit={handleVerifyPinAction}>
+              <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
+                <div className={styles.formGroup}>
+                  <label>Secure PIN</label>
+                  <div className={styles.inputWrapper}>
+                    <Lock size={18} />
+                    <input 
+                      type="password"
+                      maxLength={4}
+                      required
+                      autoFocus
+                      placeholder="••••"
+                      value={managerPinValue}
+                      onChange={(e) => {
+                        setManagerPinValue(e.target.value.replace(/\D/g, ''));
+                        setManagerPinError('');
+                      }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  {managerPinError && (
+                    <p style={{ color: '#DC2626', fontSize: '0.75rem', fontWeight: 600, marginTop: '0.25rem' }}>
+                      {managerPinError}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button 
+                  type="button"
+                  style={{ padding: '0.5rem 1rem', background: 'white', color: '#475569', border: '1px solid #CBD5E1', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                  onClick={() => setShowPinModal(false)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Verify PIN
+                </button>
               </div>
             </form>
           </div>

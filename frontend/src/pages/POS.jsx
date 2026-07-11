@@ -164,7 +164,7 @@ export default function POS() {
           'BANK': 'bank',
           'CARD': 'card',
           'UPI': 'upi',
-          'Mixed': 'cash',
+          'Multipayment': 'cash',
           'Not Paid': 'credit'
         };
         const prevMethod = methodMap[order.paymentMethod] || 'cash';
@@ -943,7 +943,7 @@ export default function POS() {
     if (paidMethods.length === 1) {
       newPayMethod = paidMethods[0];
     } else if (paidMethods.length > 1) {
-      newPayMethod = 'Mixed';
+      newPayMethod = 'Multipayment';
     } else if (newPayStatus === PAYMENT_STATUS.PAID) {
       newPayMethod = settings.defaultPaymentMethod || PAYMENT_METHODS.CASH;
     }
@@ -1968,8 +1968,8 @@ export default function POS() {
             </div>
           ) : (
             <div>
-              <h3 className={styles.modalSectionTitle}>Mixed Payment Details (Click field to enter amount)</h3>
-            <div className={styles.mixedPaymentGrid} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
+              <h3 className={styles.modalSectionTitle}>Multipayment Details (Click field to enter amount)</h3>
+            <div className={styles.multipaymentGrid} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
               <div 
                 onClick={() => setActivePaymentField('cash')}
                 style={{

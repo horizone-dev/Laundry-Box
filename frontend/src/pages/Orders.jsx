@@ -374,7 +374,7 @@ export default function Orders({ isPendingView = false }) {
     if (method === 'Card' || method.toUpperCase() === 'CARD') return t('card', settings.language);
     if (method === 'UPI' || method.toUpperCase() === 'UPI') return t('upi', settings.language);
     if (method === 'Not Paid') return t('notPaid', settings.language) || 'Not Paid';
-    if (method === 'Mixed') return 'Mixed';
+    if (method === 'Multipayment') return 'Multipayment';
     if (method === 'Advance' || method.toUpperCase() === 'ADVANCE') return 'Advance';
     return method;
   };
@@ -955,7 +955,7 @@ export default function Orders({ isPendingView = false }) {
         let newPaid = selectedOrder.totalAmount;
         let finalPayMethod = payMethod;
 
-        if (payMethod === 'Mixed') {
+        if (payMethod === 'Multipayment') {
           actualPaid = cashVal + cardVal + upiVal + bankVal;
           if (actualPaid + discVal < amountToPay) {
             newDue = amountToPay - (actualPaid + discVal);
@@ -1003,7 +1003,7 @@ export default function Orders({ isPendingView = false }) {
 
         // Prepare splits
         let splits = [];
-        if (payMethod === 'Mixed') {
+        if (payMethod === 'Multipayment') {
           if (cashVal > 0) splits.push({ method: 'Cash', amount: cashVal });
           if (cardVal > 0) splits.push({ method: 'Card', amount: cardVal });
           if (upiVal > 0) splits.push({ method: 'UPI', amount: upiVal });
@@ -1065,7 +1065,7 @@ export default function Orders({ isPendingView = false }) {
       }
 
       // 2. Update Local React State immediately
-      const actualPaidState = payMethod === 'Mixed' ? cashVal + cardVal + upiVal + bankVal : (amountToPay - discVal);
+      const actualPaidState = payMethod === 'Multipayment' ? cashVal + cardVal + upiVal + bankVal : (amountToPay - discVal);
       const newDueState = amountToPay - actualPaidState - discVal;
       const newPaidState = selectedOrder.totalAmount - Math.max(0, newDueState);
       const newPayStatusState = newDueState > 0 ? 'Partial' : 'Paid';
@@ -1487,7 +1487,7 @@ export default function Orders({ isPendingView = false }) {
                           <span className={
                             order.paymentMethod === 'Cash' ? styles.methodCash :
                               order.paymentMethod === 'Bank' ? styles.methodOther :
-                                order.paymentMethod === 'Mixed' ? styles.methodOther :
+                                order.paymentMethod === 'Multipayment' ? styles.methodOther :
                                   styles.methodOther
                           }>
                             {order.paymentMethod}
@@ -1642,7 +1642,7 @@ export default function Orders({ isPendingView = false }) {
                           <span className={
                             order.paymentMethod === 'Cash' ? styles.methodCash :
                               order.paymentMethod === 'Bank' ? styles.methodOther :
-                                order.paymentMethod === 'Mixed' ? styles.methodOther :
+                                order.paymentMethod === 'Multipayment' ? styles.methodOther :
                                   order.paymentMethod === 'Advance' ? styles.methodAdvance || styles.methodOther :
                                     styles.methodOther
                           } style={order.paymentMethod === 'Advance' && !styles.methodAdvance ? { background: '#E0E7FF', color: '#4338CA', padding: '0.25rem 0.6rem', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '600' } : {}}>
@@ -2108,15 +2108,15 @@ export default function Orders({ isPendingView = false }) {
                   <span>{t('upi', settings.language)}</span>
                 </div>
                 <div
-                  className={`${styles.payOption} ${payMethod === 'Mixed' ? styles.payOptionActive : ''}`}
-                  onClick={() => setPayMethod('Mixed')}
+                  className={`${styles.payOption} ${payMethod === 'Multipayment' ? styles.payOptionActive : ''}`}
+                  onClick={() => setPayMethod('Multipayment')}
                 >
                   <Layers size={24} />
-                  <span>Mixed</span>
+                  <span>Multipayment</span>
                 </div>
               </div>
 
-              {payMethod === 'Mixed' && (
+              {payMethod === 'Multipayment' && (
                 <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>Cash Amount</label>

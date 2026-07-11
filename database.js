@@ -748,11 +748,11 @@ function runDataHealer(db) {
       db.prepare(updateQuery).run(params);
     }
 
-    // Normalize legacy paymentMethod values to the 6-option system: Not Paid, Cash, Card, UPI, Bank, Mixed
+    // Normalize legacy paymentMethod values to the 6-option system: Not Paid, Cash, Card, UPI, Bank, Multipayment
     console.log("Normalizing legacy paymentMethod values...");
     // Orders that are credit/unpaid: set to 'Not Paid'
     db.exec(`UPDATE orders SET paymentMethod = 'Not Paid', isSynced = 0, updatedAt = '${timestamp}'
-             WHERE paymentStatus IN ('Credit') AND (paymentMethod IS NULL OR paymentMethod = '' OR paymentMethod NOT IN ('Not Paid', 'Cash', 'Card', 'UPI', 'Bank', 'Mixed'));`);
+             WHERE paymentStatus IN ('Credit') AND (paymentMethod IS NULL OR paymentMethod = '' OR paymentMethod NOT IN ('Not Paid', 'Cash', 'Card', 'UPI', 'Bank', 'Multipayment'));`);
     // Old 'Credit' method on any orders -> 'Not Paid'
     db.exec(`UPDATE orders SET paymentMethod = 'Not Paid', isSynced = 0, updatedAt = '${timestamp}' WHERE paymentMethod = 'Credit';`);
     // Normalize legacy uppercase / invalid method names (CASH -> Cash, BANK -> Bank, Wallet -> Cash, etc.)
@@ -767,7 +767,7 @@ function runDataHealer(db) {
       SELECT id, paymentMethod 
       FROM orders 
       WHERE paymentStatus = 'Paid' AND dueAmount <= 0 AND paidAmount > 0
-        AND (paymentMethod IS NULL OR paymentMethod = '' OR paymentMethod = 'Not Paid' OR paymentMethod NOT IN ('Cash', 'Card', 'UPI', 'Bank', 'Mixed'))
+        AND (paymentMethod IS NULL OR paymentMethod = '' OR paymentMethod = 'Not Paid' OR paymentMethod NOT IN ('Cash', 'Card', 'UPI', 'Bank', 'Multipayment'))
     `).all();
     for (const order of paidOrdersFromCredit) {
       const payRows = db.prepare("SELECT DISTINCT method FROM payments WHERE orderId = ?").all(order.id);
@@ -779,7 +779,7 @@ function runDataHealer(db) {
       if (methods.length === 1) {
         newMethod = methods[0];
       } else {
-        newMethod = 'Mixed';
+        newMethod = 'Multipayment';
       }
       
       if (order.paymentMethod !== newMethod) {

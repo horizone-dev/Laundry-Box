@@ -62,7 +62,7 @@ export default function MainLayout() {
   const quickBankVal = parseFloat(quickBankAmount) || 0;
 
   useEffect(() => {
-    if (settleMethod === 'Mixed') {
+    if (settleMethod === 'Multipayment') {
       const sum = quickCashVal + quickCardVal + quickUpiVal + quickBankVal;
       setSettleAmount(sum > 0 ? sum.toString() : '');
     }
@@ -82,7 +82,7 @@ export default function MainLayout() {
   }, [showQuickSettle]);
 
   useEffect(() => {
-    if (settleMethod !== 'Mixed') {
+    if (settleMethod !== 'Multipayment') {
       setQuickCashAmount('');
       setQuickCardAmount('');
       setQuickUpiAmount('');
@@ -718,7 +718,7 @@ export default function MainLayout() {
       }
 
       let splits = [];
-      if (settleMethod === 'Mixed') {
+      if (settleMethod === 'Multipayment') {
         if (quickCashVal > 0) splits.push({ method: 'Cash', amount: quickCashVal });
         if (quickCardVal > 0) splits.push({ method: 'Card', amount: quickCardVal });
         if (quickUpiVal > 0) splits.push({ method: 'UPI', amount: quickUpiVal });
@@ -784,7 +784,7 @@ export default function MainLayout() {
                 const allMethods = [...new Set([...prevMethods, split.method])];
                 const hasCash = allMethods.some(m => m === 'Cash');
                 const hasCardOrBankOrUPI = allMethods.some(m => m === 'Card' || m === 'Bank' || m === 'UPI');
-                if (hasCash && hasCardOrBankOrUPI) newOrderPaymentMethod = 'Mixed';
+                if (hasCash && hasCardOrBankOrUPI) newOrderPaymentMethod = 'Multipayment';
                 else if (allMethods.includes('Card')) newOrderPaymentMethod = 'Card';
                 else if (allMethods.includes('UPI')) newOrderPaymentMethod = 'UPI';
                 else if (allMethods.includes('Bank')) newOrderPaymentMethod = 'Bank';
@@ -1419,7 +1419,7 @@ export default function MainLayout() {
                         value={settleAmount}
                         onChange={(e) => setSettleAmount(e.target.value)}
                         placeholder="0.00"
-                        disabled={settleMethod === 'Mixed'}
+                        disabled={settleMethod === 'Multipayment'}
                         style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', fontSize: '1.25rem', fontWeight: 700 }}
                       />
                     </div>
@@ -1446,11 +1446,11 @@ export default function MainLayout() {
                         <option value="Card">Card</option>
                         <option value="UPI">UPI</option>
                         {settings.enableNomod && <option value="Nomod">Nomod Link</option>}
-                        <option value="Mixed">Mixed Payment</option>
+                        <option value="Multipayment">Multipayment</option>
                       </select>
                     </div>
 
-                    {settleMethod === 'Mixed' && (
+                    {settleMethod === 'Multipayment' && (
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '1rem' }}>
                         <div>
                           <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cash</label>
@@ -1471,7 +1471,7 @@ export default function MainLayout() {
                       </div>
                     )}
 
-                    {(settleMethod === 'Card' || settleMethod === 'UPI' || (settleMethod === 'Mixed' && (quickCardVal > 0 || quickUpiVal > 0 || quickBankVal > 0))) && settings.bankAccounts?.length > 0 && (
+                    {(settleMethod === 'Card' || settleMethod === 'UPI' || (settleMethod === 'Multipayment' && (quickCardVal > 0 || quickUpiVal > 0 || quickBankVal > 0))) && settings.bankAccounts?.length > 0 && (
                       <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
                         <label>{settleMethod === 'Card' ? 'Select Bank Account' : 'Select UPI Account'}</label>
                         <select

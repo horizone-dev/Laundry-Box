@@ -733,7 +733,7 @@ export default function Workflow() {
     if (method === 'UPI' || method.toUpperCase() === 'UPI') return t('upi', settings.language);
     if (method === 'Bank' || method.toUpperCase() === 'BANK') return t('bankaccount', settings.language);
     if (method === 'Not Paid') return t('notPaid', settings.language) || 'Not Paid';
-    if (method === 'Mixed') return 'Mixed';
+    if (method === 'Multipayment') return 'Multipayment';
     return method;
   };
 

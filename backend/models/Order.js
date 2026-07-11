@@ -4,10 +4,10 @@ const OrderSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true }, 
   billNumber: { type: String, required: true },
   customerId: { type: String, required: true },
-  customerName: { type: String, required: true },
+  customerName: { type: String, required: true, default: 'Unknown Customer' },
   customerPhone: { type: String },
   shopId: { type: String, required: true },
-  branchId: { type: String, required: true },
+  branchId: { type: String, required: true, default: 'BRANCH_01' },
   status: { 
     type: String, 
     default: 'Payment Pending'

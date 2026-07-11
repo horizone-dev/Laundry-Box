@@ -57,7 +57,7 @@ export default function Settlement() {
   const [managerPinValue, setManagerPinValue] = useState('');
   const [managerPinError, setManagerPinError] = useState('');
 
-  // Mixed Payment Split States
+  // Multipayment Split States
   const [cashAmount, setCashAmount] = useState('');
   const [cardAmount, setCardAmount] = useState('');
   const [upiAmount, setUpiAmount] = useState('');
@@ -70,7 +70,7 @@ export default function Settlement() {
   const bankVal = parseFloat(bankAmount) || 0;
 
   useEffect(() => {
-    if (paymentMethod === 'Mixed') {
+    if (paymentMethod === 'Multipayment') {
       const sum = cashVal + cardVal + upiVal + bankVal;
       setPaymentAmount(sum > 0 ? sum.toString() : '');
     }
@@ -87,7 +87,7 @@ export default function Settlement() {
   }, [showPayModal]);
 
   useEffect(() => {
-    if (paymentMethod !== 'Mixed') {
+    if (paymentMethod !== 'Multipayment') {
       setCashAmount('');
       setCardAmount('');
       setUpiAmount('');
@@ -464,7 +464,7 @@ export default function Settlement() {
         setLoading(true);
         
         let splits = [];
-        if (paymentMethod === 'Mixed') {
+        if (paymentMethod === 'Multipayment') {
           if (cashVal > 0) splits.push({ method: 'Cash', amount: cashVal });
           if (cardVal > 0) splits.push({ method: 'Card', amount: cardVal });
           if (upiVal > 0) splits.push({ method: 'UPI', amount: upiVal });
@@ -530,7 +530,7 @@ export default function Settlement() {
                 const allMethods = [...new Set([...prevMethods, split.method])];
                 const hasCash = allMethods.some(m => m === 'Cash');
                 const hasCardOrBankOrUPI = allMethods.some(m => m === 'Card' || m === 'Bank' || m === 'UPI');
-                if (hasCash && hasCardOrBankOrUPI) newOrderPaymentMethod = 'Mixed';
+                if (hasCash && hasCardOrBankOrUPI) newOrderPaymentMethod = 'Multipayment';
                 else if (allMethods.includes('Card')) newOrderPaymentMethod = 'Card';
                 else if (allMethods.includes('UPI')) newOrderPaymentMethod = 'UPI';
                 else if (allMethods.includes('Bank')) newOrderPaymentMethod = 'Bank';
@@ -1154,19 +1154,19 @@ export default function Settlement() {
                     value={paymentAmount}
                     onChange={(e) => setPaymentAmount(e.target.value)}
                     autoFocus
-                    disabled={paymentMethod === 'Mixed'}
+                    disabled={paymentMethod === 'Multipayment'}
                   />
                 </div>
                 
                 {/* Quick Presets */}
                 <div className={styles.presetsRow}>
-                  <button onClick={() => setPaymentAmount(Number(displayDue || 0).toFixed(2))} disabled={displayDue <= 0 || paymentMethod === 'Mixed'}>
+                  <button onClick={() => setPaymentAmount(Number(displayDue || 0).toFixed(2))} disabled={displayDue <= 0 || paymentMethod === 'Multipayment'}>
                     Full Dues ({Number(displayDue || 0).toFixed(2)})
                   </button>
-                  <button onClick={() => setPaymentAmount((Number(displayDue || 0) / 2).toFixed(2))} disabled={displayDue <= 0 || paymentMethod === 'Mixed'}>
+                  <button onClick={() => setPaymentAmount((Number(displayDue || 0) / 2).toFixed(2))} disabled={displayDue <= 0 || paymentMethod === 'Multipayment'}>
                     50% Dues ({(Number(displayDue || 0) / 2).toFixed(2)})
                   </button>
-                  <button onClick={() => setPaymentAmount('')} className={styles.presetClear} disabled={paymentMethod === 'Mixed'}>
+                  <button onClick={() => setPaymentAmount('')} className={styles.presetClear} disabled={paymentMethod === 'Multipayment'}>
                     Clear
                   </button>
                 </div>
@@ -1196,7 +1196,7 @@ export default function Settlement() {
                     { id: 'Card', label: 'Card Payment', icon: <CreditCard size={20} /> },
                     { id: 'UPI', label: 'UPI Payment', icon: <QrCode size={20} /> },
                     ...(settings.enableNomod ? [{ id: 'Nomod', label: 'Nomod Link', icon: <CreditCard size={20} /> }] : []),
-                    { id: 'Mixed', label: 'Mixed Payment', icon: <Layers size={20} /> }
+                    { id: 'Multipayment', label: 'Multipayment', icon: <Layers size={20} /> }
                   ].map(method => {
                     const isSelected = paymentMethod === method.id;
                     
@@ -1215,10 +1215,10 @@ export default function Settlement() {
                 </div>
               </div>
 
-              {/* Mixed Payment Breakdown Fields */}
-              {paymentMethod === 'Mixed' && (
+              {/* Multipayment Breakdown Fields */}
+              {paymentMethod === 'Multipayment' && (
                 <div className={styles.modalInputGroup} style={{ marginTop: '0.75rem' }}>
-                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-sub)', marginBottom: '0.5rem', display: 'block' }}>Mixed Payment Breakdown</label>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-sub)', marginBottom: '0.5rem', display: 'block' }}>Multipayment Breakdown</label>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                     
                     {/* Cash split */}
@@ -1297,7 +1297,7 @@ export default function Settlement() {
                 </div>
               )}
 
-              {(paymentMethod === 'Card' || paymentMethod === 'UPI' || paymentMethod === 'Bank' || (paymentMethod === 'Mixed' && (cardVal > 0 || upiVal > 0 || bankVal > 0))) && settings.bankAccounts?.length > 0 && (
+              {(paymentMethod === 'Card' || paymentMethod === 'UPI' || paymentMethod === 'Bank' || (paymentMethod === 'Multipayment' && (cardVal > 0 || upiVal > 0 || bankVal > 0))) && settings.bankAccounts?.length > 0 && (
                 <div className={styles.modalInputGroup} style={{ marginTop: '0.5rem' }}>
                   <label>{paymentMethod === 'Card' ? 'Select Card Account' : (paymentMethod === 'UPI' ? 'Select UPI Account' : 'Select Bank Account')}</label>
                   <div className={styles.largeInputBox} style={{ padding: '0.5rem 1rem' }}>

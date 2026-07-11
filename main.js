@@ -33,8 +33,44 @@ function logStartup(message, error = null) {
 logStartup('==================================================');
 logStartup('Application initialization started (main process).');
 
+// Helper to detect if an error is network-related
+function checkNetworkError(err) {
+  if (!err) return false;
+  const networkErrors = [
+    'ERR_INTERNET_DISCONNECTED',
+    'ERR_NETWORK_CHANGED',
+    'ERR_NAME_NOT_RESOLVED',
+    'ERR_CONNECTION_REFUSED',
+    'ERR_CONNECTION_RESET',
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'ENOTFOUND',
+    'ECONNABORTED',
+    'EAI_AGAIN',
+    'socket hang up',
+    'network timeout'
+  ];
+  
+  const errMsg = err.message || '';
+  const errStack = err.stack || '';
+  const errCode = err.code || '';
+  const errStr = String(err);
+
+  return networkErrors.some(code => 
+    errMsg.includes(code) || 
+    errStack.includes(code) || 
+    errCode.includes(code) || 
+    errStr.includes(code)
+  );
+}
+
 // Global error handlers to log main process exceptions and terminate the process cleanly
 process.on('uncaughtException', (err) => {
+  if (checkNetworkError(err)) {
+    logStartup(`[Network Uncaught Exception - Ignored] ${err ? (err.stack || err.message || err) : 'Unknown network error'}`);
+    return; // Continue running normally in offline mode
+  }
+  
   try {
     const errorMsg = err ? (err.stack || err.message || err) : 'Unknown error';
     logStartup(`CRITICAL UNCAUGHT EXCEPTION: ${errorMsg}`);
@@ -47,6 +83,11 @@ process.on('uncaughtException', (err) => {
 });
 
 process.on('unhandledRejection', (reason) => {
+  if (checkNetworkError(reason)) {
+    logStartup(`[Network Unhandled Rejection - Ignored] ${reason ? (reason.stack || reason.message || reason) : 'Unknown network rejection'}`);
+    return; // Continue running normally in offline mode
+  }
+
   try {
     const errorMsg = reason instanceof Error ? (reason.stack || reason.message) : reason;
     logStartup(`CRITICAL UNHANDLED REJECTION: ${errorMsg}`);
@@ -57,6 +98,7 @@ process.on('unhandledRejection', (reason) => {
   } catch (_) {}
   process.exit(1);
 });
+
 
 const { spawn } = require('child_process');
 logStartup('Importing database module...');
@@ -1667,7 +1709,10 @@ ipcMain.on('check-for-updates', async (event) => {
   } else {
     try {
       const { autoUpdater } = require('electron-updater');
-      autoUpdater.checkForUpdates();
+      autoUpdater.checkForUpdates().catch((err) => {
+        console.warn('Production auto-updater check failed (offline?):', err.message);
+        event.reply('update-status', { type: 'error', message: `Update check failed: ${err.message}` });
+      });
     } catch (err) {
       event.reply('update-status', { type: 'error', message: 'Auto-updater not configured or available.' });
     }
@@ -1695,7 +1740,10 @@ ipcMain.on('download-update', (event) => {
   } else {
     try {
       const { autoUpdater } = require('electron-updater');
-      autoUpdater.downloadUpdate();
+      autoUpdater.downloadUpdate().catch((err) => {
+        console.warn('Production auto-updater download failed:', err.message);
+        event.reply('update-status', { type: 'error', message: `Download failed: ${err.message}` });
+      });
     } catch (err) {
       event.reply('update-status', { type: 'error', message: 'Failed to initiate download.' });
     }

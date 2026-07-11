@@ -323,7 +323,7 @@ export default function Invoice() {
       }
     }
 
-    if (due > 0 && settings.enablePaymentLinks !== false) {
+    if (due > 0 && settings.enablePaymentLinks !== false && settings.enableNomod) {
       // Auto generate / retrieve payment link
       let paymentLinkUrl = '';
       if (window.electronAPI?.dbQuery) {
@@ -434,6 +434,18 @@ export default function Invoice() {
           <span>Back</span>
         </div>
         <div className={styles.topActions}>
+          <button className={styles.printBtn} style={{ height: '36px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', borderRadius: '8px', border: '1.5px solid var(--primary)' }} onClick={() => window.print()}>
+            <Printer size={16} /> Print Receipt
+          </button>
+          <button className={styles.printBtn} style={{ height: '36px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', borderRadius: '8px', border: '1.5px solid var(--primary)' }} onClick={handlePrintTags}>
+            <Tag size={16} /> Print Garment Tags
+          </button>
+          <button className={styles.pdfBtn} style={{ height: '36px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', borderRadius: '8px', border: '1.5px solid var(--secondary)', background: 'white', color: 'var(--secondary)' }} onClick={generatePDF} disabled={pdfLoading}>
+            <FileText size={16} /> {pdfLoading ? 'Generating...' : 'Download PDF'}
+          </button>
+          <button className={styles.waBtn} style={{ height: '36px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', borderRadius: '8px', border: '1.5px solid #25D366', background: 'white', color: '#25D366' }} onClick={handleWhatsApp}>
+            <Send size={16} /> Send via WhatsApp
+          </button>
           <button className={styles.closeBtn} onClick={() => navigate(-1)}>
             <X size={18} /> Close
           </button>
@@ -546,20 +558,6 @@ export default function Invoice() {
         </div>
       )}
 
-      <div className={styles.footerActions} style={{ maxWidth: '800px', margin: '0 auto 2rem auto', padding: '0 2rem' }}>
-        <button className={styles.printBtn} onClick={() => window.print()}>
-          <Printer size={20} /> Print Receipt
-        </button>
-        <button className={styles.printBtn} onClick={handlePrintTags}>
-          <Tag size={20} /> Print Garment Tags
-        </button>
-        <button className={styles.pdfBtn} onClick={generatePDF} disabled={pdfLoading}>
-          <FileText size={20} /> {pdfLoading ? 'Generating...' : 'Download PDF'}
-        </button>
-        <button className={styles.waBtn} onClick={handleWhatsApp}>
-          <Send size={20} /> Send via WhatsApp
-        </button>
-      </div>
 
       {/* Hidden Tag Printing Area */}
       {isPrintingTags && (
