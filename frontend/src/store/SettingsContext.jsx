@@ -4,6 +4,8 @@ import { DEFAULT_SHOP_ID } from '../constants';
 const SettingsContext = createContext();
 
 export function SettingsProvider({ children }) {
+  const [isSettingsDirty, setIsSettingsDirty] = useState(false);
+  const [originalSettings, setOriginalSettings] = useState(null);
   const [settings, setSettings] = useState({
     companyName: 'Laundry Box',
     companyNameAr: '',
@@ -58,7 +60,7 @@ export function SettingsProvider({ children }) {
     lateDeliveryDays: 3,
     enableCreditLimitProtection: true,
     enableManagerOverride: true,
-    workflowStatuses: ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled'],
+    workflowStatuses: ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered'],
     presetDamageNotes: ['Stain on collar', 'Fading colour', 'Missing button', 'Tear on sleeve', 'Handle with care', 'Dry Clean Only'],
     deliveryMethods: [
       { name: 'Hanger', nameAr: 'علاقة', isDefault: true },
@@ -114,7 +116,7 @@ export function SettingsProvider({ children }) {
     nomodFailureUrl: '',
     nomodWebhookSecret: '',
     nomodExpiry: 30,
-    waNewOrderTemplate: 'Hello {customerName}! Your laundry bill for {orderId} of {total} has been saved. {dueAmount} is pending. Thank you!',
+    waNewOrderTemplate: 'Hello {customerName}! Your laundry invoice for order {orderId} of {total} has been saved. {dueAmount} is pending. Thank you!',
     waOrderReadyTemplate: 'Dear {customerName}, your order {orderId} is now ready for pick-up! Total due is {dueAmount}. Thank you!',
     waReminderTemplate: 'Hello {customerName}, this is a gentle reminder that an amount of {dueAmount} is pending for order {orderId}. Kindly settle at your earliest convenience.',
     waStatementTemplate: 'Hello {customerName}, your current outstanding balance is {dueAmount}. Please find your statement attached.',
@@ -122,11 +124,19 @@ export function SettingsProvider({ children }) {
     waStatusUpdateTemplate: 'Hello! Regarding your laundry order #{orderId}, the current status is "{status}". Expected delivery date is {deliveryDate}. Thank you!',
     waCustomerBalanceTemplate: 'Hello {customerName}! This is a friendly reminder regarding your outstanding balance of {dueAmount} at {shopName}. Please settle it at your earliest convenience. Thank you!',
     waGeneralTemplate: 'Hello! This is from {shopName}. We\'re reaching out regarding your account.',
-    waInvoiceShareTemplate: '*INVOICE RECEIVED*\n\nHello! Here is your bill for order *{orderId}*.\n\n*Items:*\n{itemsSummary}\n\n*Total Amount: {total}*',
-     // ─── Web Dashboard ──────────────────────────────────────────
-     branchName: '',          // e.g., "Dubai Mall Branch" — shown on web dashboard
-     branchApiKey: '',        // Cryptographically secure sync API key
-   });
+    waInvoiceShareTemplate: '*INVOICE RECEIVED*\n\nHello! Here is your invoice for order *{orderId}*.\n\n*Items:*\n{itemsSummary}\n\n*Total Amount: {total}*',
+    // ─── Web Dashboard ──────────────────────────────────────────
+    branchName: '',          // e.g., "Dubai Mall Branch" — shown on web dashboard
+    branchApiKey: '',        // Cryptographically secure sync API key
+    // ─── System Configuration Module toggles ─────────────────────
+    workflowEnabled: true,
+    zReportEnabled: true,
+    noModPayEnabled: true,
+    paymentHistoryEnabled: true,
+    zReportClosingType: 'Day Close',
+    silentPrinting: true,
+    pdfDownloadPath: '',
+  });
 
   const settingsRef = useRef(settings);
   useEffect(() => {
@@ -207,7 +217,7 @@ export function SettingsProvider({ children }) {
             lateDeliveryDays: shopSettings?.lateDeliveryDays ?? 3,
             enableCreditLimitProtection: shopSettings?.enableCreditLimitProtection ?? true,
             enableManagerOverride: shopSettings?.enableManagerOverride ?? true,
-            workflowStatuses: shopSettings?.workflowStatuses || ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled'],
+            workflowStatuses: shopSettings?.workflowStatuses || ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered'],
             presetDamageNotes: shopSettings?.presetDamageNotes || ['Stain on collar', 'Fading colour', 'Missing button', 'Tear on sleeve', 'Handle with care', 'Dry Clean Only'],
             deliveryMethods: shopSettings?.deliveryMethods || [
               { name: 'Hanger', nameAr: 'علاقة', isDefault: true },
@@ -263,7 +273,7 @@ export function SettingsProvider({ children }) {
             nomodFailureUrl: shopSettings?.nomodFailureUrl || '',
             nomodWebhookSecret: shopSettings?.nomodWebhookSecret || '',
             nomodExpiry: shopSettings?.nomodExpiry ?? 30,
-            waNewOrderTemplate: shopSettings?.waNewOrderTemplate ?? 'Hello {customerName}! Your laundry bill for {orderId} of {total} has been saved. {dueAmount} is pending. Thank you!',
+            waNewOrderTemplate: shopSettings?.waNewOrderTemplate ?? 'Hello {customerName}! Your laundry invoice for order {orderId} of {total} has been saved. {dueAmount} is pending. Thank you!',
             waOrderReadyTemplate: shopSettings?.waOrderReadyTemplate ?? 'Dear {customerName}, your order {orderId} is now ready for pick-up! Total due is {dueAmount}. Thank you!',
             waReminderTemplate: shopSettings?.waReminderTemplate ?? 'Hello {customerName}, this is a gentle reminder that an amount of {dueAmount} is pending for order {orderId}. Kindly settle at your earliest convenience.',
             waStatementTemplate: shopSettings?.waStatementTemplate ?? 'Hello {customerName}, your current outstanding balance is {dueAmount}. Please find your statement attached.',
@@ -271,14 +281,23 @@ export function SettingsProvider({ children }) {
             waStatusUpdateTemplate: shopSettings?.waStatusUpdateTemplate ?? 'Hello! Regarding your laundry order #{orderId}, the current status is "{status}". Expected delivery date is {deliveryDate}. Thank you!',
             waCustomerBalanceTemplate: shopSettings?.waCustomerBalanceTemplate ?? 'Hello {customerName}! This is a friendly reminder regarding your outstanding balance of {dueAmount} at {shopName}. Please settle it at your earliest convenience. Thank you!',
             waGeneralTemplate: shopSettings?.waGeneralTemplate ?? 'Hello! This is from {shopName}. We\'re reaching out regarding your account.',
-            waInvoiceShareTemplate: shopSettings?.waInvoiceShareTemplate ?? '*INVOICE RECEIVED*\n\nHello! Here is your bill for order *{orderId}*.\n\n*Items:*\n{itemsSummary}\n\n*Total Amount: {total}*',
+            waInvoiceShareTemplate: shopSettings?.waInvoiceShareTemplate ?? '*INVOICE RECEIVED*\n\nHello! Here is your invoice for order *{orderId}*.\n\n*Items:*\n{itemsSummary}\n\n*Total Amount: {total}*',
             // ─── Web Dashboard ───────────────────────────────────────
             branchName:   shopSettings?.branchName   || '',
             branchApiKey: shopSettings?.branchApiKey || '',
             branchId:     shopSettings?.branchId     || 'BRANCH_01',
+            // System Configuration Module toggles
+            workflowEnabled: shopSettings?.workflowEnabled ?? true,
+            zReportEnabled: shopSettings?.zReportEnabled ?? true,
+            noModPayEnabled: shopSettings?.noModPayEnabled ?? true,
+            paymentHistoryEnabled: shopSettings?.paymentHistoryEnabled ?? true,
+            zReportClosingType: shopSettings?.zReportClosingType || 'Day Close',
+            silentPrinting: shopSettings?.silentPrinting ?? true,
+            pdfDownloadPath: shopSettings?.pdfDownloadPath || '',
           });
           window.localStorage.setItem('billingPrinter', shopSettings?.billingPrinter || '');
           window.localStorage.setItem('tagPrinter', shopSettings?.tagPrinter || '');
+          window.localStorage.setItem('silentPrinting', (shopSettings?.silentPrinting ?? true) !== false ? 'true' : 'false');
           // Also mirror dashboard settings to localStorage for syncService
           window.localStorage.setItem('laundry_settings', JSON.stringify({
             branchName:   shopSettings?.branchName   || '',
@@ -302,6 +321,9 @@ export function SettingsProvider({ children }) {
     }
     if (newSettings.hasOwnProperty('tagPrinter')) {
       window.localStorage.setItem('tagPrinter', newSettings.tagPrinter || '');
+    }
+    if (newSettings.hasOwnProperty('silentPrinting')) {
+      window.localStorage.setItem('silentPrinting', newSettings.silentPrinting !== false ? 'true' : 'false');
     }
 
 
@@ -361,6 +383,8 @@ export function SettingsProvider({ children }) {
           invoiceTermsText: updated.invoiceTermsText,
           billingPrinter: updated.billingPrinter,
           tagPrinter: updated.tagPrinter,
+          silentPrinting: updated.silentPrinting,
+          pdfDownloadPath: updated.pdfDownloadPath,
           enablePaymentLinks: updated.enablePaymentLinks,
           allowManagerStripeConfig: updated.allowManagerStripeConfig,
           enableStripe: updated.enableStripe,
@@ -415,6 +439,12 @@ export function SettingsProvider({ children }) {
           branchName:   updated.branchName,
           branchApiKey: updated.branchApiKey,
           branchId:     updated.branchId,
+          // System Configuration Module toggles
+          workflowEnabled: updated.workflowEnabled,
+          zReportEnabled: updated.zReportEnabled,
+          noModPayEnabled: updated.noModPayEnabled,
+          paymentHistoryEnabled: updated.paymentHistoryEnabled,
+          zReportClosingType: updated.zReportClosingType,
         });
         // Mirror dashboard settings to localStorage for syncService
         window.localStorage.setItem('laundry_settings', JSON.stringify({
@@ -474,7 +504,7 @@ export function SettingsProvider({ children }) {
   };
 
   return (
-    <SettingsContext.Provider value={{ settings, updateSettings, fetchSettings, formatDate }}>
+    <SettingsContext.Provider value={{ settings, updateSettings, fetchSettings, formatDate, isSettingsDirty, setIsSettingsDirty, originalSettings, setOriginalSettings }}>
       {children}
     </SettingsContext.Provider>
   );

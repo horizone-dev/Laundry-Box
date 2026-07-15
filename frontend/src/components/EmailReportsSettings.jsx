@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Mail, Save, AlertCircle } from 'lucide-react';
 import styles from '../pages/Settings.module.css';
 
-export default function EmailReportsSettings() {
+export default function EmailReportsSettings({ registerSave, setIsSettingsDirty }) {
+  const initialEmailSettingsRef = React.useRef(null);
   const [emailSettings, setEmailSettings] = useState({
     enabled: false,
     ownerEmail: '',
@@ -46,7 +47,7 @@ export default function EmailReportsSettings() {
             else if (provider === 'Outlook') defaultPort = 587;
           }
 
-          setEmailSettings({
+          const fetchedObj = {
             enabled: settings.enabled === 1,
             ownerEmail: settings.ownerEmail || '',
             sendTime: settings.sendTime || '23:50',
@@ -60,7 +61,9 @@ export default function EmailReportsSettings() {
             includeExpensesCsv: settings.includeExpensesCsv === 1 || settings.includeExpensesCsv === true,
             includeCollectionsCsv: settings.includeCollectionsCsv === 1 || settings.includeCollectionsCsv === true,
             includeOutstandingCsv: settings.includeOutstandingCsv === 1 || settings.includeOutstandingCsv === true
-          });
+          };
+          setEmailSettings(fetchedObj);
+          initialEmailSettingsRef.current = fetchedObj;
         }
       }
     } catch (err) {
@@ -95,7 +98,7 @@ export default function EmailReportsSettings() {
     });
   };
 
-  const handleSave = async () => {
+  const handleSave = async (silent = false) => {
     setSaving(true);
     setError('');
     
@@ -116,20 +119,54 @@ export default function EmailReportsSettings() {
       if (window.electronAPI && window.electronAPI.saveEmailSettings) {
         const result = await window.electronAPI.saveEmailSettings(settingsToSave);
         if (result && result.success) {
-          alert('Email settings saved successfully');
+          if (!silent) {
+            alert('Email settings saved successfully');
+          }
+          initialEmailSettingsRef.current = settingsToSave;
+          if (setIsSettingsDirty) {
+            setIsSettingsDirty(false);
+          }
           fetchSettings(); // reload settings
+          return true;
         } else {
           setError(result?.error || 'Failed to save settings');
+          return false;
         }
       } else {
         setError('electronAPI not available');
+        return false;
       }
     } catch (err) {
       setError(err.message);
+      return false;
     } finally {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (initialEmailSettingsRef.current && setIsSettingsDirty) {
+      const isModified = JSON.stringify(emailSettings) !== JSON.stringify(initialEmailSettingsRef.current);
+      setIsSettingsDirty(isModified);
+    }
+  }, [emailSettings, setIsSettingsDirty]);
+
+  useEffect(() => {
+    return () => {
+      if (setIsSettingsDirty) {
+        setIsSettingsDirty(false);
+      }
+    };
+  }, [setIsSettingsDirty]);
+
+  useEffect(() => {
+    if (registerSave) {
+      registerSave(() => handleSave(true));
+    }
+    return () => {
+      if (registerSave) registerSave(null);
+    };
+  }, [emailSettings, registerSave]);
 
   const handleTestEmail = async () => {
     setTesting(true);
@@ -157,10 +194,36 @@ export default function EmailReportsSettings() {
   return (
     <div className={styles.profileContainer}>
       <div className={styles.card}>
-        <h2 className={styles.cardTitle}>Daily Email Reports Configuration</h2>
-        <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
-          Configure automated daily business reports to be sent directly to the owner.
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+          <div>
+            <h2 className={styles.cardTitle}>Daily Email Reports Configuration</h2>
+            <p style={{ color: '#64748b', fontSize: '0.875rem', margin: 0 }}>
+              Configure automated daily business reports to be sent directly to the owner.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button
+              onClick={handleTestEmail}
+              disabled={testing}
+              style={{
+                padding: '8px 16px',
+                background: '#F1F5F9',
+                color: '#475569',
+                border: '1px solid #CBD5E1',
+                borderRadius: '8px',
+                fontWeight: '600',
+                fontSize: '0.875rem',
+                cursor: testing ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <Mail size={16} />
+              {testing ? 'Sending Test...' : 'Send Test Email'}
+            </button>
+          </div>
+        </div>
 
         {error && (
           <div style={{ padding: '12px', background: '#FEF2F2', color: '#EF4444', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1.5rem' }}>
@@ -354,47 +417,6 @@ export default function EmailReportsSettings() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{
-              padding: '10px 20px',
-              background: '#2563EB',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              fontWeight: '600',
-              cursor: saving ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <Save size={18} />
-            {saving ? 'Saving...' : 'Save Settings'}
-          </button>
-          
-          <button
-            onClick={handleTestEmail}
-            disabled={testing}
-            style={{
-              padding: '10px 20px',
-              background: '#F1F5F9',
-              color: '#475569',
-              border: '1px solid #CBD5E1',
-              borderRadius: '8px',
-              fontWeight: '600',
-              cursor: testing ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <Mail size={18} />
-            {testing ? 'Sending Test...' : 'Send Test Email'}
-          </button>
-        </div>
 
       </div>
     </div>

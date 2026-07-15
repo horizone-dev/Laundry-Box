@@ -575,3 +575,25 @@
   background: #F8FAFC;
   border-color: #E2E8F0;
 }
+
+.refundBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.25rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid #E2E8F0;
+  background: white;
+  color: #0F172A;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.refundBtn:hover {
+  background: #F8FAFC;
+  border-color: #6366F1;
+  color: #6366F1;
+}

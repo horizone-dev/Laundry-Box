@@ -1264,6 +1264,21 @@
   color: #0369A1;
 }
 
+.resultTypeBadge.advance {
+  background: #DCFCE7;
+  color: #15803D;
+}
+
+.resultTypeBadge.due {
+  background: #FEE2E2;
+  color: #B91C1C;
+}
+
+.resultTypeBadge.settled {
+  background: #F1F5F9;
+  color: #475569;
+}
+
 .resultTypeBadge.bill {
   background: #D1FAE5;
   color: #047857;
@@ -1348,4 +1363,47 @@
     transform: translateX(0);
     opacity: 1;
   }
+}
+
+.confirmModalBtn {
+  padding: 0.6rem 1.25rem;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirmModalBtnCancel {
+  background: #F1F5F9;
+  color: #475569;
+  border-color: #E2E8F0;
+}
+
+.confirmModalBtnCancel:hover {
+  background: #E2E8F0;
+}
+
+.confirmModalBtnDiscard {
+  background: #EF4444;
+  color: white;
+}
+
+.confirmModalBtnDiscard:hover {
+  background: #DC2626;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+}
+
+.confirmModalBtnSave {
+  background: #2563EB;
+  color: white;
+}
+
+.confirmModalBtnSave:hover {
+  background: #1D4ED8;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
 }

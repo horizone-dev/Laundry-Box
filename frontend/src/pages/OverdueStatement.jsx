@@ -46,7 +46,11 @@ export default function OverdueStatement() {
   const totalOverdue = pendingBills.reduce((sum, b) => sum + (b.dueAmount || (b.totalAmount - (b.paidAmount || 0))), 0);
 
   const handlePrint = () => {
-    window.print();
+    if (window.appPrint) {
+      window.appPrint();
+    } else {
+      window.print();
+    }
   };
 
   const handleWhatsApp = () => {
@@ -137,7 +141,7 @@ export default function OverdueStatement() {
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Bill ID</th>
+              <th>Invoice ID</th>
               <th>Date</th>
               <th className={styles.alignRight}>Original Total</th>
               <th className={styles.alignRight}>Paid</th>

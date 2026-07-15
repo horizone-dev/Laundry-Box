@@ -61,9 +61,9 @@ export default function ServicesReport() {
     if (!window.electronAPI?.dbQuery) return;
     try {
       setLoading(true);
-      // Fetch all active orders (exclude Cancelled status)
+      // Fetch all active orders
       const res = await window.electronAPI.dbQuery(
-        "SELECT id, billNumber, totalAmount, items, status, createdAt FROM orders WHERE status != 'Cancelled' ORDER BY createdAt DESC",
+        "SELECT id, billNumber, totalAmount, items, status, createdAt FROM orders ORDER BY createdAt DESC",
         []
       );
       if (res.success) {
@@ -269,7 +269,7 @@ export default function ServicesReport() {
           <button className="btn btn-secondary" onClick={exportCSV}>
             <Download size={16} /> Export CSV
           </button>
-          <button className="btn btn-primary" onClick={() => window.print()}>
+          <button className="btn btn-primary" onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}>
             <Printer size={16} /> Print Report
           </button>
         </div>

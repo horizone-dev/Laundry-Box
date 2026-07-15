@@ -7,7 +7,7 @@ import {
 import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
-import { getLocalDateBounds } from '../utils/dateFilters';
+import { getLocalDateBounds, isWithinBounds } from '../utils/dateFilters';
 import { getLocalISOString, getLocalDateStr } from '../utils/dateUtils';
 import styles from './DeletedOrders.module.css';
 
@@ -59,28 +59,8 @@ export default function DeletedOrders() {
 
       // A. Fetch locally from SQLite (if electron app)
       if (window.electronAPI?.dbQuery) {
-        let query = 'SELECT * FROM deleted_orders';
-        let params = [];
-
-        const bounds = getLocalDateBounds(dateRange, customStart, customEnd);
-
-        if (dateRange !== 'All') {
-          if (bounds === false) {
-            setOrders([]);
-            setLoading(false);
-            return;
-          }
-          if (bounds !== null) {
-            // Format bounds as local YYYY-MM-DD HH:MM strings for comparison with stored dates
-            const pad = n => String(n).padStart(2, '0');
-            const fmtLocal = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-            query += ' WHERE deletedAt >= ? AND deletedAt <= ?';
-            params = [fmtLocal(bounds.from), fmtLocal(bounds.to)];
-          }
-        }
-
-        query += ' ORDER BY deletedAt DESC';
-        const res = await window.electronAPI.dbQuery(query, params);
+        const query = 'SELECT * FROM deleted_orders ORDER BY deletedAt DESC';
+        const res = await window.electronAPI.dbQuery(query, []);
         setOrders(res.success ? res.data : []);
         setLoading(false);
         return;
@@ -110,10 +90,16 @@ export default function DeletedOrders() {
           const refundTxnId = `TXN-RETURN-${Date.now()}`;
           const _nowD = new Date();
           const txnTimestamp = `${_nowD.getFullYear()}-${String(_nowD.getMonth()+1).padStart(2,'0')}-${String(_nowD.getDate()).padStart(2,'0')} ${String(_nowD.getHours()).padStart(2,'0')}:${String(_nowD.getMinutes()).padStart(2,'0')}`;
+          
+          const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+          const creatorName = userSession.name || userSession.username || 'System';
+          const creatorId = userSession.id || 'SYSTEM';
+          const creatorRole = userSession.role || 'system';
+
           await window.electronAPI.dbQuery(
             `INSERT INTO account_transactions 
-             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               refundTxnId,
               orderToRefund.shopId || 'SHOP_01',
@@ -121,12 +107,15 @@ export default function DeletedOrders() {
               'EXPENSE',
               'Return',
               paidAmt,
-              `Return - Bill ${orderToRefund.id.startsWith('#') ? '' : '#'}${orderToRefund.id}`,
+              `Return - Order ${orderToRefund.id.startsWith('#') ? '' : '#'}${orderToRefund.id}`,
               txnTimestamp,
               0,
               getLocalISOString(),
               'Zap',
-              selectedRefundMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null
+              selectedRefundMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null,
+              creatorName,
+              creatorId,
+              creatorRole
             ]
           );
         }
@@ -137,15 +126,10 @@ export default function DeletedOrders() {
           [selectedRefundMethod, nowIso, orderToRefund.id]
         );
 
-        // 3. Adjust customer balance (since refund is no longer pending, add it back to customer balance)
-        if (paidAmt > 0 && orderToRefund.customerId && orderToRefund.customerId !== 'Walk-in') {
-          await window.electronAPI.dbQuery(
-            'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-            [paidAmt, getLocalISOString(), orderToRefund.customerId]
-          );
-        }
-
-        // 4. Run data healer to make sure sync and state are correct
+        // 3. Run data healer — it recalculates customer balance from source data.
+        //    When refundStatus changes to 'Returned', the DataHealer's formula
+        //    automatically stops subtracting deleted_orders.paidAmount from the balance.
+        //    Do NOT manually update balance here — it would double-correct and produce a wrong Due balance.
         if (window.electronAPI?.runDataHealer) {
           await window.electronAPI.runDataHealer();
         }
@@ -219,30 +203,11 @@ export default function DeletedOrders() {
   }, [showRefundModal]);
 
   const filteredOrders = useMemo(() => {
+    const bounds = getLocalDateBounds(dateRange, customStart, customEnd);
     return orders.filter(o => {
-      // Remote date filtering (since backend doesn't filter by date range yet)
-      if (!window.electronAPI?.dbQuery && dateRange !== 'All') {
-        const delDate = new Date(o.deletedAt);
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-        if (dateRange === 'Today') {
-          const start = new Date(today);
-          const end = new Date(today);
-          end.setHours(23, 59, 59, 999);
-          if (delDate < start || delDate > end) return false;
-
-        } else if (dateRange === 'This Month') {
-          const start = new Date(today.getFullYear(), today.getMonth(), 1);
-          if (delDate < start) return false;
-        } else if (dateRange === 'Custom' && customStart && customEnd) {
-          const start = new Date(customStart);
-          start.setHours(0, 0, 0, 0);
-          const end = new Date(customEnd);
-          end.setHours(23, 59, 59, 999);
-          if (delDate < start || delDate > end) return false;
-        }
-      }
+      // Date bounds check
+      if (bounds === false) return false;
+      if (bounds !== null && !isWithinBounds(o.deletedAt, bounds)) return false;
 
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
@@ -262,7 +227,7 @@ export default function DeletedOrders() {
   const totalVoidedAmount = filteredOrders.reduce((s, o) => s + (o.totalAmount || 0), 0);
   // Export CSV
   const exportCSV = () => {
-    const headers = ['Deletion Date', 'Order ID', 'Bill No.', 'Customer', 'Phone', 'Items', 'Approved By', 'Original Payment Status', 'Paid Amount', 'Refund/Return Status', 'Voided Amount'];
+    const headers = ['Deletion Date', 'Order ID', 'Invoice/Order No.', 'Customer', 'Phone', 'Items', 'Approved By', 'Original Payment Status', 'Paid Amount', 'Refund/Return Status', 'Voided Amount'];
     const rows = filteredOrders.map(o => {
       let items = '';
       try {
@@ -343,7 +308,7 @@ export default function DeletedOrders() {
           <button className={styles.clearBtn} onClick={exportCSV} title="Export CSV Report">
             <Download size={16} /> Export Report
           </button>
-          <button className={styles.clearBtn} onClick={() => window.print()} title="Print Audit Log">
+          <button className={styles.clearBtn} onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }} title="Print Audit Log">
             <Printer size={16} /> Print
           </button>
         </div>
@@ -359,7 +324,7 @@ export default function DeletedOrders() {
             </div>
           </div>
           <div className={styles.kpiValue}>{totalDeleted}</div>
-          <div className={styles.kpiSubtext}>Permanently removed from bills</div>
+          <div className={styles.kpiSubtext}>Permanently removed from orders</div>
         </div>
 
         <div className={styles.kpiCard}>
@@ -453,11 +418,6 @@ export default function DeletedOrders() {
                   </td>
                   <td>
                     <span className={styles.billRef}>{order.id}</span>
-                    {order.billNumber && (
-                      <div style={{ fontSize: '0.75rem', color: '#94A3B8', fontWeight: 600 }}>
-                        Bill: {order.billNumber}
-                      </div>
-                    )}
                   </td>
                   <td>
                     <div className={styles.customerName}>{order.customerName || 'Walk-in Customer'}</div>
@@ -502,6 +462,13 @@ export default function DeletedOrders() {
                           <span className={styles.badgeReturned}>Returned</span>
                           <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 500 }}>
                             Refunded: <CurrencySymbol size={10} /> {(order.paidAmount || 0).toFixed(2)}
+                          </span>
+                        </>
+                      ) : order.returnStatus === 'Converted to Advance' ? (
+                        <>
+                          <span className={styles.badgeAdvance}>Credited to Advance</span>
+                          <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 500 }}>
+                            Amount: <CurrencySymbol size={10} /> {(order.paidAmount || 0).toFixed(2)}
                           </span>
                         </>
                       ) : (

@@ -3,9 +3,14 @@ const router = express.Router();
 const syncController = require('../controllers/syncController');
 const BranchMeta = require('../models/BranchMeta');
 const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
 
 // Middleware to verify branch API key before allowing synchronization
 async function verifyBranchKey(req, res, next) {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ success: false, message: 'Sync failed: MongoDB offline', offline: true });
+  }
+
   const branchId = req.header('X-Branch-Id');
   const apiKey = req.header('X-Branch-API-Key');
 

@@ -140,7 +140,7 @@ export default function RevenueReport() {
           <button className="btn btn-secondary" onClick={handleExportCSV}>
             <Download size={18} /> Export CSV
           </button>
-          <button className="btn btn-primary" onClick={() => window.print()}>
+          <button className="btn btn-primary" onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}>
             <Printer size={18} /> Print PDF
           </button>
         </div>

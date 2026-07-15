@@ -89,13 +89,13 @@ export default function Dashboard() {
       }
 
       const curr7DaysRevenue = allOrders.reduce((sum, o) => {
-        if (o.status === 'Cancelled') return sum;
+
         const hasMatch = current7DaysStrs.some(dateStr => o.createdAt.startsWith(dateStr));
         return hasMatch ? sum + o.totalAmount : sum;
       }, 0);
 
       const prev7DaysRevenue = allOrders.reduce((sum, o) => {
-        if (o.status === 'Cancelled') return sum;
+
         const hasMatch = previous7DaysStrs.some(dateStr => o.createdAt.startsWith(dateStr));
         return hasMatch ? sum + o.totalAmount : sum;
       }, 0);
@@ -133,7 +133,7 @@ export default function Dashboard() {
       setTopServices(servicesRank);
 
       // 8. Footer: Confirmed Work stats
-      const activeOrders = allOrders.filter(o => !['Cancelled', 'Delivered'].includes(o.status));
+      const activeOrders = allOrders.filter(o => !['Delivered'].includes(o.status));
       const confirmedOrders = activeOrders.filter(o => !['Pending', 'Payment Pending'].includes(o.status));
       const deliveredOrders = allOrders.filter(o => o.status === 'Delivered');
       setFooterStats({
@@ -187,7 +187,7 @@ export default function Dashboard() {
       });
     }
     
-    const getRevenue = (list) => list.reduce((sum, o) => o.status !== 'Cancelled' ? sum + o.totalAmount : sum, 0);
+    const getRevenue = (list) => list.reduce((sum, o) => sum + o.totalAmount, 0);
     const currRevenue = getRevenue(currentOrders);
     const prevRevenue = getRevenue(previousOrders);
     
@@ -195,10 +195,10 @@ export default function Dashboard() {
     const prevOrdersCount = previousOrders.length;
     
     // Core KPIs
-    const totalPendingCount = allOrders.filter(o => !['Delivered', 'Cancelled'].includes(o.status)).length;
+    const totalPendingCount = allOrders.filter(o => !['Delivered'].includes(o.status)).length;
     const totalOutForDeliveryCount = allOrders.filter(o => o.status === 'Out for Delivery').length;
     const totalCompletedToday = allOrders.filter(o => o.status === 'Delivered' && o.createdAt.startsWith(todayStr)).length;
-    const totalDueAmount = allOrders.reduce((sum, o) => o.status !== 'Cancelled' ? sum + (o.dueAmount || 0) : sum, 0);
+    const totalDueAmount = allOrders.reduce((sum, o) => sum + (o.dueAmount || 0), 0);
     
     const calculateTrend = (curr, prev) => {
       if (!prev || prev === 0) return { val: '+0.0%', isUp: true };
@@ -219,7 +219,7 @@ export default function Dashboard() {
     }).length;
     const completedTrend = calculateTrend(totalCompletedToday, completedYesterday);
     
-    const pendingYesterday = allOrders.filter(o => !['Delivered', 'Cancelled'].includes(o.status) && o.createdAt < todayStr).length;
+    const pendingYesterday = allOrders.filter(o => !['Delivered'].includes(o.status) && o.createdAt < todayStr).length;
     const pendingTrend = calculateTrend(totalPendingCount, pendingYesterday);
 
     const yesterday = getDaysAgo(1);
@@ -254,7 +254,7 @@ export default function Dashboard() {
       if (o.createdAt.startsWith(todayStr)) return sum;
       
       const statusYesterday = getOrderStatusAtDate(o, yesterdayStr);
-      if (statusYesterday === 'Cancelled' || !statusYesterday) return sum;
+      if (!statusYesterday) return sum;
       
       const orderPaymentsBeforeToday = allPayments.filter(p => p.orderId === o.id && new Date(p.createdAt) <= new Date(yesterdayStr + 'T23:59:59'));
       const paidBeforeToday = orderPaymentsBeforeToday.reduce((pSum, p) => pSum + p.amount, 0);
@@ -298,7 +298,7 @@ export default function Dashboard() {
     }
     
     return last7Days.map(day => {
-      const dayOrders = allOrders.filter(o => o.createdAt.startsWith(day.dateStr) && o.status !== 'Cancelled');
+      const dayOrders = allOrders.filter(o => o.createdAt.startsWith(day.dateStr));
       const dayRev = dayOrders.reduce((sum, o) => sum + o.totalAmount, 0);
       return {
         name: day.label,
@@ -344,7 +344,7 @@ export default function Dashboard() {
     const board = { new: [], processing: [], ready: [], outForDelivery: [] };
     
     allOrders.forEach(o => {
-      if (o.status === 'Cancelled') return;
+
       
       const orderData = {
         id: o.id,
@@ -418,7 +418,7 @@ export default function Dashboard() {
   const calculateTopServices = (allOrders) => {
     const counts = {};
     allOrders.forEach(o => {
-      if (o.status === 'Cancelled') return;
+
       try {
         const items = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
         if (Array.isArray(items)) {

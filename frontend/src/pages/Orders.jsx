@@ -35,8 +35,7 @@ const STATUS_COLORS = {
   'Ready': styles.statusDelivery,
   'Ready to Pick up': styles.statusDelivery,
   'Out for Delivery': styles.statusDelivery,
-  'Delivered': styles.statusDelivered,
-  'Cancelled': styles.statusCancelled
+  'Delivered': styles.statusDelivered
 };
 
 export default function Orders({ isPendingView = false }) {
@@ -162,7 +161,7 @@ export default function Orders({ isPendingView = false }) {
             linkId,
             order.customerId || 'Walk-in',
             order.customerName || 'Walk-in Customer',
-            `Order #${order.billNumber || order.id}`,
+            `Order #${settings.invoicePrefix || ''}${order.id}`,
             due,
             dateStr,
             newUrl,
@@ -186,7 +185,7 @@ export default function Orders({ isPendingView = false }) {
       alert("Error generating new payment link: " + err.message);
     }
   };
-  const [workflowFilter, setWorkflowFilter] = useState('All'); // 'All', 'Confirmed', 'Processing', 'Ready', 'Delivered', 'Cancelled'
+  const [workflowFilter, setWorkflowFilter] = useState('All'); // 'All', 'Confirmed', 'Processing', 'Ready', 'Delivered'
   const [isPrintingTags, setIsPrintingTags] = useState(false);
   const [dateRange, setDateRange] = useState('All');
   const [customStart, setCustomStart] = useState('');
@@ -198,7 +197,7 @@ export default function Orders({ isPendingView = false }) {
   const [pinError, setPinError] = useState('');
   const [orderToDelete, setOrderToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [refundImmediately, setRefundImmediately] = useState(true);
+  const [deleteOption, setDeleteOption] = useState('refund'); // 'refund' or 'advance'
   const [refundMethod, setRefundMethod] = useState('Cash');
 
   // Credit Limit Protection states
@@ -415,13 +414,12 @@ export default function Orders({ isPendingView = false }) {
       } else if (workflowFilter === 'Confirmed') {
         filteredOrders = activeOnly.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status));
       } else if (workflowFilter === 'Processing') {
-        filteredOrders = activeOnly.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status));
+        filteredOrders = activeOnly.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status));
       } else if (workflowFilter === 'Ready') {
         filteredOrders = activeOnly.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status));
       } else if (workflowFilter === 'Delivered') {
         filteredOrders = activeOnly.filter(o => o.status === 'Delivered');
-      } else if (workflowFilter === 'Cancelled') {
-        filteredOrders = activeOnly.filter(o => o.status === 'Cancelled');
+
       }
     }
   }
@@ -456,10 +454,9 @@ export default function Orders({ isPendingView = false }) {
   const workflowCounts = {
     All: activeDateFilteredOrders.length,
     Confirmed: activeDateFilteredOrders.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status)).length,
-    Processing: activeDateFilteredOrders.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status)).length,
+    Processing: activeDateFilteredOrders.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status)).length,
     Ready: activeDateFilteredOrders.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status)).length,
     Delivered: activeDateFilteredOrders.filter(o => o.status === 'Delivered').length,
-    Cancelled: activeDateFilteredOrders.filter(o => o.status === 'Cancelled').length,
     Deleted: dateFilteredOrders.filter(o => o.isDeleted).length
   };
 
@@ -574,7 +571,7 @@ export default function Orders({ isPendingView = false }) {
     const orderToUpdate = orderOverride || selectedOrder;
     if (!orderToUpdate) return;
 
-    if (['Cancelled', 'Delivered'].includes(newStatus)) {
+    if (['Delivered'].includes(newStatus)) {
       const statusText = translateStatus(newStatus);
       const confirmMsg = t('confirmStatusChange', settings.language)
         .replace('{id}', orderToUpdate.id)
@@ -662,6 +659,7 @@ export default function Orders({ isPendingView = false }) {
       const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
       const currentLoggedInUser = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
 
+      const refundImmediately = deleteOption === 'refund';
       let linkedPayments = [];
 
       // A. Delete locally from SQLite (if electron app)
@@ -674,20 +672,26 @@ export default function Orders({ isPendingView = false }) {
         );
         linkedPayments = linkedPaymentsRes.success ? linkedPaymentsRes.data : [];
 
+        const allocationsRes = await window.electronAPI.dbQuery(
+          'SELECT paymentId, amountUsed FROM advance_allocations WHERE orderId = ?',
+          [orderToDelete.id]
+        );
+        const allocationsUsed = allocationsRes.success ? allocationsRes.data : [];
+
         // 2. Insert into deleted_orders audit log
         const isPaid = orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus);
         const initialReturnStatus = isPaid
-          ? (refundImmediately ? 'Returned' : 'Return Pending')
+          ? (refundImmediately ? 'Returned' : 'Converted to Advance')
           : 'N/A';
         const initialRefundStatus = isPaid
-          ? (refundImmediately ? 'Returned' : 'Refund Pending')
+          ? (refundImmediately ? 'Returned' : 'Converted to Advance')
           : 'Deleted';
         const refundMethodVal = isPaid && refundImmediately ? refundMethod : null;
         const returnedAtVal = isPaid && refundImmediately ? getLocalISOString() : null;
 
         await window.electronAPI.dbQuery(
-          `INSERT INTO deleted_orders (id, shopId, billNumber, customerId, customerName, customerPhone, totalAmount, items, deletedAt, deletedBy, originalPaymentStatus, paidAmount, returnStatus, approvedBy, originalPaymentMethod, payments, refundMethod, returnedAt, refundStatus) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT OR REPLACE INTO deleted_orders (id, shopId, billNumber, customerId, customerName, customerPhone, totalAmount, items, createdAt, deletedAt, deletedBy, originalPaymentStatus, paidAmount, returnStatus, approvedBy, originalPaymentMethod, payments, refundMethod, returnedAt, refundStatus) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             orderToDelete.id,
             orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
@@ -697,6 +701,7 @@ export default function Orders({ isPendingView = false }) {
             orderToDelete.customerPhone || orderToDelete.phone || '',
             orderToDelete.totalAmount || 0,
             typeof orderToDelete.items === 'string' ? orderToDelete.items : JSON.stringify(orderToDelete.items || []),
+            orderToDelete.createdAt || getLocalISOString(),
             getLocalISOString(),
             currentLoggedInUser,
             orderToDelete.paymentStatus || 'Pending',
@@ -717,32 +722,77 @@ export default function Orders({ isPendingView = false }) {
         // 4. Delete the order itself
         await window.electronAPI.dbQuery('DELETE FROM orders WHERE id = ?', [orderToDelete.id]);
 
-        // 5. Process refund if the order has a paid amount and refundImmediately is selected
+        // 4b. If refunding immediately, delete or reduce allocated payments so they don't become available advance
+        if (refundImmediately) {
+          for (const alloc of allocationsUsed) {
+            const payRes = await window.electronAPI.dbQuery('SELECT amount FROM payments WHERE id = ?', [alloc.paymentId]);
+            if (payRes.success && payRes.data.length > 0) {
+              const currentAmt = payRes.data[0].amount || 0;
+              const newAmt = Math.max(0, currentAmt - alloc.amountUsed);
+              if (newAmt <= 0.01) {
+                await window.electronAPI.dbQuery('DELETE FROM payments WHERE id = ?', [alloc.paymentId]);
+              } else {
+                await window.electronAPI.dbQuery('UPDATE payments SET amount = ?, isSynced = 0, updatedAt = ? WHERE id = ?', [newAmt, getLocalISOString(), alloc.paymentId]);
+              }
+            }
+          }
+        }
+
+        // 4c. Delete advance allocations associated with this order
+        await window.electronAPI.dbQuery('DELETE FROM advance_allocations WHERE orderId = ?', [orderToDelete.id]);
+
+        // 5. Process refund or convert to advance
         const paidAmt = orderToDelete.paidAmount || 0;
 
-        if (isPaid && paidAmt > 0 && refundImmediately) {
-          const refundTxnId = `TXN-RETURN-${Date.now()}`;
-          const _now1 = new Date();
-          const txnTimestamp = `${_now1.getFullYear()}-${String(_now1.getMonth() + 1).padStart(2, '0')}-${String(_now1.getDate()).padStart(2, '0')} ${String(_now1.getHours()).padStart(2, '0')}:${String(_now1.getMinutes()).padStart(2, '0')}`;
-          await window.electronAPI.dbQuery(
-            `INSERT INTO account_transactions 
-             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              refundTxnId,
-              orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
-              refundMethod === 'Bank' ? 'BANK' : 'CASH',
-              'EXPENSE',
-              'Return',
-              paidAmt,
-              `Return - Bill ${orderToDelete.id.startsWith('#') ? '' : '#'}${orderToDelete.id}`,
-              txnTimestamp,
-              0,
-              getLocalISOString(),
-              'Zap',
-              refundMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null
-            ]
-          );
+        if (isPaid && paidAmt > 0) {
+          const allocSum = allocationsUsed.reduce((sum, a) => sum + (a.amountUsed || 0), 0);
+          const cashPaidAmt = Math.max(0, paidAmt - allocSum);
+
+          if (refundImmediately) {
+            if (cashPaidAmt > 0) {
+              const refundTxnId = `TXN-RETURN-${Date.now()}`;
+              const _now1 = new Date();
+              const txnTimestamp = `${_now1.getFullYear()}-${String(_now1.getMonth() + 1).padStart(2, '0')}-${String(_now1.getDate()).padStart(2, '0')} ${String(_now1.getHours()).padStart(2, '0')}:${String(_now1.getMinutes()).padStart(2, '0')}`;
+              
+              const creatorName = userSession.name || userSession.username || 'System';
+              const creatorId = userSession.id || 'SYSTEM';
+              const creatorRole = userSession.role || 'system';
+
+              await window.electronAPI.dbQuery(
+                `INSERT INTO account_transactions 
+                 (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  refundTxnId,
+                  orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
+                  refundMethod === 'Bank' ? 'BANK' : 'CASH',
+                  'EXPENSE',
+                  'Return',
+                  cashPaidAmt,
+                  `Return - Order ${orderToDelete.id.startsWith('#') ? '' : '#'}${orderToDelete.id}`,
+                  txnTimestamp,
+                  0,
+                  getLocalISOString(),
+                  'Zap',
+                  refundMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null,
+                  creatorName || null,
+                  creatorId || null,
+                  creatorRole || null
+                ]
+              );
+            }
+          } else if (orderToDelete.customerId && orderToDelete.customerId !== 'Walk-in') {
+            // No refund immediately: Convert ONLY the cash portion to unlinked Available Advance.
+            if (cashPaidAmt > 0) {
+              const newAdvRef = await window.electronAPI.getNextPaymentReference('ADV');
+              const newAdvId = `ADV-CONV-${Date.now()}`;
+              await window.electronAPI.dbQuery(
+                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+                 VALUES (?, ?, NULL, ?, ?, 'Refund Advance', 'SUCCESS', ?, 0, ?, ?)`,
+                [newAdvId, orderToDelete.customerId || null, orderToDelete.shopId || DEFAULT_SHOP_ID || null, cashPaidAmt, getLocalISOString(), getLocalISOString(), newAdvRef || null]
+              );
+            }
+          }
         }
 
         // 6. Run data healer to reconcile any remaining inconsistencies
@@ -858,8 +908,12 @@ export default function Orders({ isPendingView = false }) {
   const handlePrintTags = () => {
     document.body.classList.add('printing-tags');
     setIsPrintingTags(true);
-    setTimeout(() => {
-      window.print();
+    setTimeout(async () => {
+      if (window.appPrint) {
+        await window.appPrint({ printerType: 'tag' });
+      } else {
+        window.print();
+      }
       setIsPrintingTags(false);
       document.body.classList.remove('printing-tags');
     }, 500);
@@ -1015,14 +1069,34 @@ export default function Orders({ isPendingView = false }) {
           splits.push({ method: 'Discount', amount: discVal });
         }
 
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const creatorName = userSession.name || userSession.username || 'System';
+        const creatorId = userSession.id || 'SYSTEM';
+        const creatorRole = userSession.role || 'system';
+
         for (const split of splits) {
           if (split.method === 'Discount') {
             const splitTxnId = `TXN-${Date.now()}-Discount`;
             await window.electronAPI.dbQuery(
               `INSERT INTO account_transactions 
-               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-              [splitTxnId, DEFAULT_SHOP_ID, 'CASH', 'EXPENSE', 'Discount Given', split.amount, `Discount for Order ${selectedOrder.id}`, txnTimestamp, getLocalISOString(), 'DollarSign']
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+              [
+                splitTxnId, 
+                DEFAULT_SHOP_ID, 
+                'CASH', 
+                'EXPENSE', 
+                'Discount Given', 
+                split.amount, 
+                `Discount for Order ${selectedOrder.id}`, 
+                txnTimestamp, 
+                getLocalISOString(), 
+                'DollarSign',
+                null,
+                creatorName,
+                creatorId,
+                creatorRole
+              ]
             );
           } else {
             const splitTxnId = `TXN-${Date.now()}-${split.method}`;
@@ -1031,9 +1105,24 @@ export default function Orders({ isPendingView = false }) {
 
             await window.electronAPI.dbQuery(
               `INSERT INTO account_transactions 
-               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-              [splitTxnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales Settlement', split.amount, `Payment for Order ${selectedOrder.id}${split.method === 'Card' ? ' (Card)' : (split.method === 'UPI' ? ' (UPI)' : '')}`, txnTimestamp, getLocalISOString(), 'DollarSign', mappedBankId]
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+              [
+                splitTxnId, 
+                DEFAULT_SHOP_ID, 
+                accountType, 
+                'INCOME', 
+                'Sales Settlement', 
+                split.amount, 
+                `Payment for Order ${selectedOrder.id}${split.method === 'Card' ? ' (Card)' : (split.method === 'UPI' ? ' (UPI)' : '')}`, 
+                txnTimestamp, 
+                getLocalISOString(), 
+                'DollarSign', 
+                mappedBankId,
+                creatorName,
+                creatorId,
+                creatorRole
+              ]
             );
 
             if (split.method === 'Card' && settings.cardCommission > 0) {
@@ -1042,18 +1131,35 @@ export default function Orders({ isPendingView = false }) {
               const commTxnId = `TXN-COMM-${Date.now()}`;
               await window.electronAPI.dbQuery(
                 `INSERT INTO account_transactions 
-                 (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-                [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, `Card Commission for Order ${selectedOrder.id}`, txnTimestamp, getLocalISOString(), 'Percent', mappedBankId]
+                 (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+                [
+                  commTxnId, 
+                  DEFAULT_SHOP_ID, 
+                  'BANK', 
+                  'EXPENSE', 
+                  'Card Commission', 
+                  commissionAmount, 
+                  `Card Commission for Order ${selectedOrder.id}`, 
+                  txnTimestamp, 
+                  getLocalISOString(), 
+                  'Percent', 
+                  mappedBankId,
+                  creatorName,
+                  creatorId,
+                  creatorRole
+                ]
               );
             }
 
             // Record Payment in payments table
             const currentTimestamp = getLocalISOString();
+            const payId = `PAY-HEAL-${selectedOrder.id}-${split.method}-${Date.now()}`;
+            const payRef = await window.electronAPI.getNextPaymentReference('PAY');
             await window.electronAPI.dbQuery(
-              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-              [`PAY-HEAL-${selectedOrder.id}-${split.method}-${Date.now()}`, selectedOrder.customerId || 'Walk-in', selectedOrder.id, DEFAULT_SHOP_ID, split.amount, split.method, 'SUCCESS', currentTimestamp, currentTimestamp]
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+              [payId, selectedOrder.customerId || 'Walk-in', selectedOrder.id, DEFAULT_SHOP_ID, split.amount, split.method, 'SUCCESS', currentTimestamp, currentTimestamp, payRef]
             );
           }
         }
@@ -1266,12 +1372,6 @@ export default function Orders({ isPendingView = false }) {
               <option value="payment">Latest Payment</option>
             </select>
           </div>
-          <button className={styles.settleBtn} onClick={() => navigate('/settlement')}>
-            <DollarSign size={18} /> {t('settlebill', settings.language)}
-          </button>
-          <button className="btn btn-primary" onClick={() => navigate('/pos')}>
-            + {t('neworder', settings.language)}
-          </button>
         </div>
       </div>
 
@@ -1601,7 +1701,6 @@ export default function Orders({ isPendingView = false }) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                         <div>
                           <span className={styles.idText}>{settings.invoicePrefix || ''}{order.id}</span>
-                          <span className={styles.billText}>{t('bill', settings.language)}: {order.billNumber || 'N/A'}</span>
                         </div>
                       </div>
                     </td>
@@ -1675,7 +1774,7 @@ export default function Orders({ isPendingView = false }) {
                             {t('confirmed', settings.language)}
                           </span>
                         )}
-                        {!order.isDeleted && order.status !== 'Delivered' && order.status !== 'Cancelled' && (
+                        {!order.isDeleted && order.status !== 'Delivered' && (
                           <button
                             className={styles.deliverBtn}
                             onClick={(e) => {
@@ -2031,7 +2130,7 @@ export default function Orders({ isPendingView = false }) {
                           className={`${styles.tagBtn} ${styles.deleteBtn}`}
                           onClick={() => {
                             setOrderToDelete(selectedOrder);
-                            setRefundImmediately(true);
+                            setDeleteOption('refund');
                             setShowPinModal(true);
                           }}
                         >
@@ -2195,46 +2294,67 @@ export default function Orders({ isPendingView = false }) {
 
               {orderToDelete && (orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus)) && (
                 <div style={{ margin: '1rem 0', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: '#F8FAFC', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <input
-                      type="checkbox"
-                      id="markAsReturned"
-                      checked={refundImmediately}
-                      onChange={(e) => setRefundImmediately(e.target.checked)}
-                      style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                    />
-                    <label htmlFor="markAsReturned" style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
-                      Mark payment of <CurrencySymbol size={11} />{(orderToDelete.paidAmount || 0).toFixed(2)} as returned (refunded) now
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Choose Action for Payment (<CurrencySymbol size={11} />{(orderToDelete.paidAmount || 0).toFixed(2)}):</span>
+                  
+                  {/* Option 1: Refund */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
+                      <input
+                        type="radio"
+                        name="deleteOption"
+                        value="refund"
+                        checked={deleteOption === 'refund'}
+                        onChange={() => setDeleteOption('refund')}
+                        style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                      />
+                      Refund Customer
                     </label>
+
+                    {deleteOption === 'refund' && (
+                      <div style={{ paddingLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.2rem' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748B' }}>Select Refund Account:</span>
+                        <div style={{ display: 'flex', gap: '1.25rem' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                            <input
+                              type="radio"
+                              name="refundMethod"
+                              value="Cash"
+                              checked={refundMethod === 'Cash'}
+                              onChange={() => setRefundMethod('Cash')}
+                              style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                            />
+                            Cash Account
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                            <input
+                              type="radio"
+                              name="refundMethod"
+                              value="Bank"
+                              checked={refundMethod === 'Bank'}
+                              onChange={() => setRefundMethod('Bank')}
+                              style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                            />
+                            Bank Account
+                          </label>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  {refundImmediately && (
-                    <div style={{ paddingLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Refund Source:</span>
-                      <div style={{ display: 'flex', gap: '1.25rem' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
-                          <input
-                            type="radio"
-                            name="refundMethod"
-                            value="Cash"
-                            checked={refundMethod === 'Cash'}
-                            onChange={() => setRefundMethod('Cash')}
-                            style={{ width: '15px', height: '15px', cursor: 'pointer' }}
-                          />
-                          Cash Account
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
-                          <input
-                            type="radio"
-                            name="refundMethod"
-                            value="Bank"
-                            checked={refundMethod === 'Bank'}
-                            onChange={() => setRefundMethod('Bank')}
-                            style={{ width: '15px', height: '15px', cursor: 'pointer' }}
-                          />
-                          Bank Account
-                        </label>
-                      </div>
+                  {/* Option 2: Convert to Advance */}
+                  {orderToDelete.customerId && orderToDelete.customerId !== 'Walk-in' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
+                        <input
+                          type="radio"
+                          name="deleteOption"
+                          value="advance"
+                          checked={deleteOption === 'advance'}
+                          onChange={() => setDeleteOption('advance')}
+                          style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                        />
+                        Convert Payment to Advance
+                      </label>
                     </div>
                   )}
                 </div>
@@ -2400,9 +2520,25 @@ export default function Orders({ isPendingView = false }) {
                     onClick={() => {
                       const canvas = document.getElementById('nomod-order-qr-canvas');
                       if (canvas) {
-                        const win = window.open('', '', 'width=400,height=400');
-                        win.document.write(`<html><body style="display:flex;justify-content:center;align-items:center;height:90vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;" onload="window.print();window.close();"/></body></html>`);
-                        win.document.close();
+                        if (window.electronAPI?.printHtml) {
+                          window.electronAPI.printHtml({
+                            html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
+                            css: '',
+                            printerName: settings.billingPrinter,
+                            silent: settings.silentPrinting !== false
+                          });
+                        } else {
+                          const win = window.open('', '', 'width=400,height=400');
+                          win.document.write(`<html><body style="display:flex;justify-content:center;align-items:center;height:90vh;"><img id="qr-img" src="${canvas.toDataURL()}" style="width:300px;height:300px;"/>
+                          <script>
+                            document.getElementById('qr-img').onload = function() {
+                              window.print();
+                              window.close();
+                            };
+                          </script>
+                          </body></html>`);
+                          win.document.close();
+                        }
                       }
                     }}
                   >
@@ -2545,7 +2681,7 @@ export default function Orders({ isPendingView = false }) {
                         nomodLinkModal.linkId,
                         selectedOrder.customerId || 'Walk-in',
                         selectedOrder.customerName || 'Walk-in Customer',
-                        `Order #${selectedOrder.billNumber || selectedOrder.id}`,
+                        `Order #${settings.invoicePrefix || ''}${selectedOrder.id}`,
                         nomodLinkModal.amount,
                         getLocalDateTime(),
                         nomodLinkModal.url,

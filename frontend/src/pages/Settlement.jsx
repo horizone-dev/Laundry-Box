@@ -23,6 +23,17 @@ import { paymentService } from '../services/paymentService';
 export default function Settlement() {
   const location = useLocation();
   const navigate = useNavigate();
+  const getNextRvNumber = async () => {
+    try {
+      if (window.electronAPI && typeof window.electronAPI.getNextRvNumber === 'function') {
+        const nextId = await window.electronAPI.getNextRvNumber();
+        if (nextId) return nextId;
+      }
+    } catch (err) {
+      console.warn("Failed to get sequential RV from main, falling back:", err);
+    }
+    return `PAY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  };
   const queryParams = new URLSearchParams(location.search);
   const initialCustomerId = queryParams.get('customerId');
   
@@ -227,7 +238,7 @@ export default function Settlement() {
     if (window.electronAPI?.dbQuery) {
       try {
         const pendingRes = await window.electronAPI.dbQuery(
-          "SELECT orders.*, customers.name as customerName, customers.phone as customerPhone, customers.balance as customerBalance FROM orders LEFT JOIN customers ON orders.customerId = customers.id WHERE orders.id IS NOT NULL AND orders.id != '' AND orders.dueAmount > 0 AND orders.status != 'Cancelled' ORDER BY orders.createdAt DESC LIMIT 8",
+          "SELECT orders.*, customers.name as customerName, customers.phone as customerPhone, customers.balance as customerBalance FROM orders LEFT JOIN customers ON orders.customerId = customers.id WHERE orders.id IS NOT NULL AND orders.id != '' AND orders.dueAmount > 0 ORDER BY orders.createdAt DESC LIMIT 8",
           []
         );
         const historyRes = await window.electronAPI.dbQuery(
@@ -247,11 +258,11 @@ export default function Settlement() {
 
         const outstandingSum = await window.electronAPI.dbQuery('SELECT SUM(balance) as total FROM customers WHERE balance > 0', []);
         const advanceSum = await window.electronAPI.dbQuery('SELECT SUM(ABS(balance)) as total FROM customers WHERE balance < 0', []);
-        const pendingCount = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE id IS NOT NULL AND id != '' AND dueAmount > 0 AND status != 'Cancelled'", []);
+        const pendingCount = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE id IS NOT NULL AND id != '' AND dueAmount > 0", []);
         const settlementsRes = await window.electronAPI.dbQuery("SELECT SUM(amount) as total FROM payments WHERE strftime('%m', createdAt) = strftime('%m', 'now')", []);
         const overdueDays = settings?.overdueDays || 7;
         const overdueRes = await window.electronAPI.dbQuery(
-          "SELECT COUNT(*) as count FROM orders WHERE id IS NOT NULL AND id != '' AND dueAmount > 0 AND status != 'Cancelled' AND createdAt < date('now', ?)",
+          "SELECT COUNT(*) as count FROM orders WHERE id IS NOT NULL AND id != '' AND dueAmount > 0 AND createdAt < date('now', ?)",
           [`-${overdueDays} days`]
         );
 
@@ -277,7 +288,7 @@ export default function Settlement() {
         const customerId = customer.id;
         
         const pendingRes = await window.electronAPI.dbQuery(
-          "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 AND status != 'Cancelled' ORDER BY createdAt DESC",
+          "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 ORDER BY createdAt DESC",
           [customerId]
         );
         const historyRes = await window.electronAPI.dbQuery(
@@ -482,7 +493,7 @@ export default function Settlement() {
 
           // Re-fetch pending bills sequentially to get updated dues
           const billsRes = await window.electronAPI.dbQuery(
-            "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 AND status != 'Cancelled' ORDER BY createdAt ASC",
+            "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 ORDER BY createdAt ASC",
             [selectedCustomer.id]
           );
           const bills = billsRes.success ? billsRes.data : [];
@@ -542,20 +553,24 @@ export default function Settlement() {
                 [newPaid, newDue, newStatus, newWorkflowStatus, newOrderPaymentMethod, timestamp, bill.id]
               );
 
+              const payId = await getNextRvNumber();
+              const payRef = await window.electronAPI.getNextPaymentReference('SET');
               await window.electronAPI.dbQuery(
-                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-                [`PAY-${Date.now()}-${bill.id}-${split.method}`, selectedCustomer.id, bill.id, DEFAULT_SHOP_ID, allocate, split.method, 'SUCCESS', timestamp, timestamp]
+                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+                [payId, selectedCustomer.id, bill.id, DEFAULT_SHOP_ID, allocate, split.method, 'SUCCESS', timestamp, timestamp, payRef]
               );
             }
           }
 
           // If there's remaining unapplied payment (excess / advance payment)
           if (remaining > 0) {
+            const payId = await getNextRvNumber();
+            const payRef = await window.electronAPI.getNextPaymentReference('SET');
             await window.electronAPI.dbQuery(
-              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-              [`PAY-ADV-${Date.now()}-${split.method}`, selectedCustomer.id, null, DEFAULT_SHOP_ID, remaining, split.method, 'SUCCESS', timestamp, timestamp]
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+              [payId, selectedCustomer.id, null, DEFAULT_SHOP_ID, remaining, split.method, 'SUCCESS', timestamp, timestamp, payRef]
             );
           }
         }
@@ -568,13 +583,18 @@ export default function Settlement() {
 
         // 3. Record Transactions in Accounts for each split
         const txnTimestamp = getLocalDateTime();
+        const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const creatorName = currentUser.name || currentUser.username || 'System';
+        const creatorId = currentUser.id || 'SYSTEM';
+        const creatorRole = currentUser.role || 'system';
+
         for (const split of splits) {
           if (split.method === 'Discount') {
             const splitTxnId = `TXN-${Date.now()}-Discount`;
             await window.electronAPI.dbQuery(
               `INSERT INTO account_transactions 
-               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
               [
                 splitTxnId,
                 DEFAULT_SHOP_ID,
@@ -586,7 +606,10 @@ export default function Settlement() {
                 txnTimestamp,
                 timestamp,
                 'Percent',
-                null
+                null,
+                creatorName,
+                creatorId,
+                creatorRole
               ]
             );
             continue;
@@ -599,8 +622,8 @@ export default function Settlement() {
 
           await window.electronAPI.dbQuery(
             `INSERT INTO account_transactions 
-             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
             [
               splitTxnId,
               DEFAULT_SHOP_ID,
@@ -616,7 +639,10 @@ export default function Settlement() {
               txnTimestamp,
               timestamp,
               split.method === 'Card' ? 'CreditCard' : (split.method === 'UPI' ? 'QrCode' : 'DollarSign'),
-              splitMappedBankId
+              splitMappedBankId,
+              creatorName,
+              creatorId,
+              creatorRole
             ]
           );
 
@@ -628,9 +654,24 @@ export default function Settlement() {
             const commDesc = `Card Commission for Credit Settlement ${selectedCustomer.name}`;
             await window.electronAPI.dbQuery(
               `INSERT INTO account_transactions 
-               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-              [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, timestamp, 'Percent', splitMappedBankId]
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+              [
+                commTxnId, 
+                DEFAULT_SHOP_ID, 
+                'BANK', 
+                'EXPENSE', 
+                'Card Commission', 
+                commissionAmount, 
+                commDesc, 
+                txnTimestamp, 
+                timestamp, 
+                'Percent', 
+                splitMappedBankId,
+                creatorName,
+                creatorId,
+                creatorRole
+              ]
             );
           }
         }
@@ -806,7 +847,7 @@ export default function Settlement() {
                 <table className={styles.collectionsTable}>
                   <thead>
                     <tr>
-                      <th>Bill ID</th>
+                      <th>Invoice ID</th>
                       <th>Customer Name</th>
                       <th>Invoice Date</th>
                       <th>Outstanding Dues</th>
@@ -860,7 +901,7 @@ export default function Settlement() {
                     {globalData.pending.length === 0 && (
                       <tr>
                         <td colSpan="6" className={styles.emptyTableText}>
-                          No pending bills found. All outstanding invoices are settled!
+                          No pending invoices found. All outstanding invoices are settled!
                         </td>
                       </tr>
                     )}
@@ -934,7 +975,7 @@ export default function Settlement() {
                     ? `This customer owes the shop ${Math.abs(Number(currentNetBalance) || 0).toFixed(2)}. Please record a payment to settle.`
                     : (Number(currentNetBalance) || 0) < 0 
                       ? `The customer has a credit balance of ${Math.abs(Number(currentNetBalance) || 0).toFixed(2)} available for future orders.`
-                      : 'All credit bills and payments for this customer are fully balanced.'}
+                      : 'All credit invoices and payments for this customer are fully balanced.'}
                 </p>
               </div>
 
@@ -999,7 +1040,7 @@ export default function Settlement() {
                     <table className={styles.ledgerDetailsTable}>
                       <thead>
                         <tr>
-                          <th>Bill Number</th>
+                          <th>Invoice ID</th>
                           <th>Invoice Date</th>
                           <th>Total Amount</th>
                           <th>Paid Amount</th>
@@ -1036,7 +1077,7 @@ export default function Settlement() {
                                     setShowPayModal(true);
                                   }}
                                 >
-                                  Settle Bill
+                                  Settle Invoice
                                 </button>
                               </td>
                             </tr>
@@ -1048,7 +1089,7 @@ export default function Settlement() {
                               <div className={styles.workspaceAllSettled}>
                                 <CheckCircle size={48} className={styles.checkSuccessIcon} />
                                 <h3>All Invoices Settled</h3>
-                                <p>This customer does not have any pending credit bills.</p>
+                                <p>This customer does not have any pending credit invoices.</p>
                               </div>
                             </td>
                           </tr>
@@ -1062,7 +1103,7 @@ export default function Settlement() {
                       onPageChange={setPendingPage}
                       totalItems={globalData.pending.length}
                       pageSize={20}
-                      itemLabel="pending bills"
+                      itemLabel="pending invoices"
                     />
                   </div>
                 ) : (
@@ -1084,7 +1125,7 @@ export default function Settlement() {
                           
                           return (
                             <tr key={pay.id}>
-                              <td className={styles.receiptIdText}>{(pay.id || '').split('-')[0] + '-' + ((pay.id || '').split('-')[1] || '')}</td>
+                              <td className={styles.receiptIdText}>{pay.paymentReference || ((pay.id || '').split('-')[0] + '-' + ((pay.id || '').split('-')[1] || ''))}</td>
                               <td className={styles.boldText}>{pay.orderId ? pay.orderId : <span className={styles.advanceLabel}>Unlinked (Advance)</span>}</td>
                               <td>{payDate}</td>
                               <td className={styles.boldText}>{pay.method}</td>
@@ -1125,78 +1166,103 @@ export default function Settlement() {
         )}
       </main>
 
-      {/* ── REDESIGNED PAYMENT MODAL ── */}
+      {/* ── REDESIGNED PAYMENT MODAL (COMPACTED) ── */}
       {showPayModal && selectedCustomer && (
         <div className={styles.modalOverlay} onClick={() => setShowPayModal(false)}>
           <div className={styles.payModalCard} onClick={(e) => e.stopPropagation()}>
             
-            <div className={styles.modalHeaderRow}>
+            <div className={styles.modalHeaderRow} style={{ padding: '1rem 1.25rem' }}>
               <div>
-                <h3>Record Settlement / Payment</h3>
-                <p>{selectedCustomer.name || 'Unknown Customer'} • {selectedCustomer.phone || 'N/A'}</p>
+                <h3 style={{ fontSize: '1rem' }}>Record Settlement / Payment</h3>
+                <p style={{ fontSize: '0.75rem' }}>{selectedCustomer.name || 'Unknown Customer'} • {selectedCustomer.phone || 'N/A'}</p>
               </div>
               <button className={styles.modalCloseBtn} onClick={() => setShowPayModal(false)}>
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
-            <div className={styles.modalBodyContent}>
+            <div className={styles.modalBodyContent} style={{ gap: '0.85rem', padding: '1rem 1.25rem' }}>
               
-              {/* Large Payment Input */}
-              <div className={styles.modalInputGroup}>
-                <label>Received Amount</label>
-                <div className={styles.largeInputBox}>
-                  <span className={styles.inputCurrency}><CurrencySymbol size={22} /></span>
-                  <input 
-                    type="number" 
-                    placeholder="0.00"
-                    step="0.01"
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(e.target.value)}
-                    autoFocus
-                    disabled={paymentMethod === 'Multipayment'}
-                  />
+              {/* Row with Received Amount & Discount Amount side-by-side */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+                {/* Received Amount Input */}
+                <div className={styles.modalInputGroup} style={{ gap: '0.25rem' }}>
+                  <label style={{ fontSize: '0.7rem' }}>Received Amount</label>
+                  <div className={styles.largeInputBox} style={{ height: '42px', padding: '0.4rem 0.8rem', borderRadius: '10px' }}>
+                    <span className={styles.inputCurrency} style={{ fontSize: '1.1rem' }}><CurrencySymbol size={15} /></span>
+                    <input 
+                      type="number" 
+                      placeholder="0.00"
+                      step="0.01"
+                      value={paymentAmount}
+                      onChange={(e) => setPaymentAmount(e.target.value)}
+                      autoFocus
+                      disabled={paymentMethod === 'Multipayment'}
+                      style={{ fontSize: '1.2rem', fontWeight: 800 }}
+                    />
+                  </div>
+                  
+                  {/* Quick Presets */}
+                  <div className={styles.presetsRow} style={{ marginTop: '0.1rem', gap: '0.35rem' }}>
+                    <button 
+                      onClick={() => setPaymentAmount(Number(displayDue || 0).toFixed(2))} 
+                      disabled={displayDue <= 0 || paymentMethod === 'Multipayment'}
+                      style={{ padding: '0.2rem 0.35rem', fontSize: '0.65rem', borderRadius: '6px' }}
+                    >
+                      Full ({Number(displayDue || 0).toFixed(2)})
+                    </button>
+                    <button 
+                      onClick={() => setPaymentAmount((Number(displayDue || 0) / 2).toFixed(2))} 
+                      disabled={displayDue <= 0 || paymentMethod === 'Multipayment'}
+                      style={{ padding: '0.2rem 0.35rem', fontSize: '0.65rem', borderRadius: '6px' }}
+                    >
+                      50%
+                    </button>
+                    <button 
+                      onClick={() => setPaymentAmount('')} 
+                      className={styles.presetClear} 
+                      disabled={paymentMethod === 'Multipayment'}
+                      style={{ padding: '0.2rem 0.35rem', fontSize: '0.65rem', borderRadius: '6px', maxWidth: '45px' }}
+                    >
+                      Clear
+                    </button>
+                  </div>
                 </div>
-                
-                {/* Quick Presets */}
-                <div className={styles.presetsRow}>
-                  <button onClick={() => setPaymentAmount(Number(displayDue || 0).toFixed(2))} disabled={displayDue <= 0 || paymentMethod === 'Multipayment'}>
-                    Full Dues ({Number(displayDue || 0).toFixed(2)})
-                  </button>
-                  <button onClick={() => setPaymentAmount((Number(displayDue || 0) / 2).toFixed(2))} disabled={displayDue <= 0 || paymentMethod === 'Multipayment'}>
-                    50% Dues ({(Number(displayDue || 0) / 2).toFixed(2)})
-                  </button>
-                  <button onClick={() => setPaymentAmount('')} className={styles.presetClear} disabled={paymentMethod === 'Multipayment'}>
-                    Clear
-                  </button>
-                </div>
-              </div>
 
-              {/* Discount Input Field */}
-              <div className={styles.modalInputGroup}>
-                <label>Discount Amount</label>
-                <div className={styles.largeInputBox} style={{ height: '48px' }}>
-                  <span className={styles.inputCurrency}><CurrencySymbol size={18} /></span>
-                  <input 
-                    type="number" 
-                    placeholder="0.00"
-                    step="0.01"
-                    value={discountAmount}
-                    onChange={(e) => setDiscountAmount(e.target.value)}
-                  />
+                {/* Discount Input Field */}
+                <div className={styles.modalInputGroup} style={{ gap: '0.25rem' }}>
+                  <label style={{ fontSize: '0.7rem' }}>Discount Amount</label>
+                  <div className={styles.largeInputBox} style={{ height: '42px', padding: '0.4rem 0.8rem', borderRadius: '10px' }}>
+                    <span className={styles.inputCurrency} style={{ fontSize: '1.1rem' }}><CurrencySymbol size={15} /></span>
+                    <input 
+                      type="number" 
+                      placeholder="0.00"
+                      step="0.01"
+                      value={discountAmount}
+                      onChange={(e) => setDiscountAmount(e.target.value)}
+                      style={{ fontSize: '1.2rem', fontWeight: 800 }}
+                    />
+                  </div>
                 </div>
               </div>
 
               {/* Payment Method Cards */}
-              <div className={styles.modalInputGroup}>
-                <label>Payment Method</label>
-                <div className={styles.methodCardsGrid}>
+              <div className={styles.modalInputGroup} style={{ gap: '0.25rem' }}>
+                <label style={{ fontSize: '0.7rem' }}>Payment Method</label>
+                <div 
+                  className={styles.methodCardsGrid} 
+                  style={{ 
+                    gridTemplateColumns: settings.enableNomod ? 'repeat(5, 1fr)' : 'repeat(4, 1fr)',
+                    gap: '0.5rem',
+                    marginTop: '0.1rem'
+                  }}
+                >
                   {[
-                    { id: 'Cash', label: 'Cash', icon: <Wallet size={20} /> },
-                    { id: 'Card', label: 'Card Payment', icon: <CreditCard size={20} /> },
-                    { id: 'UPI', label: 'UPI Payment', icon: <QrCode size={20} /> },
-                    ...(settings.enableNomod ? [{ id: 'Nomod', label: 'Nomod Link', icon: <CreditCard size={20} /> }] : []),
-                    { id: 'Multipayment', label: 'Multipayment', icon: <Layers size={20} /> }
+                    { id: 'Cash', label: 'Cash', icon: <Wallet size={16} /> },
+                    { id: 'Card', label: 'Card', icon: <CreditCard size={16} /> },
+                    { id: 'UPI', label: 'UPI', icon: <QrCode size={16} /> },
+                    ...(settings.noModPayEnabled && settings.enableNomod ? [{ id: 'Nomod', label: 'Nomod', icon: <CreditCard size={16} /> }] : []),
+                    { id: 'Multipayment', label: 'Split', icon: <Layers size={16} /> }
                   ].map(method => {
                     const isSelected = paymentMethod === method.id;
                     
@@ -1205,10 +1271,11 @@ export default function Settlement() {
                         key={method.id} 
                         className={`${styles.methodCardItem} ${isSelected ? styles.activeMethodCard : ''}`}
                         onClick={() => setPaymentMethod(method.id)}
+                        style={{ padding: '0.5rem 0.25rem', gap: '0.25rem', borderRadius: '10px' }}
                       >
-                        <div className={styles.methodCardIcon}>{method.icon}</div>
-                        <span>{method.label}</span>
-                        {isSelected && <div className={styles.methodCheck}><Check size={10} /></div>}
+                        <div className={styles.methodCardIcon} style={{ height: '20px' }}>{method.icon}</div>
+                        <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>{method.label}</span>
+                        {isSelected && <div className={styles.methodCheck} style={{ top: '3px', right: '3px' }}><Check size={8} /></div>}
                       </div>
                     );
                   })}
@@ -1217,78 +1284,70 @@ export default function Settlement() {
 
               {/* Multipayment Breakdown Fields */}
               {paymentMethod === 'Multipayment' && (
-                <div className={styles.modalInputGroup} style={{ marginTop: '0.75rem' }}>
-                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-sub)', marginBottom: '0.5rem', display: 'block' }}>Multipayment Breakdown</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className={styles.modalInputGroup} style={{ marginTop: '0.1rem', gap: '0.25rem' }}>
+                  <label style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-sub)', textTransform: 'uppercase' }}>Split Breakdown</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.5rem' }}>
                     
                     {/* Cash split */}
-                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '10px', padding: '0.5rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', background: '#F8FAFC' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                        <Wallet size={14} /> Cash Amount
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                        <span style={{ marginRight: '0.25rem' }}><CurrencySymbol size={12} /></span>
+                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.35rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '0.1rem', background: '#F8FAFC' }}>
+                      <span style={{ color: '#475569', fontSize: '0.65rem', fontWeight: 700 }}>Cash</span>
+                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '0.85rem', fontWeight: 700, color: '#1E293B' }}>
+                        <span style={{ marginRight: '0.1rem' }}><CurrencySymbol size={9} /></span>
                         <input 
                           type="number" 
                           placeholder="0.00" 
                           step="0.01"
                           value={cashAmount} 
                           onChange={(e) => setCashAmount(e.target.value)} 
-                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700 }}
+                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700, fontSize: '0.85rem' }}
                         />
                       </div>
                     </div>
 
                     {/* Card split */}
-                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '10px', padding: '0.5rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', background: '#F8FAFC' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                        <CreditCard size={14} /> Card Amount
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                        <span style={{ marginRight: '0.25rem' }}><CurrencySymbol size={12} /></span>
+                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.35rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '0.1rem', background: '#F8FAFC' }}>
+                      <span style={{ color: '#475569', fontSize: '0.65rem', fontWeight: 700 }}>Card</span>
+                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '0.85rem', fontWeight: 700, color: '#1E293B' }}>
+                        <span style={{ marginRight: '0.1rem' }}><CurrencySymbol size={9} /></span>
                         <input 
                           type="number" 
                           placeholder="0.00" 
                           step="0.01"
                           value={cardAmount} 
                           onChange={(e) => setCardAmount(e.target.value)} 
-                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700 }}
+                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700, fontSize: '0.85rem' }}
                         />
                       </div>
                     </div>
 
                     {/* UPI split */}
-                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '10px', padding: '0.5rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', background: '#F8FAFC' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                        <QrCode size={14} /> UPI Amount
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                        <span style={{ marginRight: '0.25rem' }}><CurrencySymbol size={12} /></span>
+                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.35rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '0.1rem', background: '#F8FAFC' }}>
+                      <span style={{ color: '#475569', fontSize: '0.65rem', fontWeight: 700 }}>UPI</span>
+                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '0.85rem', fontWeight: 700, color: '#1E293B' }}>
+                        <span style={{ marginRight: '0.1rem' }}><CurrencySymbol size={9} /></span>
                         <input 
                           type="number" 
                           placeholder="0.00" 
                           step="0.01"
                           value={upiAmount} 
                           onChange={(e) => setUpiAmount(e.target.value)} 
-                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700 }}
+                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700, fontSize: '0.85rem' }}
                         />
                       </div>
                     </div>
 
                     {/* Bank split */}
-                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '10px', padding: '0.5rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', background: '#F8FAFC' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                        <Landmark size={14} /> Bank Transfer
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                        <span style={{ marginRight: '0.25rem' }}><CurrencySymbol size={12} /></span>
+                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.35rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '0.1rem', background: '#F8FAFC' }}>
+                      <span style={{ color: '#475569', fontSize: '0.65rem', fontWeight: 700 }}>Bank</span>
+                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '0.85rem', fontWeight: 700, color: '#1E293B' }}>
+                        <span style={{ marginRight: '0.1rem' }}><CurrencySymbol size={9} /></span>
                         <input 
                           type="number" 
                           placeholder="0.00" 
                           step="0.01"
                           value={bankAmount} 
                           onChange={(e) => setBankAmount(e.target.value)} 
-                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700 }}
+                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700, fontSize: '0.85rem' }}
                         />
                       </div>
                     </div>
@@ -1298,12 +1357,12 @@ export default function Settlement() {
               )}
 
               {(paymentMethod === 'Card' || paymentMethod === 'UPI' || paymentMethod === 'Bank' || (paymentMethod === 'Multipayment' && (cardVal > 0 || upiVal > 0 || bankVal > 0))) && settings.bankAccounts?.length > 0 && (
-                <div className={styles.modalInputGroup} style={{ marginTop: '0.5rem' }}>
-                  <label>{paymentMethod === 'Card' ? 'Select Card Account' : (paymentMethod === 'UPI' ? 'Select UPI Account' : 'Select Bank Account')}</label>
-                  <div className={styles.largeInputBox} style={{ padding: '0.5rem 1rem' }}>
-                    <Landmark size={18} color="#2563EB" />
+                <div className={styles.modalInputGroup} style={{ marginTop: '0.1rem', gap: '0.25rem' }}>
+                  <label style={{ fontSize: '0.7rem' }}>Select Bank Account</label>
+                  <div className={styles.largeInputBox} style={{ height: '38px', padding: '0.3rem 0.75rem', borderRadius: '10px' }}>
+                    <Landmark size={15} color="#2563EB" />
                     <select
-                      style={{ border: 'none', width: '100%', outline: 'none', background: 'transparent', fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}
+                      style={{ border: 'none', width: '100%', outline: 'none', background: 'transparent', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}
                       value={selectedBank}
                       onChange={(e) => setSelectedBank(e.target.value)}
                     >
@@ -1318,34 +1377,34 @@ export default function Settlement() {
               )}
 
               {/* Live Preview Summary Box */}
-              <div className={styles.liveSummaryBox}>
-                <div className={styles.summaryRowItem}>
+              <div className={styles.liveSummaryBox} style={{ padding: '0.75rem 1rem', gap: '0.4rem', borderRadius: '12px' }}>
+                <div className={styles.summaryRowItem} style={{ fontSize: '0.75rem' }}>
                   <span>Current Balance</span>
                   <span className={(Number(currentNetBalance) || 0) > 0 ? styles.outstandingText : (Number(currentNetBalance) || 0) < 0 ? styles.advanceText : ''}>
                     {(Number(currentNetBalance) || 0) > 0 ? 'Due ' : (Number(currentNetBalance) || 0) < 0 ? 'Adv ' : ''}
-                    <CurrencySymbol size={11} /> {Math.abs(Number(currentNetBalance) || 0).toFixed(2)}
+                    <CurrencySymbol size={10} /> {Math.abs(Number(currentNetBalance) || 0).toFixed(2)}
                   </span>
                 </div>
                 
-                <div className={styles.summaryRowItem}>
+                <div className={styles.summaryRowItem} style={{ fontSize: '0.75rem' }}>
                   <span>Payment Amount</span>
                   <span className={styles.paymentAddedText}>
-                    + <CurrencySymbol size={11} /> {(parseFloat(paymentAmount) || 0).toFixed(2)}
+                    + <CurrencySymbol size={10} /> {(parseFloat(paymentAmount) || 0).toFixed(2)}
                   </span>
                 </div>
 
                 {parseFloat(discountAmount) > 0 && (
-                  <div className={styles.summaryRowItem}>
+                  <div className={styles.summaryRowItem} style={{ fontSize: '0.75rem' }}>
                     <span>Discount Amount</span>
                     <span style={{ color: '#EF4444', fontWeight: 700 }}>
-                      + <CurrencySymbol size={11} /> {parseFloat(discountAmount).toFixed(2)}
+                      + <CurrencySymbol size={10} /> {parseFloat(discountAmount).toFixed(2)}
                     </span>
                   </div>
                 )}
 
-                <div className={styles.summaryDividerLine}></div>
+                <div className={styles.summaryDividerLine} style={{ margin: '0.1rem 0' }}></div>
 
-                <div className={styles.summaryRowTotal}>
+                <div className={styles.summaryRowTotal} style={{ fontSize: '0.85rem' }}>
                   <span>
                     {(Number(simulatedNewBalance) || 0) > 0 
                       ? 'New Outstanding Balance' 
@@ -1359,10 +1418,10 @@ export default function Settlement() {
                       : (Number(simulatedNewBalance) || 0) < 0 
                         ? styles.advanceText 
                         : styles.settledText
-                  }`}>
+                  }`} style={{ fontSize: '0.9rem' }}>
                     {(Number(simulatedNewBalance) || 0) === 0 ? 'Fully Settled' : (
                       <>
-                        <CurrencySymbol size={13} /> {Math.abs(Number(simulatedNewBalance) || 0).toFixed(2)}
+                        <CurrencySymbol size={11} /> {Math.abs(Number(simulatedNewBalance) || 0).toFixed(2)}
                       </>
                     )}
                   </span>
@@ -1371,7 +1430,7 @@ export default function Settlement() {
 
             </div>
 
-            <div className={styles.modalFooterActions}>
+            <div className={styles.modalFooterActions} style={{ padding: '0.85rem 1.25rem' }}>
               <button className={styles.btnSecondary} onClick={() => setShowPayModal(false)}>
                 Cancel
               </button>
@@ -1426,9 +1485,25 @@ export default function Settlement() {
                     onClick={() => {
                       const canvas = document.getElementById('nomod-settle-qr-canvas');
                       if (canvas) {
-                        const win = window.open('', '', 'width=400,height=400');
-                        win.document.write(`<html><body style="display:flex;justify-content:center;align-items:center;height:90vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;" onload="window.print();window.close();"/></body></html>`);
-                        win.document.close();
+                        if (window.electronAPI?.printHtml) {
+                          window.electronAPI.printHtml({
+                            html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
+                            css: '',
+                            printerName: settings.billingPrinter,
+                            silent: settings.silentPrinting !== false
+                          });
+                        } else {
+                          const win = window.open('', '', 'width=400,height=400');
+                          win.document.write(`<html><body style="display:flex;justify-content:center;align-items:center;height:90vh;"><img id="qr-img" src="${canvas.toDataURL()}" style="width:300px;height:300px;"/>
+                          <script>
+                            document.getElementById('qr-img').onload = function() {
+                              window.print();
+                              window.close();
+                            };
+                          </script>
+                          </body></html>`);
+                          win.document.close();
+                        }
                       }
                     }}
                   >

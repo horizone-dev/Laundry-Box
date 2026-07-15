@@ -4,8 +4,8 @@
     "name": "Horizon inc",
     "phone": "+9710588851680",
     "userId": "super admin",
-    "password": "$2b$10$q6lE6IKaaYfTu2N6ZSpiBesnvJCsTJSkewgimLcxoobmwtx7SWySS",
-    "pin": "$2b$10$q6lE6IKaaYfTu2N6ZSpiBesnvJCsTJSkewgimLcxoobmwtx7SWySS",
+    "password": "$2b$10$h2eXGY2V9aX1qkHFDUxwvOiVPpi9dn5U.OshIVx0WuW19QEJMeOjm",
+    "pin": "$2b$10$h2eXGY2V9aX1qkHFDUxwvOiVPpi9dn5U.OshIVx0WuW19QEJMeOjm",
     "role": "super_admin",
     "shopId": "SHOP_01",
     "createdAt": "2026-06-20T07:43:00.000Z"
@@ -15,32 +15,21 @@
     "name": "Cashier Test",
     "phone": "+971000000000",
     "userId": "cashier",
-    "password": "$2b$10$q6lE6IKaaYfTu2N6ZSpiBesnvJCsTJSkewgimLcxoobmwtx7SWySS",
-    "pin": "$2b$10$q6lE6IKaaYfTu2N6ZSpiBesnvJCsTJSkewgimLcxoobmwtx7SWySS",
+    "password": "$2b$10$PqXZKr.nzJdCwIV96G1seuCOEWig.FwkB0oTpgaaeYxADFqJqSL/y",
+    "pin": "$2b$10$PqXZKr.nzJdCwIV96G1seuCOEWig.FwkB0oTpgaaeYxADFqJqSL/y",
     "role": "cashier",
     "shopId": "SHOP_01",
     "createdAt": "2026-06-20T07:43:00.000Z"
   },
   {
     "_id": "local_manager_1",
-    "name": "Manager User",
+    "name": "Manager Test",
     "phone": "+9710599999999",
     "userId": "manager",
-    "password": "$2b$10$yNBzNR268ApAymJtpV56q.S6ZRmQFik7mvypVLzA87Z4QaNe1T6wC",
-    "pin": "$2b$10$cqdM4UCIBZkRP9MMeWtlVudKsdOrcrQIW/Xd8OtlZ6ekP9hSqkzJK",
+    "password": "$2b$10$hroPO5DnkgYDGOVxwdBdUu0Jzmasy7.JeP9mMP/fr4xAz8vwWotzO",
+    "pin": "$2b$10$hroPO5DnkgYDGOVxwdBdUu0Jzmasy7.JeP9mMP/fr4xAz8vwWotzO",
     "role": "manager",
     "shopId": "SHOP_01",
     "createdAt": "2026-06-25T11:40:00.000Z"
-  },
-  {
-    "_id": "local_user_1782400775509",
-    "shopId": "SHOP_01",
-    "name": "muhammed",
-    "phone": "234567890",
-    "userId": "USER_1782400775299",
-    "password": "$2b$10$b7shqhxqz2AQlK6Dv69ahuuMbmJPcVsAhIo6PsDZ1yOm9ScOIUr0O",
-    "pin": "$2b$10$wm22tu3BkRCNtRw7pf7ohuw.KxCDD2bBdwp6Ehv7fG3RmfySXiHwy",
-    "role": "manager",
-    "createdAt": "2026-06-25T15:19:35.509Z"
   }
 ]

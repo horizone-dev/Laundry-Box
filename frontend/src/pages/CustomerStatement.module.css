@@ -583,6 +583,12 @@
   color: #8B5CF6;
 }
 
+.dueTag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #EF4444;
+}
+
 .dash {
   color: #CBD5E1;
   font-weight: 400;

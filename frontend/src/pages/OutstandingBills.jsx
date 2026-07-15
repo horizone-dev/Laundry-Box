@@ -44,7 +44,7 @@ export default function OutstandingBills() {
           SELECT o.*, c.name as customerName, c.phone as customerPhone, c.balance as customerBalance 
           FROM orders o 
           LEFT JOIN customers c ON o.customerId = c.id
-          WHERE o.id IS NOT NULL AND o.id != '' AND o.dueAmount > 0 AND o.status != 'Cancelled'
+          WHERE o.id IS NOT NULL AND o.id != '' AND o.dueAmount > 0
           ORDER BY o.createdAt DESC
         `;
         const res = await window.electronAPI.dbQuery(query, []);
@@ -98,10 +98,9 @@ export default function OutstandingBills() {
   const paginatedBills = filteredBills.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handleExportCSV = () => {
-    const headers = ['Order ID', 'Bill Number', 'Customer Name', 'Customer Phone', 'Date', 'Status', 'Total Amount', 'Due Amount'];
+    const headers = ['Invoice ID', 'Customer Name', 'Customer Phone', 'Date', 'Status', 'Total Amount', 'Due Amount'];
     const rows = filteredBills.map(bill => [
       bill.id,
-      bill.billNumber || '',
       bill.customerName || 'Walk-in',
       bill.customerPhone || '',
       formatDate(bill.createdAt),
@@ -119,7 +118,7 @@ export default function OutstandingBills() {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `outstanding_bills_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `outstanding_invoices_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -130,7 +129,7 @@ export default function OutstandingBills() {
     <div className={styles.container}>
       <div className={styles.header}>
         <div className={styles.titleArea}>
-          <h1>Outstanding Bills</h1>
+          <h1>Outstanding Invoices</h1>
           <p>Track and manage all unpaid invoices and customer credit.</p>
         </div>
         <div className={styles.actions}>
@@ -138,7 +137,7 @@ export default function OutstandingBills() {
             <Search size={18} />
             <input 
               type="text" 
-              placeholder="Search by Bill ID, Customer..." 
+              placeholder="Search by Invoice ID, Customer..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -160,7 +159,7 @@ export default function OutstandingBills() {
         <div className={styles.statCard}>
           <div className={styles.statIcon} style={{ background: '#FEF2F2' }}><AlertCircle color="#EF4444" /></div>
           <div className={styles.statInfo}>
-            <span>{t('overdue', settings.language)} Bills</span>
+            <span>{t('overdue', settings.language)} Invoices</span>
             <h3 style={{ color: '#EF4444' }}>{overdueCount} Invoices</h3>
           </div>
         </div>
@@ -178,7 +177,7 @@ export default function OutstandingBills() {
           className={`${styles.filterBtn} ${filterType === 'All' ? styles.active : ''}`}
           onClick={() => setFilterType('All')}
         >
-          All Bills
+          All Invoices
         </button>
         <button 
           className={`${styles.filterBtn} ${filterType === 'Overdue' ? styles.active : ''}`}
@@ -276,7 +275,7 @@ export default function OutstandingBills() {
             {paginatedBills.length === 0 && (
               <tr>
                 <td colSpan="7" className={styles.noData}>
-                  {loading ? 'Loading...' : 'No outstanding bills found.'}
+                  {loading ? 'Loading...' : 'No outstanding invoices found.'}
                 </td>
               </tr>
             )}

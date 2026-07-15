@@ -240,7 +240,7 @@ export default function CreditOverridesReport() {
           <button className="btn btn-secondary" onClick={exportCSV}>
             <Download size={16} /> Export CSV
           </button>
-          <button className="btn btn-primary" onClick={() => window.print()}>
+          <button className="btn btn-primary" onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}>
             <Printer size={16} /> Print / PDF
           </button>
         </div>

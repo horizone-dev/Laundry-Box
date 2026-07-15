@@ -179,11 +179,32 @@ export default function Expenses() {
         // Also record in Accounts (using the same ID for linking)
         const _nowE = new Date();
         const txnTimestamp = `${_nowE.getFullYear()}-${String(_nowE.getMonth()+1).padStart(2,'0')}-${String(_nowE.getDate()).padStart(2,'0')} ${String(_nowE.getHours()).padStart(2,'0')}:${String(_nowE.getMinutes()).padStart(2,'0')}`;
+        
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const creatorName = userSession.name || userSession.username || 'System';
+        const creatorId = userSession.id || 'SYSTEM';
+        const creatorRole = userSession.role || 'system';
+
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [id, DEFAULT_SHOP_ID, formData.paymentSource, 'EXPENSE', categoryToSave, totalAmount, formData.title, txnTimestamp, 0, getLocalISOString(), 'Zap']
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, createdBy, createdById, createdByRole) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            id, 
+            DEFAULT_SHOP_ID, 
+            formData.paymentSource, 
+            'EXPENSE', 
+            categoryToSave, 
+            totalAmount, 
+            formData.title, 
+            txnTimestamp, 
+            0, 
+            getLocalISOString(), 
+            'Zap',
+            creatorName,
+            creatorId,
+            creatorRole
+          ]
         );
 
         fetchExpenses();

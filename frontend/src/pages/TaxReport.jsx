@@ -93,7 +93,7 @@ export default function TaxReport() {
           SELECT orders.id, orders.billNumber, orders.totalAmount, orders.items, orders.createdAt, customers.name as customerName 
           FROM orders 
           LEFT JOIN customers ON orders.customerId = customers.id 
-          WHERE orders.status != 'Cancelled'
+          WHERE orders.id IS NOT NULL
         `;
 
         const expensesQuery = `
@@ -188,7 +188,7 @@ export default function TaxReport() {
         id: order.id,
         date: order.createdAt,
         type: 'Sale',
-        ref: order.billNumber || order.id,
+        ref: order.id,
         name: order.customerName || 'Walk-in Customer',
         grossAmount: gross,
         netAmount: net,
@@ -320,7 +320,7 @@ export default function TaxReport() {
           <button className="btn btn-secondary" onClick={handleExportCSV}>
             <Download size={18} /> Export CSV
           </button>
-          <button className="btn btn-primary" onClick={() => window.print()}>
+          <button className="btn btn-primary" onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}>
             <Printer size={18} /> Print Report
           </button>
         </div>

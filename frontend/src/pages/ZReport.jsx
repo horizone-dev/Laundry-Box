@@ -5,7 +5,7 @@ import {
   ArrowDownRight, RefreshCw, AlertTriangle, CheckCircle2, Download,
   Share2, ShoppingBag, Shirt, Users, Layers, Tag, Award,
   Truck, HelpCircle, Eye, Percent, CheckSquare, ListTodo,
-  Lock, Unlock, X
+  Lock, Unlock, X, Plus
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
@@ -34,10 +34,18 @@ export default function ZReport() {
   const isAuthorized = user.role === 'super_admin' || user.role === 'manager';
 
   useEffect(() => {
+    if (settings.zReportEnabled === false) {
+      navigate('/pos', { replace: true });
+    }
+  }, [settings.zReportEnabled, navigate]);
+
+  useEffect(() => {
     if (!isAuthorized) {
       navigate('/');
     }
   }, [isAuthorized, navigate]);
+
+  if (settings.zReportEnabled === false || !isAuthorized) return null;
 
   const [selectedDate, setSelectedDate] = useState(() => {
     const today = new Date();
@@ -46,6 +54,50 @@ export default function ZReport() {
     const day = String(today.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   });
+
+  const [shiftList, setShiftList] = useState([1]);
+  const [selectedShiftNo, setSelectedShiftNo] = useState(1);
+
+  const shiftKey = settings.zReportClosingType === 'Shift Close'
+    ? `shift_state_${selectedDate}_shift_${selectedShiftNo}`
+    : `shift_state_${selectedDate}`;
+
+  const parseShiftTimeString = (str) => {
+    if (!str || str === 'N/A') return null;
+    try {
+      const parts = str.split(' ');
+      const datePart = parts[0];
+      const timePart = parts[1];
+      const ampm = parts[2];
+      
+      const [year, month, day] = datePart.split('-').map(Number);
+      let [hours, minutes] = timePart.split(':').map(Number);
+      if (ampm === 'PM' && hours < 12) hours += 12;
+      if (ampm === 'AM' && hours === 12) hours = 0;
+      
+      return new Date(year, month - 1, day, hours, minutes);
+    } catch (e) {
+      return new Date(str);
+    }
+  };
+
+  useEffect(() => {
+    const listKey = `shift_list_${selectedDate}`;
+    const storedList = localStorage.getItem(listKey);
+    let list = [1];
+    if (storedList) {
+      try {
+        list = JSON.parse(storedList);
+        if (!Array.isArray(list) || list.length === 0) list = [1];
+      } catch (e) {
+        list = [1];
+      }
+    } else {
+      localStorage.setItem(listKey, JSON.stringify(list));
+    }
+    setShiftList(list);
+    setSelectedShiftNo(list[list.length - 1]);
+  }, [selectedDate]);
 
   const [loading, setLoading] = useState(true);
   
@@ -122,7 +174,7 @@ export default function ZReport() {
 
   // Load shift state from localStorage or initialize with defaults
   useEffect(() => {
-    const key = `shift_state_${selectedDate}`;
+    const key = shiftKey;
     const stored = localStorage.getItem(key);
     const isToday = selectedDate === new Date().toISOString().split('T')[0];
     
@@ -157,7 +209,7 @@ export default function ZReport() {
     } else {
       // Default initial states
       const defaultState = {
-        shiftNo: 1,
+        shiftNo: selectedShiftNo,
         openingTime: isToday ? formatShiftTime(new Date()) : `${selectedDate} 08:00 AM`,
         closingTime: isToday ? 'N/A' : `${selectedDate} 10:15 PM`,
         openedBy: user.name || 'Admin',
@@ -176,7 +228,7 @@ export default function ZReport() {
       setUserEditedActualCash(false);
       localStorage.setItem(key, JSON.stringify(defaultState));
     }
-  }, [selectedDate, user.name]);
+  }, [selectedDate, selectedShiftNo, settings.zReportClosingType, user.name, shiftKey]);
 
   const handleOpenShiftClick = () => {
     setModalOpeningCash(openingCash);
@@ -185,7 +237,7 @@ export default function ZReport() {
 
   const handleConfirmOpenShift = () => {
     if (!shiftState) return;
-    const key = `shift_state_${selectedDate}`;
+    const key = shiftKey;
     const now = new Date();
     const formattedTime = formatShiftTime(now);
     const opCash = parseFloat(modalOpeningCash) || 0;
@@ -212,7 +264,7 @@ export default function ZReport() {
 
   const handleConfirmCloseShift = async () => {
     if (!shiftState) return;
-    const key = `shift_state_${selectedDate}`;
+    const key = shiftKey;
     const now = new Date();
     const formattedTime = formatShiftTime(now);
     const actCashNum = Number(modalActualCash) || 0;
@@ -259,6 +311,41 @@ export default function ZReport() {
     }
   };
 
+  const handleOpenNewShift = () => {
+    const nextShiftNo = Math.max(...shiftList) + 1;
+    const newList = [...shiftList, nextShiftNo];
+    
+    // Save new list
+    const listKey = `shift_list_${selectedDate}`;
+    localStorage.setItem(listKey, JSON.stringify(newList));
+    setShiftList(newList);
+    setSelectedShiftNo(nextShiftNo);
+    
+    // Initialize new shift state
+    const key = `shift_state_${selectedDate}_shift_${nextShiftNo}`;
+    const now = new Date();
+    const formattedTime = formatShiftTime(now);
+    const newShift = {
+      shiftNo: nextShiftNo,
+      openingTime: formattedTime,
+      closingTime: 'N/A',
+      openedBy: user.name || 'Admin',
+      closedBy: 'N/A',
+      status: 'ACTIVE',
+      openingCash: 200,
+      floatingCash: 200,
+      withdrawal: 0,
+      actualCash: 200
+    };
+    setShiftState(newShift);
+    setOpeningCash(200);
+    setActualCash(200);
+    setFloatingCash(200);
+    setWithdrawal(0);
+    setUserEditedActualCash(false);
+    localStorage.setItem(key, JSON.stringify(newShift));
+  };
+
   // Interactive Cash Reconciliation Input
   const [openingCash, setOpeningCash] = useState(200);
   const [actualCash, setActualCash] = useState(200);
@@ -272,7 +359,7 @@ export default function ZReport() {
       setLoading(true);
       const dateParam = `${selectedDate}%`;
 
-      // 1. Fetch Orders placed on selected date (including active and cancelled)
+      // 1. Fetch Orders placed on selected date (including active)
       const ordersRes = await window.electronAPI.dbQuery(
         `SELECT id, billNumber, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, paymentMethod, paymentBreakdown, items, statusHistory, createdAt 
          FROM orders 
@@ -309,7 +396,7 @@ export default function ZReport() {
         `SELECT c.name, SUM(o.totalAmount) as totalSpent 
          FROM orders o
          JOIN customers c ON o.customerId = c.id
-         WHERE o.createdAt LIKE ? AND o.status != 'Cancelled'
+         WHERE o.createdAt LIKE ?
          GROUP BY o.customerId
          ORDER BY totalSpent DESC
          LIMIT 1`,
@@ -458,18 +545,45 @@ export default function ZReport() {
   // ────────────────────────────────────────────────────────────────────────
   
   const zStats = useMemo(() => {
-    const activeOrders = orders.filter(o => o.status !== 'Cancelled');
-    const cancelledOrders = orders.filter(o => o.status === 'Cancelled');
-    
+    let activeOrders = orders;
+    let activeExpenses = expenses;
+    let activeTransactions = transactions;
+
     // 1. Shift Info
     const shiftInfo = shiftState || {
-      shiftNo: 1,
+      shiftNo: selectedShiftNo,
       openingTime: `${selectedDate} 08:00 AM`,
       closingTime: 'N/A',
       openedBy: user.name || 'Admin',
       closedBy: 'N/A',
       status: 'ACTIVE'
     };
+
+    if (settings.zReportClosingType === 'Shift Close' && shiftState) {
+      const op = parseShiftTimeString(shiftState.openingTime);
+      const cl = parseShiftTimeString(shiftState.closingTime);
+
+      activeOrders = orders.filter(o => {
+        const t = new Date(o.createdAt);
+        if (op && t < op) return false;
+        if (cl && t > cl) return false;
+        return true;
+      });
+
+      activeExpenses = expenses.filter(e => {
+        const t = new Date(e.date);
+        if (op && t < op) return false;
+        if (cl && t > cl) return false;
+        return true;
+      });
+
+      activeTransactions = transactions.filter(tr => {
+        const t = new Date(tr.date);
+        if (op && t < op) return false;
+        if (cl && t > cl) return false;
+        return true;
+      });
+    }
 
     // 2. Top KPI Cards
     const totalOrdersCount = activeOrders.length;
@@ -560,8 +674,7 @@ export default function ZReport() {
       washing: activeOrders.filter(o => ['Washing', 'Processing', 'Picked Up', 'Drying'].includes(o.status)).length,
       ironing: activeOrders.filter(o => o.status === 'Ironing').length,
       ready: activeOrders.filter(o => ['Ready', 'Ready to Pick up'].includes(o.status)).length,
-      delivered: completedOrdersCount,
-      cancelled: cancelledOrders.length
+      delivered: completedOrdersCount
     };
 
     // 5. Service-wise Sales Grouping
@@ -610,9 +723,9 @@ export default function ZReport() {
     });
 
     // 6. Expense Summary
-    const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const totalExpenses = activeExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
     const expensesByCategory = {};
-    expenses.forEach(e => {
+    activeExpenses.forEach(e => {
       const cat = e.category || 'Other';
       expensesByCategory[cat] = (expensesByCategory[cat] || 0) + (e.amount || 0);
     });
@@ -647,7 +760,7 @@ export default function ZReport() {
     
     // Credit collections from transactions table category 'Credit Settlement' / 'Sales Settlement'
     let creditAmountCollected = 0;
-    transactions.forEach(t => {
+    activeTransactions.forEach(t => {
       const cat = (t.category || '').toLowerCase();
       if (t.type === 'INCOME' && (cat === 'credit settlement' || cat === 'sales settlement')) {
         creditAmountCollected += parseFloat(t.amount) || 0;
@@ -803,7 +916,11 @@ export default function ZReport() {
   }, [zStats.expectedCashInDrawer, userEditedActualCash, loading]);
 
   const handlePrint = (type = 'pos') => {
-    window.print();
+    if (window.appPrint) {
+      window.appPrint();
+    } else {
+      window.print();
+    }
   };
 
   const handleExportCSV = () => {
@@ -914,6 +1031,21 @@ export default function ZReport() {
               className={styles.dateInput}
             />
           </div>
+          {settings.zReportClosingType === 'Shift Close' && (
+            <div className={styles.datePicker} style={{ marginLeft: '0.5rem' }}>
+              <Users size={16} />
+              <select
+                value={selectedShiftNo}
+                onChange={(e) => setSelectedShiftNo(Number(e.target.value))}
+                className={styles.dateInput}
+                style={{ border: 'none', background: 'transparent', outline: 'none', paddingRight: '1rem', cursor: 'pointer', fontWeight: 600 }}
+              >
+                {shiftList.map(s => (
+                  <option key={s} value={s}>Shift {s}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <button className={styles.iconBtn} onClick={fetchZReportData} title="Refresh Data">
             <RefreshCw size={16} />
           </button>
@@ -925,7 +1057,7 @@ export default function ZReport() {
             <div className={styles.dropdownMenu}>
               <button onClick={handleExportCSV}><Download size={14} /> Export CSV</button>
               <button onClick={() => handlePrint('pos')}><Printer size={14} /> Print Receipt (800mm)</button>
-              <button onClick={() => window.print()}><FileText size={14} /> Print Full Page (PDF)</button>
+              <button onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}><FileText size={14} /> Print Full Page (PDF)</button>
             </div>
           </div>
         </div>
@@ -957,7 +1089,7 @@ export default function ZReport() {
                       if (shiftState) {
                         const updated = { ...shiftState, openingTime: val };
                         setShiftState(updated);
-                        localStorage.setItem(`shift_state_${selectedDate}`, JSON.stringify(updated));
+                        localStorage.setItem(shiftKey, JSON.stringify(updated));
                       }
                     }}
                   />
@@ -998,12 +1130,23 @@ export default function ZReport() {
                       <Lock size={13} /> Close Shift
                     </button>
                   ) : (
-                    <button 
-                      className={styles.reopenShiftBtn} 
-                      onClick={handleOpenShiftClick}
-                    >
-                      <Unlock size={13} /> Reopen Shift
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button 
+                        className={styles.reopenShiftBtn} 
+                        onClick={handleOpenShiftClick}
+                      >
+                        <Unlock size={13} /> Reopen Shift
+                      </button>
+                      {settings.zReportClosingType === 'Shift Close' && (
+                        <button 
+                          className={styles.closeShiftBtn} 
+                          onClick={handleOpenNewShift}
+                          style={{ background: 'linear-gradient(135deg, #10B981, #059669)', border: 'none', color: 'white' }}
+                        >
+                          <Plus size={13} /> Open New Shift
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -1137,10 +1280,6 @@ export default function ZReport() {
                 <div className={styles.itemRow}>
                   <span>Delivered</span>
                   <strong className={styles.successText}>{zStats.statusCounts.delivered}</strong>
-                </div>
-                <div className={styles.itemRow}>
-                  <span>Cancelled</span>
-                  <strong className={styles.dangerText}>{zStats.statusCounts.cancelled}</strong>
                 </div>
               </div>
             </div>
@@ -1573,7 +1712,7 @@ export default function ZReport() {
             <button className={`${styles.actionBtn} ${styles.printBtn}`} onClick={() => handlePrint('pos')}>
               <Printer size={16} /> Print (800mm)
             </button>
-            <button className={`${styles.actionBtn} ${styles.pdfBtn}`} onClick={() => window.print()}>
+            <button className={`${styles.actionBtn} ${styles.pdfBtn}`} onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}>
               <FileText size={16} /> Download PDF
             </button>
             <button className={`${styles.actionBtn} ${styles.excelBtn}`} onClick={handleExportCSV}>

@@ -31,6 +31,7 @@ export default function CustomerStatement() {
 
   const [orders, setOrders] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [allocations, setAllocations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -136,6 +137,7 @@ export default function CustomerStatement() {
     if (dateRange === 'Custom' && (!dateFrom || !dateTo)) {
       setOrders([]);
       setPayments([]);
+      setAllocations([]);
       setLoading(false);
       return;
     }
@@ -154,31 +156,32 @@ export default function CustomerStatement() {
 
           SELECT 
             id, shopId, billNumber, customerId, totalAmount, paidAmount, 0 AS dueAmount, 
-            originalPaymentStatus AS paymentStatus, 'Deleted' AS status, originalPaymentMethod AS paymentMethod, items, deletedAt AS createdAt, deletedAt AS updatedAt, 
+            originalPaymentStatus AS paymentStatus, 'Deleted' AS status, originalPaymentMethod AS paymentMethod, items, IFNULL(createdAt, deletedAt) AS createdAt, deletedAt AS updatedAt, 
             1 AS isDeleted, refundStatus, refundMethod, returnedAt, payments 
           FROM deleted_orders 
         ) AS u
         WHERE u.customerId = ?
+        ORDER BY u.createdAt ASC
       `;
-      const orderParams = [customerId]; // single placeholder for customerId in wrapped query
-      if (dateFrom) { orderQuery += ' AND u.createdAt >= ?'; orderParams.push(dateFrom); }
-      if (dateTo)   { orderQuery += ' AND u.createdAt <= ?'; orderParams.push(dateTo + 'T23:59:59'); }
-      orderQuery += ' ORDER BY u.createdAt ASC';
+      const orderParams = [customerId];
 
       const ordersRes = await window.electronAPI.dbQuery(orderQuery, orderParams);
 
-      let payWhere = 'WHERE customerId = ?';
-      const payParams = [customerId];
-      if (dateFrom) { payWhere += ' AND createdAt >= ?'; payParams.push(dateFrom); }
-      if (dateTo)   { payWhere += ' AND createdAt <= ?'; payParams.push(dateTo + 'T23:59:59'); }
-
       const paymentsRes = await window.electronAPI.dbQuery(
-        `SELECT * FROM payments ${payWhere} ORDER BY createdAt ASC`,
-        payParams
+        `SELECT * FROM payments WHERE customerId = ? ORDER BY createdAt ASC`,
+        [customerId]
+      );
+
+      const allocationsRes = await window.electronAPI.dbQuery(
+        `SELECT a.* FROM advance_allocations a
+         JOIN payments p ON a.paymentId = p.id
+         WHERE p.customerId = ?`,
+        [customerId]
       );
 
       setOrders(ordersRes.success ? ordersRes.data : []);
       setPayments(paymentsRes.success ? paymentsRes.data : []);
+      setAllocations(allocationsRes.success ? allocationsRes.data : []);
     } catch (err) {
       console.error('Statement fetch error:', err);
     } finally {
@@ -190,19 +193,57 @@ export default function CustomerStatement() {
   const ledgerRows = React.useMemo(() => {
     const rows = [];
 
+    // Robust date normalizer to handle space and timezone offsets safely
+    const normalizeDate = (dStr) => {
+      if (!dStr) return new Date(0);
+      let normalized = dStr.replace(' ', 'T');
+      if (normalized.includes('+')) {
+        normalized = normalized.split('+')[0];
+      }
+      if (normalized.endsWith('Z')) {
+        normalized = normalized.substring(0, normalized.length - 1);
+      }
+      const parsed = new Date(normalized);
+      return isNaN(parsed.getTime()) ? new Date(0) : parsed;
+    };
+
     orders.forEach(o => {
       const cleanRef = `${settings.invoicePrefix || '#'}${o.id}`;
       
       if (o.isDeleted) {
+        console.log("DELETED ORDER FOUND IN STATEMENT:", o);
         if (filterType !== 'Payments') {
+          // 1. The Original Order Charge
+          let itemSummary = '';
+          try {
+            const itemsList = typeof o.items === 'string' ? JSON.parse(o.items || '[]') : (o.items || []);
+            if (Array.isArray(itemsList) && itemsList.length > 0) {
+              itemSummary = itemsList.map(item => `${item.qty || item.quantity || 1}x ${item.name}`).join(', ');
+            }
+          } catch (e) {}
+
           rows.push({
             date: o.createdAt,
+            type: 'order',
+            ref: cleanRef,
+            description: `Order ${cleanRef} (Later Deleted)`,
+            itemsSummary: itemSummary,
+            debit: (o.totalAmount || 0),
+            credit: 0,
+            status: 'Cancelled',
+            dueAmount: 0,
+            rawOrder: o
+          });
+
+          // 2. The Deletion Reversal
+          rows.push({
+            date: o.updatedAt || o.createdAt,
             type: 'deleted_order',
             ref: cleanRef,
-            description: `Deleted Bill ${cleanRef}`,
+            description: `Order Deleted ${cleanRef}`,
             itemsSummary: `Status: ${o.refundStatus || 'Deleted'}`,
             debit: 0,
-            credit: 0,
+            credit: (o.totalAmount || 0),
             status: o.refundStatus || 'Deleted',
             dueAmount: 0,
             rawOrder: o
@@ -210,34 +251,26 @@ export default function CustomerStatement() {
         }
 
         if (filterType !== 'Orders') {
-          // Add refund row if Returned
-          if (o.refundStatus === 'Returned' && o.paidAmount > 0) {
-            rows.push({
-              date: o.returnedAt || o.createdAt,
-              type: 'refund',
-              ref: `REF-${o.id}`,
-              description: `Refund – ${o.refundMethod || 'Cash'}`,
-              itemsSummary: `Refund for Deleted Order ${cleanRef}`,
-              debit: o.paidAmount,
-              credit: 0,
-              status: 'SUCCESS',
-              dueAmount: 0
-            });
-          }
 
-          // Add original payments parsed from JSON
+          // Add original payments parsed from JSON (these are CREDIT rows — money came in from the customer)
           let parsedPayments = [];
           try {
             parsedPayments = typeof o.payments === 'string' ? JSON.parse(o.payments || '[]') : (o.payments || []);
           } catch (e) {
             parsedPayments = [];
           }
+
+          const deletedPaySum = Array.isArray(parsedPayments)
+            ? parsedPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
+            : 0;
+          const initialDeletedPay = (o.paidAmount || 0) - deletedPaySum;
+
           if (Array.isArray(parsedPayments)) {
             parsedPayments.forEach(p => {
               rows.push({
                 date: p.createdAt || o.createdAt,
                 type: 'payment',
-                ref: p.id || `PAY-DEL-${o.id}`,
+                ref: p.paymentReference || p.id || `PAY-DEL-${o.id}`,
                 description: `Payment – ${p.method || 'Cash'}`,
                 itemsSummary: `Linked to Order ${cleanRef}`,
                 debit: 0,
@@ -245,6 +278,50 @@ export default function CustomerStatement() {
                 status: 'SUCCESS',
                 dueAmount: 0
               });
+            });
+          }
+
+          // Fallback: if the order was paid via Advance Allocation (payments JSON is empty)
+          // but paidAmount > 0, emit a single credit row for the full amount.
+          // Without this, the ledger shows a refund debit with no matching credit — producing a wrong Due balance.
+          if (initialDeletedPay > 0.01) {
+            rows.push({
+              date: o.createdAt,
+              type: 'payment',
+              ref: cleanRef,
+              description: `Payment – ${o.paymentMethod || 'Advance'}`,
+              itemsSummary: `Linked to Order ${cleanRef}`,
+              debit: 0,
+              credit: initialDeletedPay,
+              status: 'SUCCESS',
+              dueAmount: 0
+            });
+          }
+
+          if (o.refundStatus === 'Returned' && deletedPaySum > 0) {
+            rows.push({
+              date: o.returnedAt || o.updatedAt || o.createdAt,
+              type: 'refund',
+              ref: `REF-${o.id}`,
+              description: `Refund – ${o.refundMethod || 'Cash'}`,
+              itemsSummary: `Refund for Deleted Order ${cleanRef}`,
+              debit: deletedPaySum,
+              credit: 0,
+              status: 'SUCCESS',
+              dueAmount: 0
+            });
+          }
+          if (o.refundStatus === 'Converted to Advance' && deletedPaySum > 0) {
+            rows.push({
+              date: o.updatedAt || o.createdAt,
+              type: 'payment',
+              ref: `ADV-CONV-${o.id}`,
+              description: 'Converted to Advance',
+              itemsSummary: `Advance from Deleted Order ${cleanRef}`,
+              debit: 0,
+              credit: deletedPaySum,
+              status: 'SUCCESS',
+              dueAmount: 0
             });
           }
         }
@@ -279,16 +356,16 @@ export default function CustomerStatement() {
     });
 
     // Map table payments and group by order ID to prevent double counting
-    const paymentsFromTable = payments.map(p => {
+    const paymentsFromTable = payments.filter(p => p.method !== 'Refund Advance').map(p => {
       const cleanOrderRef = p.orderId ? `${settings.invoicePrefix || '#'}${p.orderId}` : '';
       return {
         date: p.createdAt,
         type: 'payment',
-        ref: p.id,
+        ref: p.paymentReference || p.id,
         description: `Payment – ${p.method || 'Cash'}`,
-        itemsSummary: p.orderId ? `Linked to Order ${cleanOrderRef}` : 'Advance Deposit',
+        itemsSummary: p.method === 'Advance' ? `Advance Consumed for Order ${cleanOrderRef}` : (p.orderId ? `Linked to Order ${cleanOrderRef}` : 'Advance Deposit'),
         debit: 0,
-        credit: p.amount,
+        credit: p.method === 'Advance' ? 0 : p.amount,
         status: 'SUCCESS',
         dueAmount: 0,
         orderId: p.orderId
@@ -302,13 +379,19 @@ export default function CustomerStatement() {
       }
     });
 
-    // Capture initial payments made at order creation time that aren't in the payments table
+    // Capture initial payments made at order creation time that aren't in the payments table, subtracting allocations
     const initialPaymentsFromOrders = [];
     if (filterType !== 'Orders') {
       orders.forEach(o => {
         if (o.isDeleted) return; // Skip deleted orders here, we already extracted their payments!
+        
+        const allocs = allocations.filter(a => a.orderId === o.id);
+        const allocSum = allocs.reduce((sum, a) => sum + (a.amountUsed || 0), 0);
+        
+        const actualPaymentPaid = (o.paidAmount || 0) - allocSum;
         const tablePaySum = tablePaymentsByOrder[o.id] || 0;
-        const initialPay = (o.paidAmount || 0) - tablePaySum;
+        const initialPay = actualPaymentPaid - tablePaySum;
+        
         if (initialPay > 0.01) {
           const cleanRef = `${settings.invoicePrefix || '#'}${o.id}`;
           initialPaymentsFromOrders.push({
@@ -336,7 +419,7 @@ export default function CustomerStatement() {
 
     /* Sort chronologically (ascending) first to calculate running balance */
     rows.sort((a, b) => {
-      const diff = new Date(a.date) - new Date(b.date);
+      const diff = normalizeDate(a.date) - normalizeDate(b.date);
       if (diff !== 0) return diff;
       const aIsDebit = a.debit > 0;
       const bIsDebit = b.debit > 0;
@@ -345,55 +428,50 @@ export default function CustomerStatement() {
       return 0;
     });
 
-    /* Running balance */
+    /* Running balance: runningBalance = runningBalance + Debit (Charge) - Credit (Payment) */
+    /* Positive = Due, Negative = Advance */
     let balance = 0;
     rows.forEach(row => {
-      if (row.type === 'order') {
-        balance += row.debit - row.credit;
-      } else if (row.type === 'deleted_order') {
-        // deleted bill row itself has debit=0, credit=0, so no balance change
-        balance += row.debit - row.credit;
-      } else if (row.type === 'refund') {
-        // refund is a debit to increase balance back
-        balance += row.debit;
-      } else {
-        balance -= row.credit;
-      }
+      balance += row.debit - row.credit;
       row.runningBalance = balance;
     });
 
-    /* Sort according to user preference */
-    if (sortOrder === 'desc') {
-      rows.sort((a, b) => {
-        const diff = new Date(b.date) - new Date(a.date);
-        if (diff !== 0) return diff;
-        const aIsCredit = a.credit > 0;
-        const bIsCredit = b.credit > 0;
-        if (aIsCredit && !bIsCredit) return -1;
-        if (!aIsCredit && bIsCredit) return 1;
-        return 0;
-      });
+    let finalRows = rows;
+    if (dateRange !== 'All Time') {
+      if (dateFrom) {
+        const dFrom = normalizeDate(dateFrom);
+        finalRows = finalRows.filter(r => normalizeDate(r.date) >= dFrom);
+      }
+      if (dateTo) {
+        const dTo = normalizeDate(dateTo + 'T23:59:59');
+        finalRows = finalRows.filter(r => normalizeDate(r.date) <= dTo);
+      }
     }
 
-    return rows;
-  }, [orders, payments, filterType, sortOrder]);
+    /* Sort according to user preference (reverse chronological order) */
+    if (sortOrder === 'desc') {
+      finalRows.reverse();
+    }
+
+    return { filteredRows: finalRows, totalBalance: balance };
+  }, [orders, payments, allocations, filterType, sortOrder, dateFrom, dateTo, dateRange]);
 
   const paginatedLedgerRows = React.useMemo(() => {
     const startIndex = (currentPage - 1) * 20;
-    return ledgerRows.slice(startIndex, startIndex + 20);
+    return ledgerRows.filteredRows.slice(startIndex, startIndex + 20);
   }, [ledgerRows, currentPage]);
 
   /* ─── KPIs ────────────────────────────────────────── */
   const totalBilled    = orders.filter(o => !o.isDeleted).reduce((s, o) => s + (o.totalAmount || 0), 0);
   const totalPaid      = payments.reduce((s, p) => s + (p.amount || 0), 0);
-  const outstanding    = Math.max(0, selectedCustomer?.balance || 0);
-  const advanceCredit  = selectedCustomer?.balance < 0 ? Math.abs(selectedCustomer.balance) : 0;
+  const outstanding    = Math.max(0, ledgerRows.totalBalance || 0);
+  const advanceCredit  = ledgerRows.totalBalance < 0 ? Math.abs(ledgerRows.totalBalance) : 0;
   const orderCount     = orders.filter(o => !o.isDeleted).length;
 
   /* ─── Export CSV ──────────────────────────────────── */
   const exportCSV = () => {
     const headers = ['Date', 'Reference', 'Description', 'Debit (Charged)', 'Credit (Paid)', 'Running Balance'];
-    const rows = ledgerRows.map(r => [
+    const rows = ledgerRows.filteredRows.map(r => [
       formatDate(r.date),
       r.ref,
       `"${r.description}${r.itemsSummary ? ` (${r.itemsSummary})` : ''}"`,
@@ -478,7 +556,7 @@ export default function CustomerStatement() {
             <button className={styles.btnSecondary} onClick={exportCSV}>
               <Download size={16} /> Export CSV
             </button>
-            <button className={styles.btnPrimary} onClick={() => window.print()}>
+            <button className={styles.btnPrimary} onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}>
               <Printer size={16} /> Print / PDF
             </button>
           </div>
@@ -510,7 +588,7 @@ export default function CustomerStatement() {
               className={styles.searchInput}
             />
             {selectedCustomer
-              ? <X size={14} color="#94A3B8" style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setSelectedCustomer(null); setSearchTerm(''); setOrders([]); setPayments([]); }} />
+              ? <X size={14} color="#94A3B8" style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setSelectedCustomer(null); setSearchTerm(''); setOrders([]); setPayments([]); setAllocations([]); }} />
               : <ChevronDown size={16} color="#94A3B8" />
             }
           </div>
@@ -655,7 +733,7 @@ export default function CustomerStatement() {
           <div className={styles.tableCard}>
             {loading ? (
               <div className={styles.loadingRow}>Loading transactions…</div>
-            ) : ledgerRows.length === 0 ? (
+            ) : ledgerRows.filteredRows.length === 0 ? (
               <div className={styles.loadingRow}>No transactions found for selected filters.</div>
             ) : (
               <table className={styles.ledgerTable}>
@@ -713,9 +791,10 @@ export default function CustomerStatement() {
                       <td className={`${styles.numCol} ${styles.creditCell}`}>
                         {row.credit > 0 ? <><CurrencySymbol size={11} /> {row.credit.toFixed(2)}</> : <span className={styles.dash}>—</span>}
                       </td>
-                      <td className={`${styles.numCol} ${row.runningBalance > 0 ? styles.balanceDueNum : row.runningBalance < 0 ? styles.balanceAdvNum : styles.balanceZero}`}>
+                      <td className={`${styles.numCol} ${row.runningBalance < 0 ? styles.balanceAdvNum : row.runningBalance > 0 ? styles.balanceDueNum : styles.balanceZero}`}>
                         <CurrencySymbol size={11} /> {Math.abs(row.runningBalance).toFixed(2)}
                         {row.runningBalance < 0 && <span className={styles.advTag}> Adv</span>}
+                        {row.runningBalance > 0 && <span className={styles.dueTag}> Due</span>}
                       </td>
                     </tr>
                   ))}
@@ -724,27 +803,37 @@ export default function CustomerStatement() {
                   <tr className={styles.totalsRow}>
                     <td colSpan="3" className={styles.totalsLabel}>TOTALS</td>
                     <td className={`${styles.numCol} ${styles.debitCell} ${styles.totalsNum}`}>
-                      <CurrencySymbol size={12} /> {ledgerRows.reduce((s, r) => s + r.debit, 0).toFixed(2)}
+                      <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + r.debit, 0).toFixed(2)}
                     </td>
                     <td className={`${styles.numCol} ${styles.creditCell} ${styles.totalsNum}`}>
-                      <CurrencySymbol size={12} /> {ledgerRows.reduce((s, r) => s + r.credit, 0).toFixed(2)}
+                      <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + r.credit, 0).toFixed(2)}
                     </td>
-                    <td className={`${styles.numCol} ${styles.totalsNum} ${outstanding > 0 ? styles.balanceDueNum : styles.balanceZero}`}>
-                      <CurrencySymbol size={12} /> {outstanding.toFixed(2)}
+                    <td className={`${styles.numCol} ${styles.totalsNum} ${
+                      ledgerRows.totalBalance > 0 
+                        ? styles.balanceDueNum 
+                        : ledgerRows.totalBalance < 0 
+                        ? styles.balanceAdvNum 
+                        : styles.balanceZero
+                    }`}>
+                      <CurrencySymbol size={12} /> {selectedCustomer ? Math.abs(ledgerRows.totalBalance).toFixed(2) : '0.00'}
+                      {ledgerRows.totalBalance > 0 && <span className={styles.dueTag}> Due</span>}
+                      {ledgerRows.totalBalance < 0 && <span className={styles.advTag}> Adv</span>}
                     </td>
                   </tr>
                 </tfoot>
               </table>
             )}
             {/* Pagination Controls */}
-            <Pagination
-              currentPage={currentPage}
-              totalPages={Math.ceil(ledgerRows.length / 20)}
-              onPageChange={setCurrentPage}
-              totalItems={ledgerRows.length}
-              pageSize={20}
-              itemLabel="transactions"
-            />
+            {ledgerRows.filteredRows.length > 20 && (
+              <div className={styles.paginationContainer}>
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={Math.ceil(ledgerRows.filteredRows.length / 20)}
+                  onPageChange={setCurrentPage}
+                  totalItems={ledgerRows.filteredRows.length}
+                />
+              </div>
+            )}
           </div>
 
           {/* Print Footer */}

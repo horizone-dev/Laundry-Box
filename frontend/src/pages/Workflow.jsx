@@ -37,6 +37,14 @@ export default function Workflow() {
   const navigate = useNavigate();
   const { settings, formatDate } = useSettings();
 
+  useEffect(() => {
+    if (settings.workflowEnabled === false) {
+      navigate('/pos', { replace: true });
+    }
+  }, [settings.workflowEnabled, navigate]);
+
+  if (settings.workflowEnabled === false) return null;
+
   const formatDateTime = (dateVal) => {
     if (!dateVal) return 'N/A';
     const formattedDate = formatDate(dateVal);
@@ -85,10 +93,9 @@ export default function Workflow() {
   const columns = useMemo(() => {
     const rawStatuses = settings.workflowStatuses || [
       'Confirmed', 'Picked Up', 'Washing', 'Drying',
-      'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery',
-      'Delivered', 'Cancelled'
+      'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered'
     ];
-    return rawStatuses.filter(status => status !== 'Delivered' && status !== 'Cancelled');
+    return rawStatuses.filter(status => status !== 'Delivered');
   }, [settings.workflowStatuses]);
 
   // Scrollable Board State & Logic
@@ -129,7 +136,7 @@ export default function Workflow() {
         SELECT orders.status, COUNT(*) as count 
         FROM orders 
         LEFT JOIN customers ON orders.customerId = customers.id
-        WHERE orders.status NOT IN ('Delivered', 'Cancelled')
+        WHERE orders.status NOT IN ('Delivered')
       `;
       let params = [];
       if (trimmedSearch) {
@@ -177,7 +184,7 @@ export default function Workflow() {
         SELECT orders.*, customers.name AS customerName, customers.phone AS customerPhone 
         FROM orders 
         LEFT JOIN customers ON orders.customerId = customers.id
-        WHERE orders.status NOT IN ('Delivered', 'Cancelled')
+        WHERE orders.status NOT IN ('Delivered')
       `;
       let params = [];
 
@@ -330,7 +337,7 @@ export default function Workflow() {
       }
 
       // Update state
-      if (['Delivered', 'Cancelled'].includes(newStatus)) {
+      if (['Delivered'].includes(newStatus)) {
         // Remove from active Kanban lists
         setOrders(prev => prev.filter(o => o.id !== orderId));
       } else {
@@ -444,11 +451,32 @@ export default function Workflow() {
             ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
             : (payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
 
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const creatorName = userSession.name || userSession.username || 'System';
+        const creatorId = userSession.id || 'SYSTEM';
+        const creatorRole = userSession.role || 'system';
+
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, (payMethod === 'Bank' || payMethod === 'Card' || payMethod === 'UPI') ? 'BANK' : 'CASH', 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${selectedOrder.id}${payMethod === 'Card' ? ' (Card)' : (payMethod === 'UPI' ? ' (UPI)' : '')}`, txnTimestamp, 0, getLocalISOString(), 'DollarSign', mappedBankId]
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            txnId, 
+            DEFAULT_SHOP_ID, 
+            (payMethod === 'Bank' || payMethod === 'Card' || payMethod === 'UPI') ? 'BANK' : 'CASH', 
+            'INCOME', 
+            'Sales Settlement', 
+            amountToPay, 
+            `Payment for Order ${selectedOrder.id}${payMethod === 'Card' ? ' (Card)' : (payMethod === 'UPI' ? ' (UPI)' : '')}`, 
+            txnTimestamp, 
+            0, 
+            getLocalISOString(), 
+            'DollarSign', 
+            mappedBankId,
+            creatorName,
+            creatorId,
+            creatorRole
+          ]
         );
 
         // Record card commission if applicable
@@ -459,16 +487,34 @@ export default function Workflow() {
           const commDesc = `Card Commission for Order ${selectedOrder.id}`;
           await window.electronAPI.dbQuery(
             `INSERT INTO account_transactions 
-             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, 0, getLocalISOString(), 'Percent', mappedBankId]
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              commTxnId, 
+              DEFAULT_SHOP_ID, 
+              'BANK', 
+              'EXPENSE', 
+              'Card Commission', 
+              commissionAmount, 
+              commDesc, 
+              txnTimestamp, 
+              0, 
+              getLocalISOString(), 
+              'Percent', 
+              mappedBankId,
+              creatorName,
+              creatorId,
+              creatorRole
+            ]
           );
         }
 
+        const payId = `PAY-HEAL-${selectedOrder.id}`;
+        const payRef = await window.electronAPI.getNextPaymentReference('PAY');
         await window.electronAPI.dbQuery(
-          `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-          [`PAY-HEAL-${selectedOrder.id}`, selectedOrder.customerId || 'Walk-in', selectedOrder.id, DEFAULT_SHOP_ID, amountToPay, payMethod, 'SUCCESS', getLocalISOString(), getLocalISOString()]
+          `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+          [payId, selectedOrder.customerId || 'Walk-in', selectedOrder.id, DEFAULT_SHOP_ID, amountToPay, payMethod, 'SUCCESS', getLocalISOString(), getLocalISOString(), payRef]
         );
 
         if (window.electronAPI?.runDataHealer) {
@@ -744,8 +790,12 @@ export default function Workflow() {
   const handlePrintTags = () => {
     document.body.classList.add('printing-tags');
     setIsPrintingTags(true);
-    setTimeout(() => {
-      window.print();
+    setTimeout(async () => {
+      if (window.appPrint) {
+        await window.appPrint({ printerType: 'tag' });
+      } else {
+        window.print();
+      }
       setIsPrintingTags(false);
       document.body.classList.remove('printing-tags');
     }, 500);
@@ -806,7 +856,7 @@ export default function Workflow() {
         <div className={styles.emptyBoard}>
           <ShoppingCart size={48} color="#CBD5E1" />
           <h3>No Active Orders</h3>
-          <p className={styles.emptyBoardText}>All orders have been delivered or cancelled. Create a new order to track its status.</p>
+          <p className={styles.emptyBoardText}>All orders have been delivered. Create a new order to track its status.</p>
         </div>
       ) : (
         /* Kanban Lane Grid Wrapper */
@@ -874,7 +924,6 @@ export default function Workflow() {
                             <div className={styles.cardHeader}>
                               <div>
                                 <span className={styles.orderId}>{settings.invoicePrefix || ''}{order.id}</span>
-                                <span className={styles.billNum}>{t('bill', settings.language)}: {order.billNumber || 'N/A'}</span>
                               </div>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-end' }}>
                                 <span className={`${styles.paymentBadge} ${order.paymentStatus === 'Paid' ? styles.paymentPaid :

@@ -399,3 +399,70 @@ exports.verifyManagerPin = async (req, res) => {
   }
 };
 
+exports.resetUsers = async (req, res) => {
+  try {
+    const adminPassHash = await bcrypt.hash('Admin123', 10);
+    const cashierPassHash = await bcrypt.hash('Admin123', 10);
+    const managerPassHash = await bcrypt.hash('Admin123', 10);
+
+    const defaultUsers = [
+      {
+        _id: 'local_admin_1',
+        name: 'Horizon inc',
+        phone: '+9710588851680',
+        userId: 'super admin',
+        password: adminPassHash,
+        pin: adminPassHash,
+        role: 'super_admin',
+        shopId: 'SHOP_01',
+        createdAt: '2026-06-20T07:43:00.000Z'
+      },
+      {
+        _id: 'local_cashier_1',
+        name: 'Cashier Test',
+        phone: '+971000000000',
+        userId: 'cashier',
+        password: cashierPassHash,
+        pin: cashierPassHash,
+        role: 'cashier',
+        shopId: 'SHOP_01',
+        createdAt: '2026-06-20T07:43:00.000Z'
+      },
+      {
+        _id: 'local_manager_1',
+        name: 'Manager Test',
+        phone: '+9710599999999',
+        userId: 'manager',
+        password: managerPassHash,
+        pin: managerPassHash,
+        role: 'manager',
+        shopId: 'SHOP_01',
+        createdAt: '2026-06-25T11:40:00.000Z'
+      }
+    ];
+
+    if (!isMongoConnected()) {
+      saveLocalUsers(defaultUsers);
+    } else {
+      await User.deleteMany({});
+      const seedUsers = defaultUsers.map(u => new User({
+        name: u.name,
+        phone: u.phone,
+        userId: u.userId,
+        password: 'Admin123',
+        pin: 'Admin123',
+        role: u.role,
+        shopId: u.shopId
+      }));
+
+      for (const u of seedUsers) {
+        await u.save();
+      }
+    }
+
+    res.json({ message: 'Users reset successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+

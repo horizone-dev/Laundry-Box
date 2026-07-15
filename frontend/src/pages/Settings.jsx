@@ -2,11 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Upload, CheckCircle, Image as ImageIcon, X, Sliders, Scissors,
   Mail, Phone, Globe, Building2, MapPin, CreditCard, Hash, FileText,
-  Percent, Settings2, Info, Plus, Trash2, Star, DollarSign, Clock, Database, Save, AlertCircle, RefreshCw, Lock, Unlock, Download, Cpu,
+  Percent, Settings2, Info, Plus, Trash2, Star, DollarSign, Clock, Database, Save, AlertCircle, RefreshCw, Lock, Unlock, Download, Cpu, Printer,
   ChevronLeft, ChevronRight
 } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 import getCroppedImg from '../utils/cropImage';
+import { DEFAULT_SHOP_ID, CATEGORIES, API_BASE_URL } from '../constants';
+import axios from 'axios';
 import { useSettings } from '../store/SettingsContext';
 import Activation from './Activation';
 import { t } from '../utils/translations';
@@ -14,6 +16,7 @@ import CurrencySymbol from '../components/CurrencySymbol';
 import InvoiceTemplate from '../components/InvoiceTemplate';
 import EmailReportsSettings from '../components/EmailReportsSettings';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import defaultLogo from '../assets/logo.png';
 import styles from './Settings.module.css';
 
@@ -30,13 +33,54 @@ export default function Settings() {
 
   const [activeTab, setActiveTab] = useState(
     isSuperAdmin
-      ? (tabParam || 'Nomod')
+      ? (tabParam || 'System Configuration')
       : (tabParam === 'Maintenance' && !(isSuperAdmin || isManager)) || (tabParam === 'Software Update' && !(isSuperAdmin || isManager))
         ? 'General'
         : (tabParam || 'General')
   );
-  const { settings, updateSettings } = useSettings();
+  const { 
+    settings, 
+    updateSettings, 
+    isSettingsDirty, 
+    setIsSettingsDirty, 
+    originalSettings, 
+    setOriginalSettings 
+  } = useSettings();
+
+  // Store initial settings copy when component mounts
+  useEffect(() => {
+    if (settings) {
+      setOriginalSettings(JSON.parse(JSON.stringify(settings)));
+    }
+    return () => {
+      setIsSettingsDirty(false);
+      setOriginalSettings(null);
+    };
+  }, []);
+
+  // Update isSettingsDirty flag by comparing current settings with originalSettings
+  useEffect(() => {
+    if (settings && originalSettings) {
+      const isModified = JSON.stringify(settings) !== JSON.stringify(originalSettings);
+      setIsSettingsDirty(isModified);
+    }
+  }, [settings, originalSettings]);
+
+  // Prevent browser window reload/close if settings are modified
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      const isDirty = originalSettings && JSON.stringify(settings) !== JSON.stringify(originalSettings);
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [settings, originalSettings]);
+
   const tabsRef = useRef(null);
+  const emailSaveRef = useRef(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
   const [isCreditLimitUnlocked, setIsCreditLimitUnlocked] = useState(false);
@@ -98,6 +142,12 @@ export default function Settings() {
 
   // Printer settings states
   const [availablePrinters, setAvailablePrinters] = useState([]);
+
+  const isVirtualPrinter = (name) => {
+    if (!name) return false;
+    const lc = name.toLowerCase();
+    return lc.includes('pdf') || lc.includes('xps') || lc.includes('onenote') || lc.includes('fax') || lc.includes('writer');
+  };
 
   // Software Update States
   const [updateStatus, setUpdateStatus] = useState({ type: 'idle' });
@@ -264,22 +314,23 @@ export default function Settings() {
 
   if (!isAuthorized) return null;
 
-  const tabs = [
-    'General',
-    'Order Workflow',
-    'Company Info',
-    'Tax Settings',
-    'Bill Templates',
-    'Bank',
-    ...(isSuperAdmin ? ['Nomod'] : (isManager && settings.allowManagerNomodConfig ? ['Nomod'] : [])),
-
-    'WhatsApp Config',
-    'Damage Notes',
-    'Printers',
-    ...(isSuperAdmin || isManager ? ['Maintenance', 'Software Update'] : []),
-    'Email Reports',
-    ...(isSuperAdmin ? ['Import Backup', 'System Reset'] : (isManager ? ['System Reset'] : []))
-  ];
+  const tabs = isSuperAdmin
+    ? ['System Configuration', 'Nomod', 'Maintenance']
+    : [
+        'General',
+        'Order Workflow',
+        'Company Info',
+        'Tax Settings',
+        'Bill Templates',
+        'Bank',
+        ...(isManager && settings.allowManagerNomodConfig ? ['Nomod'] : []),
+        'WhatsApp Config',
+        'Damage Notes',
+        'Printers',
+        ...(isManager ? ['Maintenance', 'Software Update'] : []),
+        'Email Reports',
+        ...(isManager ? ['System Reset'] : [])
+      ];
 
   const onCropComplete = (croppedArea, croppedAreaPixels) => {
     setCroppedAreaPixels(croppedAreaPixels);
@@ -329,7 +380,7 @@ export default function Settings() {
       setEditingStatusIdx(-1);
       return;
     }
-    const coreStatuses = ['Confirmed', 'Delivered', 'Cancelled'];
+    const coreStatuses = ['Confirmed', 'Delivered'];
     if (coreStatuses.includes(currentList[index])) {
       alert('Cannot edit system core statuses!');
       return;
@@ -343,7 +394,7 @@ export default function Settings() {
   const handleDeleteWorkflowStatus = (index) => {
     const currentList = settings.workflowStatuses || [];
     const statusToDelete = currentList[index];
-    const coreStatuses = ['Confirmed', 'Delivered', 'Cancelled'];
+    const coreStatuses = ['Confirmed', 'Delivered'];
     if (coreStatuses.includes(statusToDelete)) {
       alert('Cannot delete system core statuses!');
       return;
@@ -417,12 +468,19 @@ export default function Settings() {
         defaultCreditLimit: 500,
         lateDeliveryDays: 3,
         enableCreditLimitProtection: true,
-        enableManagerOverride: true
+        enableManagerOverride: true,
+        workflowEnabled: true,
+        zReportEnabled: true,
+        noModPayEnabled: true,
+        paymentHistoryEnabled: true,
+        zReportClosingType: 'Day Close',
+        silentPrinting: true,
+        pdfDownloadPath: ''
       };
     }
 
     if (toReset.workflowStatuses) {
-      newSettings.workflowStatuses = ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled'];
+      newSettings.workflowStatuses = ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered'];
     }
 
     if (toReset.presetDamageNotes) {
@@ -704,8 +762,10 @@ export default function Settings() {
           // Re-insert categories
           await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat1', shopId, 'Laundry', 'Droplet', now]);
           await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat2', shopId, 'Dry Cleaning', 'Wind', now]);
-          await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat3', shopId, 'Alterations', 'Scissors', now]);
-          await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat4', shopId, 'Premium', 'Sparkles', now]);
+          await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat3', shopId, 'Ironing / Pressing', 'Layers', now]);
+          await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat4', shopId, 'Shoe & Bag Cleaning', 'Sparkles', now]);
+          await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat5', shopId, 'Carpet & Rug Cleaning', 'Layers', now]);
+          await runQuery('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)', ['cat6', shopId, 'Curtain & Household Items', 'BedDouble', now]);
 
           summaryList.push('Services & Categories: Re-seeded default inventory services');
         }
@@ -735,7 +795,15 @@ export default function Settings() {
       if (toReset.billTemplates) summaryList.push('Bill Templates & Terms: Restored standard invoice template');
       if (toReset.waTemplates) summaryList.push('WhatsApp Templates: Restored default message formats');
       if (toReset.printers) summaryList.push('Printers Configuration: Cleared tag and billing printers');
-      if (toReset.gateways) summaryList.push('Nomod: Cleared Nomod credentials');
+      if (isFactory) {
+        try {
+          await axios.post(`${API_BASE_URL}/auth/reset`);
+          summaryList.push('Users & Staff: Restored default accounts (Super Admin, Manager, Cashier)');
+        } catch (authResetErr) {
+          console.error("Failed to reset users in backend:", authResetErr);
+          summaryList.push('Users & Staff: Reset failed (' + (authResetErr.response?.data?.error || authResetErr.message) + ')');
+        }
+      }
 
       // Update actual setting context
       await updateSettings(newSettings);
@@ -778,6 +846,49 @@ export default function Settings() {
     total: 35.1
   };
 
+  const handleSaveAllChanges = async () => {
+    if (activeTab === 'Email Reports' && emailSaveRef.current) {
+      const emailSuccess = await emailSaveRef.current();
+      if (!emailSuccess) {
+        return; // Validation error or API error
+      }
+    }
+
+    // Audit Logging for System Configuration Changes
+    const loggedKeys = [
+      { key: 'workflowEnabled', label: 'Workflow' },
+      { key: 'noModPayEnabled', label: 'NoMOD Pay' },
+      { key: 'paymentHistoryEnabled', label: 'Payment History' },
+      { key: 'zReportEnabled', label: 'Z Report' },
+      { key: 'zReportClosingType', label: 'Z Report Closing Type' }
+    ];
+
+    if (window.electronAPI?.dbQuery) {
+      for (const item of loggedKeys) {
+        const prev = originalSettings[item.key];
+        const curr = settings[item.key];
+        if (prev !== curr) {
+          const prevValStr = typeof prev === 'boolean' ? (prev ? 'ON' : 'OFF') : String(prev || '');
+          const currValStr = typeof curr === 'boolean' ? (curr ? 'ON' : 'OFF') : String(curr || '');
+          const auditDetails = `${prevValStr} → ${currValStr}`;
+          const auditId = 'AUD_' + Math.random().toString(36).substr(2, 9).toUpperCase();
+          try {
+            await window.electronAPI.dbQuery(
+              'INSERT INTO audit_logs (id, event, details, userId, userRole, timestamp, device) VALUES (?, ?, ?, ?, ?, ?, ?)',
+              [auditId, item.label, auditDetails, user.name || 'Admin', user.role || 'super_admin', new Date().toISOString(), 'Desktop-App']
+            );
+          } catch (e) {
+            console.error("Failed to write system config change to audit_logs", e);
+          }
+        }
+      }
+    }
+
+    setOriginalSettings(JSON.parse(JSON.stringify(settings)));
+    setIsSettingsDirty(false);
+    alert('System Configuration updated successfully. Changes have been applied.');
+  };
+
   console.log("Settings rendering tabs:", tabs, "isSuperAdmin:", isSuperAdmin, "userRole:", user.role);
 
   return (
@@ -788,7 +899,7 @@ export default function Settings() {
           <p>Configure company profiles, bill templates, and system preferences.</p>
         </div>
         <div className={styles.headerActions}>
-          <button className={styles.saveBtn} onClick={() => alert('All settings saved successfully!')}>
+          <button className={styles.saveBtn} onClick={handleSaveAllChanges}>
             <CheckCircle size={18} /> Save All Changes
           </button>
         </div>
@@ -1213,11 +1324,11 @@ export default function Settings() {
               <div className={styles.card}>
                 <h2 className={styles.cardTitle}>Order Workflow Statuses</h2>
                 <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1rem' }}>
-                  Configure custom workflow stages for your laundry. Core statuses (Confirmed, Delivered, Cancelled) are required by the system.
+                  Configure custom workflow stages for your laundry. Core statuses (Confirmed, Delivered) are required by the system.
                 </p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.5rem' }}>
                   {(settings.workflowStatuses || []).map((status, idx) => {
-                    const isCore = ['Confirmed', 'Delivered', 'Cancelled'].includes(status);
+                    const isCore = ['Confirmed', 'Delivered'].includes(status);
                     const isEditing = editingStatusIdx === idx;
                     return (
                       <div key={idx} style={{
@@ -2343,13 +2454,13 @@ export default function Settings() {
                 <div>
                   <h2 className={styles.cardTitle}>Printer Configuration</h2>
                   <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.5rem' }}>
-                    Select specific printers for receipt printing and garment tags. Leave as default to show the native print dialog every time.
+                    Configure hardware printing settings. Silent printing directs print jobs instantly to the chosen printer without showing the print dialog.
                   </p>
                 </div>
 
                 <div className={styles.formGrid}>
                   <div className={styles.formGroup}>
-                    <label>Billing & Receipt Printer</label>
+                    <label>Default Printer</label>
                     <div className={styles.inputWrapper}>
                       <select
                         className={styles.inputField}
@@ -2359,13 +2470,59 @@ export default function Settings() {
                         <option value="">Show Print Dialog (Ask Every Time)</option>
                         <option value="System Default Printer">System Default Printer (Silent)</option>
                         {availablePrinters.map(p => (
-                          <option key={p.name} value={p.name}>{p.name} {p.isDefault ? '(Default)' : ''}</option>
+                          <option key={p.name} value={p.name}>
+                            {p.name} {p.isDefault ? '(Default)' : ''} {isVirtualPrinter(p.name) ? '⚠️ (Virtual/No Silent)' : ''}
+                          </option>
                         ))}
                       </select>
                     </div>
-                    <p style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.5rem' }}>
+                    <p style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.5rem', marginBottom: '0.5rem' }}>
                       Printers configured here will be used when printing billing invoices and receipts.
                     </p>
+                    <button
+                      type="button"
+                      className={styles.saveBtn}
+                      style={{ background: '#475569', padding: '0.4rem 0.8rem', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '4px', height: 'auto', minHeight: 'unset' }}
+                      onClick={async () => {
+                        const printer = settings.billingPrinter;
+                        if (!printer) {
+                          alert("Please select a default printer first.");
+                          return;
+                        }
+                        const testHtml = `
+                          <div style="width: 80mm; font-family: 'Courier New', Courier, monospace; padding: 10px; text-align: center; font-size: 12px; color: black; background: white;">
+                            <h2 style="margin: 0; font-size: 16px;">LAUNDRY BOX</h2>
+                            <p style="margin: 2px 0;">--------------------------------</p>
+                            <h3 style="margin: 5px 0; font-size: 13px;">PRINTER TEST RECEIPT</h3>
+                            <p style="margin: 2px 0; text-align: left;">Printer: ${printer}</p>
+                            <p style="margin: 2px 0; text-align: left;">Status: ONLINE / ACTIVE</p>
+                            <p style="margin: 2px 0; text-align: left;">Date: ${new Date().toLocaleString()}</p>
+                            <p style="margin: 2px 0;">--------------------------------</p>
+                            <p style="margin: 5px 0;">Test print completed successfully!</p>
+                            <p style="margin: 0;">Thank you!</p>
+                          </div>
+                        `;
+                        if (window.electronAPI?.printInvoice) {
+                          const res = await window.electronAPI.printInvoice({
+                            html: testHtml,
+                            css: '',
+                            printerName: printer,
+                            silent: settings.silentPrinting !== false
+                          });
+                          if (res.success) {
+                            alert("Test receipt sent successfully!");
+                          } else {
+                            alert("Test print failed: " + res.error);
+                          }
+                        } else {
+                          const win = window.open('', '', 'width=400,height=400');
+                          win.document.write(`<html><body onload="window.print();window.close();">${testHtml}</body></html>`);
+                          win.document.close();
+                        }
+                      }}
+                    >
+                      <Printer size={12} /> Test Default Printer
+                    </button>
                   </div>
 
                   <div className={styles.formGroup}>
@@ -2379,13 +2536,94 @@ export default function Settings() {
                         <option value="">Show Print Dialog (Ask Every Time)</option>
                         <option value="System Default Printer">System Default Printer (Silent)</option>
                         {availablePrinters.map(p => (
-                          <option key={p.name} value={p.name}>{p.name} {p.isDefault ? '(Default)' : ''}</option>
+                          <option key={p.name} value={p.name}>
+                            {p.name} {p.isDefault ? '(Default)' : ''} {isVirtualPrinter(p.name) ? '⚠️ (Virtual/No Silent)' : ''}
+                          </option>
                         ))}
                       </select>
                     </div>
-                    <p style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.5rem' }}>
+                    <p style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.5rem', marginBottom: '0.5rem' }}>
                       Printers configured here will be used when printing garment identification tags.
                     </p>
+                    <button
+                      type="button"
+                      className={styles.saveBtn}
+                      style={{ background: '#475569', padding: '0.4rem 0.8rem', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '4px', height: 'auto', minHeight: 'unset' }}
+                      onClick={async () => {
+                        const printer = settings.tagPrinter;
+                        if (!printer) {
+                          alert("Please select a garment tag printer first.");
+                          return;
+                        }
+                        const testHtml = `
+                          <div style="width: 80mm; font-family: 'Courier New', Courier, monospace; padding: 10px; text-align: center; font-size: 12px; color: black; background: white;">
+                            <h2 style="margin: 0; font-size: 16px;">TAG TEST</h2>
+                            <p style="margin: 2px 0;">--------------------------------</p>
+                            <h3 style="margin: 5px 0; font-size: 13px;">GARMENT TAG TEST</h3>
+                            <p style="margin: 2px 0; text-align: left;">Printer: ${printer}</p>
+                            <p style="margin: 2px 0; text-align: left;">Status: ONLINE / ACTIVE</p>
+                            <p style="margin: 2px 0; text-align: left;">Date: ${new Date().toLocaleString()}</p>
+                            <p style="margin: 2px 0;">--------------------------------</p>
+                            <p style="margin: 5px 0;">Test tag print completed successfully!</p>
+                            <p style="margin: 0;">Thank you!</p>
+                          </div>
+                        `;
+                        if (window.electronAPI?.printInvoice) {
+                          const res = await window.electronAPI.printInvoice({
+                            html: testHtml,
+                            css: '',
+                            printerName: printer,
+                            silent: settings.silentPrinting !== false
+                          });
+                          if (res.success) {
+                            alert("Test tag print sent successfully!");
+                          } else {
+                            alert("Test print failed: " + res.error);
+                          }
+                        } else {
+                          const win = window.open('', '', 'width=400,height=400');
+                          win.document.write(`<html><body onload="window.print();window.close();">${testHtml}</body></html>`);
+                          win.document.close();
+                        }
+                      }}
+                    >
+                      <Printer size={12} /> Test Tag Printer
+                    </button>
+                  </div>
+                </div>
+
+                {(isVirtualPrinter(settings.billingPrinter) || isVirtualPrinter(settings.tagPrinter)) && (
+                  <div style={{ marginTop: '1.5rem', background: '#FEF3C7', border: '1px solid #F59E0B', padding: '1rem', borderRadius: '8px', color: '#92400E', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                    <Info size={16} />
+                    <span><strong>Warning:</strong> You have selected a virtual printer (e.g. PDF/XPS). Silent printing to virtual printers will prompt file save dialogs and may not work as expected in the background.</span>
+                  </div>
+                )}
+
+                <div style={{ marginTop: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', borderTop: '1px solid #E2E8F0', paddingTop: '1.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>Auto Print Invoice</h4>
+                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Automatically trigger printing immediately after checkout completes</p>
+                    </div>
+                    <div
+                      className={`${styles.switch} ${settings.autoPrint ? styles.switchOn : ''}`}
+                      onClick={() => updateSettings({ autoPrint: !settings.autoPrint })}
+                    >
+                      <div className={styles.switchHandle}></div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>Silent Printing</h4>
+                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Send prints directly to hardware without prompting the OS print dialog window</p>
+                    </div>
+                    <div
+                      className={`${styles.switch} ${settings.silentPrinting ? styles.switchOn : ''}`}
+                      onClick={() => updateSettings({ silentPrinting: !settings.silentPrinting })}
+                    >
+                      <div className={styles.switchHandle}></div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2436,6 +2674,44 @@ export default function Settings() {
                       >
                         <Save size={18} /> Choose Path & Backup Now
                       </button>
+                    </div>
+                  </div>
+
+                  <div className={styles.backupBox} style={{ background: '#F8FAFC', padding: '2rem', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '2rem', marginTop: '1.5rem' }}>
+                    <div className={styles.backupIcon} style={{ background: '#EFF6FF', padding: '1rem', borderRadius: '12px' }}>
+                      <Download size={32} color="#3B82F6" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Default PDF Download Path</h3>
+                      <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                        Set the default folder where invoice PDFs are automatically saved when you click download. 
+                        Currently set to: <strong style={{ color: '#1E293B' }}>{settings.pdfDownloadPath || 'System Downloads Folder'}</strong>
+                      </p>
+                      <div style={{ display: 'flex', gap: '1rem' }}>
+                        <button
+                          className={styles.saveBtn}
+                          style={{ background: '#3B82F6', padding: '0.75rem 1.5rem' }}
+                          onClick={async () => {
+                            if (window.electronAPI?.selectFolder) {
+                              const path = await window.electronAPI.selectFolder();
+                              if (path) {
+                                updateSettings({ pdfDownloadPath: path });
+                              }
+                            }
+                          }}
+                        >
+                          Choose Download Folder
+                        </button>
+                        {settings.pdfDownloadPath && (
+                          <button
+                            className={styles.saveBtn}
+                            style={{ background: '#64748B', padding: '0.75rem 1.5rem' }}
+                            onClick={() => updateSettings({ pdfDownloadPath: '' })}
+                          >
+                            Reset to Default (Downloads)
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -2741,13 +3017,155 @@ export default function Settings() {
                       </button>
                     </div>
                   )}
+
+                  {/* Changelog / Release History */}
+                  <div style={{ marginTop: '2rem', borderTop: '1px solid #E2E8F0', paddingTop: '2rem' }}>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#0F172A', marginBottom: '1rem' }}>Version Release Notes</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                      <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '1.25rem', borderRadius: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                          <span style={{ fontWeight: 700, color: '#1E293B', fontSize: '0.9rem' }}>v1.0.5 (Latest Version)</span>
+                          <span style={{ fontSize: '0.75rem', background: '#DBEAFE', color: '#1E40AF', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>Active</span>
+                        </div>
+                        <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.85rem', color: '#475569', lineHeight: '1.6' }}>
+                          <li><b>Credit Limit Default Fix:</b> Resolved shop default limit display inside customer database view.</li>
+                          <li><b>Delete Order Fix:</b> Resolved deletion crashes and unique constraints on recycled order IDs.</li>
+                          <li><b>Sequential Numbers:</b> Enabled continuous sequence logic for both Order and Receipt IDs.</li>
+                          <li><b>Advance Handling:</b> Standardized "Convert to Advance" allocation logic during refunds.</li>
+                          <li><b>Returns UI Tab:</b> Added detailed blue <b>CREDITED TO ADVANCE</b> status for refunded orders.</li>
+                          <li><b>Garment Tags:</b> Hidden tag overlays from the main screen during printing.</li>
+                        </ul>
+                      </div>
+
+                      <div style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', padding: '1.25rem', borderRadius: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                          <span style={{ fontWeight: 600, color: '#1E293B', fontSize: '0.9rem' }}>v1.0.4</span>
+                          <span style={{ fontSize: '0.75rem', color: '#64748B' }}>July 14, 2026</span>
+                        </div>
+                        <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.85rem', color: '#475569', lineHeight: '1.6' }}>
+                          <li><b>Bilingual Receipt Layout:</b> Perfect Arabic translation and thermal formatting alignment.</li>
+                          <li><b>Auto-print & PDF Export:</b> Native Electron print engine integration for faster outputs.</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
           {activeTab === 'Email Reports' && (
-            <EmailReportsSettings />
+            <EmailReportsSettings registerSave={(saveFn) => { emailSaveRef.current = saveFn; }} setIsSettingsDirty={setIsSettingsDirty} />
+          )}
+
+          {activeTab === 'System Configuration' && (
+            <div className={styles.profileContainer}>
+              <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
+                <h2 className={styles.cardTitle}>System Configuration</h2>
+                <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.5rem' }}>
+                  Enable or disable application modules. Turning off a module hides it from the sidebar and restricts direct access.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '1rem' }}>
+                    <div style={{ flex: 1 }}>
+                      <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>NoMOD Pay</h4>
+                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Enable digital payment links and gateway accounts via NoMOD</p>
+                    </div>
+                    <div
+                      className={`${styles.switch} ${settings.noModPayEnabled ? styles.switchOn : ''}`}
+                      onClick={() => updateSettings({ noModPayEnabled: !settings.noModPayEnabled })}
+                    >
+                      <div className={styles.switchHandle}></div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '1rem' }}>
+                    <div style={{ flex: 1 }}>
+                      <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>Payment History</h4>
+                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>View list of all digital transactions and checkout logs</p>
+                    </div>
+                    <div
+                      className={`${styles.switch} ${settings.paymentHistoryEnabled ? styles.switchOn : ''}`}
+                      onClick={() => updateSettings({ paymentHistoryEnabled: !settings.paymentHistoryEnabled })}
+                    >
+                      <div className={styles.switchHandle}></div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '1rem' }}>
+                    <div style={{ flex: 1 }}>
+                      <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>Workflow</h4>
+                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Enable the order status workflow board (Kanban)</p>
+                    </div>
+                    <div
+                      className={`${styles.switch} ${settings.workflowEnabled ? styles.switchOn : ''}`}
+                      onClick={() => updateSettings({ workflowEnabled: !settings.workflowEnabled })}
+                    >
+                      <div className={styles.switchHandle}></div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '1rem' }}>
+                    <div style={{ flex: 1 }}>
+                      <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>Z Report</h4>
+                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Enable end-of-day daily business report and reconciliation logs</p>
+                    </div>
+                    <div
+                      className={`${styles.switch} ${settings.zReportEnabled ? styles.switchOn : ''}`}
+                      onClick={() => updateSettings({ zReportEnabled: !settings.zReportEnabled })}
+                    >
+                      <div className={styles.switchHandle}></div>
+                    </div>
+                  </div>
+
+                  {settings.zReportEnabled && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      style={{ background: '#F8FAFC', borderRadius: '8px', padding: '1rem', marginTop: '0.5rem', border: '1px dashed #CBD5E1' }}
+                    >
+                      <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Z Report Configuration</h4>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#334155' }}>Report Closing Type</span>
+                        
+                        <div style={{ display: 'flex', gap: '2rem' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: '#334155', fontWeight: 500 }}>
+                            <input
+                              type="radio"
+                              name="zReportClosingType"
+                              value="Day Close"
+                              checked={settings.zReportClosingType === 'Day Close'}
+                              onChange={() => updateSettings({ zReportClosingType: 'Day Close' })}
+                              style={{ cursor: 'pointer' }}
+                            />
+                            Day Close
+                          </label>
+                          
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: '#334155', fontWeight: 500 }}>
+                            <input
+                              type="radio"
+                              name="zReportClosingType"
+                              value="Shift Close"
+                              checked={settings.zReportClosingType === 'Shift Close'}
+                              onChange={() => updateSettings({ zReportClosingType: 'Shift Close' })}
+                              style={{ cursor: 'pointer' }}
+                            />
+                            Shift Close
+                          </label>
+                        </div>
+                        <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.7rem', color: '#64748B', lineHeight: '1.4' }}>
+                          {settings.zReportClosingType === 'Day Close' 
+                            ? 'One summary Z Report will be generated for the entire calendar business day.' 
+                            : 'Z Reports will be segmented and generated independently for each individual employee shift.'}
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
 
           {activeTab === 'System Reset' && (

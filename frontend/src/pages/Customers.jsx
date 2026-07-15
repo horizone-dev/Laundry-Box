@@ -83,6 +83,9 @@ export default function Customers() {
   const [pinActionTarget, setPinActionTarget] = useState(null);
   const [selectedBillForPayment, setSelectedBillForPayment] = useState(null);
   const [selectedInvoiceForView, setSelectedInvoiceForView] = useState(null);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [orderToRefund, setOrderToRefund] = useState(null);
+  const [selectedRefundMethod, setSelectedRefundMethod] = useState('Cash');
   const [selectedCustomerStats, setSelectedCustomerStats] = useState({
     totalSales: 0,
     pendingDue: 0,
@@ -376,19 +379,23 @@ export default function Customers() {
                 [newPaid, newDue, newStatus, split.method, timestamp, bill.id]
               );
 
+              const payId = await getNextRvNumber();
+              const payRef = await window.electronAPI.getNextPaymentReference('PAY');
               await window.electronAPI.dbQuery(
-                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-                [`PAY-${Date.now()}-${bill.id}-${split.method}`, selectedCustomer.id, bill.id, DEFAULT_SHOP_ID, paymentForThisBill, split.method, 'SUCCESS', timestamp, timestamp]
+                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+                [payId, selectedCustomer.id, bill.id, DEFAULT_SHOP_ID, paymentForThisBill, split.method, 'SUCCESS', timestamp, timestamp, payRef]
               );
             }
           }
 
           if (remainingPayment > 0) {
+            const payId = await getNextRvNumber();
+            const payRef = await window.electronAPI.getNextPaymentReference('ADV');
             await window.electronAPI.dbQuery(
-              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-              [`PAY-ADV-${Date.now()}-${split.method}`, selectedCustomer.id, null, DEFAULT_SHOP_ID, remainingPayment, split.method, 'SUCCESS', timestamp, timestamp]
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+              [payId, selectedCustomer.id, null, DEFAULT_SHOP_ID, remainingPayment, split.method, 'SUCCESS', timestamp, timestamp, payRef]
             );
           }
 
@@ -404,11 +411,32 @@ export default function Customers() {
               ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
               : (split.method === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
 
+          const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+          const creatorName = currentUser.name || currentUser.username || 'System';
+          const creatorId = currentUser.id || 'SYSTEM';
+          const creatorRole = currentUser.role || 'system';
+
           await window.electronAPI.dbQuery(
             `INSERT INTO account_transactions 
-             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [txnId, DEFAULT_SHOP_ID, (split.method === 'Bank' || split.method === 'Card' || split.method === 'UPI') ? 'BANK' : 'CASH', 'INCOME', 'Credit Settlement', split.amount, `Settlement from ${selectedCustomer.name} (${split.method})`, txnTimestamp, 0, timestamp, 'DollarSign', mappedBankId]
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              txnId, 
+              DEFAULT_SHOP_ID, 
+              (split.method === 'Bank' || split.method === 'Card' || split.method === 'UPI') ? 'BANK' : 'CASH', 
+              'INCOME', 
+              'Credit Settlement', 
+              split.amount, 
+              `Settlement from ${selectedCustomer.name} (${split.method})`, 
+              txnTimestamp, 
+              0, 
+              timestamp, 
+              'DollarSign', 
+              mappedBankId,
+              creatorName,
+              creatorId,
+              creatorRole
+            ]
           );
 
           if (split.method === 'Card' && settings.cardCommission > 0) {
@@ -418,9 +446,25 @@ export default function Customers() {
             const commDesc = `Card Commission for Credit Settlement ${selectedCustomer.name}`;
             await window.electronAPI.dbQuery(
               `INSERT INTO account_transactions 
-               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, 0, timestamp, 'Percent', mappedBankId]
+                (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                commTxnId, 
+                DEFAULT_SHOP_ID, 
+                'BANK', 
+                'EXPENSE', 
+                'Card Commission', 
+                commissionAmount, 
+                commDesc, 
+                txnTimestamp, 
+                0, 
+                timestamp, 
+                'Percent', 
+                mappedBankId,
+                creatorName,
+                creatorId,
+                creatorRole
+              ]
             );
           }
         }
@@ -489,10 +533,25 @@ export default function Customers() {
     }
   };
 
+  const getNextRvNumber = async () => {
+    try {
+      if (window.electronAPI && typeof window.electronAPI.getNextRvNumber === 'function') {
+        const nextId = await window.electronAPI.getNextRvNumber();
+        if (nextId) return nextId;
+      }
+    } catch (err) {
+      console.warn("Failed to get sequential RV from main, falling back:", err);
+    }
+    return `PAY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  };
+
   const formatPaymentId = (pay) => {
-    if (!pay || !pay.id) return '';
+    if (!pay || (!pay.id && !pay.paymentReference)) return '';
+    if (pay.paymentReference) return pay.paymentReference;
+    if (pay.id && pay.id.startsWith('RV-')) return pay.id;
     if (pay.orderId) return `PAY-${pay.orderId}`;
     
+    if (!pay.id) return '';
     const parts = pay.id.split('-');
     const lastPart = parts[parts.length - 1];
     
@@ -574,76 +633,10 @@ export default function Customers() {
     }
   };
 
-  const handleViewPaymentDetails = async (pay) => {
+  const handleViewPaymentDetails = (pay) => {
     if (!pay) return;
-    if (pay.orderId) {
-      try {
-        const orderRes = await window.electronAPI.dbQuery(
-          "SELECT orders.*, customers.name as customerName, customers.phone as customerPhone FROM orders LEFT JOIN customers ON orders.customerId = customers.id WHERE orders.id = ? OR orders.billNumber = ?",
-          [pay.orderId, pay.orderId]
-        );
-        if (orderRes.success && orderRes.data.length > 0) {
-          const rawOrder = orderRes.data[0];
-          let parsedItems = [];
-          try {
-            if (rawOrder.items) {
-              parsedItems = typeof rawOrder.items === 'string' ? JSON.parse(rawOrder.items) : rawOrder.items;
-            }
-          } catch (e) {}
-          let parsedBreakdown = null;
-          try {
-            if (rawOrder.paymentBreakdown) {
-              parsedBreakdown = typeof rawOrder.paymentBreakdown === 'string' ? JSON.parse(rawOrder.paymentBreakdown) : rawOrder.paymentBreakdown;
-            }
-          } catch (e) {}
-          
-          const formatDateTime = (dateVal) => {
-            if (!dateVal) return 'N/A';
-            const formattedDate = formatDate(dateVal);
-            if (formattedDate === 'N/A' || formattedDate === 'Invalid Date') return formattedDate;
-            let d = new Date(dateVal);
-            let hours = d.getHours();
-            const minutes = String(d.getMinutes()).padStart(2, '0');
-            let ampm = settings.timeFormat === '12h' ? (hours >= 12 ? ' PM' : ' AM') : '';
-            if (settings.timeFormat === '12h') {
-              hours = hours % 12 || 12;
-            }
-            return `${formattedDate} ${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
-          };
-
-          setSelectedInvoiceForView({
-            ...rawOrder,
-            id: rawOrder.id,
-            billNumber: rawOrder.billNumber || '',
-            date: formatDateTime(rawOrder.createdAt),
-            customer: rawOrder.customerName || rawOrder.customerId,
-            customerId: rawOrder.customerId,
-            customerPhone: rawOrder.customerPhone || '',
-            residency: 'Customer Residency',
-            status: rawOrder.status,
-            paymentStatus: rawOrder.paymentStatus,
-            paymentMethod: rawOrder.paymentMethod || 'Not Paid',
-            total: rawOrder.totalAmount,
-            paidAmount: rawOrder.paidAmount || 0,
-            dueAmount: rawOrder.dueAmount ?? (rawOrder.totalAmount - (rawOrder.paidAmount || 0)),
-            items: parsedItems,
-            paymentBreakdown: parsedBreakdown,
-            totalBalance: selectedCustomer?.balance || 0,
-            previousBalance: (selectedCustomer?.balance || 0) - (rawOrder.totalAmount - (rawOrder.paidAmount || 0))
-          });
-        } else {
-          setSelectedPaymentForAction(pay);
-          setShowPaymentViewModal(true);
-        }
-      } catch (err) {
-        console.error("View payment invoice error:", err);
-        setSelectedPaymentForAction(pay);
-        setShowPaymentViewModal(true);
-      }
-    } else {
-      setSelectedPaymentForAction(pay);
-      setShowPaymentViewModal(true);
-    }
+    setSelectedPaymentForAction(pay);
+    setShowPaymentViewModal(true);
   };
 
   const handleDeletePaymentRecord = async (paymentId) => {
@@ -698,6 +691,7 @@ export default function Customers() {
         [payment.amount, timestamp, selectedCustomer.id]
       );
 
+      await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE paymentId = ?", [payment.id]);
       await window.electronAPI.dbQuery("DELETE FROM payments WHERE id = ?", [payment.id]);
 
       const payDate = new Date(payment.createdAt);
@@ -868,20 +862,39 @@ export default function Customers() {
           [customer.id]
         );
         let bills = result.success ? result.data : [];
-        bills.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         setCustomerBills(bills.filter(b => b.status !== 'Cancelled'));
-        setCustomerReturns(bills.filter(b => b.status === 'Cancelled'));
+
+        const deletedRes = await window.electronAPI.dbQuery(
+          "SELECT * FROM deleted_orders WHERE customerId = ? ORDER BY deletedAt DESC",
+          [customer.id]
+        );
+        let deletedBills = deletedRes.success ? deletedRes.data : [];
+
+        const combinedReturns = [
+          ...bills.filter(b => b.status === 'Cancelled').map(b => ({
+            ...b,
+            isDeleted: false,
+            refundStatus: 'Cancelled'
+          })),
+          ...deletedBills.map(db => ({
+            ...db,
+            createdAt: db.deletedAt,
+            isDeleted: true
+          }))
+        ];
+        combinedReturns.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        setCustomerReturns(combinedReturns);
 
         const paymentsRes = await window.electronAPI.dbQuery(
           "SELECT * FROM payments WHERE customerId = ? ORDER BY createdAt DESC",
           [customer.id]
         );
         let payments = paymentsRes.success ? paymentsRes.data : [];
-        payments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         setCustomerPayments(payments);
 
         const totalSales = bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
-        const salesReturn = bills.filter(b => b.status === 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+        const salesReturn = bills.filter(b => b.status === 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0) +
+          deletedBills.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
         
         let totalDiscount = 0;
         bills.forEach(bill => {
@@ -893,11 +906,35 @@ export default function Customers() {
           } catch (e) {}
         });
 
+        const advStatsRes = await window.electronAPI.dbQuery(
+          `SELECT 
+             (SELECT IFNULL(SUM(amount), 0) FROM payments WHERE customerId = ? AND (orderId IS NULL OR orderId = '')) as totalRecv,
+             (SELECT IFNULL(SUM(a.amountUsed), 0) 
+              FROM advance_allocations a
+              JOIN orders o ON a.orderId = o.id
+              JOIN payments p ON a.paymentId = p.id
+              WHERE p.customerId = ? AND o.status != 'Cancelled') as totalUsed`,
+          [customer.id, customer.id]
+        );
+        const advStats = advStatsRes.success && advStatsRes.data?.[0] ? advStatsRes.data[0] : { totalRecv: 0, totalUsed: 0 };
+        const totalAdvanceReceived = advStats.totalRecv;
+        const advanceUsed = advStats.totalUsed;
+        
+        // Follow business rules for net customer balance to prevent negative values:
+        // - balance > 0: customer has outstanding due (Pending Due = balance, Available Advance = 0)
+        // - balance <= 0: customer has advance credit (Pending Due = 0, Available Advance = abs(balance))
+        const balanceVal = customer.balance || 0;
+        const pendingDue = balanceVal > 0 ? balanceVal : 0;
+        const availableAdvance = balanceVal < 0 ? Math.abs(balanceVal) : 0;
+
         setSelectedCustomerStats({
           totalSales,
-          pendingDue: customer.balance || 0,
+          pendingDue,
           salesReturn,
-          totalDiscount
+          totalDiscount,
+          totalAdvanceReceived,
+          advanceUsed,
+          availableAdvance
         });
         setViewMode('insight');
         setInsightTab('sales');
@@ -914,7 +951,7 @@ export default function Customers() {
       alert('Restricted: Paid orders cannot be cancelled/deleted.');
       return;
     }
-    if (!window.confirm(`Are you sure you want to cancel order ${bill.billNumber || bill.id}?`)) return;
+    if (!window.confirm(`Are you sure you want to cancel order ${settings.invoicePrefix || ''}${bill.id}?`)) return;
 
     const timestamp = getLocalISOString();
     try {
@@ -942,6 +979,113 @@ export default function Customers() {
     } catch (err) {
       console.error('Cancel order error:', err);
       alert('Failed to cancel order.');
+    }
+  };
+
+  const confirmRefund = async () => {
+    if (!orderToRefund) return;
+    try {
+      const nowIso = getLocalISOString();
+      if (window.electronAPI?.dbQuery) {
+        // 1. Process refund if paid amount exists: Create a single Return expense transaction
+        const paidAmt = orderToRefund.paidAmount || 0;
+        if (paidAmt > 0) {
+          const refundTxnId = `TXN-RETURN-${Date.now()}`;
+          const _nowD = new Date();
+          const txnTimestamp = `${_nowD.getFullYear()}-${String(_nowD.getMonth()+1).padStart(2,'0')}-${String(_nowD.getDate()).padStart(2,'0')} ${String(_nowD.getHours()).padStart(2,'0')}:${String(_nowD.getMinutes()).padStart(2,'0')}`;
+          
+          const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+          const creatorName = userSession.name || userSession.username || 'System';
+          const creatorId = userSession.id || 'SYSTEM';
+          const creatorRole = userSession.role || 'system';
+
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+              (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              refundTxnId,
+              orderToRefund.shopId || 'SHOP_01',
+              selectedRefundMethod === 'Bank' ? 'BANK' : 'CASH',
+              'EXPENSE',
+              'Return',
+              paidAmt,
+              `Return - Order ${orderToRefund.id.startsWith('#') ? '' : '#'}${orderToRefund.id}`,
+              txnTimestamp,
+              0,
+              getLocalISOString(),
+              'Zap',
+              selectedRefundMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null,
+              creatorName,
+              creatorId,
+              creatorRole
+            ]
+          );
+        }
+
+        // 2. Update return status and refund details in SQLite database
+        await window.electronAPI.dbQuery(
+          "UPDATE deleted_orders SET returnStatus = 'Returned', refundStatus = 'Returned', refundMethod = ?, returnedAt = ? WHERE id = ?",
+          [selectedRefundMethod, nowIso, orderToRefund.id]
+        );
+
+        // 3. Adjust customer balance (since refund is no longer pending, add it back to customer balance)
+        if (paidAmt > 0 && orderToRefund.customerId && orderToRefund.customerId !== 'Walk-in') {
+          await window.electronAPI.dbQuery(
+            'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+            [paidAmt, getLocalISOString(), orderToRefund.customerId]
+          );
+        }
+
+        // 4. Run data healer to make sure sync and state are correct
+        if (window.electronAPI?.runDataHealer) {
+          await window.electronAPI.runDataHealer();
+        }
+      }
+      
+      setCustomerReturns(prev =>
+        prev.map((o) =>
+          o.id === orderToRefund.id
+            ? {
+                ...o,
+                returnStatus: 'Returned',
+                refundStatus: 'Returned',
+                refundMethod: selectedRefundMethod,
+                returnedAt: nowIso,
+              }
+            : o
+        )
+      );
+
+      // Attempt backend sync
+      try {
+        await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/orders/deleted/${encodeURIComponent(orderToRefund.id)}/refund`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              returnStatus: 'Returned',
+              refundStatus: 'Returned',
+              refundMethod: selectedRefundMethod,
+            }),
+          }
+        ).catch(() => {});
+      } catch (e) {}
+
+      // Reload/update the current customer's data so the balance updates in the UI
+      const updatedCustomerRes = await window.electronAPI.dbQuery("SELECT * FROM customers WHERE id = ?", [selectedCustomer.id]);
+      if (updatedCustomerRes.success && updatedCustomerRes.data.length > 0) {
+        setSelectedCustomer(updatedCustomerRes.data[0]);
+      }
+      fetchCustomers();
+
+      alert("Refund processed successfully!");
+      setShowRefundModal(false);
+      setOrderToRefund(null);
+    } catch (err) {
+      console.error("Refund error:", err);
+      alert("Failed to process refund: " + err.message);
     }
   };
 
@@ -1085,8 +1229,8 @@ export default function Customers() {
             <div>
               <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Credit Limit</div>
               <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--primary)' }}>
-                <CurrencySymbol size={14} /> {(selectedCustomer.creditLimit || 0).toFixed(2)}
-                {selectedCustomer.creditLimit === 0 && <span style={{ fontSize: '0.7rem', color: '#94A3B8', marginLeft: '0.25rem' }}>(Shop default: {settings.defaultCreditLimit})</span>}
+                <CurrencySymbol size={14} /> {(selectedCustomer.creditLimit || settings.defaultCreditLimit || 500).toFixed(2)}
+                {(!selectedCustomer.creditLimit || selectedCustomer.creditLimit === 0) && <span style={{ fontSize: '0.7rem', color: '#94A3B8', marginLeft: '0.25rem' }}>(Shop default)</span>}
               </div>
             </div>
 
@@ -1115,6 +1259,29 @@ export default function Customers() {
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
                 <span style={{ color: '#64748B', fontWeight: 600 }}>Total Discount</span>
                 <span style={{ fontWeight: 700, color: '#1E293B' }}>{(selectedCustomerStats.totalDiscount || 0).toFixed(2)}</span>
+              </div>
+            </div>
+
+            <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.25rem 0' }} />
+
+            <div>
+              <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.5rem', marginBottom: '1rem', letterSpacing: '0.05em' }}>Advance Details</h3>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
+                <span style={{ color: '#64748B', fontWeight: 600 }}>Total Advance Received</span>
+                <span style={{ fontWeight: 700, color: '#1E293B' }}>{(selectedCustomerStats.totalAdvanceReceived || 0).toFixed(2)}</span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
+                <span style={{ color: '#64748B', fontWeight: 600 }}>Advance Used</span>
+                <span style={{ fontWeight: 700, color: '#1E293B' }}>{(selectedCustomerStats.advanceUsed || 0).toFixed(2)}</span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
+                <span style={{ color: '#64748B', fontWeight: 600 }}>Available Advance</span>
+                <span style={{ fontWeight: 800, color: 'var(--secondary)' }}>
+                  {(selectedCustomerStats.availableAdvance || 0).toFixed(2)}
+                </span>
               </div>
             </div>
           </div>
@@ -1157,7 +1324,7 @@ export default function Customers() {
                   <tbody>
                     {customerBills.length > 0 ? customerBills.map((bill) => (
                       <tr key={bill.id}>
-                        <td style={{ fontWeight: 700 }}>{bill.billNumber || bill.id}</td>
+                        <td style={{ fontWeight: 700 }}>{settings.invoicePrefix || ''}{bill.id}</td>
                         <td>{formatDate(bill.createdAt)}</td>
                         <td><CurrencySymbol size={13} /> {(bill.totalAmount || 0).toFixed(2)}</td>
                         <td style={{ fontWeight: 700, color: (bill.dueAmount || 0) <= 0 ? 'var(--secondary)' : ((bill.paidAmount || 0) > 0 ? 'var(--warning)' : 'var(--danger)') }}>
@@ -1275,7 +1442,7 @@ export default function Customers() {
                   <tbody>
                     {customerPayments.length > 0 ? customerPayments.map((pay) => (
                       <tr key={pay.id}>
-                        <td style={{ fontWeight: 700 }} title={pay.id}>{formatPaymentId(pay)}</td>
+                        <td style={{ fontWeight: 700 }} title={formatPaymentId(pay)}>{formatPaymentId(pay)}</td>
                         <td>{formatDate(pay.createdAt)}</td>
                         <td><CurrencySymbol size={13} /> {(pay.amount || 0).toFixed(2)}</td>
                         <td style={{ fontWeight: 600 }}>{pay.method}</td>
@@ -1337,21 +1504,43 @@ export default function Customers() {
                       <th style={{ background: '#F8FAFC' }}># Order</th>
                       <th style={{ background: '#F8FAFC' }}>Date</th>
                       <th style={{ background: '#F8FAFC' }}>Net Amount</th>
-                      <th style={{ background: '#F8FAFC' }}>Status</th>
+                      <th style={{ background: '#F8FAFC' }}>Paid Amount</th>
+                      <th style={{ background: '#F8FAFC' }}>Refund/Return Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {customerReturns.length > 0 ? customerReturns.map((ret) => (
                       <tr key={ret.id}>
-                        <td style={{ fontWeight: 700 }}>{ret.billNumber || ret.id}</td>
+                        <td style={{ fontWeight: 700 }}>{settings.invoicePrefix || ''}{ret.id}</td>
                         <td>{formatDate(ret.createdAt)}</td>
                         <td><CurrencySymbol size={13} /> {(ret.totalAmount || 0).toFixed(2)}</td>
+                        <td><CurrencySymbol size={13} /> {(ret.paidAmount || 0).toFixed(2)}</td>
                         <td>
-                          <span style={{ color: 'var(--danger)', fontWeight: 700, fontSize: '0.8rem' }}>CANCELLED</span>
+                          {!ret.isDeleted ? (
+                            <span style={{ color: 'var(--danger)', fontWeight: 700, fontSize: '0.8rem' }}>CANCELLED</span>
+                          ) : ret.refundStatus === 'Refund Pending' ? (
+                            <button
+                              className={styles.refundBtn}
+                              onClick={(e) => {
+                                e.preventDefault(); e.stopPropagation();
+                                setOrderToRefund(ret);
+                                setSelectedRefundMethod('Cash');
+                                setShowRefundModal(true);
+                              }}
+                            >
+                              Refund Pending
+                            </button>
+                          ) : ret.refundStatus === 'Returned' ? (
+                            <span style={{ color: '#16A34A', fontWeight: 700, fontSize: '0.8rem' }}>REFUNDED ({ret.refundMethod || 'Cash'})</span>
+                          ) : ret.refundStatus === 'Converted to Advance' ? (
+                            <span style={{ color: '#2563EB', fontWeight: 700, fontSize: '0.8rem' }}>CREDITED TO ADVANCE</span>
+                          ) : (
+                            <span style={{ color: '#64748B', fontWeight: 700, fontSize: '0.8rem' }}>RETURNED / DELETED</span>
+                          )}
                         </td>
                       </tr>
                     )) : (
-                      <tr><td colSpan="4" style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>No returned/cancelled orders found.</td></tr>
+                      <tr><td colSpan="5" style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>No returned/cancelled orders found.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -1366,8 +1555,8 @@ export default function Customers() {
             <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
                 <div>
-                  <h2 style={{ color: '#0F172A' }}>Settle Customer Bill</h2>
-                  <p>{selectedBillForPayment ? `Record payment for Bill #${selectedBillForPayment.billNumber}` : 'Record payment and settle outstanding credit'}</p>
+                  <h2 style={{ color: '#0F172A' }}>Settle Customer Invoice</h2>
+                  <p>{selectedBillForPayment ? `Record payment for Invoice #${settings.invoicePrefix || ''}${selectedBillForPayment.id}` : 'Record payment and settle outstanding credit'}</p>
                 </div>
                 <X size={24} className={styles.closeBtn} onClick={() => { setShowPaymentModal(false); setSelectedBillForPayment(null); }} />
               </div>
@@ -1381,7 +1570,7 @@ export default function Customers() {
                     <div>
                       <h4 style={{ margin: 0, fontSize: '1rem', color: '#1E293B' }}>{selectedCustomer.name}</h4>
                       <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748B' }}>
-                        Due for this bill: <strong><CurrencySymbol size={14} /> {selectedBillForPayment ? selectedBillForPayment.dueAmount.toFixed(2) : selectedCustomer.balance.toFixed(2)}</strong>
+                        Due for this invoice: <strong><CurrencySymbol size={14} /> {selectedBillForPayment ? selectedBillForPayment.dueAmount.toFixed(2) : selectedCustomer.balance.toFixed(2)}</strong>
                       </p>
                     </div>
                   </div>
@@ -1458,7 +1647,7 @@ export default function Customers() {
             <div className={styles.modal} style={{ maxWidth: '800px', width: '95%', maxHeight: '90vh', overflowY: 'auto', padding: 0 }} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader} style={{ position: 'sticky', top: 0, background: 'white', zIndex: 10, padding: '1.25rem 1.5rem', borderBottom: '1px solid #E2E8F0' }}>
                 <div>
-                  <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E293B' }}>Invoice #{selectedInvoiceForView.billNumber || `${settings.invoicePrefix || ''}${selectedInvoiceForView.id}`}</h2>
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E293B' }}>Invoice #{settings.invoicePrefix || ''}{selectedInvoiceForView.id}</h2>
                 </div>
                 <X size={24} className={styles.closeBtn} onClick={() => setSelectedInvoiceForView(null)} />
               </div>
@@ -1486,7 +1675,7 @@ export default function Customers() {
               <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
                 <div>
                   <h2 style={{ color: '#0F172A' }}>Payment Details</h2>
-                  <p>Receipt ID: {selectedPaymentForAction.id}</p>
+                  <p>Receipt ID: {selectedPaymentForAction.paymentReference || selectedPaymentForAction.id}</p>
                 </div>
                 <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentViewModal(false)} />
               </div>
@@ -1659,15 +1848,16 @@ export default function Customers() {
                   }}>
                     <div>
                       <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>CURRENT BALANCE</div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: (selectedCustomerStats.pendingDue || 0) > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
-                        <CurrencySymbol size={16} /> {Math.abs(selectedCustomerStats.pendingDue || 0).toFixed(2)}
+                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: (selectedCustomer.balance || 0) > 0 ? 'var(--danger)' : (selectedCustomer.balance || 0) < 0 ? 'var(--secondary)' : '#64748B' }}>
+                        <CurrencySymbol size={16} /> {Math.abs(selectedCustomer.balance || 0).toFixed(2)}
+                        {selectedCustomer.balance < 0 ? ' Adv' : selectedCustomer.balance > 0 ? ' Due' : ''}
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>CURRENT CREDIT LIMIT</div>
                       <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)' }}>
-                        <CurrencySymbol size={16} /> {(selectedCustomer.creditLimit || 0).toFixed(2)}
-                        {selectedCustomer.creditLimit === 0 && <span style={{ fontSize: '0.7rem', color: '#94A3B8', marginLeft: '0.25rem' }}>(using shop default: {settings.defaultCreditLimit})</span>}
+                        <CurrencySymbol size={16} /> {(selectedCustomer.creditLimit || settings.defaultCreditLimit || 500).toFixed(2)}
+                        {(!selectedCustomer.creditLimit || selectedCustomer.creditLimit === 0) && <span style={{ fontSize: '0.7rem', color: '#94A3B8', marginLeft: '0.25rem' }}>(shop default)</span>}
                       </div>
                     </div>
                   </div>
@@ -1740,6 +1930,72 @@ export default function Customers() {
             </div>
           </div>
         )}
+
+        {/* Refund Method Selection Modal */}
+        {showRefundModal && orderToRefund && (
+          <div className={styles.modalOverlay} onClick={() => { setShowRefundModal(false); setOrderToRefund(null); }}>
+            <div className={styles.modal} style={{ maxWidth: '400px', width: '90%' }} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.25rem' }}>
+                <div>
+                  <h2 style={{ color: '#0F172A', fontSize: '1.25rem', fontWeight: 800 }}>Confirm Refund Account</h2>
+                  <p style={{ fontSize: '0.85rem', color: '#64748B', marginTop: '0.25rem' }}>
+                    Select the account to refund <strong style={{ color: '#0F172A' }}><CurrencySymbol size={12} />{(orderToRefund.paidAmount || 0).toFixed(2)}</strong> for order <strong style={{ color: '#0F172A' }}>{orderToRefund.id}</strong>.
+                  </p>
+                </div>
+                <X size={24} className={styles.closeBtn} onClick={() => { setShowRefundModal(false); setOrderToRefund(null); }} />
+              </div>
+              <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', border: '1px solid #E2E8F0', borderRadius: '8px', cursor: 'pointer', background: selectedRefundMethod === 'Cash' ? '#F0F9FF' : 'white', borderColor: selectedRefundMethod === 'Cash' ? '#0284C7' : '#E2E8F0', transition: 'all 0.2s' }}>
+                    <input 
+                      type="radio" 
+                      name="refundAccount" 
+                      value="Cash"
+                      checked={selectedRefundMethod === 'Cash'}
+                      onChange={() => setSelectedRefundMethod('Cash')}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '0.9rem' }}>Refund to Cash Account</div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748B' }}>Deduct refund amount from Cash register</div>
+                    </div>
+                  </label>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', border: '1px solid #E2E8F0', borderRadius: '8px', cursor: 'pointer', background: selectedRefundMethod === 'Bank' ? '#F0F9FF' : 'white', borderColor: selectedRefundMethod === 'Bank' ? '#0284C7' : '#E2E8F0', transition: 'all 0.2s' }}>
+                    <input 
+                      type="radio" 
+                      name="refundAccount" 
+                      value="Bank"
+                      checked={selectedRefundMethod === 'Bank'}
+                      onChange={() => setSelectedRefundMethod('Bank')}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '0.9rem' }}>Refund to Bank Account</div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748B' }}>Deduct refund amount from default bank account</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+              <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid #E2E8F0' }}>
+                <button 
+                  type="button" 
+                  className={styles.secondaryBtn} 
+                  onClick={() => { setShowRefundModal(false); setOrderToRefund(null); }}
+                  style={{ padding: '0.5rem 1rem', borderRadius: '6px', fontSize: '0.85rem' }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="button" 
+                  className={styles.primaryBtn} 
+                  onClick={confirmRefund}
+                  style={{ padding: '0.5rem 1rem', borderRadius: '6px', fontSize: '0.85rem', background: 'var(--primary)', color: 'white', border: 'none', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Confirm Refund
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1802,7 +2058,8 @@ export default function Customers() {
                   {customer.phone || '000'}
                 </td>
                 <td style={{ fontWeight: 600, color: '#475569' }}>
-                  {(customer.creditLimit || 0).toFixed(2)}
+                  {(customer.creditLimit || settings.defaultCreditLimit || 500).toFixed(2)}
+                  {(!customer.creditLimit || customer.creditLimit === 0) && <span style={{ fontSize: '0.65rem', color: '#94A3B8', marginLeft: '3px' }}>(default)</span>}
                 </td>
                 <td style={{ fontWeight: 600, color: '#475569' }}>
                   {(customer.totalSales || 0).toFixed(2)}
@@ -1958,7 +2215,7 @@ export default function Customers() {
           <div className={styles.modal} style={{ width: '800px', maxWidth: '95vw' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div>
-                <h2>Billing History - {selectedCustomer?.name}</h2>
+                <h2>Invoice/Order History - {selectedCustomer?.name}</h2>
                 <p>
                   {selectedCustomer?.balance > 0 
                     ? 'Outstanding Due: ' 
@@ -1982,7 +2239,7 @@ export default function Customers() {
               <table className={styles.customersTable}>
                 <thead>
                   <tr>
-                    <th>Bill ID</th>
+                    <th>Invoice/Order ID</th>
                     <th>Date</th>
                     <th>Total</th>
                     <th>Paid</th>
@@ -2017,7 +2274,7 @@ export default function Customers() {
                       </td>
                     </tr>
                   )) : (
-                    <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>No billing history found.</td></tr>
+                    <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>No invoice/order history found.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -2046,8 +2303,8 @@ export default function Customers() {
           <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
               <div>
-                <h2 style={{ color: '#0F172A' }}>Settle Customer Bill</h2>
-                <p>Record payment and settle outstanding credit</p>
+                <h2 style={{ color: '#0F172A' }}>Settle Customer Invoice</h2>
+                <p>{selectedBillForPayment ? `Record payment for Invoice #${settings.invoicePrefix || ''}${selectedBillForPayment.id}` : 'Record payment and settle outstanding credit'}</p>
               </div>
               <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentModal(false)} />
             </div>
@@ -2249,8 +2506,9 @@ export default function Customers() {
                 }}>
                   <div>
                     <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>CURRENT BALANCE</div>
-                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: (selectedCustomerStats.pendingDue || 0) > 0 ? 'var(--danger)' : 'var(--secondary)' }}>
-                      <CurrencySymbol size={16} /> {Math.abs(selectedCustomerStats.pendingDue || 0).toFixed(2)}
+                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: (selectedCustomer.balance || 0) > 0 ? 'var(--danger)' : (selectedCustomer.balance || 0) < 0 ? 'var(--secondary)' : '#64748B' }}>
+                      <CurrencySymbol size={16} /> {Math.abs(selectedCustomer.balance || 0).toFixed(2)}
+                      {selectedCustomer.balance < 0 ? ' Adv' : selectedCustomer.balance > 0 ? ' Due' : ''}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
@@ -2431,7 +2689,7 @@ export default function Customers() {
             <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
               <div>
                 <h2 style={{ color: '#0F172A' }}>Payment Details</h2>
-                <p>Receipt ID: {selectedPaymentForAction.id}</p>
+                <p>Receipt ID: {selectedPaymentForAction.paymentReference || selectedPaymentForAction.id}</p>
               </div>
               <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentViewModal(false)} />
             </div>
@@ -2586,7 +2844,7 @@ export default function Customers() {
           <div className={styles.modal} style={{ maxWidth: '800px', width: '95%', maxHeight: '90vh', overflowY: 'auto', padding: 0 }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ position: 'sticky', top: 0, background: 'white', zIndex: 10, padding: '1.25rem 1.5rem', borderBottom: '1px solid #E2E8F0' }}>
               <div>
-                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E293B' }}>Invoice #{selectedInvoiceForView.billNumber || `${settings.invoicePrefix || ''}${selectedInvoiceForView.id}`}</h2>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E293B' }}>Invoice #{settings.invoicePrefix || ''}{selectedInvoiceForView.id}</h2>
               </div>
               <X size={24} className={styles.closeBtn} onClick={() => setSelectedInvoiceForView(null)} />
             </div>

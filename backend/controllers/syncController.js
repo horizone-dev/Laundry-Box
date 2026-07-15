@@ -5,6 +5,7 @@ const Category = require('../models/Category');
 const Payment = require('../models/Payment');
 const AccountTransaction = require('../models/AccountTransaction');
 const mongoose = require('mongoose');
+const AdvanceAllocation = require('../models/AdvanceAllocation');
 
 function isMongoConnected() {
   return mongoose.connection.readyState === 1;
@@ -15,7 +16,7 @@ exports.syncData = async (req, res) => {
     return res.status(503).json({ success: false, message: 'Sync failed: MongoDB offline' });
   }
 
-  const { shopId, orders, customers, payments, accountTransactions, lastSyncTimestamp } = req.body;
+  const { shopId, orders, customers, payments, accountTransactions, advanceAllocations, lastSyncTimestamp } = req.body;
 
   if (!shopId) {
     return res.status(400).json({ success: false, message: 'Missing required field: shopId' });
@@ -66,7 +67,7 @@ exports.syncData = async (req, res) => {
             branchId: order.branchId || 'BRANCH_01',           // required field — provide default
             customerName: resolvedCustomerName,                  // required field — always populated
             customerPhone: customerPhone || '',
-            billNumber: order.billNumber || `BN-${Date.now().toString().slice(-6)}`,
+            billNumber: order.billNumber || `ORD-${Date.now().toString().slice(-6)}`,
             totalAmount: Number(order.totalAmount) || 0,
             paidAmount:  Number(order.paidAmount)  || 0,
             dueAmount:   Number(order.dueAmount)   || 0,
@@ -143,6 +144,28 @@ exports.syncData = async (req, res) => {
             console.warn(`[Sync] Duplicate account transaction skipped: ${txn.id}`);
           } else {
             console.error(`[Sync] Failed to upsert account_transaction ${txn.id}:`, txnErr.message, txnErr.stack);
+          }
+        }
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // 3.7 Process Advance Allocations from client
+    // ────────────────────────────────────────────────────────────
+    if (advanceAllocations && advanceAllocations.length > 0) {
+      for (const alloc of advanceAllocations) {
+        try {
+          const { isSynced, ...rest } = alloc;
+          await AdvanceAllocation.findOneAndUpdate(
+            { id: alloc.id, shopId },
+            { $set: { ...rest, shopId, updatedAt: new Date() } },
+            { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+          );
+        } catch (allocErr) {
+          if (allocErr.code === 11000) {
+            console.warn(`[Sync] Duplicate advance allocation skipped: ${alloc.id}`);
+          } else {
+            console.error(`[Sync] Failed to upsert advance_allocation ${alloc.id}:`, allocErr.message, allocErr.stack);
           }
         }
       }

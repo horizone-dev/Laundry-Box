@@ -115,6 +115,12 @@ const Users = () => {
       
       if (editingUser) {
         await axios.put(`${AUTH_API}/users/${editingUser._id}`, payload);
+        if (editingUser.email === user.email || editingUser.userId === user.userId || editingUser._id === user._id) {
+          const updatedUser = { ...user, ...payload };
+          delete updatedUser.password;
+          sessionStorage.setItem('user', JSON.stringify(updatedUser));
+          window.dispatchEvent(new Event('user-profile-updated'));
+        }
       } else {
         await axios.post(`${AUTH_API}/register`, {
           ...payload,

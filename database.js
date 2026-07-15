@@ -171,7 +171,8 @@ function initDB(appPath) {
       status TEXT,
       isSynced INTEGER DEFAULT 0,
       createdAt TEXT,
-      updatedAt TEXT
+      updatedAt TEXT,
+      paymentReference TEXT
     );
 
     CREATE TABLE IF NOT EXISTS expenses (
@@ -200,7 +201,10 @@ function initDB(appPath) {
       isSynced INTEGER DEFAULT 0,
       updatedAt TEXT,
       icon TEXT,
-      bankAccountId TEXT
+      bankAccountId TEXT,
+      createdBy TEXT,
+      createdById TEXT,
+      createdByRole TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sync_state (
@@ -244,6 +248,39 @@ function initDB(appPath) {
       exceededAmount REAL,
       actionType TEXT,
       timestamp TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS deleted_orders (
+      id TEXT PRIMARY KEY,
+      shopId TEXT,
+      billNumber TEXT,
+      customerId TEXT,
+      customerName TEXT,
+      customerPhone TEXT,
+      totalAmount REAL,
+      items JSON,
+      createdAt TEXT,
+      deletedAt TEXT,
+      deletedBy TEXT,
+      originalPaymentStatus TEXT,
+      paidAmount REAL DEFAULT 0,
+      returnStatus TEXT DEFAULT 'N/A',
+      approvedBy TEXT,
+      originalPaymentMethod TEXT,
+      refundMethod TEXT,
+      returnedAt TEXT,
+      refundStatus TEXT DEFAULT 'Deleted',
+      payments TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS advance_allocations (
+      id TEXT PRIMARY KEY,
+      paymentId TEXT,
+      orderId TEXT,
+      amountUsed REAL,
+      date TEXT,
+      isSynced INTEGER DEFAULT 0,
+      updatedAt TEXT
     );
 
     CREATE TABLE IF NOT EXISTS payment_links (
@@ -374,8 +411,26 @@ function initDB(appPath) {
     CREATE INDEX IF NOT EXISTS idx_deleted_orders_customer ON deleted_orders(customerId);
     CREATE INDEX IF NOT EXISTS idx_account_txn_date ON account_transactions(date);
     CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
+    
+    CREATE INDEX IF NOT EXISTS idx_advance_allocations_payment ON advance_allocations(paymentId);
+    CREATE INDEX IF NOT EXISTS idx_advance_allocations_order ON advance_allocations(orderId);
   `);
 
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS advance_allocations (
+        id TEXT PRIMARY KEY,
+        paymentId TEXT,
+        orderId TEXT,
+        amountUsed REAL,
+        date TEXT,
+        isSynced INTEGER DEFAULT 0,
+        updatedAt TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_advance_allocations_payment ON advance_allocations(paymentId);
+      CREATE INDEX IF NOT EXISTS idx_advance_allocations_order ON advance_allocations(orderId);
+    `);
+  } catch (e) { /* already exists */ }
   try {
     db.exec(`ALTER TABLE orders ADD COLUMN expectedDeliveryDate TEXT;`);
   } catch (e) { /* already exists */ }
@@ -387,6 +442,9 @@ function initDB(appPath) {
   } catch (e) { /* already exists */ }
   try {
     db.exec(`ALTER TABLE payment_links ADD COLUMN payment_method TEXT;`);
+  } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE deleted_orders ADD COLUMN createdAt TEXT;`);
   } catch (e) { /* already exists */ }
 
   // Migrations for audit_logs table self-healing
@@ -648,6 +706,15 @@ function initDB(appPath) {
     if (!txnCols2.some(col => col.name === 'bankAccountId')) {
       db.exec("ALTER TABLE account_transactions ADD COLUMN bankAccountId TEXT;");
     }
+    if (!txnCols2.some(col => col.name === 'createdBy')) {
+      db.exec("ALTER TABLE account_transactions ADD COLUMN createdBy TEXT;");
+    }
+    if (!txnCols2.some(col => col.name === 'createdById')) {
+      db.exec("ALTER TABLE account_transactions ADD COLUMN createdById TEXT;");
+    }
+    if (!txnCols2.some(col => col.name === 'createdByRole')) {
+      db.exec("ALTER TABLE account_transactions ADD COLUMN createdByRole TEXT;");
+    }
 
     // Detect the device's UTC offset in hours (positive = ahead of UTC, e.g. +4 for UAE)
     const tzOffsetHours = -(new Date().getTimezoneOffset()) / 60;
@@ -682,7 +749,45 @@ function initDB(appPath) {
       db.exec("UPDATE account_transactions SET timezoneMigrated = 1 WHERE timezoneMigrated = 0;");
       console.log('[TZ Migration] UTC device detected. No shift needed.');
     }
+    // ─── Payment Sequence Migration ──────────────────────────────────
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS payment_sequence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT
+      );
+    `);
+    const seqRow = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'payment_sequence'").get();
+    if (!seqRow) {
+      const maxRvRow = db.prepare("SELECT id FROM payments WHERE id LIKE 'RV-%' ORDER BY id DESC LIMIT 1").get();
+      let seedVal = 0;
+      if (maxRvRow) {
+        const parts = maxRvRow.id.split('-');
+        if (parts.length > 1) {
+          const lastNum = parseInt(parts[1], 10);
+          if (!isNaN(lastNum)) {
+            seedVal = lastNum;
+          }
+        }
+      }
+      if (seedVal === 0) {
+        const totalPayments = db.prepare("SELECT COUNT(*) as count FROM payments").get().count;
+        seedVal = totalPayments;
+      }
+      if (seedVal > 0) {
+        db.prepare("INSERT INTO payment_sequence (id) VALUES (?)").run(seedVal);
+        console.log(`[Sequence Migration] Seeded payment_sequence with ID ${seedVal}`);
+      }
+    }
+
+    // Alter table payments to add paymentReference column if missing
+    const paymentCols = db.prepare("PRAGMA table_info(payments)").all();
+    if (!paymentCols.some(col => col.name === 'paymentReference')) {
+      db.exec("ALTER TABLE payments ADD COLUMN paymentReference TEXT DEFAULT NULL;");
+      console.log("[Sequence Migration] Added paymentReference column to payments table.");
+    }
     // ───────────────────────────────────────────────────────────────────
+
+    // Run legacy advance payments migration
+    migrateLegacyAdvancePayments(db);
 
     // Data Healer: Run on init
     logDB("Running Database Data Healer on initialization...");
@@ -788,33 +893,74 @@ function runDataHealer(db) {
     }
 
     // Recalculate customer balances from actual orders and payments before smart advance/unapplied payments logic
+    // Formula: balance = active_orders_due - available_advance - (deleted_orders pending refund)
+    //   available_advance = unlinked_payments - allocations_already_used
+    //   deleted_orders pending refund: only those WITH paidAmount > 0 (i.e. customer actually paid for them)
+    //   When refundStatus changes from 'Refund Pending' to 'Returned', that subtraction goes away — no manual update needed.
     console.log("Recalculating customer balances from actual orders and payments...");
     db.exec(`UPDATE customers SET balance = (
               SELECT IFNULL(SUM(dueAmount), 0) 
               FROM orders 
               WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+            ) - (
+              IFNULL((
+                SELECT SUM(amount) 
+                FROM payments 
+                WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+              ), 0) - IFNULL((
+                SELECT SUM(a.amountUsed)
+                FROM advance_allocations a
+                JOIN orders o ON a.orderId = o.id
+                JOIN payments p ON a.paymentId = p.id
+                WHERE p.customerId = customers.id AND o.status != 'Cancelled'
+              ), 0)
             ) - IFNULL((
-              SELECT SUM(amount) 
-              FROM payments 
-              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
-            ), 0) - IFNULL((
               SELECT SUM(paidAmount)
               FROM deleted_orders
-              WHERE deleted_orders.customerId = customers.id AND deleted_orders.refundStatus = 'Refund Pending'
+              WHERE deleted_orders.customerId = customers.id
+                AND deleted_orders.refundStatus = 'Refund Pending'
+                AND deleted_orders.paidAmount > 0
             ), 0), isSynced = 0, updatedAt = '${timestamp}'
-            WHERE balance != (
-              SELECT IFNULL(SUM(dueAmount), 0) 
-              FROM orders 
-              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-            ) - IFNULL((
-              SELECT SUM(amount) 
-              FROM payments 
-              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
-            ), 0) - IFNULL((
-              SELECT SUM(paidAmount)
-              FROM deleted_orders
-              WHERE deleted_orders.customerId = customers.id AND deleted_orders.refundStatus = 'Refund Pending'
-            ), 0);`);
+            WHERE ABS(balance - (
+              (
+                SELECT IFNULL(SUM(dueAmount), 0) 
+                FROM orders 
+                WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+              ) - (
+                IFNULL((
+                  SELECT SUM(amount) 
+                  FROM payments 
+                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+                ), 0) - IFNULL((
+                  SELECT SUM(a.amountUsed)
+                  FROM advance_allocations a
+                  JOIN orders o ON a.orderId = o.id
+                  JOIN payments p ON a.paymentId = p.id
+                  WHERE p.customerId = customers.id AND o.status != 'Cancelled'
+                ), 0)
+              ) - IFNULL((
+                SELECT SUM(paidAmount)
+                FROM deleted_orders
+                WHERE deleted_orders.customerId = customers.id
+                  AND deleted_orders.refundStatus = 'Refund Pending'
+                  AND deleted_orders.paidAmount > 0
+              ), 0)
+            )) > 0.005;`);
+
+    const getNextRvNumberSync = () => {
+      const rows = db.prepare("SELECT id FROM payments WHERE id LIKE 'RV-%'").all();
+      let maxNum = 0;
+      if (rows && rows.length > 0) {
+        rows.forEach(row => {
+          const num = parseInt(row.id.replace('RV-', '').replace(/\D/g, ''));
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+          }
+        });
+      }
+      const nextId = maxNum + 1;
+      return `RV-${String(nextId).padStart(6, '0')}`;
+    };
 
     // Auto-application of customer advances and unapplied payments
     console.log("Auto-applying customer advances to oldest unpaid invoices...");
@@ -852,9 +998,11 @@ function runDataHealer(db) {
           .run(newPaid, newDue, newStatus, timestamp, order.id);
 
         // Deduct from advance pool by creating a negative unlinked payment (so customer balance remains perfectly accurate)
-        db.prepare(`INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`).run(
-          `PAY-ADV-USE-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+        const payIdAdv = getNextRvNumberSync();
+        const payRefAdv = getNextPaymentReference(db, 'SYS');
+        db.prepare(`INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`).run(
+          payIdAdv,
           cust.customerId,
           null,
           'SHOP_01',
@@ -862,13 +1010,16 @@ function runDataHealer(db) {
           'System Auto',
           'SUCCESS',
           timestamp,
-          timestamp
+          timestamp,
+          payRefAdv
         );
 
         // Add a positive payment linked to the specific order (so the invoice has a proper payment history matching actualPaid)
-        db.prepare(`INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`).run(
-          `PAY-AUTO-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+        const payIdAuto = getNextRvNumberSync();
+        const payRefAuto = getNextPaymentReference(db, 'SYS');
+        db.prepare(`INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`).run(
+          payIdAuto,
           cust.customerId,
           order.id,
           'SHOP_01',
@@ -876,40 +1027,63 @@ function runDataHealer(db) {
           'System Auto',
           'SUCCESS',
           timestamp,
-          timestamp
+          timestamp,
+          payRefAuto
         );
         
         console.log(`Auto-applied ${paymentToApply} to order ${order.id}. New status: ${newStatus}`);
       }
     }
 
-    // Final Recalculate customer balances just in case the above changed something structurally
+    // Final Recalculate customer balances after advance auto-application above may have changed dueAmount on orders
     db.exec(`UPDATE customers SET balance = (
               SELECT IFNULL(SUM(dueAmount), 0) 
               FROM orders 
               WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+            ) - (
+              IFNULL((
+                SELECT SUM(amount) 
+                FROM payments 
+                WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+              ), 0) - IFNULL((
+                SELECT SUM(a.amountUsed)
+                FROM advance_allocations a
+                JOIN orders o ON a.orderId = o.id
+                JOIN payments p ON a.paymentId = p.id
+                WHERE p.customerId = customers.id AND o.status != 'Cancelled'
+              ), 0)
             ) - IFNULL((
-              SELECT SUM(amount) 
-              FROM payments 
-              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
-            ), 0) - IFNULL((
               SELECT SUM(paidAmount)
               FROM deleted_orders
-              WHERE deleted_orders.customerId = customers.id AND deleted_orders.refundStatus = 'Refund Pending'
+              WHERE deleted_orders.customerId = customers.id
+                AND deleted_orders.refundStatus = 'Refund Pending'
+                AND deleted_orders.paidAmount > 0
             ), 0), isSynced = 0, updatedAt = '${timestamp}'
-            WHERE balance != (
-              SELECT IFNULL(SUM(dueAmount), 0) 
-              FROM orders 
-              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-            ) - IFNULL((
-              SELECT SUM(amount) 
-              FROM payments 
-              WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
-            ), 0) - IFNULL((
-              SELECT SUM(paidAmount)
-              FROM deleted_orders
-              WHERE deleted_orders.customerId = customers.id AND deleted_orders.refundStatus = 'Refund Pending'
-            ), 0);`);
+            WHERE ABS(balance - (
+              (
+                SELECT IFNULL(SUM(dueAmount), 0) 
+                FROM orders 
+                WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+              ) - (
+                IFNULL((
+                  SELECT SUM(amount) 
+                  FROM payments 
+                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+                ), 0) - IFNULL((
+                  SELECT SUM(a.amountUsed)
+                  FROM advance_allocations a
+                  JOIN orders o ON a.orderId = o.id
+                  JOIN payments p ON a.paymentId = p.id
+                  WHERE p.customerId = customers.id AND o.status != 'Cancelled'
+                ), 0)
+              ) - IFNULL((
+                SELECT SUM(paidAmount)
+                FROM deleted_orders
+                WHERE deleted_orders.customerId = customers.id
+                  AND deleted_orders.refundStatus = 'Refund Pending'
+                  AND deleted_orders.paidAmount > 0
+              ), 0)
+            )) > 0.005;`);
 
 
 
@@ -1021,6 +1195,87 @@ function runDataHealer(db) {
   }
 }
 
+function migrateLegacyAdvancePayments(db) {
+  try {
+    console.log("Checking for legacy advance payments to migrate...");
+    
+    // Find matching split payments by exact createdAt match
+    const splits = db.prepare(`
+      SELECT p1.id as originalId, p1.amount as originalRemainingAmount, 
+             p2.id as splitId, p2.amount as splitUsedAmount, p2.orderId, p1.createdAt, p1.customerId
+      FROM payments p1 
+      JOIN payments p2 ON p1.createdAt = p2.createdAt AND p1.customerId = p2.customerId
+      WHERE (p1.orderId IS NULL OR p1.orderId = '') 
+        AND (p2.orderId IS NOT NULL AND p2.orderId != '')
+    `).all();
+
+    if (splits.length === 0) {
+      console.log("No legacy advance payments need migration.");
+      return;
+    }
+
+    console.log(`Found ${splits.length} legacy split payments. Beginning migration transaction...`);
+    const timestamp = new Date().toISOString();
+
+    // Perform updates inside a transaction
+    db.transaction(() => {
+      // 1. Create advance_allocations table and indexes if they don't exist
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS advance_allocations (
+          id TEXT PRIMARY KEY,
+          paymentId TEXT,
+          orderId TEXT,
+          amountUsed REAL,
+          date TEXT,
+          isSynced INTEGER DEFAULT 0,
+          updatedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_advance_allocations_payment ON advance_allocations(paymentId);
+        CREATE INDEX IF NOT EXISTS idx_advance_allocations_order ON advance_allocations(orderId);
+      `);
+
+      const restoredAmounts = {}; // originalId -> sum to restore
+      let migratedCount = 0;
+
+      for (const s of splits) {
+        const origId = s.originalId;
+        const splitId = s.splitId;
+        const usedAmt = s.splitUsedAmount;
+        const orderId = s.orderId;
+        const createdAt = s.createdAt;
+
+        const allocId = `ALLOC-LEGACY-${splitId}`;
+
+        // Check if allocation already exists
+        const exists = db.prepare("SELECT id FROM advance_allocations WHERE id = ?").get(allocId);
+        if (exists) continue;
+
+        // Insert allocation
+        db.prepare(`
+          INSERT INTO advance_allocations (id, paymentId, orderId, amountUsed, date, isSynced, updatedAt)
+          VALUES (?, ?, ?, ?, ?, 0, ?)
+        `).run(allocId, origId, orderId, usedAmt, createdAt, timestamp);
+
+        // Delete split payment
+        db.prepare("DELETE FROM payments WHERE id = ?").run(splitId);
+
+        restoredAmounts[origId] = (restoredAmounts[origId] || 0) + usedAmt;
+        migratedCount++;
+      }
+
+      // Update original payment amounts
+      const updateStmt = db.prepare("UPDATE payments SET amount = amount + ?, isSynced = 0, updatedAt = ? WHERE id = ?");
+      for (const [origId, addAmt] of Object.entries(restoredAmounts)) {
+        updateStmt.run(addAmt, timestamp, origId);
+      }
+
+      console.log(`Successfully migrated ${migratedCount} split payments.`);
+    })();
+  } catch (err) {
+    console.error("Failed to migrate legacy advance payments:", err);
+  }
+}
+
 function generateServiceSVG(name, category) {
   let startColor = '#3B82F6';
   let endColor = '#1D4ED8';
@@ -1088,6 +1343,31 @@ function generateServiceSVG(name, category) {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+function getNextPaymentReference(db, paymentType) {
+  try {
+    const info = db.prepare("INSERT INTO payment_sequence DEFAULT VALUES").run();
+    const nextId = info.lastInsertRowid;
+    db.prepare("DELETE FROM payment_sequence WHERE id < ?").run(nextId);
+    const paddedSeq = String(nextId).padStart(6, '0');
+    let prefix = 'PAY';
+    switch (paymentType) {
+      case 'ADV': prefix = 'ADV'; break;
+      case 'APY': prefix = 'APY'; break;
+      case 'QPY': prefix = 'QPY'; break;
+      case 'PAY': prefix = 'PAY'; break;
+      case 'REF': prefix = 'REF'; break;
+      case 'SET': prefix = 'SET'; break;
+      case 'ONL': prefix = 'ONL'; break;
+      case 'SYS': prefix = 'SYS'; break;
+      default: prefix = 'PAY';
+    }
+    return `${prefix}-${paddedSeq}`;
+  } catch (err) {
+    console.error("Failed to generate payment reference:", err);
+    throw err;
+  }
+}
+
 function getDB() {
   if (!db) {
     throw new Error('Database not initialized');
@@ -1103,4 +1383,4 @@ function closeDB() {
   }
 }
 
-module.exports = { initDB, getDB, runDataHealer, closeDB, generateServiceSVG };
+module.exports = { initDB, getDB, runDataHealer, closeDB, generateServiceSVG, getNextPaymentReference };

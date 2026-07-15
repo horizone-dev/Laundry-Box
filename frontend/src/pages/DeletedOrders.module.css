@@ -490,6 +490,18 @@
   border: 1px solid #D1FAE5;
 }
 
+.badgeAdvance {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: #F5F3FF;
+  color: #7C3AED;
+  border: 1px solid #DDD6FE;
+}
+
 .badgeNA {
   display: inline-block;
   padding: 0.25rem 0.6rem;

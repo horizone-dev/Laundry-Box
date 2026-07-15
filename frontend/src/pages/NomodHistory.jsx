@@ -5,12 +5,22 @@ import {
   DollarSign, CheckCircle, Clock, AlertTriangle 
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
+import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
 import styles from './Reports.module.css';
 
 export default function NomodHistory() {
   const { settings, formatDate } = useSettings();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (settings.noModPayEnabled === false || settings.paymentHistoryEnabled === false) {
+      navigate('/pos', { replace: true });
+    }
+  }, [settings.noModPayEnabled, settings.paymentHistoryEnabled, navigate]);
+
+  if (settings.noModPayEnabled === false || settings.paymentHistoryEnabled === false) return null;
   
   const [txns, setTxns] = useState([]);
   const [loading, setLoading] = useState(true);

@@ -157,7 +157,7 @@ export default function ExpectedDeliveries() {
   };
 
   // KPI calculations (only active orders i.e. not Delivered and not Cancelled)
-  const activeOrders = orders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled');
+  const activeOrders = orders.filter(o => o.status !== 'Delivered');
   const todayStr = getTodayString();
   const tomorrowStr = getTomorrowString();
 
@@ -176,7 +176,7 @@ export default function ExpectedDeliveries() {
 
       if (dateFilter === 'All Pending') {
         // Only active/pending orders
-        return order.status !== 'Delivered' && order.status !== 'Cancelled';
+        return order.status !== 'Delivered';
       }
 
       if (dateFilter === 'Today') {
@@ -190,7 +190,7 @@ export default function ExpectedDeliveries() {
 
 
       if (dateFilter === 'Overdue') {
-        return expDate && expDate < todayStr && order.status !== 'Delivered' && order.status !== 'Cancelled';
+        return expDate && expDate < todayStr && order.status !== 'Delivered';
       }
 
       if (dateFilter === 'Custom') {
@@ -228,7 +228,7 @@ export default function ExpectedDeliveries() {
   };
 
   const handleUpdateStatus = async (order, newStatus) => {
-    if (['Cancelled', 'Delivered'].includes(newStatus)) {
+    if (['Delivered'].includes(newStatus)) {
       const confirmMsg = t('confirmStatusChange', settings.language)
         .replace('{id}', order.id)
         .replace('{status}', newStatus);
@@ -312,12 +312,12 @@ export default function ExpectedDeliveries() {
     if (settings.waStatusUpdateTemplate) {
       message = settings.waStatusUpdateTemplate
         .replace(/{customerName}/g, customerName)
-        .replace(/{orderId}/g, id)
+        .replace(/{orderId}/g, settings.invoicePrefix ? `${settings.invoicePrefix}${id}` : `#${id}`)
         .replace(/{status}/g, status)
         .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${due.toFixed(2)}`)
         .replace(/{deliveryDate}/g, formattedExp);
     } else {
-      message = `Hello! Regarding your laundry order #${id}, the current status is "${status}". Expected delivery date is ${formattedExp}. Thank you!`;
+      message = `Hello! Regarding your laundry order ${settings.invoicePrefix || '#'}${id}, the current status is "${status}". Expected delivery date is ${formattedExp}. Thank you!`;
       if (orderMatch && orderMatch.dueAmount > 0) {
         message += `\n\nFriendly reminder: Your pending balance is ${settings.currencySymbol || 'AED'} ${orderMatch.dueAmount.toFixed(2)}.`;
       }
@@ -375,11 +375,31 @@ export default function ExpectedDeliveries() {
           : (payMethod === 'UPI'
             ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
             : (payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const creatorName = userSession.name || userSession.username || 'System';
+        const creatorId = userSession.id || 'SYSTEM';
+        const creatorRole = userSession.role || 'system';
+
         const r3 = await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-          [txnId, DEFAULT_SHOP_ID, (payMethod === 'Bank' || payMethod === 'Card' || payMethod === 'UPI') ? 'BANK' : 'CASH', 'INCOME', 'Sales Settlement', amountToPay, `Payment for Order ${order.id}${payMethod === 'Card' ? ' (Card)' : (payMethod === 'UPI' ? ' (UPI)' : '')}`, txnTimestamp, timestamp, 'DollarSign', mappedBankId]
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+          [
+            txnId, 
+            DEFAULT_SHOP_ID, 
+            (payMethod === 'Bank' || payMethod === 'Card' || payMethod === 'UPI') ? 'BANK' : 'CASH', 
+            'INCOME', 
+            'Sales Settlement', 
+            amountToPay, 
+            `Payment for Order ${order.id}${payMethod === 'Card' ? ' (Card)' : (payMethod === 'UPI' ? ' (UPI)' : '')}`, 
+            txnTimestamp, 
+            timestamp, 
+            'DollarSign', 
+            mappedBankId,
+            creatorName,
+            creatorId,
+            creatorRole
+          ]
         );
         if (!r3.success) throw new Error(r3.error || 'Failed to insert account transaction');
 
@@ -391,18 +411,35 @@ export default function ExpectedDeliveries() {
           const commDesc = `Card Commission for Order ${order.id}`;
           const r4 = await window.electronAPI.dbQuery(
             `INSERT INTO account_transactions 
-             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-            [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, timestamp, 'Percent', mappedBankId]
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+            [
+              commTxnId, 
+              DEFAULT_SHOP_ID, 
+              'BANK', 
+              'EXPENSE', 
+              'Card Commission', 
+              commissionAmount, 
+              commDesc, 
+              txnTimestamp, 
+              timestamp, 
+              'Percent', 
+              mappedBankId,
+              creatorName,
+              creatorId,
+              creatorRole
+            ]
           );
           if (!r4.success) throw new Error(r4.error || 'Failed to insert card commission');
         }
 
         // Record payment
+        const payId = `PAY-DELIV-${order.id}`;
+        const payRef = await window.electronAPI.getNextPaymentReference('PAY');
         const r5 = await window.electronAPI.dbQuery(
-          `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-          [`PAY-DELIV-${order.id}`, order.customerId || 'Walk-in', order.id, DEFAULT_SHOP_ID, amountToPay, payMethod, 'SUCCESS', timestamp, timestamp]
+          `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+          [payId, order.customerId || 'Walk-in', order.id, DEFAULT_SHOP_ID, amountToPay, payMethod, 'SUCCESS', timestamp, timestamp, payRef]
         );
         if (!r5.success) throw new Error(r5.error || 'Failed to insert payment record');
 
@@ -443,7 +480,7 @@ export default function ExpectedDeliveries() {
   };
 
   const getWorkflowStatuses = () => {
-    return settings.workflowStatuses || ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled'];
+    return settings.workflowStatuses || ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered'];
   };
 
   const getStatusBadgeClass = (status) => {
@@ -451,7 +488,7 @@ export default function ExpectedDeliveries() {
       case 'Delivered':
       case 'Paid':
         return styles.badgeGreen;
-      case 'Cancelled':
+
       case 'Credit':
         return styles.badgeRed;
       case 'Payment Pending':
@@ -479,7 +516,7 @@ export default function ExpectedDeliveries() {
             <Search size={18} />
             <input
               type="text"
-              placeholder="Search by Bill ID, Customer..."
+              placeholder="Search by Invoice ID, Customer..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -617,14 +654,13 @@ export default function ExpectedDeliveries() {
               return (
                 <>
                   {paginatedOrders.map(order => {
-                    const isOverdueOrder = order.expectedDeliveryDate && order.expectedDeliveryDate < todayStr && order.status !== 'Delivered' && order.status !== 'Cancelled';
+                    const isOverdueOrder = order.expectedDeliveryDate && order.expectedDeliveryDate < todayStr && order.status !== 'Delivered';
                     const { date: createdDate, time: createdTime } = formatDateTimeSplit(order.createdAt);
                     return (
                       <tr key={order.id} className={isOverdueOrder ? styles.overdueRow : ''}>
                         <td className={styles.boldText}>
                           <div className={styles.idCell}>
-                            <span className={styles.billNumber}>{order.billNumber || order.id}</span>
-                            <span className={styles.orderIdSub}>{order.id}</span>
+                            <span className={styles.billNumber}>{settings.invoicePrefix || ''}{order.id}</span>
                           </div>
                         </td>
                         <td>
@@ -706,7 +742,7 @@ export default function ExpectedDeliveries() {
                         </td>
                         <td>
                           <div className={styles.actionGroup}>
-                            {order.status !== 'Delivered' && order.status !== 'Cancelled' && (
+                            {order.status !== 'Delivered' && (
                               <button
                                 className={styles.deliverBtn}
                                 onClick={() => handleQuickDeliver(order)}
@@ -720,7 +756,7 @@ export default function ExpectedDeliveries() {
                             {order.customerPhone && (
                               <button
                                 className={styles.whatsappBtn}
-                                onClick={() => handleWhatsApp(order.customerPhone, order.billNumber || order.id, order.status, order.expectedDeliveryDate)}
+                                onClick={() => handleWhatsApp(order.customerPhone, order.id, order.status, order.expectedDeliveryDate)}
                                 title="WhatsApp Reminder"
                               >
                                 <WhatsAppIcon size={14} />
@@ -781,7 +817,7 @@ export default function ExpectedDeliveries() {
         <div className={styles.modalOverlay} onClick={() => { setShowPayModal(false); setSelectedOrderForPay(null); }}>
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
-              <h3>Record Payment for #{selectedOrderForPay.billNumber || selectedOrderForPay.id}</h3>
+              <h3>Record Payment for {settings.invoicePrefix || '#'}{selectedOrderForPay.id}</h3>
               <button className={styles.closeBtn} onClick={() => { setShowPayModal(false); setSelectedOrderForPay(null); }}>&times;</button>
             </div>
             <div className={styles.modalBody}>

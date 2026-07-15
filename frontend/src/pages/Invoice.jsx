@@ -193,7 +193,7 @@ export default function Invoice() {
     const useFallback = () => {
       setOrder({
         id: id,
-        billNumber: `BN-${Date.now().toString().slice(-6)}`,
+        billNumber: `ORD-${Date.now().toString().slice(-6)}`,
         date: 'Oct 24, 2023, 10:00 AM',
         createdAt: new Date().toISOString(),
         customer: 'Eleanor Shellstrop',
@@ -220,28 +220,194 @@ export default function Invoice() {
     fetchOrder();
 
     const unsubscribe = paymentService.subscribe(({ orderId, status }) => {
-      if (orderId === id || orderId === id.replace('#', '') || (order && orderId === order.id)) {
+      const cleanOrderId = orderId ? orderId.replace('#', '') : '';
+      const cleanId = id ? id.replace('#', '') : '';
+      if (cleanOrderId === cleanId) {
         fetchOrder();
       }
     });
 
     return () => unsubscribe();
-  }, [id, settings, order]);
+  }, [id, settings]);
+
+  // ── Build a self-contained thermal receipt HTML from order data ──
+  const buildReceiptHtml = (ord, stg) => {
+    const sym = stg.currencySymbol || 'AED';
+    const taxRate = stg.isTaxEnabled ? (stg.taxRate || 0) / 100 : 0;
+    const total = ord.total || 0;
+    const subtotal = taxRate > 0 ? total / (1 + taxRate) : total;
+    const tax = total - subtotal;
+    const bi = stg.showBilingual !== false;
+    const logoSrc = stg.logo || '';
+
+    const row = (label, value, bold = false) => `
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin:2px 0;${bold ? 'font-weight:900;font-size:13px;border-top:1px solid #000;border-bottom:1px solid #000;padding:3px 0;' : ''}">
+        <span>${label}</span>
+        <span>${value}</span>
+      </div>`;
+
+    const dash = `<div style="border-top:1px dashed #000;margin:6px 0;"></div>`;
+
+    const itemsHtml = (ord.items || []).map(item => {
+      const lineTotal = ((parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0)).toFixed(2);
+      const delivery = item.deliveryMethod ? `<div style="font-size:11px;">${item.deliveryMethod}${bi && item.deliveryMethod === 'Hanger' ? ' / علاقة' : item.deliveryMethod === 'Folded' ? ' / مطوي' : item.deliveryMethod === 'Bagged' ? ' / مكيس' : ''}</div>` : '';
+      const types = (item.types && item.types.length > 0 ? item.types.map(t => t.name).join(', ') : item.sub) || '';
+      return `
+        <div style="margin:4px 0;padding-bottom:4px;border-bottom:1px dotted #ccc;">
+          <div style="font-weight:700;font-size:13px;">${item.name}</div>
+          ${types ? `<div style="font-size:11px;color:#000;">${types}</div>` : ''}
+          ${delivery}
+          <div style="display:flex;justify-content:space-between;font-size:12px;">
+            <span>Qty: ${item.qty} &times; ${(parseFloat(item.price)||0).toFixed(2)}</span>
+            <span>${sym} ${lineTotal}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    const advanceDeducted = (ord.previousBalance || 0) < 0
+      ? Math.min(total, Math.abs(ord.previousBalance)) : 0;
+    const manualPaid = Math.max(0, (ord.paidAmount || 0) - advanceDeducted);
+
+    return `
+      <div style="font-family:'Courier New',Courier,monospace;font-size:12px;color:#000;background:#fff;width:100%;max-width:80mm;margin:0 auto;padding:8px;">
+        ${logoSrc ? `<div style="text-align:center;margin-bottom:4px;"><img src="${logoSrc}" style="max-height:50px;max-width:60mm;" /></div>` : ''}
+        <div style="text-align:center;font-size:15px;font-weight:900;">${stg.companyName || 'Laundry Box'}</div>
+        ${bi && stg.companyNameAr ? `<div style="text-align:center;font-size:13px;direction:rtl;">${stg.companyNameAr}</div>` : ''}
+        ${stg.address ? `<div style="text-align:center;font-size:11px;">${stg.address}</div>` : ''}
+        ${stg.phone ? `<div style="text-align:center;font-size:11px;">Tel: ${stg.phone}</div>` : ''}
+        ${dash}
+        <div style="margin:2px 0;"><span style="font-size:11px;">Invoice No${bi ? ' / رقم الفاتورة' : ''}:</span> <b>${stg.invoicePrefix || ''}${ord.id}</b></div>
+        <div style="margin:2px 0;"><span style="font-size:11px;">Date${bi ? ' / التاريخ' : ''}:</span> ${ord.date || ''}</div>
+        ${ord.expectedDeliveryDate ? `<div style="margin:2px 0;"><span style="font-size:11px;">Exp. Delivery${bi ? ' / تاريخ التسليم المتوقع' : ''}:</span> <b>${ord.expectedDeliveryDate}</b></div>` : ''}
+        ${dash}
+        <div style="margin:2px 0;"><span style="font-size:11px;">Name${bi ? ' / الاسم' : ''}:</span> <b>${ord.customer || ''}</b></div>
+        ${ord.customerPhone ? `<div style="margin:2px 0;"><span style="font-size:11px;">Phone${bi ? ' / الهاتف' : ''}:</span> ${ord.customerPhone}</div>` : ''}
+        ${dash}
+        ${itemsHtml}
+        ${dash}
+        ${row(`Subtotal${bi ? ' / قبل الضريبة' : ''}`, `${sym} ${subtotal.toFixed(2)}`)}
+        ${stg.isTaxEnabled ? row(`VAT (${stg.taxRate || 0}%)${bi ? ' / الضريبة' : ''}`, `${sym} ${tax.toFixed(2)}`) : ''}
+        ${row(`TOTAL${bi ? ' / الإجمالي' : ''}`, `${sym} ${total.toFixed(2)}`, true)}
+        ${dash}
+        ${manualPaid > 0 ? row(`Paid${bi ? ' / المدفوع' : ''}`, `${sym} ${manualPaid.toFixed(2)}`) : ''}
+        ${(ord.previousBalance || 0) < 0 ? row(`Advance Available${bi ? ' / رصيد مسبق' : ''}`, `${sym} ${Math.abs(ord.previousBalance).toFixed(2)}`) : ''}
+        ${advanceDeducted > 0 ? row(`Advance Deducted${bi ? ' / الرصيد المخصوم' : ''}`, `- ${sym} ${advanceDeducted.toFixed(2)}`) : ''}
+        ${row(`Balance${bi ? ' / الرصيد' : ''}`, `${sym} ${(ord.totalBalance || 0).toFixed(2)}`, true)}
+        ${stg.invoiceTermsText ? `${dash}<div style="font-size:10px;text-align:center;">${stg.invoiceTermsText}</div>` : ''}
+        <div style="text-align:center;font-size:10px;margin-top:8px;">Thank you!</div>
+      </div>`;
+  };
+
+  // ── Build a self-contained garment tag HTML from order data ──
+  const buildTagHtml = (ord, stg) => {
+    if (!ord || !ord.items) return '';
+    const tags = [];
+    const items = typeof ord.items === 'string' ? JSON.parse(ord.items) : ord.items;
+    
+    items.forEach(item => {
+      for (let i = 0; i < item.qty; i++) {
+        tags.push({
+          ...item,
+          tagIndex: i + 1,
+          totalInGroup: item.qty
+        });
+      }
+    });
+
+    const prefix = stg?.invoicePrefix || '';
+    const formattedDate = formatDate(ord.createdAt);
+
+    return `
+      <div style="font-family:'Inter', sans-serif; background:white; color:black; width:100%; max-width:80mm; margin:0 auto; padding:8px;">
+        ${tags.map((tag, idx) => `
+          <div style="border:1px dashed #000; padding:8px; display:flex; flex-direction:column; width:100%; height:140px; margin-bottom:10px; page-break-inside:avoid; overflow:hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #000; padding-bottom:4px; margin-bottom:6px;">
+              <span style="font-weight:800; font-size:14px;">${prefix}${ord.id}</span>
+              <span style="font-size:12px; font-weight:600; color:#64748b;">${tag.tagIndex}/${tag.totalInGroup}</span>
+            </div>
+            
+            <div style="display:flex; gap:10px; flex:1; align-items:center;">
+              <div style="min-width:0; flex:1;">
+                <h3 style="margin:0; font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${tag.name}</h3>
+                <p style="margin:2px 0 0 0; font-size:11px; color:#475569; text-transform:uppercase;">${tag.type || ''}</p>
+                ${tag.deliveryMethod ? `
+                  <p style="font-weight:bold; color:#16A34A; font-size:11px; margin:2px 0 0 0;">
+                    📦 ${tag.deliveryMethod}
+                  </p>
+                ` : ''}
+                <p style="margin:4px 0 0 0; font-size:12px; font-weight:600; color:#1e293b;">${ord.customer || ''}</p>
+              </div>
+            </div>
+            
+            <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-top:auto; font-size:10px; color:#64748b; border-top:1px dotted #ccc; padding-top:4px;">
+              <span>${formattedDate}</span>
+              ${tag.addons && tag.addons.length > 0 ? `
+                <span style="font-size:9px; font-style:italic; max-width:120px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">+ ${tag.addons.join(', ')}</span>
+              ` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  };
+
+  const executeNativePrint = async (forceSilent = null, printerType = 'billing') => {
+    if (window.electronAPI?.printInvoice && order) {
+      const printerName = printerType === 'tag' ? settings.tagPrinter : settings.billingPrinter;
+
+      if (!printerName) {
+        alert(printerType === 'tag'
+          ? "No default tag printer selected. Configure it in Settings → Printers."
+          : "No default printer selected. Configure it in Settings → Printers."
+        );
+        return;
+      }
+
+      const html = printerType === 'tag' ? buildTagHtml(order, settings) : buildReceiptHtml(order, settings);
+
+      const res = await window.electronAPI.printInvoice({
+        html,
+        css: `
+          * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          body { margin: 0; padding: 0; background: white; }
+          @page { margin: 2mm; }
+        `,
+        printerName,
+        silent: true
+      });
+
+      if (res && !res.success) {
+        alert("Printing failed: " + (res.error || "Printer is offline or unavailable."));
+      }
+
+    } else if (window.appPrint) {
+      await window.appPrint({
+        printerName: printerType === 'tag' ? settings.tagPrinter : settings.billingPrinter,
+        silent: true,
+        printerType
+      });
+    } else {
+      window.print();
+    }
+  };
+
+
 
   // Auto-print if query param is set
   useEffect(() => {
-    if (order && searchParams.get('print') === 'true') {
+    const shouldPrint = searchParams.get('print') === 'force' || (searchParams.get('print') === 'true' && settings.autoPrint);
+    if (order && shouldPrint) {
       const timer = setTimeout(() => {
-        window.print();
+        executeNativePrint();
       }, 800);
       return () => clearTimeout(timer);
     }
-  }, [order, searchParams]);
+  }, [order, searchParams, settings.autoPrint]);
 
   // Native Electron PDF — captures pre-rendered invoice HTML for perfect Arabic rendering
   const generatePDF = async () => {
     if (!window.electronAPI?.printToPDF) {
-      window.print();
+      executeNativePrint(false);
       return true;
     }
     if (!invoiceRef.current) return false;
@@ -272,7 +438,15 @@ export default function Invoice() {
       }
       const html = clone.outerHTML;
 
-      const result = await window.electronAPI.printToPDF({ filename, html, css });
+      const result = await window.electronAPI.printToPDF({ 
+        filename, 
+        html, 
+        css, 
+        pdfDownloadPath: settings.pdfDownloadPath || '' 
+      });
+      if (result && result.success) {
+        alert(`Invoice PDF downloaded successfully!\nPath: ${result.filePath}`);
+      }
       return result.success;
     } catch (err) {
       console.error('PDF failed:', err);
@@ -416,8 +590,8 @@ export default function Invoice() {
   const handlePrintTags = () => {
     document.body.classList.add('printing-tags');
     setIsPrintingTags(true);
-    setTimeout(() => {
-      window.print();
+    setTimeout(async () => {
+      await executeNativePrint(null, 'tag');
       setIsPrintingTags(false);
       document.body.classList.remove('printing-tags');
     }, 500);
@@ -434,7 +608,7 @@ export default function Invoice() {
           <span>Back</span>
         </div>
         <div className={styles.topActions}>
-          <button className={styles.printBtn} style={{ height: '36px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', borderRadius: '8px', border: '1.5px solid var(--primary)' }} onClick={() => window.print()}>
+          <button className={styles.printBtn} style={{ height: '36px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', borderRadius: '8px', border: '1.5px solid var(--primary)' }} onClick={() => executeNativePrint()}>
             <Printer size={16} /> Print Receipt
           </button>
           <button className={styles.printBtn} style={{ height: '36px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', borderRadius: '8px', border: '1.5px solid var(--primary)' }} onClick={handlePrintTags}>
@@ -448,9 +622,6 @@ export default function Invoice() {
           </button>
           <button className={styles.closeBtn} onClick={() => navigate(-1)}>
             <X size={18} /> Close
-          </button>
-          <button className="btn btn-primary" onClick={() => navigate('/pos')}>
-            New Order
           </button>
         </div>
       </div>
@@ -561,7 +732,7 @@ export default function Invoice() {
 
       {/* Hidden Tag Printing Area */}
       {isPrintingTags && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'white', zIndex: 99999 }}>
+        <div style={{ position: 'fixed', left: '-9999px', top: '-9999px', width: '80mm', opacity: 0 }}>
           <DressTag order={order} />
         </div>
       )}

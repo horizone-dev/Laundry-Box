@@ -89,9 +89,9 @@ router.patch('/:id/status', async (req, res) => {
   console.log(`Updating status for order: ${orderId}`);
   try {
     const { status, paymentStatus, paidAmount, dueAmount, expectedDeliveryDate, updatedBy } = req.body;
-    
+
     // Try matching by multiple fields for robustness
-    let order = await Order.findOne({ 
+    let order = await Order.findOne({
       $or: [
         { id: orderId },
         { id: orderId.replace('#', '') },
@@ -125,7 +125,7 @@ router.patch('/:id/status', async (req, res) => {
       timestamp: new Date()
     });
     order.updatedAt = new Date();
-    
+
     await order.save();
     res.json(order);
   } catch (err) {
@@ -170,7 +170,7 @@ router.delete('/:id', async (req, res) => {
 
     const isPaid = order.paidAmount > 0 || ['Paid', 'Partial'].includes(order.paymentStatus);
     const initialRefundStatus = isPaid
-      ? (refundImmediately ? 'Returned' : 'Refund Pending')
+      ? (refundImmediately ? 'Returned' : 'Converted to Advance')
       : 'Deleted';
 
     // 0. Save to DeletedOrder audit log collection in MongoDB
@@ -188,7 +188,7 @@ router.delete('/:id', async (req, res) => {
       deletedAt: new Date(),
       originalPaymentStatus: order.paymentStatus,
       paidAmount: order.paidAmount || 0,
-      returnStatus: isPaid ? (refundImmediately ? 'Returned' : 'Return Pending') : 'N/A',
+      returnStatus: isPaid ? (refundImmediately ? 'Returned' : 'Converted to Advance') : 'N/A',
       originalPaymentMethod: originalPaymentMethod || order.paymentMethod || 'CASH',
       payments: payments || [],
       refundMethod: refundImmediately ? (refundMethod || 'CASH') : null,
@@ -200,11 +200,30 @@ router.delete('/:id', async (req, res) => {
     // 1. Delete associated payments in MongoDB
     await Payment.deleteMany({ orderId: order.id, shopId: order.shopId });
 
+    if (isPaid && (order.paidAmount || 0) > 0 && !refundImmediately) {
+      // Create unlinked Advance payment in MongoDB
+      const newAdvId = `ADV-CONV-${Date.now()}`;
+      const newPayment = new Payment({
+        id: newAdvId,
+        customerId: order.customerId,
+        orderId: null,
+        shopId: order.shopId,
+        amount: order.paidAmount,
+        method: 'Refund Advance',
+        status: 'SUCCESS',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        paymentReference: `ADV-CONV-${Date.now()}`
+      });
+      await newPayment.save();
+    }
+
     // 2. Delete the order
     await Order.deleteOne({ _id: order._id });
 
     // 3. Recalculate and update customer balance in MongoDB
-    if (order.customerId) {
+    // Formula mirrors the SQLite DataHealer: balance = totalDue - availableAdvance - pendingRefunds
+    if (order.customerId && order.customerId !== 'Walk-in') {
       const customerId = order.customerId;
       const shopId = order.shopId;
 
@@ -212,20 +231,37 @@ router.delete('/:id', async (req, res) => {
       const activeOrders = await Order.find({ customerId, shopId, status: { $ne: 'Cancelled' } });
       const totalDue = activeOrders.reduce((sum, o) => sum + (o.dueAmount ?? 0), 0);
 
-      // Get all unlinked payments for this customer (where orderId is null or empty)
+      // Get all unlinked payments for this customer (advances, deposits, RV receipts)
       const unlinkedPayments = await Payment.find({
         customerId,
         shopId,
         $or: [{ orderId: { $exists: false } }, { orderId: null }, { orderId: '' }]
       });
-      const totalPayments = unlinkedPayments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
+      const totalPaymentsRaw = unlinkedPayments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
 
-      // Subtract the deleted order's paidAmount — the customer already paid this,
-      // and now the order is removed. If NOT refunded immediately, their balance
-      // should decrease (meaning we owe them). If refunded immediately, their balance
-      // shouldn't change relative to the deleted order since they got the cash back.
-      const deletedPaidAmount = refundImmediately ? 0 : (order.paidAmount || 0);
-      const newBalance = totalDue - totalPayments - deletedPaidAmount;
+      // Deduct advance allocations already consumed on active orders
+      const AdvanceAllocation = require('../models/AdvanceAllocation');
+      const allocations = await AdvanceAllocation.find({ shopId, paymentId: { $in: unlinkedPayments.map(p => p.id) } });
+      const totalUsed = allocations.reduce((sum, a) => sum + (a.amountUsed ?? 0), 0);
+
+      const availableAdvance = totalPaymentsRaw - totalUsed;
+
+      // Deleted orders where refund has NOT been given yet: customer is owed this money.
+      // This includes the currently deleted order (if not refunded immediately) AND any prior pending refunds.
+      // Only count orders with paidAmount > 0 — unpaid deleted orders don't affect balance.
+      const DeletedOrder = require('../models/DeletedOrder');
+      const pendingRefunds = await DeletedOrder.find({
+        customerId,
+        shopId,
+        refundStatus: 'Refund Pending',
+        paidAmount: { $gt: 0 }
+      });
+      const totalPendingRefunds = pendingRefunds.reduce((sum, d) => sum + (d.paidAmount ?? 0), 0);
+
+      // The currently deleted order is already converted to an unlinked payment, so additionalPending is 0.
+      const additionalPending = 0;
+
+      const newBalance = totalDue - availableAdvance - totalPendingRefunds - additionalPending;
 
       await Customer.findOneAndUpdate(
         { id: customerId, shopId },
@@ -245,14 +281,14 @@ router.patch('/deleted/:id/refund', async (req, res) => {
     const { returnStatus, refundMethod } = req.body;
     const deletedOrder = await DeletedOrder.findOne({ id: req.params.id });
     if (!deletedOrder) return res.status(404).json({ message: 'Deleted order log not found' });
-    
+
     const oldStatus = deletedOrder.refundStatus || deletedOrder.returnStatus;
-    
+
     deletedOrder.returnStatus = returnStatus || 'Returned';
     deletedOrder.refundStatus = 'Returned';
     deletedOrder.refundMethod = refundMethod || 'CASH';
     deletedOrder.returnedAt = new Date();
-    
+
     await deletedOrder.save();
 
     // If status changed to Returned, adjust customer balance
@@ -266,7 +302,7 @@ router.patch('/deleted/:id/refund', async (req, res) => {
         }
       }
     }
-    
+
     res.json(deletedOrder);
   } catch (err) {
     res.status(500).json({ message: err.message });

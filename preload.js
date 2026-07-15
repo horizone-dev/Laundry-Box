@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer, webFrame } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   checkConnection: () => ipcRenderer.invoke('check-connection'),
   dbQuery: (query, params) => ipcRenderer.invoke('db-query', { query, params }),
+  getNextRvNumber: () => ipcRenderer.invoke('get-next-rv-number'),
+  getNextPaymentReference: (paymentType) => ipcRenderer.invoke('get-next-payment-reference', paymentType),
   runDataHealer: () => ipcRenderer.invoke('run-data-healer'),
   openExternal: (url) => ipcRenderer.send('open-external', url),
   printToPDF: (options) => ipcRenderer.invoke('print-to-pdf', options),
@@ -22,6 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   requestRefocus: () => ipcRenderer.send('request-refocus'),
   getPrinters: () => ipcRenderer.invoke('get-printers'),
   printHtml: (options) => ipcRenderer.invoke('print-html', options),
+  printInvoice: (options) => ipcRenderer.invoke('print-invoice', options),
   createNomodCheckout: (options) => ipcRenderer.invoke('create-nomod-checkout', options),
   retrieveNomodCheckoutStatus: (options) => ipcRenderer.invoke('retrieve-nomod-checkout-status', options),
   startPaymentTracking: (options) => ipcRenderer.send('start-payment-tracking', options),
@@ -231,51 +234,6 @@ webFrame.executeJavaScript(`
         window.electronAPI.requestRefocus();
       }
       return result;
-    };
-
-    const _print = window.print;
-    window.print = function() {
-      const isTag = document.body.classList.contains('printing-tags');
-      const billingPrinter = window.localStorage.getItem('billingPrinter') || '';
-      const tagPrinter = window.localStorage.getItem('tagPrinter') || '';
-      const selectedPrinter = isTag ? tagPrinter : billingPrinter;
-
-      if (!selectedPrinter || selectedPrinter === 'Show Print Dialog') {
-        _print();
-      } else {
-        let css = '';
-        for (const sheet of document.styleSheets) {
-          try {
-            const rules = Array.from(sheet.cssRules || []);
-            css += rules.map(function(r) { return r.cssText; }).join('\\n') + '\\n';
-          } catch (_) {}
-        }
-        const clone = document.body.cloneNode(true);
-        const images = clone.getElementsByTagName('img');
-        const originalImages = document.body.getElementsByTagName('img');
-        for (let i = 0; i < images.length; i++) {
-          if (originalImages[i].src) {
-            images[i].src = originalImages[i].src;
-          }
-        }
-        const html = clone.innerHTML;
-
-        if (window.electronAPI && typeof window.electronAPI.printHtml === 'function') {
-          window.electronAPI.printHtml({ html: html, css: css, printerName: selectedPrinter })
-            .then(function(result) {
-              if (result && !result.success) {
-                console.error('Silent print failed:', result.error);
-                _print();
-              }
-            })
-            .catch(function(err) {
-              console.error('Silent print exception:', err);
-              _print();
-            });
-        } else {
-          _print();
-        }
-      }
     };
   })();
 `);

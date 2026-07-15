@@ -90,7 +90,10 @@ app.use('/api/orders',    apiLimiter, orderRoutes);
 app.use('/api/roles',     roleRoutes);
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Laundry Box Backend Running' });
+  res.json({ 
+    status: 'ok', 
+    message: 'Laundry Box Backend Running' 
+  });
 });
 
 app.listen(PORT, () => {

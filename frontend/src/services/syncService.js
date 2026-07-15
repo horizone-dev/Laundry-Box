@@ -24,13 +24,15 @@ export const syncData = async () => {
     const resCustomers = await window.electronAPI.dbQuery('SELECT * FROM customers WHERE isSynced = 0', []);
     const resPayments  = await window.electronAPI.dbQuery('SELECT * FROM payments WHERE isSynced = 0', []);
     const resTxns      = await window.electronAPI.dbQuery('SELECT * FROM account_transactions WHERE isSynced = 0', []);
+    const resAllocs    = await window.electronAPI.dbQuery('SELECT * FROM advance_allocations WHERE isSynced = 0', []);
     
     const unsyncedOrders    = resOrders.data    || [];
     const unsyncedCustomers = resCustomers.data || [];
     const unsyncedPayments  = resPayments.data  || [];
     const unsyncedTxns      = resTxns.data      || [];
+    const unsyncedAllocs    = resAllocs.data    || [];
 
-    if (unsyncedOrders.length === 0 && unsyncedCustomers.length === 0 && unsyncedPayments.length === 0 && unsyncedTxns.length === 0) {
+    if (unsyncedOrders.length === 0 && unsyncedCustomers.length === 0 && unsyncedPayments.length === 0 && unsyncedTxns.length === 0 && unsyncedAllocs.length === 0) {
       console.log('No local data to sync.');
     }
 
@@ -51,6 +53,7 @@ export const syncData = async () => {
       customers: unsyncedCustomers,
       payments: unsyncedPayments,
       accountTransactions: unsyncedTxns,
+      advanceAllocations: unsyncedAllocs,
       lastSyncTimestamp
     };
 
@@ -88,6 +91,9 @@ export const syncData = async () => {
       }
       for (const txn of unsyncedTxns) {
         await window.electronAPI.dbQuery('UPDATE account_transactions SET isSynced = 1 WHERE id = ?', [txn.id]);
+      }
+      for (const alloc of unsyncedAllocs) {
+        await window.electronAPI.dbQuery('UPDATE advance_allocations SET isSynced = 1 WHERE id = ?', [alloc.id]);
       }
 
       // 5. Save new items from backend to local DB
@@ -281,7 +287,11 @@ export const syncData = async () => {
       return true;
     }
   } catch (error) {
-    console.error('Sync failed:', error);
+    if (error.response && error.response.status === 503) {
+      console.warn('Sync skipped: Cloud database is offline.');
+    } else {
+      console.error('Sync failed:', error.message || error);
+    }
     return false;
   }
 };

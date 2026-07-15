@@ -5,7 +5,7 @@ import {
   X, ChevronDown, Shirt, Bed, Wind, Layers, Package,
   Droplet, Zap, Heart, Sparkles, User, CreditCard, Wallet,
   Gift, Printer, Receipt, Edit3, UserPlus, Phone, MapPin, Landmark,
-  Calendar, FileText, AlertTriangle, AlertCircle, Info, Lock, Clock, QrCode, BedDouble
+  Calendar, FileText, AlertTriangle, AlertCircle, Info, Lock, Clock, QrCode, BedDouble, ClipboardList
 } from 'lucide-react';
 const Dress = Shirt;
 import axios from 'axios';
@@ -23,6 +23,17 @@ import { paymentService } from '../services/paymentService';
 
 export default function POS() {
   const navigate = useNavigate();
+  const getNextRvNumber = async () => {
+    try {
+      if (window.electronAPI && typeof window.electronAPI.getNextRvNumber === 'function') {
+        const nextId = await window.electronAPI.getNextRvNumber();
+        if (nextId) return nextId;
+      }
+    } catch (err) {
+      console.warn("Failed to get sequential RV from main, falling back:", err);
+    }
+    return `PAY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  };
   const [searchParams] = useSearchParams();
   const { settings } = useSettings();
   const [services, setServices] = useState([]);
@@ -227,7 +238,7 @@ export default function POS() {
         setCart([]);
         setSelectedCustomer(null);
         setSpecialInstructions('');
-        navigate(`/invoice/${paidOrderId}?print=true`);
+        navigate(`/invoice/${paidOrderId}${settings.autoPrint ? '?print=true' : ''}`);
       }
     };
     window.addEventListener('nomod-payment-success', handleNomodSuccess);
@@ -274,7 +285,9 @@ export default function POS() {
   const fetchNextOrderId = async () => {
     if (window.electronAPI?.dbQuery) {
       try {
-        const res = await window.electronAPI.dbQuery('SELECT id FROM orders');
+        const res = await window.electronAPI.dbQuery(
+          'SELECT id FROM orders UNION SELECT id FROM deleted_orders'
+        );
         if (res.success && res.data.length > 0) {
           let maxNum = 0;
           res.data.forEach(row => {
@@ -809,7 +822,7 @@ export default function POS() {
       alert('Cart is empty.');
       return;
     }
-    if (!settings.enableNomod) return;
+    if (!settings.noModPayEnabled || !settings.enableNomod) return;
 
     const orderId = pendingOrderId || '0001';
     let linkId = `LNK-${Date.now().toString().slice(-4)}`;
@@ -897,7 +910,7 @@ export default function POS() {
       return;
     }
     const orderId = pendingOrderId || '0001';
-    const billNumber = `BN-${Date.now().toString().slice(-6)}`;
+    const billNumber = `ORD-${Date.now().toString().slice(-6)}`;
     const combinedExpectedDelivery = expectedDeliveryDate ? `${expectedDeliveryDate} ${expectedDeliveryTime || '17:00'}` : '';
 
     const cashVal = parseFloat(cashAmount || 0);
@@ -1137,27 +1150,82 @@ export default function POS() {
                    ? (settings.bankAccounts?.find(acc => acc.bankName === selectedBank || acc.id === selectedBank)?.id || selectedBank)
                    : null;
 
-                 const desc = `Order ${editOrderId.replace('#', '')} via ${method.name}`;
-                 await window.electronAPI.dbQuery(
-                   `INSERT INTO account_transactions 
-                    (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-                   [txnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales', method.value, desc, txnTimestamp, getLocalISOString(), method.icon, mappedBankId]
-                 );
+                  const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+                  const creatorName = currentUser.name || currentUser.username || 'System';
+                  const creatorId = currentUser.id || 'SYSTEM';
+                  const creatorRole = currentUser.role || 'system';
 
-                 // Record card commission if applicable
-                 if (method.name === 'Card' && settings.cardCommission > 0) {
-                   const commissionRate = parseFloat(settings.cardCommission || 0);
-                   const commissionAmount = method.value * (commissionRate / 100);
-                   const commTxnId = `TXN-COMM-${Date.now()}`;
-                   const commDesc = `Card Commission for Order ${editOrderId}`;
-                   await window.electronAPI.dbQuery(
-                     `INSERT INTO account_transactions 
-                      (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-                     [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, getLocalISOString(), 'Percent', mappedBankId]
-                   );
-                 }
+                  const desc = `Order ${editOrderId.replace('#', '')} via ${method.name}`;
+                  await window.electronAPI.dbQuery(
+                    `INSERT INTO account_transactions 
+                     (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+                    [
+                      txnId, 
+                      DEFAULT_SHOP_ID, 
+                      accountType, 
+                      'INCOME', 
+                      'Sales', 
+                      method.value, 
+                      desc, 
+                      txnTimestamp, 
+                      getLocalISOString(), 
+                      method.icon, 
+                      mappedBankId,
+                      creatorName,
+                      creatorId,
+                      creatorRole
+                    ]
+                  );
+
+                  // Record to payments table for Customer Insight Payment History
+                  const payId = await getNextRvNumber();
+                  const payRef = await window.electronAPI.getNextPaymentReference('PAY');
+                  await window.electronAPI.dbQuery(
+                    `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+                    [
+                      payId,
+                      selectedCustomer ? selectedCustomer.id : 'Walk-in',
+                      editOrderId,
+                      DEFAULT_SHOP_ID,
+                      method.value,
+                      method.name,
+                      'SUCCESS',
+                      getLocalISOString(),
+                      getLocalISOString(),
+                      payRef
+                    ]
+                  );
+
+                  // Record card commission if applicable
+                  if (method.name === 'Card' && settings.cardCommission > 0) {
+                    const commissionRate = parseFloat(settings.cardCommission || 0);
+                    const commissionAmount = method.value * (commissionRate / 100);
+                    const commTxnId = `TXN-COMM-${Date.now()}`;
+                    const commDesc = `Card Commission for Order ${editOrderId}`;
+                    await window.electronAPI.dbQuery(
+                      `INSERT INTO account_transactions 
+                       (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+                      [
+                        commTxnId, 
+                        DEFAULT_SHOP_ID, 
+                        'BANK', 
+                        'EXPENSE', 
+                        'Card Commission', 
+                        commissionAmount, 
+                        commDesc, 
+                        txnTimestamp, 
+                        getLocalISOString(), 
+                        'Percent', 
+                        mappedBankId,
+                        creatorName,
+                        creatorId,
+                        creatorRole
+                      ]
+                    );
+                  }
                }
              }
 
@@ -1167,7 +1235,7 @@ export default function POS() {
             setExpectedDeliveryDate(getTomorrowDateString());
             setExpectedDeliveryTime('17:00');
             setSpecialInstructions('');
-            navigate(`/invoice/${editOrderId.replace('#', '')}?print=true`);
+            navigate(`/invoice/${editOrderId.replace('#', '')}${settings.autoPrint ? '?print=true' : ''}`);
             return;
           }
         }
@@ -1227,37 +1295,50 @@ export default function POS() {
           }
           return; // STOP — do not proceed
         }
-        // Link unlinked advance payments if advance was applied
-        if (appliedAdvance > 0 && selectedCustomer) {
-          let remainingToLink = appliedAdvance;
-          const unlinkedPaymentsRes = await window.electronAPI.dbQuery(
-            "SELECT * FROM payments WHERE customerId = ? AND (orderId IS NULL OR orderId = '') AND amount > 0 ORDER BY createdAt ASC",
-            [selectedCustomer.id]
-          );
-          const unlinkedPayments = unlinkedPaymentsRes.success ? unlinkedPaymentsRes.data : [];
+        // Track advance usage separately in advance_allocations
+        if (selectedCustomer) {
+          // Clear any existing allocations and APY payments for this order first
+          await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE orderId = ?", [orderId]);
+          await window.electronAPI.dbQuery("DELETE FROM payments WHERE orderId = ? AND method = 'Advance'", [orderId]);
+          
+          if (appliedAdvance > 0) {
+            let remainingToLink = appliedAdvance;
+            const paymentsRes = await window.electronAPI.dbQuery(
+              `SELECT p.*, 
+               IFNULL((SELECT SUM(a.amountUsed) FROM advance_allocations a WHERE a.paymentId = p.id), 0) as usedAmount
+               FROM payments p
+               WHERE p.customerId = ? AND (p.orderId IS NULL OR p.orderId = '')
+               ORDER BY p.createdAt ASC`,
+              [selectedCustomer.id]
+            );
+            const unlinkedPayments = paymentsRes.success ? paymentsRes.data : [];
 
-          for (const payment of unlinkedPayments) {
-            if (remainingToLink <= 0) break;
-            
-            if (payment.amount <= remainingToLink) {
+            for (const payment of unlinkedPayments) {
+              if (remainingToLink <= 0) break;
+              
+              const availableAmount = payment.amount - (payment.usedAmount || 0);
+              if (availableAmount <= 0) continue;
+
+              const useFromThisPayment = Math.min(availableAmount, remainingToLink);
+              const allocationId = `ALLOC-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
               await window.electronAPI.dbQuery(
-                "UPDATE payments SET orderId = ?, updatedAt = ?, isSynced = 0 WHERE id = ?",
-                [orderId, getLocalISOString(), payment.id]
+                `INSERT INTO advance_allocations (id, paymentId, orderId, amountUsed, date, isSynced, updatedAt)
+                 VALUES (?, ?, ?, ?, ?, 0, ?)`,
+                [allocationId, payment.id, orderId, useFromThisPayment, getLocalISOString(), getLocalISOString()]
               );
-              remainingToLink -= payment.amount;
-            } else {
-              const remainingUnlinkedAmount = payment.amount - remainingToLink;
-              await window.electronAPI.dbQuery(
-                "UPDATE payments SET amount = ?, updatedAt = ?, isSynced = 0 WHERE id = ?",
-                [remainingUnlinkedAmount, getLocalISOString(), payment.id]
-              );
-              await window.electronAPI.dbQuery(
-                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-                [`PAY-${Date.now()}-LINKED`, selectedCustomer.id, orderId, DEFAULT_SHOP_ID, remainingToLink, payment.method, 'SUCCESS', payment.createdAt, getLocalISOString()]
-              );
-              remainingToLink = 0;
+
+              remainingToLink -= useFromThisPayment;
             }
+
+            // Record advance payment consumption to the payments table for APY reference
+            const payIdAdv = await getNextRvNumber();
+            const payRefApy = await window.electronAPI.getNextPaymentReference('APY');
+            await window.electronAPI.dbQuery(
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+              [payIdAdv, selectedCustomer.id, orderId, DEFAULT_SHOP_ID, appliedAdvance, 'Advance', 'SUCCESS', getLocalISOString(), getLocalISOString(), payRefApy]
+            );
           }
         }
 
@@ -1327,6 +1408,11 @@ export default function POS() {
           { name: 'Nomod', value: nomodVal, accountType: 'GATEWAY', icon: 'CreditCard' },
         ];
 
+        const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const creatorName = currentUser.name || currentUser.username || 'System';
+        const creatorId = currentUser.id || 'SYSTEM';
+        const creatorRole = currentUser.role || 'system';
+
         for (const method of paymentMethodsList) {
           if (method.value > 0) {
             const txnId = `TXN-${Date.now()}-${method.name.toLowerCase()}`;
@@ -1339,9 +1425,44 @@ export default function POS() {
             const desc = `Order ${orderId} via ${method.name}`;
             await window.electronAPI.dbQuery(
               `INSERT INTO account_transactions 
-               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-              [txnId, DEFAULT_SHOP_ID, accountType, 'INCOME', 'Sales', method.value, desc, txnTimestamp, getLocalISOString(), method.icon, mappedBankId]
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+              [
+                txnId, 
+                DEFAULT_SHOP_ID, 
+                accountType, 
+                'INCOME', 
+                'Sales', 
+                method.value, 
+                desc, 
+                txnTimestamp, 
+                getLocalISOString(), 
+                method.icon, 
+                mappedBankId,
+                creatorName,
+                creatorId,
+                creatorRole
+              ]
+            );
+
+            // Record to payments table for Customer Insight Payment History
+            const payId = await getNextRvNumber();
+            const payRef = await window.electronAPI.getNextPaymentReference('PAY');
+            await window.electronAPI.dbQuery(
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+              [
+                payId,
+                selectedCustomer ? selectedCustomer.id : 'Walk-in',
+                orderId,
+                DEFAULT_SHOP_ID,
+                method.value,
+                method.name,
+                'SUCCESS',
+                getLocalISOString(),
+                getLocalISOString(),
+                payRef
+              ]
             );
 
             // Record card commission if applicable
@@ -1352,16 +1473,31 @@ export default function POS() {
                const commDesc = `Card Commission for Order ${orderId}`;
                await window.electronAPI.dbQuery(
                  `INSERT INTO account_transactions 
-                  (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-                 [commTxnId, DEFAULT_SHOP_ID, 'BANK', 'EXPENSE', 'Card Commission', commissionAmount, commDesc, txnTimestamp, getLocalISOString(), 'Percent', mappedBankId]
+                  (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+                 [
+                   commTxnId, 
+                   DEFAULT_SHOP_ID, 
+                   'BANK', 
+                   'EXPENSE', 
+                   'Card Commission', 
+                   commissionAmount, 
+                   commDesc, 
+                   txnTimestamp, 
+                   getLocalISOString(), 
+                   'Percent', 
+                   mappedBankId,
+                   creatorName,
+                   creatorId,
+                   creatorRole
+                 ]
                );
             }
           }
         }
 
         setPendingOrderId(null);
-        navigate(`/invoice/${orderId.replace('#', '')}?print=true`);
+        navigate(`/invoice/${orderId.replace('#', '')}${settings.autoPrint ? '?print=true' : ''}`);
       } catch (err) {
         console.error("Failed to save order:", err);
         // If DB-level credit limit check blocked the order, show the override modal
@@ -1408,7 +1544,7 @@ export default function POS() {
     }
 
     const orderId = pendingOrderId || '0001';
-    const billNumber = `BN-${Date.now().toString().slice(-6)}`;
+    const billNumber = `ORD-${Date.now().toString().slice(-6)}`;
     const combinedExpectedDelivery = expectedDeliveryDate ? `${expectedDeliveryDate} ${expectedDeliveryTime || '17:00'}` : '';
 
     if (window.electronAPI?.dbQuery) {
@@ -1572,37 +1708,50 @@ export default function POS() {
           return; // STOP — do not update balance or show success
         }
 
-        // Link unlinked advance payments if advance was applied
-        if (appliedAdvance > 0 && selectedCustomer) {
-          let remainingToLink = appliedAdvance;
-          const unlinkedPaymentsRes = await window.electronAPI.dbQuery(
-            "SELECT * FROM payments WHERE customerId = ? AND (orderId IS NULL OR orderId = '') AND amount > 0 ORDER BY createdAt ASC",
-            [selectedCustomer.id]
-          );
-          const unlinkedPayments = unlinkedPaymentsRes.success ? unlinkedPaymentsRes.data : [];
+        // Track advance usage separately in advance_allocations
+        if (selectedCustomer) {
+          // Clear any existing allocations and APY payments for this order first
+          await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE orderId = ?", [orderId]);
+          await window.electronAPI.dbQuery("DELETE FROM payments WHERE orderId = ? AND method = 'Advance'", [orderId]);
+          
+          if (appliedAdvance > 0) {
+            let remainingToLink = appliedAdvance;
+            const paymentsRes = await window.electronAPI.dbQuery(
+              `SELECT p.*, 
+               IFNULL((SELECT SUM(a.amountUsed) FROM advance_allocations a WHERE a.paymentId = p.id), 0) as usedAmount
+               FROM payments p
+               WHERE p.customerId = ? AND (p.orderId IS NULL OR p.orderId = '')
+               ORDER BY p.createdAt ASC`,
+              [selectedCustomer.id]
+            );
+            const unlinkedPayments = paymentsRes.success ? paymentsRes.data : [];
 
-          for (const payment of unlinkedPayments) {
-            if (remainingToLink <= 0) break;
-            
-            if (payment.amount <= remainingToLink) {
+            for (const payment of unlinkedPayments) {
+              if (remainingToLink <= 0) break;
+              
+              const availableAmount = payment.amount - (payment.usedAmount || 0);
+              if (availableAmount <= 0) continue;
+
+              const useFromThisPayment = Math.min(availableAmount, remainingToLink);
+              const allocationId = `ALLOC-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
               await window.electronAPI.dbQuery(
-                "UPDATE payments SET orderId = ?, updatedAt = ?, isSynced = 0 WHERE id = ?",
-                [orderId, getLocalISOString(), payment.id]
+                `INSERT INTO advance_allocations (id, paymentId, orderId, amountUsed, date, isSynced, updatedAt)
+                 VALUES (?, ?, ?, ?, ?, 0, ?)`,
+                [allocationId, payment.id, orderId, useFromThisPayment, getLocalISOString(), getLocalISOString()]
               );
-              remainingToLink -= payment.amount;
-            } else {
-              const remainingUnlinkedAmount = payment.amount - remainingToLink;
-              await window.electronAPI.dbQuery(
-                "UPDATE payments SET amount = ?, updatedAt = ?, isSynced = 0 WHERE id = ?",
-                [remainingUnlinkedAmount, getLocalISOString(), payment.id]
-              );
-              await window.electronAPI.dbQuery(
-                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-                [`PAY-${Date.now()}-LINKED`, selectedCustomer.id, orderId, DEFAULT_SHOP_ID, remainingToLink, payment.method, 'SUCCESS', payment.createdAt, getLocalISOString()]
-              );
-              remainingToLink = 0;
+
+              remainingToLink -= useFromThisPayment;
             }
+
+            // Record advance payment consumption to the payments table for APY reference
+            const payIdAdv = await getNextRvNumber();
+            const payRefApy = await window.electronAPI.getNextPaymentReference('APY');
+            await window.electronAPI.dbQuery(
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+              [payIdAdv, selectedCustomer.id, orderId, DEFAULT_SHOP_ID, appliedAdvance, 'Advance', 'SUCCESS', getLocalISOString(), getLocalISOString(), payRefApy]
+            );
           }
         }
 
@@ -1825,16 +1974,25 @@ export default function POS() {
                     onClick={() => {
                       const canvas = document.getElementById('nomod-qr-canvas');
                       if (canvas) {
-                        const win = window.open('', '', 'width=400,height=400');
-                        win.document.write(`<html><body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;"><img id="qr-img" src="${canvas.toDataURL()}" style="width:300px;height:300px;"/>
-                        <script>
-                          document.getElementById('qr-img').onload = function() {
-                            window.print();
-                            window.close();
-                          };
-                        </script>
-                        </body></html>`);
-                        win.document.close();
+                        if (window.electronAPI?.printHtml) {
+                          window.electronAPI.printHtml({
+                            html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
+                            css: '',
+                            printerName: settings.billingPrinter,
+                            silent: settings.silentPrinting !== false
+                          });
+                        } else {
+                          const win = window.open('', '', 'width=400,height=400');
+                          win.document.write(`<html><body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;"><img id="qr-img" src="${canvas.toDataURL()}" style="width:300px;height:300px;"/>
+                          <script>
+                            document.getElementById('qr-img').onload = function() {
+                              window.print();
+                              window.close();
+                            };
+                          </script>
+                          </body></html>`);
+                          win.document.close();
+                        }
                       }
                     }}
                   >
@@ -1949,7 +2107,7 @@ export default function POS() {
                           nomodLinkModal.linkId,
                           selectedCustomer ? selectedCustomer.id : 'Walk-in',
                           selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
-                          `Order #${nomodLinkModal.billNumber || nomodLinkModal.orderId}`,
+                          `Order #${settings.invoicePrefix || ''}${nomodLinkModal.orderId}`,
                           nomodLinkModal.amount,
                           getLocalDateTime(),
                           nomodLinkModal.url,
@@ -2066,7 +2224,7 @@ export default function POS() {
                 </div>
               </div>
 
-              {settings.enableNomod && (
+              {settings.noModPayEnabled && settings.enableNomod && (
                 <div 
                   onClick={() => setActivePaymentField('nomod')}
                   style={{
@@ -2208,6 +2366,9 @@ export default function POS() {
           <button className={styles.manageCustBtn} onClick={() => navigate('/customers')}>
             <User size={18} /> Customers
           </button>
+          <button className={styles.manageCustBtn} onClick={() => navigate('/orders')}>
+            <ClipboardList size={18} /> Orders
+          </button>
         </div>
 
         <div className={styles.categoriesRow}>
@@ -2227,10 +2388,6 @@ export default function POS() {
                 {cat.name}
               </button>
             ))}
-          </div>
-          <div className={styles.activeStation}>
-            <span className={styles.statusDot}></span>
-            Active Station
           </div>
         </div>
 
@@ -2501,9 +2658,9 @@ export default function POS() {
               className={`${styles.saveBtn} ${(!selectedCustomer || cart.length === 0) ? styles.disabled : ''}`}
               onClick={handleSaveOrder}
             >
-              <ShoppingBag size={18} /> Save Bill
+              <ShoppingBag size={18} /> Save Invoice
             </button>
-            {settings.enableNomod && (
+            {settings.noModPayEnabled && settings.enableNomod && (
               <button
                 className={styles.overdueBtn}
                 style={{ background: 'linear-gradient(135deg, #1D4ED8, #3B82F6)', color: 'white', border: 'none' }}
@@ -2524,7 +2681,7 @@ export default function POS() {
                 setStep('checkout');
               }}
             >
-              <CreditCard size={18} /> Payment Bill
+              <CreditCard size={18} /> Pay & Checkout
             </button>
           </div>
         </div>
@@ -2973,12 +3130,19 @@ export default function POS() {
       {/* Success Modal */}
       {showSuccessModal && lastOrderInfo && (
         <div className={styles.modalOverlay} onClick={() => { setShowSuccessModal(false); setSelectedCustomer(null); }}>
+          {settings.autoPrint && (
+            <iframe 
+              src={`#/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=true`} 
+              style={{ display: 'none' }} 
+              title="Silent Print Frame"
+            />
+          )}
           <div className={styles.successModal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.successHeader}>
               <div className={styles.checkIcon}>
                 <CheckCircle size={40} />
               </div>
-              <h2>Bill Saved Successfully!</h2>
+              <h2>Invoice Saved Successfully!</h2>
               <p>Order {lastOrderInfo.orderId} has been recorded.</p>
             </div>
 
@@ -3044,7 +3208,7 @@ export default function POS() {
                 <button
                   className={styles.printSuccessBtn}
                   onClick={() => {
-                    navigate(`/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=true`);
+                    navigate(`/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=force`);
                   }}
                 >
                   <Printer size={20} /> Print Receipt
@@ -3195,16 +3359,25 @@ export default function POS() {
                     onClick={() => {
                       const canvas = document.getElementById('nomod-qr-canvas');
                       if (canvas) {
-                        const win = window.open('', '', 'width=400,height=400');
-                        win.document.write(`<html><body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;"><img id="qr-img" src="${canvas.toDataURL()}" style="width:300px;height:300px;"/>
-                        <script>
-                          document.getElementById('qr-img').onload = function() {
-                            window.print();
-                            window.close();
-                          };
-                        </script>
-                        </body></html>`);
-                        win.document.close();
+                        if (window.electronAPI?.printHtml) {
+                          window.electronAPI.printHtml({
+                            html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
+                            css: '',
+                            printerName: settings.billingPrinter,
+                            silent: settings.silentPrinting !== false
+                          });
+                        } else {
+                          const win = window.open('', '', 'width=400,height=400');
+                          win.document.write(`<html><body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;"><img id="qr-img" src="${canvas.toDataURL()}" style="width:300px;height:300px;"/>
+                          <script>
+                            document.getElementById('qr-img').onload = function() {
+                              window.print();
+                              window.close();
+                            };
+                          </script>
+                          </body></html>`);
+                          win.document.close();
+                        }
                       }
                     }}
                   >

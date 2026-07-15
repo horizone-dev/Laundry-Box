@@ -30,24 +30,30 @@ export default function Accounts() {
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
   const isAuthorized = user.role === 'super_admin' || user.role === 'manager';
 
+  const { settings, updateSettings, formatDate } = useSettings();
+
   useEffect(() => {
     if (!isAuthorized) {
       navigate('/');
     }
   }, [isAuthorized, navigate]);
 
-  if (!isAuthorized) return null;
+  useEffect(() => {
+    if (activeAccountType === 'GATEWAY' && settings.noModPayEnabled === false) {
+      navigate('/accounts/cash', { replace: true });
+    }
+  }, [activeAccountType, settings.noModPayEnabled, navigate]);
 
-  const { settings, updateSettings, formatDate } = useSettings();
+  if (!isAuthorized || (activeAccountType === 'GATEWAY' && settings.noModPayEnabled === false)) return null;
 
   /* ─── State ──────────────────────────────────────── */
   const [activeTab, setActiveTab] = useState('Payments');
   const [notified, setNotified] = useState(false);
   const tabs = useMemo(() => {
-    return settings.enablePaymentLinks !== false
+    return (settings.noModPayEnabled !== false && settings.enablePaymentLinks !== false)
       ? ['Payments', 'Payment links', 'Refunds']
       : ['Payments', 'Refunds'];
-  }, [settings.enablePaymentLinks]);
+  }, [settings.noModPayEnabled, settings.enablePaymentLinks]);
   const [transactions, setTransactions] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [refundsPage, setRefundsPage] = useState(1);
@@ -249,11 +255,11 @@ export default function Accounts() {
           // Build refunds list dynamically from returns/refund transactions
           const returnTxns = res.data.filter(t => t.category === 'Return' || t.category === 'Refund Return');
           const mappedRefunds = returnTxns.map(t => {
-            const orderIdMatch = t.description.match(/Bill\s*(?:#|##)?([A-Za-z0-9_-]+)/i);
+            const orderIdMatch = t.description.match(/(?:Bill|Invoice)\s*(?:#|##)?([A-Za-z0-9_-]+)/i);
             const orderId = orderIdMatch ? orderIdMatch[1] : '';
 
             let reason = 'Damaged Garment';
-            if (t.description.startsWith('Return - Bill')) {
+            if (t.description.startsWith('Return - Bill') || t.description.startsWith('Return - Invoice')) {
               reason = 'Order Deleted';
             } else {
               const reasonParts = t.description.split(' - ');
@@ -295,7 +301,7 @@ export default function Accounts() {
         }
 
         // Outstanding receivables
-        const recRes = await window.electronAPI.dbQuery("SELECT SUM(dueAmount) as total FROM orders WHERE status != 'Cancelled' AND paymentStatus != 'Paid'", []);
+        const recRes = await window.electronAPI.dbQuery("SELECT SUM(dueAmount) as total FROM orders WHERE paymentStatus != 'Paid'", []);
         if (recRes.success && recRes.data[0]?.total !== null) {
           setReceivablesTotal(recRes.data[0].total);
         }
@@ -491,8 +497,8 @@ export default function Accounts() {
 
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
           [
             id,
             DEFAULT_SHOP_ID,
@@ -504,7 +510,10 @@ export default function Accounts() {
             timestamp,
             nowIso,
             formData.icon,
-            activeAccountType === 'BANK' ? activeBankAccountId : null
+            activeAccountType === 'BANK' ? activeBankAccountId : null,
+            user.name || user.username || 'System',
+            user.id || 'SYSTEM',
+            user.role || 'system'
           ]
         );
 
@@ -599,8 +608,8 @@ export default function Accounts() {
         const sourceTxnId = `TXN-XFER-OUT-${Date.now()}`;
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
           [
             sourceTxnId,
             DEFAULT_SHOP_ID,
@@ -612,7 +621,10 @@ export default function Accounts() {
             timestamp,
             nowIso,
             'Receipt',
-            sourceBankId
+            sourceBankId,
+            user.name || user.username || 'System',
+            user.id || 'SYSTEM',
+            user.role || 'system'
           ]
         );
 
@@ -620,8 +632,8 @@ export default function Accounts() {
         const targetTxnId = `TXN-XFER-IN-${Date.now()}`;
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
           [
             targetTxnId,
             DEFAULT_SHOP_ID,
@@ -633,7 +645,10 @@ export default function Accounts() {
             timestamp,
             nowIso,
             'DollarSign',
-            targetBankId
+            targetBankId,
+            user.name || user.username || 'System',
+            user.id || 'SYSTEM',
+            user.role || 'system'
           ]
         );
 
@@ -839,8 +854,8 @@ export default function Accounts() {
 
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
           [
             id,
             DEFAULT_SHOP_ID,
@@ -848,11 +863,14 @@ export default function Accounts() {
             'EXPENSE',
             'Return',
             amountVal,
-            `Refund for Bill #${refundFormData.orderId} - ${refundFormData.reason}`,
+            `Refund for Order #${refundFormData.orderId} - ${refundFormData.reason}`,
             timestamp,
             nowIso,
             'Receipt',
-            refundFormData.accountId === 'CASH' ? null : refundFormData.accountId
+            refundFormData.accountId === 'CASH' ? null : refundFormData.accountId,
+            user.name || user.username || 'System',
+            user.id || 'SYSTEM',
+            user.role || 'system'
           ]
         );
         fetchData();
@@ -968,8 +986,8 @@ export default function Accounts() {
 
         await window.electronAPI.dbQuery(
           `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
           [
             id,
             DEFAULT_SHOP_ID,
@@ -981,7 +999,10 @@ export default function Accounts() {
             timestamp,
             nowIso,
             'Receipt',
-            payrollInputData.paymentAccount === 'CASH' ? null : payrollInputData.paymentAccount
+            payrollInputData.paymentAccount === 'CASH' ? null : payrollInputData.paymentAccount,
+            user.name || user.username || 'System',
+            user.id || 'SYSTEM',
+            user.role || 'system'
           ]
         );
         const expenseId = `EXP-PR-${Date.now()}`;
@@ -1078,15 +1099,24 @@ export default function Accounts() {
 
   /* ─── Print Report ────────────────────────────────── */
   const handlePrint = () => {
-    window.print();
+    if (window.appPrint) {
+      window.appPrint();
+    } else {
+      window.print();
+    }
   };
 
   const renderDescriptionWithLinks = (description) => {
     if (!description) return 'Manual Entry';
 
+    // Replace any user-visible "Bill" or "Invoice" with "Order"
+    const cleanDesc = description
+      .replace(/\b(?:Bill|Invoice|Invoice\/Order)\b/gi, 'Order')
+      .replace(/\b(?:Bills|Invoices|Invoices\/Orders)\b/gi, 'Orders');
+
     // 1. Check if it is a settlement description with a customer name
-    if (description.startsWith('Settlement from ')) {
-      const remainingText = description.substring('Settlement from '.length);
+    if (cleanDesc.startsWith('Settlement from ')) {
+      const remainingText = cleanDesc.substring('Settlement from '.length);
       const matchedCustomer = [...dbCustomers]
         .sort((a, b) => b.name.length - a.name.length)
         .find(c => remainingText.toLowerCase().startsWith(c.name.toLowerCase()));
@@ -1112,8 +1142,8 @@ export default function Accounts() {
 
     // 2. Default order ID linker
     const regex = /(#[a-zA-Z0-9_-]+)/g;
-    const parts = description.split(regex);
-    if (parts.length === 1) return description;
+    const parts = cleanDesc.split(regex);
+    if (parts.length === 1) return cleanDesc;
 
     return parts.map((part, index) => {
       if (regex.test(part)) {
@@ -1180,30 +1210,32 @@ export default function Accounts() {
             </div>
 
             {/* Gateway Card */}
-            <div
-              className={`${styles.accountCard} ${activeAccountType === 'GATEWAY' ? styles.accountCardActive : ''}`}
-              onClick={() => navigate('/accounts/gateway')}
-            >
-              <div className={styles.cardHeaderSmall}>
-                <span className={styles.accountLabel}>NOMOD PAYMENT LINK</span>
-                <CreditCard size={18} className={styles.accountIcon} />
-              </div>
-              <div className={styles.accountBalance}>
-                {gatewayBalance.toFixed(2)} <span className={styles.curr}>{settings.currencySymbol || 'AED'}</span>
-              </div>
-
-              {activeAccountType === 'GATEWAY' && (
-                <div className={styles.cardQuickActions} onClick={e => e.stopPropagation()}>
-                  <div className={styles.actionRow}>
-                    <button className={styles.cardBtnGreen} onClick={() => handleOpenAddModal('INCOME')}>+ Income</button>
-                    <button className={styles.cardBtnRed} onClick={() => handleOpenAddModal('EXPENSE')}>- Expense</button>
-                  </div>
-                  <button className={styles.cardBtnOutline} onClick={handleOpenTransferModal}>
-                    <ArrowLeftRight size={14} /> Transfer
-                  </button>
+            {settings.noModPayEnabled !== false && (
+              <div
+                className={`${styles.accountCard} ${activeAccountType === 'GATEWAY' ? styles.accountCardActive : ''}`}
+                onClick={() => navigate('/accounts/gateway')}
+              >
+                <div className={styles.cardHeaderSmall}>
+                  <span className={styles.accountLabel}>NOMOD PAYMENT LINK</span>
+                  <CreditCard size={18} className={styles.accountIcon} />
                 </div>
-              )}
-            </div>
+                <div className={styles.accountBalance}>
+                  {gatewayBalance.toFixed(2)} <span className={styles.curr}>{settings.currencySymbol || 'AED'}</span>
+                </div>
+
+                {activeAccountType === 'GATEWAY' && (
+                  <div className={styles.cardQuickActions} onClick={e => e.stopPropagation()}>
+                    <div className={styles.actionRow}>
+                      <button className={styles.cardBtnGreen} onClick={() => handleOpenAddModal('INCOME')}>+ Income</button>
+                      <button className={styles.cardBtnRed} onClick={() => handleOpenAddModal('EXPENSE')}>- Expense</button>
+                    </div>
+                    <button className={styles.cardBtnOutline} onClick={handleOpenTransferModal}>
+                      <ArrowLeftRight size={14} /> Transfer
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Bank Cards */}
             {settings.bankAccounts && settings.bankAccounts.length > 0 ? (
@@ -1341,7 +1373,7 @@ export default function Accounts() {
                     <Search size={14} color="#64748B" />
                     <input
                       type="text"
-                      placeholder="Search comments..."
+                      placeholder="Search by comment or Order Number..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className={styles.searchInput}
@@ -1381,9 +1413,8 @@ export default function Accounts() {
                     </tr>
                   ) : (
                     paginatedTransactions.map(t => {
-                      // Parse user/cashier name who created the transaction
-                      const matchesCashier = t.description?.match(/Settlement from (.+?)(?:\s+via|$)/i) || t.description?.match(/Settlement for Bill #(.+?)(?:\s+via|$)/i);
-                      const creatorName = matchesCashier ? 'System' : (user.name || 'Mohammed');
+                      // Retrieve transaction creator directly from database fields, fallback to System/Unknown
+                      const creatorName = t.createdBy || (t.category === 'Sales Settlement' || t.category === 'Sales' ? 'System' : 'Unknown');
 
                       return (
                         <tr key={t.id} className={styles.ledgerRow}>
@@ -1488,7 +1519,7 @@ export default function Accounts() {
                   />
                 </div>
                 <div className={styles.formGroup}>
-                  <label>Description / Order Ref</label>
+                  <label>Description / Order Number</label>
                   <input
                     type="text"
                     placeholder="e.g. Order #105103"
@@ -1603,8 +1634,8 @@ export default function Accounts() {
 
                                       await window.electronAPI.dbQuery(
                                         `INSERT INTO account_transactions 
-                                         (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+                                         (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
                                         [
                                           txnId,
                                           DEFAULT_SHOP_ID,
@@ -1616,7 +1647,10 @@ export default function Accounts() {
                                           timestamp,
                                           nowIso,
                                           'CreditCard',
-                                          settings.bankAccounts && settings.bankAccounts.length > 0 ? settings.bankAccounts[0].id : null
+                                          settings.bankAccounts && settings.bankAccounts.length > 0 ? settings.bankAccounts[0].id : null,
+                                          user.name || user.username || 'System',
+                                          user.id || 'SYSTEM',
+                                          user.role || 'system'
                                         ]
                                       );
 
@@ -1739,7 +1773,7 @@ export default function Accounts() {
                 <tr>
                   <th>REFUND ID</th>
                   <th>DATE</th>
-                  <th>ORDER ID</th>
+                  <th>ORDER NUMBER</th>
                   <th>CUSTOMER</th>
                   <th>AMOUNT REFUNDED</th>
                   <th>REASON</th>
@@ -1892,7 +1926,7 @@ export default function Accounts() {
                   >
                     {activeAccountType === 'CASH' ? (
                       <>
-                        <option value="GATEWAY">Nomod Payment Link</option>
+                        {settings.noModPayEnabled !== false && <option value="GATEWAY">Nomod Payment Link</option>}
                         {settings.bankAccounts?.length > 0 ? (
                           settings.bankAccounts.map(b => (
                             <option key={b.id} value={b.id}>{b.bankName}</option>
@@ -1915,7 +1949,7 @@ export default function Accounts() {
                     ) : (
                       <>
                         <option value="CASH">Cash</option>
-                        <option value="GATEWAY">Nomod Payment Link</option>
+                        {settings.noModPayEnabled !== false && <option value="GATEWAY">Nomod Payment Link</option>}
                         {settings.bankAccounts
                           ?.filter(b => b.id !== activeBankAccountId)
                           .map(b => (
@@ -2044,7 +2078,7 @@ export default function Accounts() {
           <div className={styles.payslipCard} onClick={(e) => e.stopPropagation()}>
             <div className={styles.payslipHeader}>
               <h2>STAFF PAY SLIP</h2>
-              <p>LAUNDRY BILLING SOFTWARE</p>
+              <p>LAUNDRY INVOICING SOFTWARE</p>
               <p>Month: {activePayslip.month}</p>
             </div>
             <div className={styles.payslipBody}>

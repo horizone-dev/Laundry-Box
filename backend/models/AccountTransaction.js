@@ -11,6 +11,9 @@ const accountTransactionSchema = new mongoose.Schema({
   date: { type: String },
   icon: { type: String },
   bankAccountId: { type: String },
+  createdBy: { type: String },
+  createdById: { type: String },
+  createdByRole: { type: String },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });

@@ -121,7 +121,7 @@ export default function DailyTaxReport() {
         let ordersQuery = `
           SELECT orders.id, orders.totalAmount, orders.items, orders.createdAt 
           FROM orders 
-          WHERE orders.status != 'Cancelled'
+          WHERE orders.id IS NOT NULL
         `;
         let ordersParams = [];
 
@@ -356,7 +356,7 @@ export default function DailyTaxReport() {
           <button className="btn btn-secondary" onClick={handleExportCSV}>
             <Download size={18} /> Export CSV
           </button>
-          <button className="btn btn-primary" onClick={() => window.print()}>
+          <button className="btn btn-primary" onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}>
             <Printer size={18} /> Print Report
           </button>
         </div>

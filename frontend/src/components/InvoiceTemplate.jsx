@@ -334,12 +334,6 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             <span className={styles.metaLabelEnAr}>{formatLabel('Invoice No', 'رقم الفاتورة')}:</span>
             <span className={styles.metaValue}>{settings.invoicePrefix || ''}{order.id}</span>
           </div>
-          {order.billNumber && (
-            <div className={styles.metaRow}>
-              <span className={styles.metaLabelEnAr}>{formatLabel('Bill Number', 'رقم الحساب')}:</span>
-              <span className={styles.metaValue}>{order.billNumber}</span>
-            </div>
-          )}
 
         </div>
         <div className={styles.metaRightColumn}>

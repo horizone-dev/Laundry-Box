@@ -156,7 +156,8 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
       preload: preloadPath
     }
   });
@@ -756,6 +757,38 @@ ipcMain.handle('db-query', (event, { query, params }) => {
   }
 });
 
+ipcMain.handle('get-next-rv-number', async (event) => {
+  try {
+    const db = getDB();
+    const rows = db.prepare("SELECT id FROM payments WHERE id LIKE 'RV-%'").all();
+    let maxNum = 0;
+    if (rows && rows.length > 0) {
+      rows.forEach(row => {
+        const num = parseInt(row.id.replace('RV-', '').replace(/\D/g, ''));
+        if (!isNaN(num) && num > maxNum) {
+          maxNum = num;
+        }
+      });
+    }
+    const nextId = maxNum + 1;
+    return `RV-${String(nextId).padStart(6, '0')}`;
+  } catch (err) {
+    console.error("Failed to generate sequential RV number:", err);
+    throw err;
+  }
+});
+
+ipcMain.handle('get-next-payment-reference', async (event, paymentType) => {
+  try {
+    const db = getDB();
+    const { getNextPaymentReference } = require('./database');
+    return getNextPaymentReference(db, paymentType);
+  } catch (err) {
+    console.error("Failed to generate sequential payment reference:", err);
+    throw err;
+  }
+});
+
 ipcMain.handle('create-nomod-checkout', async (event, { amount, currency, customer, orderId, userRole }) => {
   try {
     const db = getDB();
@@ -952,10 +985,12 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
                 const payId = `PAY-NOMOD-SETTLE-${bill.id}-${checkoutId}`;
                 const exists = db.prepare('SELECT COUNT(*) as count FROM payments WHERE id = ?').get(payId).count;
                 if (exists === 0) {
+                  const { getNextPaymentReference } = require('./database');
+                  const payRef = getNextPaymentReference(db, 'ONL');
                   db.prepare(`
-                    INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-                    VALUES (?, ?, ?, ?, ?, 'Nomod', 'SUCCESS', ?, 0, ?)
-                  `).run(payId, customerId, bill.id, 'SHOP_01', allocate, paidAt || nowStr, nowStr);
+                    INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+                    VALUES (?, ?, ?, ?, ?, 'Nomod', 'SUCCESS', ?, 0, ?, ?)
+                  `).run(payId, customerId, bill.id, 'SHOP_01', allocate, paidAt || nowStr, nowStr, payRef);
                 } else {
                   logTracker(orderId, `Duplicate payment record check: payment ${payId} already exists. Skipping insert.`, 'warn');
                 }
@@ -967,10 +1002,12 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
                 const advPayId = `PAY-ADV-NOMOD-${checkoutId}`;
                 const exists = db.prepare('SELECT COUNT(*) as count FROM payments WHERE id = ?').get(advPayId).count;
                 if (exists === 0) {
+                  const { getNextPaymentReference } = require('./database');
+                  const payRef = getNextPaymentReference(db, 'ONL');
                   db.prepare(`
-                    INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-                    VALUES (?, ?, ?, ?, ?, 'Nomod', 'SUCCESS', ?, 0, ?)
-                  `).run(advPayId, customerId, null, 'SHOP_01', remaining, paidAt || nowStr, nowStr);
+                    INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+                    VALUES (?, ?, ?, ?, ?, 'Nomod', 'SUCCESS', ?, 0, ?, ?)
+                  `).run(advPayId, customerId, null, 'SHOP_01', remaining, paidAt || nowStr, nowStr, payRef);
                 } else {
                   logTracker(orderId, `Duplicate payment record check: advance payment ${advPayId} already exists. Skipping insert.`, 'warn');
                 }
@@ -992,8 +1029,8 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
                 
                 db.prepare(`
                   INSERT INTO account_transactions 
-                  (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-                  VALUES (?, 'SHOP_01', 'GATEWAY', 'INCOME', 'Sales Settlement', ?, ?, ?, 0, ?, 'CreditCard', NULL)
+                  (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+                  VALUES (?, 'SHOP_01', 'GATEWAY', 'INCOME', 'Sales Settlement', ?, ?, ?, 0, ?, 'CreditCard', NULL, 'System', 'SYSTEM', 'system')
                 `).run(
                   txnId,
                   amount,
@@ -1094,10 +1131,12 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
             const payId = `PAY-NOMOD-${checkoutId}`;
             const exists = db.prepare('SELECT COUNT(*) as count FROM payments WHERE id = ?').get(payId).count;
             if (exists === 0) {
+              const { getNextPaymentReference } = require('./database');
+              const payRef = getNextPaymentReference(db, 'ONL');
               db.prepare(`
-                INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-                VALUES (?, ?, ?, ?, ?, 'Nomod', 'SUCCESS', ?, 0, ?)
-              `).run(payId, order.customerId || 'Walk-in', orderId, order.shopId || 'SHOP_01', order.totalAmount, paidAt || nowStr, nowStr);
+                INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+                VALUES (?, ?, ?, ?, ?, 'Nomod', 'SUCCESS', ?, 0, ?, ?)
+              `).run(payId, order.customerId || 'Walk-in', orderId, order.shopId || 'SHOP_01', order.totalAmount, paidAt || nowStr, nowStr, payRef);
             } else {
               logTracker(orderId, `Duplicate payment record check: payment ${payId} already exists. Skipping insert.`, 'warn');
             }
@@ -1110,8 +1149,8 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
               
               db.prepare(`
                 INSERT INTO account_transactions 
-                (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-                VALUES (?, 'SHOP_01', 'GATEWAY', 'INCOME', 'Sales', ?, ?, ?, 0, ?, 'CreditCard', NULL)
+                (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+                VALUES (?, 'SHOP_01', 'GATEWAY', 'INCOME', 'Sales', ?, ?, ?, 0, ?, 'CreditCard', NULL, 'System', 'SYSTEM', 'system')
               `).run(
                 txnId,
                 order.totalAmount,
@@ -1320,16 +1359,13 @@ ipcMain.handle('print-to-pdf', async (event, options) => {
   let printWin = null;
   let tmpPath = '';
   try {
-    const { filename = 'Invoice.pdf', html = '', css = '' } = options || {};
+    const { filename = 'Invoice.pdf', html = '', css = '', pdfDownloadPath = '' } = options || {};
 
-    // Show save dialog
-    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-      title: 'Save Invoice as PDF',
-      defaultPath: filename,
-      filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
-    });
-
-    if (canceled || !filePath) return { success: false, canceled: true };
+    // Use target download path if configured, otherwise default to user's Downloads directory
+    const targetFolder = pdfDownloadPath && fs.existsSync(pdfDownloadPath)
+      ? pdfDownloadPath
+      : app.getPath('downloads');
+    const filePath = path.join(targetFolder, filename);
 
     // Build a standalone HTML document with all styles embedded
     const fullHtml = `<!DOCTYPE html>
@@ -1802,7 +1838,109 @@ ipcMain.handle('get-printers', async () => {
   return [];
 });
 
-ipcMain.handle('print-html', async (event, { html, css, printerName }) => {
+ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent }) => {
+  if (printerName && printerName !== 'System Default Printer') {
+    try {
+      const printers = await event.sender.getPrintersAsync();
+      const printer = printers.find(p => p.name === printerName);
+      if (!printer) {
+        return { success: false, error: `Selected printer "${printerName}" was not found or is disconnected.` };
+      }
+    } catch (err) {
+      console.error("Printer validation failed:", err);
+    }
+  }
+
+  let printWin = null;
+  let tmpPath = '';
+  try {
+    const fullHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      background: white;
+      color: black;
+    }
+    ${css}
+  </style>
+</head>
+<body>
+  ${html}
+</body>
+</html>`;
+
+    tmpPath = path.join(app.getPath('temp'), `print_invoice_${Date.now()}.html`);
+    fs.writeFileSync(tmpPath, fullHtml, 'utf8');
+
+    printWin = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+
+    await printWin.loadFile(tmpPath);
+
+    // Wait for fonts and images to render before printing (max 500ms)
+    try {
+      await Promise.race([
+        printWin.webContents.executeJavaScript(`
+          new Promise((resolve) => {
+            const imgs = Array.from(document.querySelectorAll('img'));
+            const imgPromises = imgs.map(img => {
+              if (img.complete) return Promise.resolve();
+              return new Promise(r => { img.onload = r; img.onerror = r; });
+            });
+            const fontsReady = document.fonts ? document.fonts.ready : Promise.resolve();
+            Promise.all([...imgPromises, fontsReady]).then(resolve).catch(resolve);
+          })
+        `),
+        new Promise(resolve => setTimeout(resolve, 500))
+      ]);
+    } catch (_) {}
+
+    // Short layout settle delay
+    await new Promise(resolve => setTimeout(resolve, 150));
+
+    const result = await new Promise((resolve) => {
+      printWin.webContents.print({
+        silent: true,   // Always silent — no dialog
+        printBackground: true,
+        margins: { marginType: 'printableArea' },
+        scaleFactor: 100,
+        deviceName: (printerName === 'System Default Printer' || !printerName) ? '' : printerName
+      }, (success, failureReason) => {
+        if (success) {
+          resolve({ success: true });
+        } else {
+          resolve({ success: false, error: failureReason || 'Unknown printer hardware error' });
+        }
+      });
+    });
+    return result;
+  } catch (err) {
+    console.error('Print-Invoice error:', err);
+    return { success: false, error: err.message };
+  } finally {
+    if (printWin) {
+      try {
+        printWin.close();
+      } catch (_) {}
+    }
+    if (tmpPath && fs.existsSync(tmpPath)) {
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch (_) {}
+    }
+  }
+});
+
+ipcMain.handle('print-html', async (event, { html, css, printerName, silent }) => {
   let printWin = null;
   let tmpPath = '';
   try {
@@ -1840,7 +1978,7 @@ ipcMain.handle('print-html', async (event, { html, css, printerName }) => {
 
     return new Promise((resolve) => {
       printWin.webContents.print({
-        silent: true,
+        silent: silent !== false,
         printBackground: true,
         margins: { marginType: 'none' },
         scaleFactor: 100,

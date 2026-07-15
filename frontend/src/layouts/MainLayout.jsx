@@ -21,7 +21,7 @@ import { paymentService } from '../services/paymentService';
 const API_BASE = API_BASE_URL;
 
 export default function MainLayout() {
-  const { settings, updateSettings } = useSettings();
+  const { settings, updateSettings, isSettingsDirty, setIsSettingsDirty, originalSettings, setOriginalSettings } = useSettings();
   const settingsRef = useRef(settings);
   useEffect(() => {
     settingsRef.current = settings;
@@ -32,6 +32,41 @@ export default function MainLayout() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const profileRef = useRef(null);
   const navigate = useNavigate();
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const [pendingPath, setPendingPath] = useState(null);
+  const [pendingOptions, setPendingOptions] = useState(null);
+
+  const customNavigate = (path, options) => {
+    if (isSettingsDirty) {
+      setPendingPath(path);
+      setPendingOptions(options);
+      setShowUnsavedModal(true);
+    } else {
+      navigate(path, options);
+    }
+  };
+  const handleNavClick = (e, path) => {
+    if (isSettingsDirty) {
+      if (e && e.preventDefault) e.preventDefault();
+      setPendingPath(path);
+      setPendingOptions(null);
+      setShowUnsavedModal(true);
+    }
+  };
+  const executeLogout = () => {
+    sessionStorage.clear();
+    window.location.reload();
+  };
+  const handleLogoutClick = (e) => {
+    if (isSettingsDirty) {
+      if (e && e.preventDefault) e.preventDefault();
+      setPendingPath('LOGOUT');
+      setPendingOptions(null);
+      setShowUnsavedModal(true);
+    } else {
+      executeLogout();
+    }
+  };
   const location = useLocation();
 
 
@@ -135,6 +170,87 @@ export default function MainLayout() {
     }
   };
 
+  // Set up global printing helper
+  useEffect(() => {
+    window.appPrint = async (options = {}) => {
+      if (window.electronAPI?.printInvoice) {
+
+        // ── 1. Find the invoice or tag element to print ──
+        const isTag = options.printerType === 'tag';
+        let printTarget = isTag
+          ? document.querySelector('.printing-tags') || document.querySelector('[class*="dressTag"]') || document.querySelector('[class*="tagCard"]')
+          : document.querySelector('[class*="invoiceCard"]') || document.querySelector('[class*="thermalHeader"]')?.closest('[class*="invoiceCard"], [class*="invoice"]');
+
+        // Fallback: use whole body if no specific target found
+        const sourceEl = printTarget || document.body;
+
+        // ── 2. Deep clone the target element ──
+        const clone = sourceEl.cloneNode(true);
+
+        // ── 3. Remove all noprint / UI-only elements ──
+        clone.querySelectorAll('[data-noprint="true"], [class*="editMode"], [class*="noprint"], button').forEach(el => el.remove());
+
+        // ── 4. Fix image srcs (cloneNode does not copy live src) ──
+        const originalImages = sourceEl.getElementsByTagName('img');
+        const clonedImages = clone.getElementsByTagName('img');
+        for (let i = 0; i < clonedImages.length; i++) {
+          if (originalImages[i]?.src) {
+            clonedImages[i].src = originalImages[i].src;
+          }
+        }
+
+        // ── 5. Extract all CSS from the page ──
+        let css = '';
+        for (const sheet of document.styleSheets) {
+          try {
+            const rules = Array.from(sheet.cssRules || []);
+            css += rules.map(r => r.cssText).join('\n') + '\n';
+          } catch (_) {}
+        }
+
+        // ── 6. Add solid black print override ──
+        css += `
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          body, * { color: #000 !important; background-color: transparent !important; box-shadow: none !important; }
+          .thermalTotalBold span, .thermalGrandTotal span { color: #000 !important; font-weight: 900 !important; }
+          svg { display: none !important; }
+        `;
+
+        const html = clone.outerHTML || `<div>${clone.innerHTML}</div>`;
+
+        // ── 7. Select printer ──
+        const billingPrinter = window.localStorage.getItem('billingPrinter') || '';
+        const tagPrinter = window.localStorage.getItem('tagPrinter') || '';
+        const selectedPrinter = options.printerName || (isTag ? tagPrinter : billingPrinter);
+
+        if (!selectedPrinter) {
+          alert(isTag
+            ? "No default tag printer is selected. Please configure it in settings under the Printers tab."
+            : "No default printer is selected. Please configure a default printer in settings under the Printers tab."
+          );
+          return;
+        }
+
+        const res = await window.electronAPI.printInvoice({
+          html,
+          css,
+          printerName: selectedPrinter,
+          silent: true
+        });
+
+        if (res && !res.success) {
+          alert("Printing failed: " + (res.error || "Selected printer is offline or unavailable."));
+        }
+      } else {
+        window.print();
+      }
+    };
+
+    return () => {
+      delete window.appPrint;
+    };
+  }, []);
+
   // Scroll to top when route changes
   useEffect(() => {
     const contentArea = document.querySelector(`.${styles.content}`);
@@ -145,26 +261,66 @@ export default function MainLayout() {
 
   // 1. Connection status monitoring
   useEffect(() => {
+    let active = true;
+    let timer = null;
+
     const checkStatus = async () => {
-      if (window.electronAPI) {
-        const status = await window.electronAPI.checkConnection();
-        setIsOnline(status);
-      } else {
-        setIsOnline(navigator.onLine);
+      if (!navigator.onLine) {
+        if (active) setIsOnline(false);
+        return;
+      }
+
+      try {
+        // 1. Check local backend server status
+        const response = await fetch(`${API_BASE}/health`, { 
+          cache: 'no-store',
+          signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : null
+        });
+        if (!response.ok) {
+          if (active) setIsOnline(false);
+          return;
+        }
+        const data = await response.json();
+        if (data.status !== 'ok') {
+          if (active) setIsOnline(false);
+          return;
+        }
+
+        // 2. Check actual internet access to ensure Atlas MongoDB connection is reachable
+        await fetch('https://clients3.google.com/generate_204', { 
+          mode: 'no-cors', 
+          cache: 'no-store',
+          signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : null 
+        });
+
+        if (active) setIsOnline(true);
+      } catch (err) {
+        if (active) setIsOnline(false);
       }
     };
 
+    // Initial check
     checkStatus();
-    const interval = setInterval(checkStatus, 5000);
 
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    // Poll every 30 seconds
+    timer = setInterval(checkStatus, 30000);
+
+    const handleOnline = () => {
+      if (active) {
+        setIsOnline(true);
+        checkStatus();
+      }
+    };
+    const handleOffline = () => {
+      if (active) setIsOnline(false);
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
     return () => {
-      clearInterval(interval);
+      active = false;
+      if (timer) clearInterval(timer);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
@@ -196,7 +352,7 @@ export default function MainLayout() {
     let unsubscribeNav = () => {};
     if (window.electronAPI && window.electronAPI.onNavigateToPendingPayments) {
       unsubscribeNav = window.electronAPI.onNavigateToPendingPayments(() => {
-        navigate('/pending');
+        customNavigate('/pending');
       });
     }
 
@@ -289,25 +445,67 @@ export default function MainLayout() {
 
 
 
-  let user = {};
-  let normalized = false;
-  try {
-    user = JSON.parse(sessionStorage.getItem('user') || '{}');
-    if (user.role === 'admin') {
-      user.role = 'super_admin';
-      normalized = true;
+  const [currentUser, setCurrentUser] = useState(() => {
+    let u = {};
+    try {
+      u = JSON.parse(sessionStorage.getItem('user') || '{}');
+      let normalized = false;
+      if (u.role === 'admin') {
+        u.role = 'super_admin';
+        normalized = true;
+      }
+      if (u.role === 'staff') {
+        u.role = 'cashier';
+        normalized = true;
+      }
+      if (normalized) {
+        sessionStorage.setItem('user', JSON.stringify(u));
+      }
+    } catch (e) {
+      console.error("Failed to parse user data", e);
     }
-    if (user.role === 'staff') {
-      user.role = 'cashier';
-      normalized = true;
+    return u;
+  });
+
+  useEffect(() => {
+    const handleUserUpdate = () => {
+      let u = {};
+      try {
+        u = JSON.parse(sessionStorage.getItem('user') || '{}');
+        let normalized = false;
+        if (u.role === 'admin') {
+          u.role = 'super_admin';
+          normalized = true;
+        }
+        if (u.role === 'staff') {
+          u.role = 'cashier';
+          normalized = true;
+        }
+        if (normalized) {
+          sessionStorage.setItem('user', JSON.stringify(u));
+        }
+      } catch (e) {
+        console.error("Failed to parse user data on update", e);
+      }
+      setCurrentUser(u);
+    };
+    window.addEventListener('user-profile-updated', handleUserUpdate);
+    return () => window.removeEventListener('user-profile-updated', handleUserUpdate);
+  }, []);
+
+  const user = currentUser;
+  const role = user.role || '';
+  const getNextRvNumber = async () => {
+    try {
+      if (window.electronAPI && typeof window.electronAPI.getNextRvNumber === 'function') {
+        const nextId = await window.electronAPI.getNextRvNumber();
+        if (nextId) return nextId;
+      }
+    } catch (err) {
+      console.warn("Failed to get sequential RV from main, falling back:", err);
     }
-    if (normalized) {
-      sessionStorage.setItem('user', JSON.stringify(user));
-    }
-  } catch (e) {
-    console.error("Failed to parse user data", e);
-  }
-  let role = user.role || '';
+    return `PAY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  };
 
   const [userPermissions, setUserPermissions] = useState(null);
 
@@ -383,7 +581,6 @@ export default function MainLayout() {
         { path: '/orders/pending', label: 'Pending Payments' },
         { path: '/orders/expected-delivery', label: 'Expected Deliveries' },
         { path: '/orders/deleted', label: 'Deleted Orders' },
-        { path: '/reports/cancelled', label: 'Cancelled Orders' },
       ]
     },
     {
@@ -397,12 +594,12 @@ export default function MainLayout() {
     },
     { path: '/services', label: 'Services', icon: Layers, permissionKey: 'services' },
     {
-      label: 'Settle Bill',
+      label: 'Settle Invoice',
       icon: DollarSign,
       permissionKey: 'pos',
       subItems: [
-        { path: '/settlement', label: 'Settle Bill' },
-        { path: '/outstanding-bills', label: 'Outstanding Bills' },
+        { path: '/settlement', label: 'Settle Invoice' },
+        { path: '/outstanding-bills', label: 'Outstanding Invoices' },
       ]
     },
     {
@@ -796,19 +993,23 @@ export default function MainLayout() {
                 [newPaid, newDue, newStatus, newWorkflowStatus, newOrderPaymentMethod, timestamp, bill.id]
               );
 
+              const payId = await getNextRvNumber();
+              const payRef = await window.electronAPI.getNextPaymentReference('QPY');
               await window.electronAPI.dbQuery(
-                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-                [`PAY-QUICK-${Date.now()}-${bill.id}-${split.method}`, customer.id, bill.id, DEFAULT_SHOP_ID, allocate, split.method, 'SUCCESS', timestamp, timestamp]
+                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+                [payId, customer.id, bill.id, DEFAULT_SHOP_ID, allocate, split.method, 'SUCCESS', timestamp, timestamp, payRef]
               );
             }
           }
 
           if (remaining > 0) {
+            const payId = await getNextRvNumber();
+            const payRef = await window.electronAPI.getNextPaymentReference('QPY');
             await window.electronAPI.dbQuery(
-              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-              [`PAY-ADV-${Date.now()}-${split.method}`, customer.id, null, DEFAULT_SHOP_ID, remaining, split.method, 'SUCCESS', timestamp, timestamp]
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+              [payId, customer.id, null, DEFAULT_SHOP_ID, remaining, split.method, 'SUCCESS', timestamp, timestamp, payRef]
             );
           }
         }
@@ -821,13 +1022,18 @@ export default function MainLayout() {
 
         // Record Transactions in Accounts
         const txnTimestamp = getLocalDateTime();
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const creatorName = userSession.name || userSession.username || 'System';
+        const creatorId = userSession.id || 'SYSTEM';
+        const creatorRole = userSession.role || 'system';
+
         for (const split of splits) {
           if (split.method === 'Discount') {
             const splitTxnId = `TXN-${Date.now()}-Discount`;
             await window.electronAPI.dbQuery(
               `INSERT INTO account_transactions 
-               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
               [
                 splitTxnId,
                 DEFAULT_SHOP_ID,
@@ -839,7 +1045,10 @@ export default function MainLayout() {
                 txnTimestamp,
                 timestamp,
                 'Percent',
-                null
+                null,
+                creatorName,
+                creatorId,
+                creatorRole
               ]
             );
             continue;
@@ -852,8 +1061,8 @@ export default function MainLayout() {
 
           await window.electronAPI.dbQuery(
             `INSERT INTO account_transactions 
-             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
             [
               splitTxnId,
               DEFAULT_SHOP_ID,
@@ -867,7 +1076,10 @@ export default function MainLayout() {
               txnTimestamp,
               timestamp,
               'DollarSign',
-              splitMappedBankId
+              splitMappedBankId,
+              creatorName,
+              creatorId,
+              creatorRole
             ]
           );
         }
@@ -894,10 +1106,12 @@ export default function MainLayout() {
             [newPaid, newDue, newStatus, updatedOrderStatus, (split.method === 'Card' || split.method === 'UPI' || split.method === 'Bank') ? split.method : 'Cash', timestamp, bill.id]
           );
 
+          const payId = await getNextRvNumber();
+          const payRef = await window.electronAPI.getNextPaymentReference('QPY');
           await window.electronAPI.dbQuery(
-            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-            [`PAY-QUICK-${Date.now()}-${bill.id}-${split.method}`, bill.customerId, bill.id, DEFAULT_SHOP_ID, allocate, split.method, 'SUCCESS', timestamp, timestamp]
+            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+            [payId, bill.customerId, bill.id, DEFAULT_SHOP_ID, allocate, split.method, 'SUCCESS', timestamp, timestamp, payRef]
           );
         }
 
@@ -909,13 +1123,18 @@ export default function MainLayout() {
 
         // Record Transactions in Accounts
         const txnTimestamp = getLocalDateTime();
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const creatorName = userSession.name || userSession.username || 'System';
+        const creatorId = userSession.id || 'SYSTEM';
+        const creatorRole = userSession.role || 'system';
+
         for (const split of splits) {
           if (split.method === 'Discount') {
             const splitTxnId = `TXN-${Date.now()}-Discount`;
             await window.electronAPI.dbQuery(
               `INSERT INTO account_transactions 
-               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
               [
                 splitTxnId,
                 DEFAULT_SHOP_ID,
@@ -923,11 +1142,14 @@ export default function MainLayout() {
                 'EXPENSE',
                 'Discount Given',
                 split.amount,
-                `Discount given for Bill #${bill.billNumber || bill.id}`,
+                `Discount given for Order #${settings.invoicePrefix || ''}${bill.id}`,
                 txnTimestamp,
                 timestamp,
                 'Percent',
-                null
+                null,
+                creatorName,
+                creatorId,
+                creatorRole
               ]
             );
             continue;
@@ -940,8 +1162,8 @@ export default function MainLayout() {
 
           await window.electronAPI.dbQuery(
             `INSERT INTO account_transactions 
-             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
             [
               splitTxnId,
               DEFAULT_SHOP_ID,
@@ -949,16 +1171,19 @@ export default function MainLayout() {
               'INCOME',
               'Sales Settlement',
               split.amount,
-              `Settlement for Bill #${bill.billNumber || bill.id} via ${split.method}`,
+              `Settlement for Order #${settings.invoicePrefix || ''}${bill.id} via ${split.method}`,
               txnTimestamp,
               timestamp,
               'DollarSign',
-              splitMappedBankId
+              splitMappedBankId,
+              creatorName,
+              creatorId,
+              creatorRole
             ]
           );
         }
 
-        alert(`Successfully settled ${amount} (Discount: ${discount}) for Bill #${bill.billNumber || bill.id}`);
+        alert(`Successfully settled ${amount} (Discount: ${discount}) for Order #${settings.invoicePrefix || ''}${bill.id}`);
       }
 
       setShowQuickSettle(false);
@@ -971,6 +1196,7 @@ export default function MainLayout() {
       setQuickUpiAmount('');
       setQuickBankAmount('');
       setQuickSettleResults([]);
+      window.location.reload();
     } catch (err) {
       console.error("Quick settle error:", err);
       alert("Failed to process settlement: " + err.message);
@@ -981,6 +1207,9 @@ export default function MainLayout() {
 
   const filteredNavItems = navItems
     .filter(item => {
+      if (item.path === '/workflow' && !settings.workflowEnabled) return false;
+      if (item.path === '/reports/z-report' && !settings.zReportEnabled) return false;
+
       if (role === 'super_admin') return item.path === '/activation' || item.path === '/settings';
       if (item.roleOnly) {
         if (Array.isArray(item.roleOnly)) return item.roleOnly.includes(role);
@@ -994,13 +1223,19 @@ export default function MainLayout() {
       return {
         ...item,
         subItems: item.subItems.filter(sub => {
+          if (sub.path === '/workflow' && !settings.workflowEnabled) return false;
+          if (sub.path === '/reports/z-report' && !settings.zReportEnabled) return false;
+          if (sub.path === '/reports/nomod-history' && (!settings.noModPayEnabled || !settings.paymentHistoryEnabled)) return false;
+          if (sub.path === '/accounts/gateway' && !settings.noModPayEnabled) return false;
+
           if (!sub.roleOnly) return true;
           if (role === 'super_admin') return true;
           if (Array.isArray(sub.roleOnly)) return sub.roleOnly.includes(role);
           return sub.roleOnly === role;
         })
       };
-    });
+    })
+    .filter(item => !item.subItems || item.subItems.length > 0);
 
   return (
     <div className={styles.layout}>
@@ -1048,6 +1283,7 @@ export default function MainLayout() {
                           className={({ isActive }) =>
                             isActive ? `${styles.subNavItem} ${styles.activeSub}` : styles.subNavItem
                           }
+                          onClick={(e) => handleNavClick(e, sub.path)}
                         >
                           <div className={styles.dot} />
                           {t(sub.label.toLowerCase().replace(/ /g, ''), settings.language)}
@@ -1066,7 +1302,10 @@ export default function MainLayout() {
                 className={({ isActive }) =>
                   isActive ? `${styles.navItem} ${styles.active}` : styles.navItem
                 }
-                onClick={() => setExpandedMenus([])}
+                onClick={(e) => {
+                  setExpandedMenus([]);
+                  handleNavClick(e, item.path);
+                }}
               >
                 <item.icon size={20} />
                 <span className={styles.sidebarText}>{t(item.label.toLowerCase().replace(/ /g, ''), settings.language)}</span>
@@ -1119,10 +1358,7 @@ export default function MainLayout() {
             <div
               className={styles.navItem}
               style={{ color: '#EF4444', cursor: 'pointer' }}
-              onClick={() => {
-                sessionStorage.clear();
-                window.location.reload();
-              }}
+              onClick={handleLogoutClick}
             >
               <LogOut size={20} /> <span className={styles.sidebarText}>Logout</span>
             </div>
@@ -1131,7 +1367,11 @@ export default function MainLayout() {
 
         {role !== 'super_admin' && (
           <div className={styles.sidebarFooter}>
-            <NavLink to="/help" className={styles.helpLink}>
+            <NavLink 
+              to="/help" 
+              className={styles.helpLink}
+              onClick={(e) => handleNavClick(e, '/help')}
+            >
               <HelpCircle size={18} /> <span className={styles.sidebarText}>Help Center</span>
             </NavLink>
           </div>
@@ -1149,7 +1389,7 @@ export default function MainLayout() {
                 placeholder="Search orders, customers, or services..."
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    navigate(`/orders?search=${e.target.value}`);
+                    customNavigate(`/orders?search=${e.target.value}`);
                   }
                 }}
               />
@@ -1161,7 +1401,7 @@ export default function MainLayout() {
               <div className={styles.headerIcons}>
                 <button
                   className={styles.headerNewOrderBtn}
-                  onClick={() => navigate('/pos')}
+                  onClick={() => customNavigate('/pos')}
                   title="New Order"
                 >
                   <Plus size={18} /> New Order
@@ -1178,7 +1418,7 @@ export default function MainLayout() {
                   <DollarSign size={18} /> Settle Bill
                 </button>
                 {(role === 'super_admin' || role === 'manager') && (
-                  <button className={styles.headerSettleBtn} onClick={() => navigate('/reports/z-report')} title="Z Report">
+                  <button className={styles.headerSettleBtn} onClick={() => customNavigate('/reports/z-report')} title="Z Report">
                     <Activity size={18} /> Z Report
                   </button>
                 )}
@@ -1199,7 +1439,7 @@ export default function MainLayout() {
                       <div className={styles.dropdownDivider} />
                       <div className={styles.notificationList}>
                         {notifications.map(n => (
-                          <div key={n.id} className={styles.notificationItem} onClick={() => navigate('/orders')}>
+                          <div key={n.id} className={styles.notificationItem} onClick={() => customNavigate('/orders')}>
                             <div className={styles.notifIcon}><ShoppingBag size={14} /></div>
                             <div className={styles.notifContent}>
                               <p>Order <strong>{settings.invoicePrefix || ''}{n.id}</strong> updated to <strong>{n.status}</strong></p>
@@ -1226,7 +1466,7 @@ export default function MainLayout() {
                         <strong>Need Help?</strong>
                       </div>
                       <div className={styles.dropdownDivider} />
-                      <div className={styles.dropdownItem} onClick={() => navigate('/help')}>
+                      <div className={styles.dropdownItem} onClick={() => customNavigate('/help')}>
                         <HelpCircle size={16} /> Help Center
                       </div>
                       <div className={styles.dropdownItem} onClick={() => window.open('https://wa.me/971588851680', '_blank')}>
@@ -1262,10 +1502,7 @@ export default function MainLayout() {
                     <span>{user.phone || 'No Phone'}</span>
                   </div>
                   <div className={styles.dropdownDivider} />
-                  <div className={`${styles.dropdownItem} ${styles.logoutItem}`} onClick={() => {
-                    sessionStorage.clear();
-                    window.location.reload();
-                  }}>
+                  <div className={`${styles.dropdownItem} ${styles.logoutItem}`} onClick={handleLogoutClick}>
                     <LogOut size={16} />
                     <span>Logout</span>
                   </div>
@@ -1307,6 +1544,72 @@ export default function MainLayout() {
         </div>
       </main>
 
+      {/* Unsaved Changes Confirmation Modal */}
+      {showUnsavedModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowUnsavedModal(false)} style={{ zIndex: 9999 }}>
+          <div className={styles.quickModal} style={{ maxWidth: '450px', width: '90%' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader} style={{ borderBottom: '1px solid #E2E8F0', paddingBottom: '1rem' }}>
+              <div className={styles.titleWithIcon} style={{ display: 'flex', alignItems: 'center' }}>
+                <AlertTriangle color="#F59E0B" size={24} />
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0F172A', marginLeft: '0.5rem' }}>Unsaved Changes</h2>
+              </div>
+              <button className={styles.closeBtn} onClick={() => setShowUnsavedModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className={styles.modalBody} style={{ padding: '1.5rem 0' }}>
+              <p style={{ color: '#475569', fontSize: '0.95rem', lineHeight: '1.5' }}>
+                You have unsaved changes. Do you want to save your changes before leaving this page?
+              </p>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', borderTop: '1px solid #E2E8F0', paddingTop: '1rem' }}>
+              <button 
+                type="button" 
+                className={`${styles.confirmModalBtn} ${styles.confirmModalBtnDiscard}`}
+                onClick={async () => {
+                  if (originalSettings) {
+                    await updateSettings(originalSettings);
+                  }
+                  setIsSettingsDirty(false);
+                  setShowUnsavedModal(false);
+                  setTimeout(() => {
+                    if (pendingPath === 'LOGOUT') {
+                      executeLogout();
+                    } else if (pendingPath) {
+                      if (pendingOptions) navigate(pendingPath, pendingOptions);
+                      else navigate(pendingPath);
+                    }
+                  }, 0);
+                }}
+              >
+                Discard Changes
+              </button>
+              <button 
+                type="button" 
+                className={`${styles.confirmModalBtn} ${styles.confirmModalBtnSave}`}
+                onClick={() => {
+                  setOriginalSettings(JSON.parse(JSON.stringify(settings)));
+                  setIsSettingsDirty(false);
+                  setShowUnsavedModal(false);
+                  setTimeout(() => {
+                    if (pendingPath === 'LOGOUT') {
+                      executeLogout();
+                    } else if (pendingPath) {
+                      if (pendingOptions) navigate(pendingPath, pendingOptions);
+                      else navigate(pendingPath);
+                    }
+                  }, 0);
+                }}
+              >
+                Save & Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Quick Settlement Modal */}
       {showQuickSettle && (
         <div className={styles.modalOverlay}>
@@ -1323,12 +1626,12 @@ export default function MainLayout() {
 
             <div className={styles.modalBody}>
               <div className={styles.inputGroup}>
-                <label>Search Customer (Name/Phone) or Bill No</label>
+                <label>Search Customer (Name/Phone) or Invoice/Order No</label>
                 <div className={styles.searchWrapper}>
                   <Search size={18} className={styles.searchIcon} />
                   <input
                     type="text"
-                    placeholder="Search name, phone, or bill number..."
+                    placeholder="Search name, phone, or invoice/order number..."
                     value={settleSearch}
                     onChange={(e) => handleQuickSettleSearch(e.target.value)}
                     autoFocus
@@ -1349,7 +1652,7 @@ export default function MainLayout() {
                           setSettleSearch(result.data.name);
                           setSettleAmount('');
                         } else {
-                          setSettleSearch(result.data.billNumber || result.data.id);
+                          setSettleSearch(result.data.id);
                           setSettleAmount(result.data.dueAmount.toString());
                         }
                       }}
@@ -1360,7 +1663,7 @@ export default function MainLayout() {
                         </div>
                         <div className={styles.resultItemText}>
                           <span className={styles.resultItemTitle}>
-                            {result.type === 'customer' ? result.data.name : `Bill #${result.data.billNumber || `${settings.invoicePrefix || ''}${result.data.id}`}`}
+                            {result.type === 'customer' ? result.data.name : `Invoice/Order #${settings.invoicePrefix || ''}${result.data.id}`}
                           </span>
                           <span className={styles.resultItemSub}>
                             {result.type === 'customer'
@@ -1371,10 +1674,30 @@ export default function MainLayout() {
                       </div>
                       <div className={styles.resultItemRight}>
                         <span className={styles.resultItemPrice}>
-                          {(settings.currencySymbol || 'AED')} {(result.type === 'customer' ? result.data.balance : result.data.dueAmount).toFixed(2)}
+                          {result.type === 'customer' ? (
+                            result.data.balance < 0 ? (
+                              <span style={{ color: '#15803D' }}>
+                                {Math.abs(result.data.balance).toFixed(2)} {(settings.currencySymbol || 'AED')}
+                              </span>
+                            ) : result.data.balance > 0 ? (
+                              <span style={{ color: '#B91C1C' }}>
+                                {result.data.balance.toFixed(2)} {(settings.currencySymbol || 'AED')}
+                              </span>
+                            ) : (
+                              <span>0.00 {(settings.currencySymbol || 'AED')}</span>
+                            )
+                          ) : (
+                            <span>{result.data.dueAmount.toFixed(2)} {(settings.currencySymbol || 'AED')}</span>
+                          )}
                         </span>
-                        <span className={`${styles.resultTypeBadge} ${result.type === 'customer' ? styles.customer : styles.bill}`}>
-                          {result.type === 'customer' ? 'Customer' : 'Bill'}
+                        <span className={`${styles.resultTypeBadge} ${
+                          result.type === 'customer' 
+                            ? (result.data.balance < 0 ? styles.advance : (result.data.balance > 0 ? styles.due : styles.settled))
+                            : styles.bill
+                        }`}>
+                          {result.type === 'customer' 
+                            ? (result.data.balance < 0 ? 'Advance' : (result.data.balance > 0 ? 'Credit/Due' : 'Settled'))
+                            : 'Order'}
                         </span>
                       </div>
                     </div>
@@ -1388,10 +1711,16 @@ export default function MainLayout() {
                     <span className={styles.orderId}>
                       {selectedSettleTarget.type === 'customer'
                         ? selectedSettleTarget.data.name
-                        : `Bill #${selectedSettleTarget.data.billNumber || `${settings.invoicePrefix || ''}${selectedSettleTarget.data.id}`}`}
+                        : `Invoice/Order #${settings.invoicePrefix || ''}${selectedSettleTarget.data.id}`}
                     </span>
-                    <span className={`${styles.statusBadge} ${styles.statusPending}`}>
-                      Due: {(settings.currencySymbol || 'AED')} {(selectedSettleTarget.type === 'customer' ? selectedSettleTarget.data.balance : selectedSettleTarget.data.dueAmount).toFixed(2)}
+                    <span className={`${styles.statusBadge} ${
+                      selectedSettleTarget.type === 'customer' && selectedSettleTarget.data.balance < 0
+                        ? styles.statusDone
+                        : ''
+                    }`}>
+                      {selectedSettleTarget.type === 'customer' && selectedSettleTarget.data.balance < 0
+                        ? `Advance: ${(settings.currencySymbol || 'AED')} ${Math.abs(selectedSettleTarget.data.balance).toFixed(2)}`
+                        : `Due: ${(settings.currencySymbol || 'AED')} ${(selectedSettleTarget.type === 'customer' ? selectedSettleTarget.data.balance : selectedSettleTarget.data.dueAmount).toFixed(2)}`}
                     </span>
                   </div>
 

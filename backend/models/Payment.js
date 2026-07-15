@@ -8,6 +8,7 @@ const paymentSchema = new mongoose.Schema({
   amount: { type: Number, required: true },
   method: { type: String, required: true },
   status: { type: String, required: true },
+  paymentReference: { type: String },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
