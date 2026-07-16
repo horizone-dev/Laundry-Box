@@ -356,58 +356,28 @@ export default function Accounts() {
       ];
       setTransactions(mockData);
 
-      const mockRefunds = [
-        { id: 'RFD-1001', date: '2026-06-15 11:30', orderId: 'AG-44282', customerName: 'David Miller', amount: 75.00, reason: 'Damaged Garment', account: 'Cash', status: 'Processed' },
-        { id: 'RFD-1002', date: '2026-06-14 15:40', orderId: 'AG-44283', customerName: 'Emily Watson', amount: 110.00, reason: 'Customer Dissatisfied', account: 'Emirates NBD', status: 'Processed' }
-      ];
+      const mockRefunds = [];
       setRefunds(mockRefunds);
 
-      const mockCusts = [
-        { id: 'CUST-001', name: 'Muhammed Ali', phone: '0501111111', balance: 350.00 },
-        { id: 'CUST-002', name: 'Sarah Connor', phone: '0502222222', balance: 0 },
-        { id: 'CUST-003', name: 'John Doe', phone: '0503333333', balance: 480.00 }
-      ];
+      const mockCusts = [];
       setDbCustomers(mockCusts);
 
-      const mockOrders = [
-        { id: 'AG-44280', billNumber: '44280', customerId: 'CUST-001', totalAmount: 350.00, paidAmount: 0.00, dueAmount: 350.00, paymentStatus: 'Unpaid', createdAt: '2026-06-16' },
-        { id: 'AG-44281', billNumber: '44281', customerId: 'CUST-002', totalAmount: 125.00, paidAmount: 125.00, dueAmount: 0.00, paymentStatus: 'Paid', createdAt: '2026-06-15' },
-        { id: 'AG-44282', billNumber: '44282', customerId: 'CUST-003', totalAmount: 480.00, paidAmount: 480.00, dueAmount: 0.00, paymentStatus: 'Paid', createdAt: '2026-06-14' }
-      ];
+      const mockOrders = [];
       setDbOrders(mockOrders);
 
-      const mockPaymentLinks = [
-        { id: 'LNK-1001', customerName: 'Muhammed Ali', description: 'Order #AG-44280', amount: 350.00, channel: 'Apple Pay', date: '2026-06-16 10:15', status: 'Active', url: 'https://pay.lundry.ae/lnk/AG-44280' },
-        { id: 'LNK-1002', customerName: 'Sarah Connor', description: 'Order #AG-44281', amount: 125.00, channel: 'Visa', date: '2026-06-15 14:20', status: 'Paid', url: 'https://pay.lundry.ae/lnk/AG-44281' },
-        { id: 'LNK-1003', customerName: 'John Doe', description: 'Outstanding Balance', amount: 480.00, channel: 'Google Pay', date: '2026-06-14 09:00', status: 'Expired', url: 'https://pay.lundry.ae/lnk/AG-JD02' }
-      ];
+      const mockPaymentLinks = [];
       setPaymentLinks(mockPaymentLinks);
 
-      const mockReconciliations = [
-        { id: 'REC-1001', date: '2026-06-15 22:00', cashCounted: 450.00, cashExpected: 450.00, status: 'Matched', verifiedBy: 'Super Admin' },
-        { id: 'REC-1002', date: '2026-06-14 22:00', cashCounted: 320.00, cashExpected: 325.00, status: 'Discrepancy (-5.00)', verifiedBy: 'Super Admin' }
-      ];
+      const mockReconciliations = [];
       setReconciliations(mockReconciliations);
 
-      const mockPayrollEmployees = [
-        { id: 'EMP-1', name: 'John Doe', role: 'Cashier', baseSalary: 3500 },
-        { id: 'EMP-2', name: 'Alice Smith', role: 'Washer', baseSalary: 4000 },
-        { id: 'EMP-3', name: 'Bob Jones', role: 'Delivery Agent', baseSalary: 3200 },
-        { id: 'EMP-4', name: 'Emily Rose', role: 'Ironer', baseSalary: 3800 }
-      ];
+      const mockPayrollEmployees = [];
       setPayrollEmployees(mockPayrollEmployees);
 
-      const mockPayrollPayments = [
-        { id: 'PR-1001', month: 'May 2026', employeeName: 'John Doe', role: 'Cashier', base: 3500, daysWorked: 30, overtime: 12, bonus: 150, deduction: 0, net: 3770, status: 'Paid', date: '2026-05-31' },
-        { id: 'PR-1002', month: 'May 2026', employeeName: 'Alice Smith', role: 'Washer', base: 4000, daysWorked: 28, overtime: 5, bonus: 0, deduction: 100, net: 3733, status: 'Paid', date: '2026-05-31' }
-      ];
+      const mockPayrollPayments = [];
       setPayrollPayments(mockPayrollPayments);
 
-      const mockAccrualLogs = [
-        { id: 'ACR-1001', date: '2026-06-15', employeeName: 'John Doe', type: 'Leave Salary Accrual', monthYear: 'June 2026', amount: 291.67, status: 'Accrued' },
-        { id: 'ACR-1002', date: '2026-06-15', employeeName: 'Alice Smith', type: 'Gratuity / End of Service Accrual', monthYear: 'June 2026', amount: 333.33, status: 'Accrued' },
-        { id: 'ACR-1003', date: '2026-06-15', employeeName: 'Bob Jones', type: 'Leave Salary Accrual', monthYear: 'June 2026', amount: 266.67, status: 'Accrued' }
-      ];
+      const mockAccrualLogs = [];
       setAccrualLogs(mockAccrualLogs);
 
       setLoading(false);
@@ -699,6 +669,9 @@ export default function Accounts() {
   /* ─── Filtering & Search ──────────────────────────── */
   const activeTransactions = useMemo(() => {
     return transactions.filter(t => {
+      // Exclude system auto-allocated transactions
+      if (t.description?.includes('System Auto') || t.category === 'System Auto') return false;
+
       if (activeAccountType === 'CASH') {
         return t.accountType === 'CASH';
       } else if (activeAccountType === 'GATEWAY') {
@@ -767,7 +740,11 @@ export default function Accounts() {
     const amountVal = parseFloat(linkFormData.amount);
 
     let checkoutId = linkId;
-    let checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${amountVal}&reference=${linkId}`;
+    let checkoutUrl = '';
+    if (settings.nomodEnv !== 'live') {
+      checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${amountVal}&reference=${linkId}`;
+    }
+
     if (window.electronAPI?.createNomodCheckout) {
       try {
         const checkoutRes = await window.electronAPI.createNomodCheckout({
@@ -783,12 +760,25 @@ export default function Accounts() {
         if (checkoutRes.success && checkoutRes.data?.url) {
           checkoutUrl = checkoutRes.data.url;
           checkoutId = checkoutRes.data.id || linkId;
-        } else if (checkoutRes.error) {
-          console.warn("Nomod API failed, falling back to sandbox link:", checkoutRes.error);
+        } else {
+          const errorMsg = checkoutRes?.error || 'Unknown error';
+          console.warn("Nomod API failed:", errorMsg);
+          if (settings.nomodEnv === 'live') {
+            alert("Nomod Checkout API failed: " + errorMsg + ". Please check your API key configuration in settings.");
+            return; // Stop flow
+          }
         }
       } catch (err) {
         console.warn("Nomod API connection error:", err.message);
+        if (settings.nomodEnv === 'live') {
+          alert("Nomod Checkout API connection error: " + err.message);
+          return; // Stop flow
+        }
       }
+    }
+
+    if (!checkoutUrl && settings.nomodEnv === 'live') {
+      return;
     }
 
     const newLink = {

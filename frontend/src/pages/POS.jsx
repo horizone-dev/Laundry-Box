@@ -844,15 +844,28 @@ export default function POS() {
       if (checkoutRes.success && checkoutRes.data && checkoutRes.data.url) {
         checkoutUrl = checkoutRes.data.url;
         if (checkoutRes.data.id) linkId = checkoutRes.data.id;
-      } else if (checkoutRes.error) {
-        console.warn('Nomod API failed in POS sidebar:', checkoutRes.error);
-        alert('Nomod Checkout API failed: ' + checkoutRes.error + '. Falling back to sandbox link.');
+      } else {
+        const errorMsg = checkoutRes?.error || 'Unknown error';
+        console.warn('Nomod API failed in POS sidebar:', errorMsg);
+        if (settings.nomodEnv === 'live') {
+          alert('Nomod Checkout API failed: ' + errorMsg + '. Please check your API key configuration in settings.');
+          return; // Stop flow, keep pending
+        } else {
+          alert('Nomod Checkout API failed: ' + errorMsg + '. Falling back to sandbox link.');
+        }
       }
     } catch (err) {
       console.warn('Nomod IPC failed in POS sidebar:', err.message);
+      if (settings.nomodEnv === 'live') {
+        alert('Nomod Checkout IPC failed: ' + err.message);
+        return;
+      }
     }
 
     if (!checkoutUrl) {
+      if (settings.nomodEnv === 'live') {
+        return;
+      }
       checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${total}&reference=${linkId}`;
     }
 
@@ -1008,16 +1021,29 @@ export default function POS() {
             if (checkoutRes.data.id) {
               linkId = checkoutRes.data.id;
             }
-          } else if (checkoutRes.error) {
-            console.warn("Nomod Backend API failed:", checkoutRes.error);
-            alert("Nomod Checkout API connection failed: " + checkoutRes.error + ". Falling back to sandbox payment link.");
+          } else {
+            const errorMsg = checkoutRes?.error || 'Unknown error';
+            console.warn("Nomod Backend API failed:", errorMsg);
+            if (settings.nomodEnv === 'live') {
+              alert("Nomod Checkout API connection failed: " + errorMsg + ". Please check your API key configuration in settings.");
+              return; // Stop flow
+            } else {
+              alert("Nomod Checkout API connection failed: " + errorMsg + ". Falling back to sandbox payment link.");
+            }
           }
         } catch (err) {
           console.warn("Nomod Checkout IPC failed:", err.message);
+          if (settings.nomodEnv === 'live') {
+            alert("Nomod Checkout IPC failed: " + err.message);
+            return;
+          }
         }
       }
 
       if (!checkoutUrl) {
+        if (settings.nomodEnv === 'live') {
+          return;
+        }
         checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${nomodVal}&reference=${linkId}`;
       }
 

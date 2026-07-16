@@ -24,7 +24,6 @@ import Login from './pages/Login';
 import Users from './pages/Users';
 import Accounts from './pages/Accounts';
 import Settlement from './pages/Settlement';
-import OutstandingBills from './pages/OutstandingBills';
 import OverdueStatement from './pages/OverdueStatement';
 import HelpCenter from './pages/HelpCenter';
 import Activation from './pages/Activation';
@@ -53,7 +52,6 @@ function App() {
           <Route path="workflow" element={<Workflow />} />
           <Route path="orders">
             <Route index element={<Orders />} />
-            <Route path="pending" element={<Orders isPendingView={true} />} />
             <Route path="expected-delivery" element={<ExpectedDeliveries />} />
             <Route path="deleted" element={<DeletedOrders />} />
           </Route>
@@ -82,7 +80,6 @@ function App() {
           <Route path="users" element={<Users />} />
           <Route path="accounts/:type" element={<Accounts />} />
           <Route path="settlement" element={<Settlement />} />
-          <Route path="outstanding-bills" element={<OutstandingBills />} />
           <Route path="invoice/:id" element={<Invoice />} />
           <Route path="overdue-statement/:customerId" element={<OverdueStatement />} />
           <Route path="activation" element={<Activation />} />

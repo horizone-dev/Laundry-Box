@@ -1,7 +1,7 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1rem;
   padding: 0 1rem 1rem 1rem;
 }
 
@@ -9,53 +9,53 @@
 .headerRow {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 0.5rem;
 }
 
 .breadcrumb {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.1rem;
 }
 
 .headerInfo h1 {
-  font-size: 1.8rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.15rem;
 }
 
 .subtext {
   color: var(--text-secondary);
-  font-size: 0.95rem;
+  font-size: 0.85rem;
 }
 
 .headerActions {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.5rem;
 }
 
 /* ── KPI Cards ───────────────────────────────── */
 .kpiGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.5rem;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
 }
 
 .kpiCard {
   background: white;
-  padding: 1.5rem;
+  padding: 1rem;
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.2rem;
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
@@ -106,12 +106,12 @@
 .tableCard {
   background: white;
   border-radius: var(--radius-lg);
-  padding: 1.5rem;
+  padding: 1rem;
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 /* ── Toolbar ─────────────────────────────────── */
@@ -119,7 +119,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
   flex-wrap: wrap;
 }
 
@@ -140,12 +140,12 @@
 
 .searchInput {
   width: 100%;
-  padding: 0.75rem 1rem 0.75rem 2.75rem;
+  padding: 0.5rem 1rem 0.5rem 2.5rem;
   background: #F8FAFC;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   outline: none;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 500;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
@@ -164,11 +164,11 @@
 }
 
 .filterSelect {
-  padding: 0.7rem 1rem;
+  padding: 0.5rem 1rem;
   background: #F8FAFC;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: #475569;
   outline: none;
@@ -190,9 +190,9 @@
 .table th {
   text-align: left;
   border-bottom: 1px solid var(--border);
-  padding: 1rem;
+  padding: 0.75rem;
   color: var(--text-secondary);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 700;
   background: #F8FAFC;
   letter-spacing: 0.05em;
@@ -200,8 +200,8 @@
 }
 
 .table td {
-  padding: 1.1rem 1rem;
-  font-size: 0.9rem;
+  padding: 0.75rem;
+  font-size: 0.85rem;
   border-bottom: 1px solid #F1F5F9;
   color: var(--text-primary);
   vertical-align: top;
@@ -509,6 +509,18 @@
   font-size: 0.75rem;
   font-weight: 600;
   color: #64748B;
+}
+
+.badgeNotPaid {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: #F1F5F9;
+  color: #475569;
+  border: 1px solid #E2E8F0;
 }
 
 .refundBtn {

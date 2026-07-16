@@ -1089,14 +1089,10 @@ function runDataHealer(db) {
 
     // 4. Pre-populate Categories if empty
     const catCheck = db.prepare("SELECT COUNT(*) as count FROM service_categories").get();
+    db.prepare("DELETE FROM service_categories WHERE id IN ('cat-1', 'cat-2', 'cat-3', 'cat-4')").run();
     if (catCheck.count === 0) {
       console.log("Pre-populating default categories...");
-      const defaultCats = [
-        { id: 'cat-1', name: 'Laundry', icon: 'Shirt' },
-        { id: 'cat-2', name: 'Dry Cleaning', icon: 'Sparkles' },
-        { id: 'cat-3', name: 'Alterations', icon: 'Scissors' },
-        { id: 'cat-4', name: 'Add-ons', icon: 'Zap' }
-      ];
+      const defaultCats = [];
       const stmt = db.prepare("INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)");
       defaultCats.forEach(cat => {
         stmt.run(cat.id, 'SHOP_01', cat.name, cat.icon, new Date().toISOString());
@@ -1105,14 +1101,10 @@ function runDataHealer(db) {
 
     // 5. Pre-populate Payroll Employees if empty
     const empCheck = db.prepare("SELECT COUNT(*) as count FROM payroll_employees").get();
+    db.prepare("DELETE FROM payroll_employees WHERE id IN ('EMP-1', 'EMP-2', 'EMP-3', 'EMP-4')").run();
     if (empCheck.count === 0) {
       console.log("Pre-populating default payroll employees...");
-      const defaultEmps = [
-        { id: 'EMP-1', name: 'John Doe', role: 'Cashier', baseSalary: 3500 },
-        { id: 'EMP-2', name: 'Alice Smith', role: 'Washer', baseSalary: 4000 },
-        { id: 'EMP-3', name: 'Bob Jones', role: 'Delivery Agent', baseSalary: 3200 },
-        { id: 'EMP-4', name: 'Emily Rose', role: 'Ironer', baseSalary: 3800 }
-      ];
+      const defaultEmps = [];
       const stmt = db.prepare("INSERT INTO payroll_employees (id, name, role, baseSalary) VALUES (?, ?, ?, ?)");
       defaultEmps.forEach(emp => {
         stmt.run(emp.id, emp.name, emp.role, emp.baseSalary);
@@ -1121,13 +1113,10 @@ function runDataHealer(db) {
 
     // 6. Pre-populate Payment Links if empty
     const linkCheck = db.prepare("SELECT COUNT(*) as count FROM payment_links").get();
+    db.prepare("DELETE FROM payment_links WHERE id IN ('LNK-1001', 'LNK-1002', 'LNK-1003')").run();
     if (linkCheck.count === 0) {
       console.log("Pre-populating default payment links...");
-      const defaultLinks = [
-        { id: 'LNK-1001', customerId: 'CUST-001', customerName: 'Muhammed Ali', description: 'Order #AG-44280', amount: 350.00, channel: 'Apple Pay', date: '2026-06-16 10:15', status: 'Active', url: 'https://pay.lundry.ae/lnk/AG-44280' },
-        { id: 'LNK-1002', customerId: 'CUST-002', customerName: 'Sarah Connor', description: 'Order #AG-44281', amount: 125.00, channel: 'Visa', date: '2026-06-15 14:20', status: 'Paid', url: 'https://pay.lundry.ae/lnk/AG-44281' },
-        { id: 'LNK-1003', customerId: 'CUST-003', customerName: 'John Doe', description: 'Outstanding Balance', amount: 480.00, channel: 'Google Pay', date: '2026-06-14 09:00', status: 'Expired', url: 'https://pay.lundry.ae/lnk/AG-JD02' }
-      ];
+      const defaultLinks = [];
       const stmt = db.prepare("INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
       defaultLinks.forEach(link => {
         stmt.run(link.id, link.customerId, link.customerName, link.description, link.amount, link.channel, link.date, link.status, link.url);
@@ -1136,12 +1125,10 @@ function runDataHealer(db) {
 
     // 7. Pre-populate Reconciliations if empty
     const recCheck = db.prepare("SELECT COUNT(*) as count FROM reconciliations").get();
+    db.prepare("DELETE FROM reconciliations WHERE id IN ('REC-1001', 'REC-1002')").run();
     if (recCheck.count === 0) {
       console.log("Pre-populating default reconciliations...");
-      const defaultRecs = [
-        { id: 'REC-1001', date: '2026-06-15 22:00', cashCounted: 450.00, cashExpected: 450.00, status: 'Matched', verifiedBy: 'Super Admin' },
-        { id: 'REC-1002', date: '2026-06-14 22:00', cashCounted: 320.00, cashExpected: 325.00, status: 'Discrepancy (-5.00)', verifiedBy: 'Super Admin' }
-      ];
+      const defaultRecs = [];
       const stmt = db.prepare("INSERT INTO reconciliations (id, date, cashCounted, cashExpected, status, verifiedBy) VALUES (?, ?, ?, ?, ?, ?)");
       defaultRecs.forEach(rec => {
         stmt.run(rec.id, rec.date, rec.cashCounted, rec.cashExpected, rec.status, rec.verifiedBy);
@@ -1150,12 +1137,10 @@ function runDataHealer(db) {
 
     // 8. Pre-populate Payroll Payments if empty
     const payCheck = db.prepare("SELECT COUNT(*) as count FROM payroll_payments").get();
+    db.prepare("DELETE FROM payroll_payments WHERE id IN ('PR-1001', 'PR-1002')").run();
     if (payCheck.count === 0) {
       console.log("Pre-populating default payroll payments...");
-      const defaultPayPayments = [
-        { id: 'PR-1001', month: 'May 2026', employeeName: 'John Doe', role: 'Cashier', base: 3500, daysWorked: 30, overtime: 12, bonus: 150, deduction: 0, net: 3770, status: 'Paid', date: '2026-05-31' },
-        { id: 'PR-1002', month: 'May 2026', employeeName: 'Alice Smith', role: 'Washer', base: 4000, daysWorked: 28, overtime: 5, bonus: 0, deduction: 100, net: 3733, status: 'Paid', date: '2026-05-31' }
-      ];
+      const defaultPayPayments = [];
       const stmt = db.prepare("INSERT INTO payroll_payments (id, month, employeeName, role, base, daysWorked, overtime, bonus, deduction, net, status, date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       defaultPayPayments.forEach(p => {
         stmt.run(p.id, p.month, p.employeeName, p.role, p.base, p.daysWorked, p.overtime, p.bonus, p.deduction, p.net, p.status, p.date);
@@ -1164,13 +1149,10 @@ function runDataHealer(db) {
 
     // 9. Pre-populate Accrual Logs if empty
     const accCheck = db.prepare("SELECT COUNT(*) as count FROM accrual_logs").get();
+    db.prepare("DELETE FROM accrual_logs WHERE id IN ('ACR-1001', 'ACR-1002', 'ACR-1003')").run();
     if (accCheck.count === 0) {
       console.log("Pre-populating default accrual logs...");
-      const defaultAccs = [
-        { id: 'ACR-1001', date: '2026-06-15', employeeName: 'John Doe', type: 'Leave Salary Accrual', monthYear: 'June 2026', amount: 291.67, status: 'Accrued' },
-        { id: 'ACR-1002', date: '2026-06-15', employeeName: 'Alice Smith', type: 'Gratuity / End of Service Accrual', monthYear: 'June 2026', amount: 333.33, status: 'Accrued' },
-        { id: 'ACR-1003', date: '2026-06-15', employeeName: 'Bob Jones', type: 'Leave Salary Accrual', monthYear: 'June 2026', amount: 266.67, status: 'Accrued' }
-      ];
+      const defaultAccs = [];
       const stmt = db.prepare("INSERT INTO accrual_logs (id, date, employeeName, type, monthYear, amount, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
       defaultAccs.forEach(acc => {
         stmt.run(acc.id, acc.date, acc.employeeName, acc.type, acc.monthYear, acc.amount, acc.status);

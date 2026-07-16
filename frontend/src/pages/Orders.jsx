@@ -38,7 +38,7 @@ const STATUS_COLORS = {
   'Delivered': styles.statusDelivered
 };
 
-export default function Orders({ isPendingView = false }) {
+export default function Orders() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const querySearch = searchParams.get('search') || '';
@@ -114,7 +114,6 @@ export default function Orders({ isPendingView = false }) {
 
   const [nomodLinkModal, setNomodLinkModal] = useState({ show: false, url: '', linkId: '', amount: 0 });
   const [showStatusModal, setShowStatusModal] = useState(false);
-  const [pendingSubFilter, setPendingSubFilter] = useState('All'); // 'All', 'Pending', 'Overdue'
   const [sortBy, setSortBy] = useState('date'); // 'date', 'payment'
 
   const getDaysPending = (dateStr) => {
@@ -210,7 +209,7 @@ export default function Orders({ isPendingView = false }) {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, isPendingView, pendingSubFilter, workflowFilter, dateRange, customStart, customEnd, sortBy]);
+  }, [searchTerm, workflowFilter, dateRange, customStart, customEnd, sortBy]);
 
   useEffect(() => {
     const handleNomodSuccess = (e) => {
@@ -397,30 +396,20 @@ export default function Orders({ isPendingView = false }) {
 
   // Filtering logic
   let filteredOrders = [];
-  if (isPendingView) {
-    filteredOrders = dateFilteredOrders.filter(o => !o.isDeleted && (o.dueAmount > 0 || o.paymentStatus !== 'Paid'));
-    if (pendingSubFilter === 'Pending') {
-      filteredOrders = filteredOrders.filter(o => !isOverdue(o));
-    } else if (pendingSubFilter === 'Overdue') {
-      filteredOrders = filteredOrders.filter(o => isOverdue(o));
-    }
+  if (workflowFilter === 'Deleted') {
+    filteredOrders = dateFilteredOrders.filter(o => o.isDeleted);
   } else {
-    if (workflowFilter === 'Deleted') {
-      filteredOrders = dateFilteredOrders.filter(o => o.isDeleted);
-    } else {
-      const activeOnly = dateFilteredOrders.filter(o => !o.isDeleted);
-      if (workflowFilter === 'All') {
-        filteredOrders = activeOnly;
-      } else if (workflowFilter === 'Confirmed') {
-        filteredOrders = activeOnly.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status));
-      } else if (workflowFilter === 'Processing') {
-        filteredOrders = activeOnly.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status));
-      } else if (workflowFilter === 'Ready') {
-        filteredOrders = activeOnly.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status));
-      } else if (workflowFilter === 'Delivered') {
-        filteredOrders = activeOnly.filter(o => o.status === 'Delivered');
-
-      }
+    const activeOnly = dateFilteredOrders.filter(o => !o.isDeleted);
+    if (workflowFilter === 'All') {
+      filteredOrders = activeOnly;
+    } else if (workflowFilter === 'Confirmed') {
+      filteredOrders = activeOnly.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status));
+    } else if (workflowFilter === 'Processing') {
+      filteredOrders = activeOnly.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status));
+    } else if (workflowFilter === 'Ready') {
+      filteredOrders = activeOnly.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status));
+    } else if (workflowFilter === 'Delivered') {
+      filteredOrders = activeOnly.filter(o => o.status === 'Delivered');
     }
   }
 
@@ -445,11 +434,6 @@ export default function Orders({ isPendingView = false }) {
   const overdueOrdersList = activeDateFilteredOrders.filter(o => isOverdue(o));
   const overdueAmount = overdueOrdersList.reduce((sum, o) => sum + (o.dueAmount || 0), 0);
 
-  const counts = {
-    all: activeDateFilteredOrders.filter(o => o.dueAmount > 0).length,
-    pending: activeDateFilteredOrders.filter(o => o.dueAmount > 0 && !isOverdue(o)).length,
-    overdue: overdueOrdersList.length
-  };
 
   const workflowCounts = {
     All: activeDateFilteredOrders.length,
@@ -460,11 +444,6 @@ export default function Orders({ isPendingView = false }) {
     Deleted: dateFilteredOrders.filter(o => o.isDeleted).length
   };
 
-  const dueSoonOrders = activeDateFilteredOrders.filter(o => {
-    if (o.status !== 'Credit' && o.status !== 'Payment Pending') return false;
-    const diffDays = Math.ceil(Math.abs(new Date() - new Date(o.createdAt)) / (1000 * 60 * 60 * 24));
-    return diffDays <= 7 && diffDays > 0;
-  });
 
   useEffect(() => {
     setSearchTerm(querySearch);
@@ -819,6 +798,7 @@ export default function Orders({ isPendingView = false }) {
       setShowPinModal(false);
       setPinValue('');
       alert(`Order ${orderToDelete.id} and all its associated payments/transactions deleted successfully (authorized by ${pinOwner}).`);
+      window.location.reload();
     } catch (err) {
       console.error('Failed to delete order:', err);
       setPinError('An error occurred during deletion');
@@ -968,17 +948,22 @@ export default function Orders({ isPendingView = false }) {
               if (checkoutRes.data.id) {
                 linkId = checkoutRes.data.id;
               }
-            } else if (checkoutRes.error) {
-              console.warn("Nomod Backend API failed in Orders:", checkoutRes.error);
-              alert("Nomod Checkout API connection failed: " + checkoutRes.error + ". Falling back to sandbox payment link.");
+            } else {
+              const errorMsg = checkoutRes?.error || 'Unknown error';
+              console.warn("Nomod Backend API failed in Orders:", errorMsg);
+              if (settings.nomodEnv === 'live') {
+                alert("Nomod Checkout API connection failed: " + errorMsg + ". Please check your API key configuration in settings.");
+                return;
+              }
+              checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${amountToPay}&reference=${linkId}`;
             }
           } catch (err) {
             console.warn("Nomod Checkout IPC failed in Orders:", err.message);
+            if (settings.nomodEnv === 'live') {
+              alert("Nomod Checkout IPC failed: " + err.message);
+              return;
+            }
           }
-        }
-
-        if (!checkoutUrl) {
-          checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${amountToPay}&reference=${linkId}`;
         }
 
         // Log Audit Event
@@ -1256,7 +1241,8 @@ export default function Orders({ isPendingView = false }) {
             paymentLinkUrl = searchRes.data[0].url;
           } else {
             const linkId = `LNK-${orderMatch.billNumber || Date.now().toString().slice(-4)}`;
-            const url = `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`;
+            const paymentBase = (settings.paymentBaseUrl || 'https://pay.laundry.ae').replace(/\/$/, '');
+            const url = `${paymentBase}/lnk/${linkId.toLowerCase()}`;
             const dateStr = getLocalDateTime();
             await window.electronAPI.dbQuery(
               `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
@@ -1278,7 +1264,8 @@ export default function Orders({ isPendingView = false }) {
           console.error("Failed to query or create payment link in database:", err);
         }
       } else {
-        paymentLinkUrl = `https://pay.lundry.ae/lnk/lnk-${(orderMatch.billNumber || 'mock').toLowerCase()}`;
+        const paymentBase = (settings.paymentBaseUrl || 'https://pay.laundry.ae').replace(/\/$/, '');
+        paymentLinkUrl = `${paymentBase}/lnk/lnk-${(orderMatch.billNumber || 'mock').toLowerCase()}`;
       }
     }
 
@@ -1344,11 +1331,9 @@ export default function Orders({ isPendingView = false }) {
       {/* Header */}
       <div className={styles.headerRow}>
         <div className={styles.headerTitle}>
-          <h1>{isPendingView ? t('pendingpayments', settings.language) : t('orderManagement', settings.language)}</h1>
+          <h1>{t('orderManagement', settings.language)}</h1>
           <p>
-            {isPendingView
-              ? t('pendingPaymentsSub', settings.language)
-              : t('orderManagementSub', settings.language)}
+            {t('orderManagementSub', settings.language)}
           </p>
         </div>
         <div className={styles.headerActions}>
@@ -1419,63 +1404,7 @@ export default function Orders({ isPendingView = false }) {
         </div>
       </div>
 
-      {isPendingView ? (
-        <div className={styles.subFilterRow}>
-          <Filter size={16} color="#64748B" />
-          <button
-            className={`${styles.filterTab} ${pendingSubFilter === 'All' ? styles.filterTabActive : ''}`}
-            onClick={() => setPendingSubFilter('All')}
-          >
-            {t('all', settings.language)} ({counts.all})
-          </button>
-          <button
-            className={`${styles.filterTab} ${pendingSubFilter === 'Pending' ? styles.filterTabActive : ''}`}
-            onClick={() => setPendingSubFilter('Pending')}
-          >
-            {t('pending', settings.language)} ({counts.pending})
-          </button>
-          <button
-            className={`${styles.filterTab} ${pendingSubFilter === 'Overdue' ? styles.filterTabActiveOverdue : ''}`}
-            onClick={() => setPendingSubFilter('Overdue')}
-          >
-            {t('overdue', settings.language)} ({counts.overdue})
-          </button>
-
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Calendar size={16} color="#64748B" />
-            <select
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value)}
-              style={{ border: '1px solid #E2E8F0', padding: '0.4rem 0.8rem', borderRadius: '8px', fontWeight: 600, outline: 'none', fontSize: '0.85rem' }}
-            >
-              <option value="All">All Time</option>
-              <option value="Today">Today</option>
-              <option value="This Month">This Month</option>
-              <option value="This Year">This Year</option>
-              <option value="Custom">Custom Range</option>
-            </select>
-
-            {dateRange === 'Custom' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <input
-                  type="date"
-                  value={customStart}
-                  onChange={(e) => setCustomStart(e.target.value)}
-                  style={{ border: '1px solid #E2E8F0', padding: '0.35rem 0.5rem', borderRadius: '8px', fontSize: '0.8rem', outline: 'none' }}
-                />
-                <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>to</span>
-                <input
-                  type="date"
-                  value={customEnd}
-                  onChange={(e) => setCustomEnd(e.target.value)}
-                  style={{ border: '1px solid #E2E8F0', padding: '0.35rem 0.5rem', borderRadius: '8px', fontSize: '0.8rem', outline: 'none' }}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className={styles.subFilterRow}>
+      <div className={styles.subFilterRow}>
           <Filter size={16} color="#64748B" />
           <button
             className={`${styles.filterTab} ${workflowFilter === 'All' ? styles.filterTabActive : ''}`}
@@ -1507,12 +1436,6 @@ export default function Orders({ isPendingView = false }) {
           >
             {t('delivered', settings.language)} ({workflowCounts.Delivered})
           </button>
-          <button
-            className={`${styles.filterTab} ${workflowFilter === 'Cancelled' ? styles.filterTabActiveOverdue : ''}`}
-            onClick={() => setWorkflowFilter('Cancelled')}
-          >
-            {t('cancelled', settings.language)} ({workflowCounts.Cancelled})
-          </button>
 
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Calendar size={16} color="#64748B" />
@@ -1547,131 +1470,12 @@ export default function Orders({ isPendingView = false }) {
             )}
           </div>
         </div>
-      )}
+
 
       {/* Table Section */}
-      <div className={isPendingView ? styles.cardGridContainer : styles.tableCard}>
-        {isPendingView ? (
-          <div className={styles.orderListContainer}>
-            {paginatedOrders.length > 0 ? (
-              paginatedOrders.map((order) => (
-                <div key={order.id} className={`${styles.premiumListItem} ${isOverdue(order) ? styles.overdueListItem : ''}`}>
-                  <div className={styles.listIdSection}>
-                    <span className={styles.listIdLabel}>{t('order', settings.language).toUpperCase()}</span>
-                    <h3 className={styles.listIdValue}>{settings.invoicePrefix || ''}{order.id}</h3>
-                  </div>
+      <div className={styles.tableCard}>
+        <table className={styles.ordersTable}>
 
-                  <div className={styles.listCustomerSection}>
-                    <div className={styles.listAvatar}>
-                      {order.customerName ? order.customerName.charAt(0).toUpperCase() : 'W'}
-                    </div>
-                    <div className={styles.listUserInfo}>
-                      <p className={styles.listCustName}>{order.customerName || t('walkInCustomer', settings.language)}</p>
-                      <p className={styles.listCustPhone}>{order.customerPhone || order.phone || t('noPhone', settings.language)}</p>
-                    </div>
-                  </div>
-
-                  <div className={styles.listFinancialSection} style={{ width: '220px' }}>
-                    <div className={styles.listStat}>
-                      <span className={styles.listStatLabel}>{t('dueAmount', settings.language)}</span>
-                      <span className={styles.listStatValue} style={{ color: (order.dueAmount ?? (order.totalAmount - (order.paidAmount || 0))) > 0 ? '#EF4444' : '#107C41' }}>
-                        <CurrencySymbol size={14} /> {((order.dueAmount !== undefined && order.dueAmount !== null) ? order.dueAmount : (order.totalAmount - (order.paidAmount || 0))).toFixed(2)}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600, marginTop: '4px', textTransform: 'capitalize' }}>
-                      {t('total', settings.language)}: <CurrencySymbol size={10} /> {(order.totalAmount || 0).toFixed(2)} | {t('paid', settings.language)}: <CurrencySymbol size={10} /> {(order.paidAmount || 0).toFixed(2)}
-                    </div>
-                    <div style={{ marginTop: '6px' }}>
-                      {order.paymentStatus === 'Paid' || order.paymentStatus === 'Partial' || (order.dueAmount !== undefined && order.dueAmount <= 0) ? (
-                        order.paymentMethod ? (
-                          <span className={
-                            order.paymentMethod === 'Cash' ? styles.methodCash :
-                              order.paymentMethod === 'Bank' ? styles.methodOther :
-                                order.paymentMethod === 'Multipayment' ? styles.methodOther :
-                                  styles.methodOther
-                          }>
-                            {order.paymentMethod}
-                          </span>
-                        ) : (
-                          <span style={{ color: '#94A3B8' }}>-</span>
-                        )
-                      ) : (
-                        <span className={styles.methodCredit}>
-                          {t('notPaid', settings.language)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className={styles.listStatusSection}>
-                    {order.nomodCheckoutId && order.nomodPaymentStatus === 'Pending' && getDaysPending(order.nomodLinkDate) >= (settings.pendingPaymentWarningDays || 3) && (
-                      <span className={styles.listBadgeOverdue} style={{ background: '#F59E0B', color: 'white', display: 'inline-flex', alignItems: 'center', gap: '4px', marginBottom: '4px', padding: '0.2rem 0.4rem', fontSize: '0.65rem' }}>
-                        <AlertCircle size={10} /> Link Pending {getDaysPending(order.nomodLinkDate)}d
-                      </span>
-                    )}
-                    {isOverdue(order) ? (
-                      <span className={styles.listBadgeOverdue}>{t('overdue', settings.language)}</span>
-                    ) : (
-                      <span className={styles.listBadgePending}>{t('pending', settings.language)}</span>
-                    )}
-                    <span className={styles.listDate}>{formatDateTime(order.createdAt)}</span>
-                  </div>
-
-                  <div className={styles.listActionsSection}>
-                    {order.nomodCheckoutId && order.nomodPaymentStatus === 'Pending' && (
-                      <button
-                        type="button"
-                        className={styles.listCollectBtn}
-                        style={{ background: '#0EA5E9', color: 'white', display: 'flex', alignItems: 'center', gap: '4px', padding: '0.4rem 0.6rem' }}
-                        onClick={async () => {
-                          const res = await paymentService.checkNow(order.id, order.nomodCheckoutId);
-                          if (res.success) {
-                            alert(`Nomod payment status is: ${res.status}`);
-                            fetchOrders();
-                          } else {
-                            alert("Failed to check status: " + res.error);
-                          }
-                        }}
-                        title="Check Payment Status Now"
-                      >
-                        <RefreshCw size={14} /> Check
-                      </button>
-                    )}
-                    {order.nomodCheckoutId && (order.nomodPaymentStatus === 'Pending' || order.nomodPaymentStatus === 'Expired' || order.nomodPaymentStatus === 'Failed') && (
-                      <button
-                        type="button"
-                        className={styles.listCollectBtn}
-                        style={{ background: '#EC4899', color: 'white', display: 'flex', alignItems: 'center', gap: '4px', padding: '0.4rem 0.6rem' }}
-                        onClick={() => handleResendPaymentLink(order)}
-                        title="Generate and Resend Payment Link"
-                      >
-                        <Send size={14} /> Resend
-                      </button>
-                    )}
-                    <button
-                      className={styles.listCollectBtn}
-                      onClick={() => {
-                        setSelectedOrder(order);
-                        setShowPayModal(true);
-                      }}
-                    >
-                      <DollarSign size={16} /> {t('collect', settings.language)}
-                    </button>
-                    <button
-                      className={styles.listReminderBtn}
-                      onClick={() => handleWhatsApp(order.customerPhone || order.phone, order.id)}
-                    >
-                      <WhatsAppIcon size={16} />
-                    </button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className={styles.noData}>{t('noPendingPayments', settings.language)}</div>
-            )}
-          </div>
-        ) : (
-          <table className={styles.ordersTable}>
             <thead>
               <tr>
                 <th>{t('orderId', settings.language)}</th>
@@ -1854,13 +1658,12 @@ export default function Orders({ isPendingView = false }) {
               ) : (
                 <tr>
                   <td colSpan="8" style={{ textAlign: 'center', padding: '2rem' }}>
-                    {isPendingView ? t('noPendingPayments', settings.language) : t('noOrdersFound', settings.language)}
+                    {t('noOrdersFound', settings.language)}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
-        )}
 
         {!loading && (
           <Pagination
@@ -2292,7 +2095,7 @@ export default function Orders({ isPendingView = false }) {
                 autoFocus
               />
 
-              {orderToDelete && (orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus)) && (
+              {orderToDelete && (orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus)) ? (
                 <div style={{ margin: '1rem 0', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: '#F8FAFC', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
                   <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Choose Action for Payment (<CurrencySymbol size={11} />{(orderToDelete.paidAmount || 0).toFixed(2)}):</span>
                   
@@ -2357,6 +2160,13 @@ export default function Orders({ isPendingView = false }) {
                       </label>
                     </div>
                   )}
+                </div>
+              ) : (
+                <div style={{ margin: '1rem 0', background: '#F8FAFC', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Payment Status:</span>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748B', marginTop: '0.25rem' }}>
+                    Not Paid (No transactions recorded)
+                  </div>
                 </div>
               )}
 

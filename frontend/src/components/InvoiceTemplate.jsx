@@ -224,6 +224,269 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
     return order.status;
   };
 
+  const isHorizon = settings.invoiceTemplate === 'horizon' || settings.invoiceTemplate === 'compact 2';
+
+  if (isHorizon) {
+    const totalBalanceVal = (order.totalBalance !== undefined) ? order.totalBalance : (order.dueAmount || 0);
+    const invoiceStatus = getInvoiceStatus().toUpperCase();
+    const formattedDate = order.date || '';
+
+    return (
+      <div className={`${styles.invoiceCard} ${styles.template_horizon}`} style={{ fontSize }}>
+        {/* Edit Mode Toggle Bar (hidden in preview and on print) */}
+        {!isPreview && (
+          <div className={styles.editModeBar} data-noprint="true">
+            {!editMode ? (
+              <button className={styles.editModeBtn} onClick={() => setEditMode(true)}>
+                <Pencil size={14} /> Edit Invoice
+              </button>
+            ) : (
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.8rem', color: '#3B82F6', fontWeight: 700 }}>
+                  ✏️ Edit Mode — Click any cell to edit
+                </span>
+                <button className={styles.editModeDoneBtn} onClick={handleSaveEdits}>
+                  <Check size={14} /> Done
+                </button>
+                <button className={styles.editModeCancelBtn} onClick={() => { setItems(order.items || []); setEditMode(false); }}>
+                  <X size={14} /> Reset
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 1. Brand Header */}
+        <div className={styles.horizonHeaderWrap}>
+          {showLogo && (
+            <div className={styles.horizonLogoBox}>
+              {settings.logo ? (
+                <img src={settings.logo} alt="Logo" className={styles.horizonLogo} />
+              ) : (
+                <img src={defaultLogo} alt="Logo" className={styles.horizonLogo} onError={(e) => { e.target.style.display = 'none'; }} />
+              )}
+            </div>
+          )}
+          <div className={styles.horizonHeader}>
+            <div className={styles.horizonBrandName}>{settings.companyName || 'HORIZON LAUNDRY'}</div>
+            {showBilingual && settings.companyNameAr && <div className={styles.horizonBrandNameAr} dir="rtl">{settings.companyNameAr}</div>}
+            <div className={styles.horizonBrandSubline}>PREMIUM GARMENT CARE</div>
+            <div className={styles.horizonMetaLine}>
+              {settings.address || '123 Main Street, Business District'}
+            </div>
+            <div className={styles.horizonMetaLine}>
+              Tel: {settings.phone || '+971 50 123 4567'} {settings.trn && `| TRN: ${settings.trn}`}
+            </div>
+          </div>
+        </div>
+
+        {/* Double-bordered title block */}
+        <div className={styles.horizonTitleBlock}>
+          <div className={styles.horizonTitleText}>{showBilingual ? `${docTitle} / ${docTitleAr}` : docTitle}</div>
+        </div>
+
+        {/* Metadata section */}
+        <div className={styles.horizonMetaGrid}>
+          <div className={styles.horizonMetaRow}>
+            <span className={styles.horizonMetaLabel}>{formatLabel('INVOICE NO', 'رقم الفاتورة')}:</span>
+            <span className={styles.horizonMetaValue}>{settings.invoicePrefix || ''}{order.id}</span>
+          </div>
+          <div className={styles.horizonMetaRow}>
+            <span className={styles.horizonMetaLabel}>{formatLabel('DATE', 'التاريخ')}:</span>
+            <span className={styles.horizonMetaValue}>{formattedDate}</span>
+          </div>
+          <div className={styles.horizonMetaRow}>
+            <span className={styles.horizonMetaLabel}>{formatLabel('CUSTOMER NAME', 'اسم العميل')}:</span>
+            <span className={styles.horizonMetaValue}>{order.customer || 'Walk-in Customer'}</span>
+          </div>
+          {order.customerPhone && (
+            <div className={styles.horizonMetaRow}>
+              <span className={styles.horizonMetaLabel}>{formatLabel('MOBILE NO', 'رقم الهاتف')}:</span>
+              <span className={styles.horizonMetaValue}>{order.customerPhone}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Services Table */}
+        <table className={styles.horizonItemsTable}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left' }}>{formatLabel('SERVICES', 'الخدمات')}</th>
+              <th style={{ textAlign: 'center', width: '15%' }}>{formatLabel('QTY', 'الكمية')}</th>
+              <th style={{ textAlign: 'right', width: '25%' }}>{settings.currencySymbol || 'AED'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, idx) => {
+              const lineTotal = (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0);
+              const servicesText = item.types && item.types.length > 0 
+                ? item.types.map(t => t.name).join(' + ') 
+                : (item.sub || item.category || '');
+              return (
+                <tr key={idx}>
+                  <td style={{ textAlign: 'left' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <EditableCell
+                        editing={editMode}
+                        value={item.name}
+                        onChange={(v) => updateItem(idx, 'name', v)}
+                        className={styles.horizonItemName}
+                      />
+                      {servicesText && (
+                        <span className={styles.horizonItemSubText}>
+                          ◦ {servicesText}
+                        </span>
+                      )}
+                      {item.description && (
+                        <span className={styles.horizonItemSubText} style={{ color: '#DC2626' }}>
+                          ⚠️ {item.description}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    <EditableCell
+                      editing={editMode}
+                      value={item.qty}
+                      onChange={(v) => updateItem(idx, 'qty', v)}
+                      type="number"
+                      align="center"
+                    />
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    {editMode ? (
+                      <EditableCell
+                        editing={editMode}
+                        value={item.price}
+                        onChange={(v) => updateItem(idx, 'price', v)}
+                        type="number"
+                        align="right"
+                      />
+                    ) : (
+                      lineTotal.toFixed(2)
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        {/* Divider line before totals */}
+        <div className={styles.horizonLineDivider}></div>
+
+        {/* Totals side */}
+        <div className={styles.horizonTotalsBlock}>
+          <div className={styles.horizonTotalRow}>
+            <span>{formatLabel('Subtotal (Incl. Tax)', 'الإجمالي قبل الضريبة')}:</span>
+            <span>{computedSubtotal.toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+          </div>
+          <div className={styles.horizonTotalRow}>
+            <span>{formatLabel(`VAT Amount (${settings.isTaxEnabled ? settings.taxRate : 0}%)`, 'قيمة الضريبة')}:</span>
+            <span>{computedTax.toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+          </div>
+          <div className={styles.horizonTotalRow}>
+            <span>{formatLabel('Discounts', 'الخصومات')}:</span>
+            <span>{(parseFloat(order.discount) || 0).toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+          </div>
+          
+          <div className={styles.horizonTotalDashedLine}></div>
+
+          <div className={styles.horizonGrandTotalRow}>
+            <span>{formatLabel('TOTAL AMOUNT', 'المجموع الكلي')}:</span>
+            <span>{computedTotal.toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+          </div>
+
+          <div className={styles.horizonTotalDashedLine}></div>
+
+          <div className={styles.horizonStatusRow}>
+            <span>{formatLabel('PAYMODE', 'طريقة الدفع')}:</span>
+            <span style={{ textTransform: 'uppercase' }}>
+              {(() => {
+                const breakdown = order.paymentBreakdown;
+                const activeMethods = [];
+                if (breakdown) {
+                  if (breakdown.cash > 0) activeMethods.push('CASH');
+                  if (breakdown.card > 0) activeMethods.push('CARD');
+                  if (breakdown.upi > 0) activeMethods.push('UPI');
+                  if (breakdown.bank > 0) activeMethods.push('BANK');
+                }
+                if (activeMethods.length > 0) return activeMethods.join(' / ');
+                return order.paymentMethod || 'CASH';
+              })()}
+            </span>
+          </div>
+
+          <div className={styles.horizonStatusRow}>
+            <span>{formatLabel('STATUS', 'الحالة')}:</span>
+            <span style={{ fontWeight: 800 }}>{invoiceStatus}</span>
+          </div>
+        </div>
+
+        {/* Customer Statement Box */}
+        <div className={styles.horizonStatementBox}>
+          <div className={styles.horizonBoxTitle}>{formatLabel('CUSTOMER STATEMENT', 'كشف الحساب')}</div>
+          <div className={styles.horizonBoxRow}>
+            <span>{formatLabel('Prev. Balance', 'الرصيد السابق')}:</span>
+            <span>{Math.abs(order.previousBalance || 0).toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+          </div>
+          <div className={styles.horizonBoxRow}>
+            <span>{formatLabel('New Balance', 'الرصيد الجديد')}:</span>
+            <span>{Math.abs(totalBalanceVal).toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+          </div>
+        </div>
+
+        {/* Ready for Collection Box */}
+        {order.expectedDeliveryDate && (
+          <div className={styles.horizonCollectionBox}>
+            <div className={styles.horizonBoxTitle}>{formatLabel('READY FOR COLLECTION', 'جاهز للاستلام')}</div>
+            <div className={styles.horizonCollectionDate}>
+              {order.expectedDeliveryDate.split(' ')[0]}
+            </div>
+            {order.expectedDeliveryDate.includes(' ') && (
+              <div className={styles.horizonCollectionTime}>
+                BY {order.expectedDeliveryDate.split(' ').slice(1).join(' ')}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Bullet guidelines */}
+        {showTerms && termsText && (
+          <div className={styles.horizonGuidelinesList}>
+            {termsText.split('\n').filter(line => line.trim().length > 0).map((line, lidx) => (
+              <div key={lidx} className={styles.horizonGuidelineItem}>
+                <span className={styles.horizonBullet}>▪</span>
+                <span>{line.replace(/^-\s*/, '').replace(/^▪\s*/, '')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Compliance QR corner */}
+        {showQrCode && (
+          <div className={styles.horizonQrContainer}>
+            <QRCodeSVG value={order.id.toString()} size={85} />
+            <div className={styles.horizonTrackText}>TRACK ORDER: hzl.io/t/{order.id}</div>
+          </div>
+        )}
+
+        {/* Footer Tagline */}
+        {footerTagline && (
+          <div style={{ textAlign: 'center', padding: '0.5rem 0 0.15rem', fontSize: '0.78rem', fontWeight: 700 }}>
+            {footerTagline}
+          </div>
+        )}
+
+        <div className={styles.horizonFooterDivider}></div>
+        <div className={styles.horizonFooterText}>
+          Thank you for choosing {settings.companyName || 'Horizon Laundry'}
+          <div className={styles.horizonFooterSubText}>POWERED BY HORIZON INNOVATIONS</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`${styles.invoiceCard} ${styles[`template_${settings.invoiceTemplate}`]}`}

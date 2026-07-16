@@ -128,14 +128,14 @@ export default function MainLayout() {
   useEffect(() => {
     if (settings.bankAccounts && settings.bankAccounts.length > 0) {
       if (settleMethod === 'Card') {
-        const cardBank = settings.bankAccounts.find(acc => acc.id === settings.cardDefaultAccountId) || 
-                         settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || 
-                         settings.bankAccounts[0];
+        const cardBank = settings.bankAccounts.find(acc => acc.id === settings.cardDefaultAccountId) ||
+          settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) ||
+          settings.bankAccounts[0];
         setSelectedBank(cardBank.bankName);
       } else if (settleMethod === 'UPI') {
-        const upiBank = settings.bankAccounts.find(acc => acc.id === settings.upiDefaultAccountId) || 
-                        settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || 
-                        settings.bankAccounts[0];
+        const upiBank = settings.bankAccounts.find(acc => acc.id === settings.upiDefaultAccountId) ||
+          settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) ||
+          settings.bankAccounts[0];
         setSelectedBank(upiBank.bankName);
       } else if (!selectedBank) {
         const defaultBank = settings.bankAccounts.find(acc => acc.id === settings.defaultBankId) || settings.bankAccounts[0];
@@ -205,7 +205,7 @@ export default function MainLayout() {
           try {
             const rules = Array.from(sheet.cssRules || []);
             css += rules.map(r => r.cssText).join('\n') + '\n';
-          } catch (_) {}
+          } catch (_) { }
         }
 
         // ── 6. Add solid black print override ──
@@ -272,7 +272,7 @@ export default function MainLayout() {
 
       try {
         // 1. Check local backend server status
-        const response = await fetch(`${API_BASE}/health`, { 
+        const response = await fetch(`${API_BASE}/health`, {
           cache: 'no-store',
           signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : null
         });
@@ -287,10 +287,10 @@ export default function MainLayout() {
         }
 
         // 2. Check actual internet access to ensure Atlas MongoDB connection is reachable
-        await fetch('https://clients3.google.com/generate_204', { 
-          mode: 'no-cors', 
+        await fetch('https://clients3.google.com/generate_204', {
+          mode: 'no-cors',
           cache: 'no-store',
-          signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : null 
+          signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : null
         });
 
         if (active) setIsOnline(true);
@@ -349,10 +349,10 @@ export default function MainLayout() {
       }
     });
 
-    let unsubscribeNav = () => {};
+    let unsubscribeNav = () => { };
     if (window.electronAPI && window.electronAPI.onNavigateToPendingPayments) {
       unsubscribeNav = window.electronAPI.onNavigateToPendingPayments(() => {
-        customNavigate('/pending');
+        customNavigate('/orders');
       });
     }
 
@@ -578,9 +578,9 @@ export default function MainLayout() {
       permissionKey: 'orders',
       subItems: [
         { path: '/orders', label: 'All Orders' },
-        { path: '/orders/pending', label: 'Pending Payments' },
+        { path: '/settlement', label: 'Settle Invoice' },
         { path: '/orders/expected-delivery', label: 'Expected Deliveries' },
-        { path: '/orders/deleted', label: 'Deleted Orders' },
+        { path: '/orders/deleted', label: 'Deleted Orders' }
       ]
     },
     {
@@ -593,15 +593,7 @@ export default function MainLayout() {
       ]
     },
     { path: '/services', label: 'Services', icon: Layers, permissionKey: 'services' },
-    {
-      label: 'Settle Invoice',
-      icon: DollarSign,
-      permissionKey: 'pos',
-      subItems: [
-        { path: '/settlement', label: 'Settle Invoice' },
-        { path: '/outstanding-bills', label: 'Outstanding Invoices' },
-      ]
-    },
+
     {
       label: 'Reports',
       icon: BarChart3,
@@ -804,8 +796,8 @@ export default function MainLayout() {
       const discount = parseFloat(quickDiscountAmount || 0) || 0;
       const totalReduction = amount + discount;
       const timestamp = getLocalISOString();
-      const customerId = selectedSettleTarget.type === 'customer' 
-        ? selectedSettleTarget.data.id 
+      const customerId = selectedSettleTarget.type === 'customer'
+        ? selectedSettleTarget.data.id
         : selectedSettleTarget.data.customerId;
 
       const checkRes = await checkCreditLimit(customerId, -amount, settings);
@@ -845,7 +837,7 @@ export default function MainLayout() {
       if (settleMethod === 'Nomod' && !isOverridden) {
         let linkId = `LNK-${Date.now().toString().slice(-4)}`;
         let checkoutUrl = '';
-        
+
         if (window.electronAPI?.dbQuery) {
           try {
             const activeLnkRes = await window.electronAPI.dbQuery(
@@ -880,16 +872,29 @@ export default function MainLayout() {
               if (checkoutRes.data.id) {
                 linkId = checkoutRes.data.id;
               }
-            } else if (checkoutRes.error) {
-              console.warn("Nomod Backend API failed in Quick Settle:", checkoutRes.error);
-              alert("Nomod Checkout API connection failed: " + checkoutRes.error + ". Falling back to sandbox payment link.");
+            } else {
+              const errorMsg = checkoutRes?.error || 'Unknown error';
+              console.warn("Nomod Backend API failed in Quick Settle:", errorMsg);
+              if (settings.nomodEnv === 'live') {
+                alert("Nomod Checkout API connection failed: " + errorMsg + ". Please check your API key configuration in settings.");
+                return;
+              } else {
+                alert("Nomod Checkout API connection failed: " + errorMsg + ". Falling back to sandbox payment link.");
+              }
             }
           } catch (err) {
             console.warn("Nomod Checkout IPC failed in Quick Settle:", err.message);
+            if (settings.nomodEnv === 'live') {
+              alert("Nomod Checkout IPC failed: " + err.message);
+              return;
+            }
           }
         }
 
         if (!checkoutUrl) {
+          if (settings.nomodEnv === 'live') {
+            return;
+          }
           checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${amount}&reference=${linkId}`;
         }
 
@@ -1070,8 +1075,7 @@ export default function MainLayout() {
               'INCOME',
               'Credit Settlement',
               split.amount,
-              `Settlement from ${customer.name} via ${split.method}${
-                (split.method === 'Card' || split.method === 'UPI' || split.method === 'Bank') && selectedBank ? ` (${selectedBank})` : ''
+              `Settlement from ${customer.name} via ${split.method}${(split.method === 'Card' || split.method === 'UPI' || split.method === 'Bank') && selectedBank ? ` (${selectedBank})` : ''
               }`,
               txnTimestamp,
               timestamp,
@@ -1087,7 +1091,7 @@ export default function MainLayout() {
         alert(`Successfully settled ${amount} (Discount: ${discount}) for ${customer.name}`);
       } else if (selectedSettleTarget.type === 'bill') {
         const bill = selectedSettleTarget.data;
-        
+
         for (const split of splits) {
           let remaining = split.amount;
           const currentDue = bill.dueAmount;
@@ -1367,8 +1371,8 @@ export default function MainLayout() {
 
         {role !== 'super_admin' && (
           <div className={styles.sidebarFooter}>
-            <NavLink 
-              to="/help" 
+            <NavLink
+              to="/help"
               className={styles.helpLink}
               onClick={(e) => handleNavClick(e, '/help')}
             >
@@ -1557,16 +1561,16 @@ export default function MainLayout() {
                 <X size={20} />
               </button>
             </div>
-            
+
             <div className={styles.modalBody} style={{ padding: '1.5rem 0' }}>
               <p style={{ color: '#475569', fontSize: '0.95rem', lineHeight: '1.5' }}>
                 You have unsaved changes. Do you want to save your changes before leaving this page?
               </p>
             </div>
-            
+
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', borderTop: '1px solid #E2E8F0', paddingTop: '1rem' }}>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 className={`${styles.confirmModalBtn} ${styles.confirmModalBtnDiscard}`}
                 onClick={async () => {
                   if (originalSettings) {
@@ -1586,8 +1590,8 @@ export default function MainLayout() {
               >
                 Discard Changes
               </button>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 className={`${styles.confirmModalBtn} ${styles.confirmModalBtnSave}`}
                 onClick={() => {
                   setOriginalSettings(JSON.parse(JSON.stringify(settings)));
@@ -1690,12 +1694,11 @@ export default function MainLayout() {
                             <span>{result.data.dueAmount.toFixed(2)} {(settings.currencySymbol || 'AED')}</span>
                           )}
                         </span>
-                        <span className={`${styles.resultTypeBadge} ${
-                          result.type === 'customer' 
+                        <span className={`${styles.resultTypeBadge} ${result.type === 'customer'
                             ? (result.data.balance < 0 ? styles.advance : (result.data.balance > 0 ? styles.due : styles.settled))
                             : styles.bill
-                        }`}>
-                          {result.type === 'customer' 
+                          }`}>
+                          {result.type === 'customer'
                             ? (result.data.balance < 0 ? 'Advance' : (result.data.balance > 0 ? 'Credit/Due' : 'Settled'))
                             : 'Order'}
                         </span>
@@ -1713,11 +1716,10 @@ export default function MainLayout() {
                         ? selectedSettleTarget.data.name
                         : `Invoice/Order #${settings.invoicePrefix || ''}${selectedSettleTarget.data.id}`}
                     </span>
-                    <span className={`${styles.statusBadge} ${
-                      selectedSettleTarget.type === 'customer' && selectedSettleTarget.data.balance < 0
+                    <span className={`${styles.statusBadge} ${selectedSettleTarget.type === 'customer' && selectedSettleTarget.data.balance < 0
                         ? styles.statusDone
                         : ''
-                    }`}>
+                      }`}>
                       {selectedSettleTarget.type === 'customer' && selectedSettleTarget.data.balance < 0
                         ? `Advance: ${(settings.currencySymbol || 'AED')} ${Math.abs(selectedSettleTarget.data.balance).toFixed(2)}`
                         : `Due: ${(settings.currencySymbol || 'AED')} ${(selectedSettleTarget.type === 'customer' ? selectedSettleTarget.data.balance : selectedSettleTarget.data.dueAmount).toFixed(2)}`}
@@ -1845,7 +1847,7 @@ export default function MainLayout() {
                 <X size={20} />
               </button>
             </div>
-            
+
             <div className={styles.modalBody} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
                 <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>SETTLEMENT AMOUNT</span>
@@ -1856,7 +1858,7 @@ export default function MainLayout() {
 
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
                 <div style={{ padding: '10px', background: 'white', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-                  <QRCodeCanvas 
+                  <QRCodeCanvas
                     id="nomod-quick-settle-qr-canvas"
                     value={nomodLinkModal.url}
                     size={160}

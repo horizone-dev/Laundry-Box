@@ -1716,3 +1716,288 @@
   .thermalItem { page-break-inside: avoid; break-inside: avoid; }
   .thermalTotalsBlock { page-break-inside: avoid; break-inside: avoid; }
 }
+
+/* ── Template: Horizon Premium / Compact 2 ── */
+.template_horizon,
+.template_compact\ 2 {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem;
+  background: white;
+  color: #000000;
+  font-family: 'Courier New', Courier, monospace;
+  box-shadow: none;
+  border: none;
+}
+
+.horizonHeaderWrap {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 1.25rem;
+  margin-bottom: 0.75rem;
+  width: 100%;
+}
+
+.horizonLogoBox {
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+}
+
+.horizonLogo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.horizonHeader {
+  flex-grow: 1;
+  text-align: left;
+}
+
+.horizonBrandName {
+  font-size: 1.75rem;
+  font-weight: 900;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #000000;
+}
+
+.horizonBrandNameAr {
+  font-size: 1.45rem;
+  font-weight: 700;
+  margin-top: 0.1rem;
+}
+
+.horizonBrandSubline {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin: 0.25rem 0;
+  color: #000000;
+}
+
+.horizonMetaLine {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #000000;
+  line-height: 1.35;
+}
+
+.horizonTitleBlock {
+  border-top: 3px double #000000;
+  border-bottom: 3px double #000000;
+  padding: 0.4rem 0;
+  text-align: center;
+  margin: 0.75rem 0;
+}
+
+.horizonTitleText {
+  font-size: 1.2rem;
+  font-weight: 900;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #000000;
+}
+
+.horizonMetaGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.horizonMetaRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.horizonMetaLabel {
+  font-weight: 900;
+  color: #000000;
+}
+
+.horizonMetaValue {
+  text-align: right;
+  color: #000000;
+}
+
+.horizonItemsTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.75rem;
+}
+
+.horizonItemsTable th {
+  font-size: 0.78rem;
+  font-weight: 900;
+  color: #000000;
+  border-bottom: 1.5px solid #000000;
+  padding: 0.35rem 0;
+  text-transform: uppercase;
+}
+
+.horizonItemsTable td {
+  padding: 0.45rem 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  vertical-align: top;
+  border-bottom: 0.5px solid #E2E8F0;
+}
+
+.horizonItemName {
+  font-weight: 900;
+  font-size: 0.78rem;
+}
+
+.horizonItemSubText {
+  font-size: 0.68rem;
+  color: #475569;
+  font-style: italic;
+  margin-top: 0.1rem;
+  display: block;
+}
+
+.horizonLineDivider {
+  border-top: 1.5px solid #000000;
+  margin: 0.5rem 0;
+}
+
+.horizonTotalsBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.75rem;
+}
+
+.horizonTotalRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.horizonTotalDashedLine {
+  border-top: 1px dashed #000000;
+  margin: 0.25rem 0;
+}
+
+.horizonGrandTotalRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.horizonStatusRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.horizonStatementBox {
+  border: 1px solid #000000;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  text-align: center;
+}
+
+.horizonBoxTitle {
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+  margin-bottom: 0.35rem;
+  text-align: center;
+}
+
+.horizonBoxRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  font-weight: 900;
+  margin: 0.15rem 0;
+}
+
+.horizonCollectionBox {
+  border: 1px solid #000000;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  text-align: center;
+}
+
+.horizonCollectionDate {
+  font-size: 1.05rem;
+  font-weight: 900;
+  letter-spacing: 1px;
+  margin: 0.2rem 0;
+}
+
+.horizonCollectionTime {
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.horizonGuidelinesList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.horizonGuidelineItem {
+  display: flex;
+  gap: 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.horizonBullet {
+  font-size: 0.68rem;
+  line-height: 1.1;
+}
+
+.horizonQrContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 1rem 0;
+}
+
+.horizonTrackText {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.horizonFooterDivider {
+  border-top: 1px solid #000000;
+  margin: 0.75rem 0 0.5rem;
+}
+
+.horizonFooterText {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.horizonFooterSubText {
+  font-size: 0.58rem;
+  font-weight: 600;
+  color: #475569;
+  margin-top: 0.15rem;
+}

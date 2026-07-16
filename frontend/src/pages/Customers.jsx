@@ -890,6 +890,8 @@ export default function Customers() {
           [customer.id]
         );
         let payments = paymentsRes.success ? paymentsRes.data : [];
+        // Filter out automatic system transactions
+        payments = payments.filter(p => p.method !== 'System Auto');
         setCustomerPayments(payments);
 
         const totalSales = bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
@@ -1534,6 +1536,8 @@ export default function Customers() {
                             <span style={{ color: '#16A34A', fontWeight: 700, fontSize: '0.8rem' }}>REFUNDED ({ret.refundMethod || 'Cash'})</span>
                           ) : ret.refundStatus === 'Converted to Advance' ? (
                             <span style={{ color: '#2563EB', fontWeight: 700, fontSize: '0.8rem' }}>CREDITED TO ADVANCE</span>
+                          ) : (ret.paidAmount || 0) <= 0 ? (
+                            <span style={{ color: '#64748B', fontWeight: 700, fontSize: '0.8rem' }}>NOT PAID</span>
                           ) : (
                             <span style={{ color: '#64748B', fontWeight: 700, fontSize: '0.8rem' }}>RETURNED / DELETED</span>
                           )}

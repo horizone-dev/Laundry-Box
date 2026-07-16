@@ -789,76 +789,168 @@ ipcMain.handle('get-next-payment-reference', async (event, paymentType) => {
   }
 });
 
-ipcMain.handle('create-nomod-checkout', async (event, { amount, currency, customer, orderId, userRole }) => {
-  try {
-    const db = getDB();
-    const shopResult = db.prepare('SELECT settings FROM shops LIMIT 1').get();
-    const settings = shopResult && shopResult.settings ? JSON.parse(shopResult.settings) : {};
+const DEBUG_NOMOD = true;
 
-    const apiKey = settings.nomodApiKey;
+function logNomodRequest(url, method, apiKey, settings, body = null) {
+  if (!DEBUG_NOMOD) return;
+  const apiKeyExists = !!apiKey;
+  const maskedKey = apiKeyExists ? `${apiKey.substring(0, 8)}...${apiKey.substring(apiKey.length - 4)}` : 'N/A';
+  const len = apiKeyExists ? apiKey.length : 0;
+  const trimmedLen = apiKeyExists ? apiKey.trim().length : 0;
+  const spaces = apiKeyExists ? (apiKey.length !== apiKey.trim().length) : false;
+  const hasNewline = apiKeyExists ? (apiKey.includes('\n') || apiKey.includes('\r')) : false;
+  
+  console.log(`
+[NoMOD Debug - Request]
+Environment: ${settings.nomodEnv || 'sandbox'}
+API Key Exists: ${apiKeyExists}
+API Key Masked: ${maskedKey}
+API Key Length: ${len}
+API Key Trimmed Length: ${trimmedLen}
+Has leading/trailing spaces: ${spaces}
+Has newlines: ${hasNewline}
+settings.nomodApiKey matches key: ${apiKeyExists && settings.nomodApiKey === apiKey}
+Request URL: ${url}
+HTTP Method: ${method}
+Headers:
+  X-API-KEY: ${maskedKey} (length: ${len})
+  Content-Type: application/json
+Payload:
+${body ? JSON.stringify(body, null, 2) : '{}'}
+`);
+}
+
+function logNomodResponse(url, status, duration, responseText, headers = {}) {
+  if (!DEBUG_NOMOD) return;
+  console.log(`
+[NoMOD Debug - Response]
+URL: ${url}
+Status: ${status}
+Duration: ${duration} ms
+Response Headers: ${JSON.stringify(headers, null, 2)}
+Response:
+${responseText}
+`);
+}
+
+function logNomodError(err, url, env) {
+  if (!DEBUG_NOMOD) return;
+  console.error(`
+[NoMOD Debug - Error]
+Request URL: ${url}
+Environment: ${env}
+Error Name: ${err.name}
+Error Message: ${err.message}
+Stack Trace:
+${err.stack}
+`);
+}
+
+ipcMain.handle('create-nomod-checkout', async (event, { amount, currency, customer, orderId, userRole }) => {
+  const db = getDB();
+  const shopResult = db.prepare('SELECT settings FROM shops LIMIT 1').get();
+  const settings = shopResult && shopResult.settings ? JSON.parse(shopResult.settings) : {};
+  const apiKey = settings.nomodApiKey;
+  const mode = settings.nomodEnv || 'sandbox';
+  const url = 'https://api.nomod.com/v1/links';
+  
+  try {
     const linkId = `LNK-${Date.now().toString().slice(-4)}`;
+
+    // Settings validation debug logs
+    if (DEBUG_NOMOD) {
+      console.log(`[NoMOD Debug - Settings Validation] Loaded from database settings. nomodApiKey exists: ${!!apiKey}, nomodEnv: ${mode}`);
+    }
 
     // If no API key configured or it is a placeholder/empty, return a sandbox demo link without calling the real API
     if (!apiKey || apiKey.trim() === '' || apiKey.includes('placeholder') || apiKey.length < 10) {
+      if (mode === 'live') {
+        throw new Error("Nomod API key is missing. Please configure it in Settings.");
+      }
       const sandboxUrl = `https://demo.nomod.com/pay?ref=${linkId}&amount=${parseFloat(amount).toFixed(2)}&currency=${currency || settings.nomodCurrency || 'AED'}`;
+      if (DEBUG_NOMOD) {
+        console.log(`[NoMOD Debug] Returning sandbox URL directly: ${sandboxUrl}`);
+      }
       return { success: true, data: { url: sandboxUrl, id: linkId }, linkId };
     }
 
-    const response = await fetch('https://api.nomod.com/v1/checkout', {
-      method: 'POST',
-      headers: {
-        'X-API-KEY': apiKey,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        reference_id: linkId,
-        amount: parseFloat(amount).toFixed(2),
-        currency: currency || settings.nomodCurrency || 'AED',
-        success_url: settings.nomodSuccessUrl || 'https://pay.lundry.ae/success',
-        failure_url: settings.nomodFailureUrl || 'https://pay.lundry.ae/failure',
-        cancelled_url: settings.nomodFailureUrl || 'https://pay.lundry.ae/cancelled',
-        customer: {
-          first_name: (customer?.name || 'Customer').split(' ')[0],
-          last_name: (customer?.name || 'Customer').split(' ').slice(1).join(' ') || 'Laundry',
-          phone_number: customer?.phone || ''
-        },
-        metadata: {
-          orderId: orderId,
-          description: `Payment for Order #${orderId}`
+    const payload = {
+      title: `Order #${orderId || ''} Payment`.trim(),
+      amount: parseFloat(amount).toFixed(2),
+      currency: currency || settings.nomodCurrency || 'AED',
+      note: `Payment for Order #${orderId}`,
+      items: [
+        {
+          name: `Order #${orderId || ''} Payment`.trim(),
+          amount: parseFloat(amount).toFixed(2)
         }
-      })
+      ]
+    };
+
+    logNomodRequest(url, 'POST', apiKey, settings, payload);
+
+    const headers = {
+      'X-API-KEY': apiKey,
+      'Content-Type': 'application/json'
+    };
+
+    const startTime = Date.now();
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload)
     });
 
+    const responseText = await response.text();
+    const duration = Date.now() - startTime;
+
+    const responseHeaders = {};
+    response.headers.forEach((value, name) => {
+      responseHeaders[name] = value;
+    });
+
+    logNomodResponse(url, response.status, duration, responseText, responseHeaders);
+
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Nomod API response error: ${response.status} - ${errorText}`);
+      throw new Error(`Nomod API response error: ${response.status} - ${responseText}`);
     }
 
-    const data = await response.json();
-    return { success: true, data, linkId };
+    const responseData = JSON.parse(responseText);
+    // Wrap to match POS expected return payload structure: { url, id }
+    return { success: true, data: { url: responseData.url, id: responseData.id }, linkId };
   } catch (err) {
-    console.error("create-nomod-checkout failed:", err);
+    logNomodError(err, url, mode);
     return { success: false, error: err.message };
   }
 });
 
 ipcMain.handle('retrieve-nomod-checkout-status', async (event, { checkoutId, userRole }) => {
-  try {
-    const db = getDB();
-    const shopResult = db.prepare('SELECT settings FROM shops LIMIT 1').get();
-    const settings = shopResult && shopResult.settings ? JSON.parse(shopResult.settings) : {};
+  const db = getDB();
+  const shopResult = db.prepare('SELECT settings FROM shops LIMIT 1').get();
+  const settings = shopResult && shopResult.settings ? JSON.parse(shopResult.settings) : {};
+  const mode = settings.nomodEnv || 'sandbox';
+  const apiKey = settings.nomodApiKey;
+  const chargesUrl = `https://api.nomod.com/v1/charges?link_id=${checkoutId}`;
 
+  try {
     // Enforce role permission rules on backend
     if (userRole === 'staff') {
       throw new Error("Staff are unauthorized to perform Nomod actions.");
     }
 
-    const apiKey = settings.nomodApiKey;
     if (!apiKey) {
       throw new Error("Nomod API key is missing. Please configure it in Settings.");
     }
 
-    const response = await fetch(`https://api.nomod.com/v1/checkout/${checkoutId}`, {
+    if (DEBUG_NOMOD) {
+      console.log(`[NoMOD Debug - Settings Validation] Loaded status settings. nomodApiKey exists: ${!!apiKey}, nomodEnv: ${mode}`);
+    }
+
+    // Step 1: Check if there are any charges for this link
+    logNomodRequest(chargesUrl, 'GET', apiKey, settings);
+
+    const startTime = Date.now();
+    const response = await fetch(chargesUrl, {
       method: 'GET',
       headers: {
         'X-API-KEY': apiKey,
@@ -866,15 +958,78 @@ ipcMain.handle('retrieve-nomod-checkout-status', async (event, { checkoutId, use
       }
     });
 
+    const responseText = await response.text();
+    const duration = Date.now() - startTime;
+
+    const responseHeaders = {};
+    response.headers.forEach((value, name) => {
+      responseHeaders[name] = value;
+    });
+
+    logNomodResponse(chargesUrl, response.status, duration, responseText, responseHeaders);
+
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Nomod Status API failed: ${response.status} - ${errorText}`);
+      throw new Error(`Nomod Charges API failed: ${response.status} - ${responseText}`);
     }
 
-    const data = await response.json();
-    return { success: true, data };
+    const data = JSON.parse(responseText);
+    const results = data.results || data.data || [];
+
+    if (results.length > 0) {
+      // Link has been paid
+      const mainTxn = results[0];
+      return {
+        success: true,
+        data: {
+          status: 'paid',
+          transactions: [
+            {
+              id: mainTxn.id,
+              created_at: mainTxn.created_at || new Date().toISOString()
+            }
+          ]
+        }
+      };
+    }
+
+    // Step 2: No charges yet. Fetch link to see if it's active or disabled
+    const linkUrl = `https://api.nomod.com/v1/links/${checkoutId}`;
+    logNomodRequest(linkUrl, 'GET', apiKey, settings);
+    
+    const linkStartTime = Date.now();
+    const linkResponse = await fetch(linkUrl, {
+      method: 'GET',
+      headers: {
+        'X-API-KEY': apiKey,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const linkResponseText = await linkResponse.text();
+    const linkDuration = Date.now() - linkStartTime;
+
+    const linkResponseHeaders = {};
+    linkResponse.headers.forEach((value, name) => {
+      linkResponseHeaders[name] = value;
+    });
+
+    logNomodResponse(linkUrl, linkResponse.status, linkDuration, linkResponseText, linkResponseHeaders);
+
+    if (!linkResponse.ok) {
+      throw new Error(`Nomod Links API failed: ${linkResponse.status} - ${linkResponseText}`);
+    }
+
+    const linkData = JSON.parse(linkResponseText);
+    const mappedStatus = linkData.status === 'enabled' ? 'created' : 'cancelled';
+
+    return {
+      success: true,
+      data: {
+        status: mappedStatus
+      }
+    };
   } catch (err) {
-    console.error("retrieve-nomod-checkout-status failed:", err);
+    logNomodError(err, chargesUrl, mode);
     return { success: false, error: err.message };
   }
 });

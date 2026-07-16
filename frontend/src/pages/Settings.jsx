@@ -38,13 +38,13 @@ export default function Settings() {
         ? 'General'
         : (tabParam || 'General')
   );
-  const { 
-    settings, 
-    updateSettings, 
-    isSettingsDirty, 
-    setIsSettingsDirty, 
-    originalSettings, 
-    setOriginalSettings 
+  const {
+    settings,
+    updateSettings,
+    isSettingsDirty,
+    setIsSettingsDirty,
+    originalSettings,
+    setOriginalSettings
   } = useSettings();
 
   // Store initial settings copy when component mounts
@@ -317,20 +317,20 @@ export default function Settings() {
   const tabs = isSuperAdmin
     ? ['System Configuration', 'Nomod', 'Maintenance']
     : [
-        'General',
-        'Order Workflow',
-        'Company Info',
-        'Tax Settings',
-        'Bill Templates',
-        'Bank',
-        ...(isManager && settings.allowManagerNomodConfig ? ['Nomod'] : []),
-        'WhatsApp Config',
-        'Damage Notes',
-        'Printers',
-        ...(isManager ? ['Maintenance', 'Software Update'] : []),
-        'Email Reports',
-        ...(isManager ? ['System Reset'] : [])
-      ];
+      'General',
+      'Order Workflow',
+      'Company Info',
+      'Tax Settings',
+      'Bill Templates',
+      'Bank',
+      ...(isManager && settings.allowManagerNomodConfig ? ['Nomod'] : []),
+      'WhatsApp Config',
+      'Damage Notes',
+      'Printers',
+      ...(isManager ? ['Maintenance', 'Software Update'] : []),
+      'Email Reports',
+      ...(isManager ? ['System Reset'] : [])
+    ];
 
   const onCropComplete = (croppedArea, croppedAreaPixels) => {
     setCroppedAreaPixels(croppedAreaPixels);
@@ -641,7 +641,7 @@ export default function Settings() {
         if (toReset.customers) {
           await runQuery('DELETE FROM customers');
           summaryList.push('Customers: Deleted all customer profiles');
-          
+
           // Cascaded delete to prevent orphaned records in order/payment tables
           await runQuery('DELETE FROM orders');
           await runQuery('DELETE FROM payments');
@@ -812,7 +812,7 @@ export default function Settings() {
       setShowSuccessSummary(true);
     } catch (err) {
       console.error(err);
-      
+
       // Format audit log text for FAILURE
       const auditDetails = `Reset Type: ${resetType}. Result: Failed. Selected Modules: [${modulesStr}]. Error: ${err.message}`;
       if (window.electronAPI?.dbQuery) {
@@ -826,7 +826,7 @@ export default function Settings() {
           console.error('Failed to write failure audit log:', logErr);
         }
       }
-      
+
       alert('Reset Failed: ' + err.message);
     }
   };
@@ -1924,6 +1924,7 @@ export default function Settings() {
                   <TemplateCard id="standard" name="Standard" description="Bilingual office layout" active={settings.invoiceTemplate === 'standard'} onClick={() => updateSettings({ invoiceTemplate: 'standard' })} />
                   <TemplateCard id="modern" name="Modern" description="Clean single-language" active={settings.invoiceTemplate === 'modern'} onClick={() => updateSettings({ invoiceTemplate: 'modern' })} />
                   <TemplateCard id="compact" name="Compact" description="Thermal / small receipt" active={settings.invoiceTemplate === 'compact'} onClick={() => updateSettings({ invoiceTemplate: 'compact' })} />
+                  <TemplateCard id="compact 2" name="Compact 2" description="Thermal / small receipt" active={settings.invoiceTemplate === 'compact 2'} onClick={() => updateSettings({ invoiceTemplate: 'compact 2' })} />
                 </div>
               </div>
 
@@ -2113,6 +2114,25 @@ export default function Settings() {
                       <span className={`${styles.slider} ${styles.round}`}></span>
                     </label>
                   </div>
+
+                  {settings.enablePaymentLinks !== false && (
+                    <div style={{ padding: '0.5rem 0', borderBottom: '1px solid #F1F5F9', marginBottom: '0.75rem' }}>
+                      <label style={{ fontWeight: 600, fontSize: '0.95rem', display: 'block', marginBottom: '0.25rem' }}>Payment Base URL</label>
+                      <input
+                        type="text"
+                        value={settings.paymentBaseUrl || 'https://pay.laundry.ae'}
+                        onChange={(e) => updateSettings({ paymentBaseUrl: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '0.5rem',
+                          borderRadius: '6px',
+                          border: '1px solid #CBD5E1',
+                          fontSize: '0.9rem'
+                        }}
+                      />
+                      <p style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '0.25rem', margin: 0 }}>Base URL prefix for payment links sent to customers.</p>
+                    </div>
+                  )}
 
                   <div className={styles.toggleWrapper} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0' }}>
                     <div>
@@ -2684,7 +2704,7 @@ export default function Settings() {
                     <div style={{ flex: 1 }}>
                       <h3 style={{ marginBottom: '0.5rem', color: '#1E293B' }}>Default PDF Download Path</h3>
                       <p style={{ color: '#64748B', fontSize: '0.875rem', marginBottom: '1rem' }}>
-                        Set the default folder where invoice PDFs are automatically saved when you click download. 
+                        Set the default folder where invoice PDFs are automatically saved when you click download.
                         Currently set to: <strong style={{ color: '#1E293B' }}>{settings.pdfDownloadPath || 'System Downloads Folder'}</strong>
                       </p>
                       <div style={{ display: 'flex', gap: '1rem' }}>
@@ -3127,10 +3147,10 @@ export default function Settings() {
                       style={{ background: '#F8FAFC', borderRadius: '8px', padding: '1rem', marginTop: '0.5rem', border: '1px dashed #CBD5E1' }}
                     >
                       <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Z Report Configuration</h4>
-                      
+
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                         <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#334155' }}>Report Closing Type</span>
-                        
+
                         <div style={{ display: 'flex', gap: '2rem' }}>
                           <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: '#334155', fontWeight: 500 }}>
                             <input
@@ -3143,7 +3163,7 @@ export default function Settings() {
                             />
                             Day Close
                           </label>
-                          
+
                           <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: '#334155', fontWeight: 500 }}>
                             <input
                               type="radio"
@@ -3157,8 +3177,8 @@ export default function Settings() {
                           </label>
                         </div>
                         <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.7rem', color: '#64748B', lineHeight: '1.4' }}>
-                          {settings.zReportClosingType === 'Day Close' 
-                            ? 'One summary Z Report will be generated for the entire calendar business day.' 
+                          {settings.zReportClosingType === 'Day Close'
+                            ? 'One summary Z Report will be generated for the entire calendar business day.'
                             : 'Z Reports will be segmented and generated independently for each individual employee shift.'}
                         </p>
                       </div>

@@ -471,6 +471,8 @@ export default function DeletedOrders() {
                             Amount: <CurrencySymbol size={10} /> {(order.paidAmount || 0).toFixed(2)}
                           </span>
                         </>
+                      ) : (order.paidAmount || 0) <= 0 ? (
+                        <span className={styles.badgeNotPaid}>Not Paid</span>
                       ) : (
                         <span className={styles.badgeNA}>—</span>
                       )}

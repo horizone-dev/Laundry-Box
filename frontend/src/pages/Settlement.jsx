@@ -435,16 +435,29 @@ export default function Settlement() {
             if (checkoutRes.data.id) {
               linkId = checkoutRes.data.id;
             }
-          } else if (checkoutRes.error) {
-            console.warn("Nomod Backend API failed in Settlement:", checkoutRes.error);
-            alert("Nomod Checkout API connection failed: " + checkoutRes.error + ". Falling back to sandbox payment link.");
+          } else {
+            const errorMsg = checkoutRes?.error || 'Unknown error';
+            console.warn("Nomod Backend API failed in Settlement:", errorMsg);
+            if (settings.nomodEnv === 'live') {
+              alert("Nomod Checkout API connection failed: " + errorMsg + ". Please check your API key configuration in settings.");
+              return; // Stop flow
+            } else {
+              alert("Nomod Checkout API connection failed: " + errorMsg + ". Falling back to sandbox payment link.");
+            }
           }
         } catch (err) {
           console.warn("Nomod Checkout IPC failed in Settlement:", err.message);
+          if (settings.nomodEnv === 'live') {
+            alert("Nomod Checkout IPC failed: " + err.message);
+            return;
+          }
         }
       }
 
       if (!checkoutUrl) {
+        if (settings.nomodEnv === 'live') {
+          return;
+        }
         checkoutUrl = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${amount}&reference=${linkId}`;
       }
 
@@ -836,79 +849,6 @@ export default function Settlement() {
               </div>
             </div>
 
-            {/* Urgent Collections & Overdue Table */}
-            <div className={styles.overviewSection}>
-              <div className={styles.sectionHeader}>
-                <h3>Urgent Pending Collections</h3>
-                <span className={styles.overdueDaysBadge}>{t('overdue', settings.language)} ({settings?.overdueDays || 7}+ Days)</span>
-              </div>
-
-              <div className={styles.collectionsTableCard}>
-                <table className={styles.collectionsTable}>
-                  <thead>
-                    <tr>
-                      <th>Invoice ID</th>
-                      <th>Customer Name</th>
-                      <th>Invoice Date</th>
-                      <th>Outstanding Dues</th>
-                      <th>Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {globalData.pending.slice(0, 6).map(bill => (
-                      <tr key={bill.id} onClick={() => setSelectedCustomer({
-                        id: bill.customerId,
-                        name: bill.customerName || 'Unknown Customer',
-                        phone: bill.customerPhone || 'N/A',
-                        balance: Number(bill.customerBalance || 0)
-                      })} className={styles.tableRowClickable}>
-                        <td className={styles.billIdText}>{bill.id}</td>
-                        <td>
-                          <div className={styles.tableNameCell}>
-                            <span className={styles.custNameBold}>{bill.customerName || 'Unknown Customer'}</span>
-                            <span className={styles.custPhoneSub}>{bill.customerPhone || 'N/A'}</span>
-                          </div>
-                        </td>
-                        <td>{bill.createdAt ? formatDate(bill.createdAt) : 'N/A'}</td>
-                        <td className={styles.redAmountText}><CurrencySymbol size={11} /> {Number(bill.dueAmount || 0).toFixed(2)}</td>
-                        <td>
-                          <span className={`${styles.pillBadge} ${styles.pillBadgeRed}`}>Unpaid</span>
-                        </td>
-                        <td>
-                          <button 
-                            className={styles.quickPayActionBtn}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedCustomer({
-                                id: bill.customerId,
-                                name: bill.customerName || 'Unknown Customer',
-                                phone: bill.customerPhone || 'N/A',
-                                balance: Number(bill.customerBalance || 0)
-                              });
-                              const balance = Number(bill.customerBalance || 0);
-                              const due = Number(bill.dueAmount || 0);
-                              const defaultAmount = balance > 0 ? Math.min(due, balance) : due;
-                              setPaymentAmount(defaultAmount.toFixed(2));
-                              setShowPayModal(true);
-                            }}
-                          >
-                            Settle
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {globalData.pending.length === 0 && (
-                      <tr>
-                        <td colSpan="6" className={styles.emptyTableText}>
-                          No pending invoices found. All outstanding invoices are settled!
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </div>
         ) : (
           /* If customer IS selected: Focused Workspace View */
@@ -1184,7 +1124,7 @@ export default function Settlement() {
             <div className={styles.modalBodyContent} style={{ gap: '0.85rem', padding: '1rem 1.25rem' }}>
               
               {/* Row with Received Amount & Discount Amount side-by-side */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem', alignItems: 'start' }}>
                 {/* Received Amount Input */}
                 <div className={styles.modalInputGroup} style={{ gap: '0.25rem' }}>
                   <label style={{ fontSize: '0.7rem' }}>Received Amount</label>
@@ -1243,6 +1183,8 @@ export default function Settlement() {
                       style={{ fontSize: '1.2rem', fontWeight: 800 }}
                     />
                   </div>
+                  {/* Empty space matching height of presetsRow to balance alignment */}
+                  <div style={{ height: '24px', marginTop: '0.1rem' }}></div>
                 </div>
               </div>
 

@@ -1,0 +1,31 @@
+        myfatoorahSuccessUrl: '',
+        myfatoorahFailureUrl: '',
+        myfatoorahWebhookSecret: '',
+        myfatoorahExpiry: 30,
+        allowManagerNomodConfig: false,
+        enableNomod: false,
+        nomodApiKey: '',
+        nomodMerchantId: '',
+        nomodEnv: 'sandbox',
+        nomodCurrency: 'AED',
+        nomodSuccessUrl: '',
+        nomodFailureUrl: '',
+        nomodWebhookSecret: '',
+        nomodExpiry: 30
+      };
+    }
+
+    if (toReset.expensesBank) {
+      newSettings.bankAccounts = [];
+      newSettings.defaultBankId = '';
+    }
+
+    if (isFactory) {
+      newSettings.orderDeletePin = '0000';
+    }
+
+    // Execute all DB reset operations inside a single SQLite transaction
+    const runQuery = async (query, params = []) => {
+      const res = await window.electronAPI.dbQuery(query, params);
+      if (!res.success) {
+        throw new Error(res.error || 'Database query failed');

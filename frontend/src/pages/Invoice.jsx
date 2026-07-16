@@ -535,17 +535,30 @@ export default function Invoice() {
                      WHERE id = ?`,
                     [checkoutIdVal, url, new Date().toISOString(), order.id]
                   );
-                } else if (checkoutRes.error) {
-                  console.warn("Nomod Backend API failed in Invoice handleWhatsApp:", checkoutRes.error);
+                } else {
+                  const errorMsg = checkoutRes?.error || 'Unknown error';
+                  console.warn("Nomod Backend API failed in Invoice handleWhatsApp:", errorMsg);
+                  if (settings.nomodEnv === 'live') {
+                    alert("Nomod Checkout API connection failed: " + errorMsg + ". Please check your API key configuration in settings.");
+                    return; // Stop flow
+                  }
                 }
               } catch (apiErr) {
                 console.warn("Nomod API failure in Invoice.jsx handleWhatsApp:", apiErr.message);
+                if (settings.nomodEnv === 'live') {
+                  alert("Nomod Checkout API failure: " + apiErr.message);
+                  return;
+                }
               }
               if (!url) {
+                if (settings.nomodEnv === 'live') {
+                  return;
+                }
                 url = `https://link.nomod.com/pay?account=${settings.nomodMerchantId || 'default'}&amount=${due}&reference=${linkId}`;
               }
             } else {
-              url = `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`;
+              const paymentBase = (settings.paymentBaseUrl || 'https://pay.laundry.ae').replace(/\/$/, '');
+              url = `${paymentBase}/lnk/${linkId.toLowerCase()}`;
             }
  
             const dateStr = getLocalDateTime();
@@ -571,7 +584,8 @@ export default function Invoice() {
           console.error("Failed to query or create payment link in database:", err);
         }
       } else {
-        paymentLinkUrl = `https://pay.lundry.ae/lnk/lnk-${(order.billNumber || 'mock').toLowerCase()}`;
+        const paymentBase = (settings.paymentBaseUrl || 'https://pay.laundry.ae').replace(/\/$/, '');
+        paymentLinkUrl = `${paymentBase}/lnk/lnk-${(order.billNumber || 'mock').toLowerCase()}`;
       }
 
       if (paymentLinkUrl) {

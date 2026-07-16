@@ -678,7 +678,8 @@ export default function Workflow() {
             paymentLinkUrl = searchRes.data[0].url;
           } else {
             const linkId = `LNK-${orderMatch.billNumber || Date.now().toString().slice(-4)}`;
-            const url = `https://pay.lundry.ae/lnk/${linkId.toLowerCase()}`;
+            const paymentBase = (settings.paymentBaseUrl || 'https://pay.laundry.ae').replace(/\/$/, '');
+            const url = `${paymentBase}/lnk/${linkId.toLowerCase()}`;
             const dateStr = getLocalDateTime();
             await window.electronAPI.dbQuery(
               `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
@@ -700,7 +701,8 @@ export default function Workflow() {
           console.error("Failed to query or create payment link in database:", err);
         }
       } else {
-        paymentLinkUrl = `https://pay.lundry.ae/lnk/lnk-${(orderMatch.billNumber || 'mock').toLowerCase()}`;
+        const paymentBase = (settings.paymentBaseUrl || 'https://pay.laundry.ae').replace(/\/$/, '');
+        paymentLinkUrl = `${paymentBase}/lnk/lnk-${(orderMatch.billNumber || 'mock').toLowerCase()}`;
       }
     }
 

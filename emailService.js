@@ -456,12 +456,12 @@ async function generateHtmlReport(stats) {
         
         <div class="grid">
           <div class="card">
-            <h3>Total Sales</h3>
-            <div class="value">AED ${stats.totalSales.toFixed(2)}</div>
+            <h3>Total Payment</h3>
+            <div class="value">AED ${stats.totalCollections.toFixed(2)}</div>
           </div>
           <div class="card" style="background:#f0fdf4; border-color:#10b981;">
-            <h3 style="color:#065f46;">Collections</h3>
-            <div class="value" style="color:#059669;">AED ${stats.totalCollections.toFixed(2)}</div>
+            <h3 style="color:#065f46;">Sales</h3>
+            <div class="value" style="color:#059669;">AED ${stats.totalSales.toFixed(2)}</div>
           </div>
           <div class="card" style="background:#fef2f2; border-color:#ef4444;">
             <h3 style="color:#991b1b;">Expenses</h3>
@@ -469,12 +469,12 @@ async function generateHtmlReport(stats) {
           </div>
         </div>
 
-        <h2 class="section-title">Sales Breakdown</h2>
+        <h2 class="section-title">Payments Breakdown</h2>
         <table>
-          <tr><th>Cash Sales</th><td>AED ${stats.cashSales.toFixed(2)}</td></tr>
-          <tr><th>Card Sales</th><td>AED ${stats.cardSales.toFixed(2)}</td></tr>
-          <tr><th>Nomod Sales</th><td>AED ${stats.nomodSales.toFixed(2)}</td></tr>
-          <tr><th>Credit Sales</th><td>AED ${stats.creditSales.toFixed(2)}</td></tr>
+          <tr><th>Cash Payments</th><td>AED ${stats.cashSales.toFixed(2)}</td></tr>
+          <tr><th>Card Payments</th><td>AED ${stats.cardSales.toFixed(2)}</td></tr>
+          <tr><th>Nomod Payments</th><td>AED ${stats.nomodSales.toFixed(2)}</td></tr>
+          <tr><th>Credit Payments</th><td>AED ${stats.creditSales.toFixed(2)}</td></tr>
         </table>
 
         <h2 class="section-title">Orders Overview</h2>
@@ -635,7 +635,7 @@ async function sendEmailReport(retryCount = 0) {
       const customers = db.prepare(`
         SELECT id, name, phone, email, address, creditLimit, balance 
         FROM customers 
-        WHERE balance > 0 OR balance < 0
+        WHERE balance > 0
       `).all();
       if (customers.length > 0) {
         const outstandingHtml = generateOutstandingHtml(customers, stats.dateStr);
