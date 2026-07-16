@@ -255,14 +255,15 @@ export default function Accounts() {
           // Build refunds list dynamically from returns/refund transactions
           const returnTxns = res.data.filter(t => t.category === 'Return' || t.category === 'Refund Return');
           const mappedRefunds = returnTxns.map(t => {
-            const orderIdMatch = t.description.match(/(?:Bill|Invoice)\s*(?:#|##)?([A-Za-z0-9_-]+)/i);
+            const descStr = t.description || '';
+            const orderIdMatch = descStr.match(/(?:Bill|Invoice)\s*(?:#|##)?([A-Za-z0-9_-]+)/i);
             const orderId = orderIdMatch ? orderIdMatch[1] : '';
 
             let reason = 'Damaged Garment';
-            if (t.description.startsWith('Return - Bill') || t.description.startsWith('Return - Invoice')) {
+            if (descStr.startsWith('Return - Bill') || descStr.startsWith('Return - Invoice')) {
               reason = 'Order Deleted';
             } else {
-              const reasonParts = t.description.split(' - ');
+              const reasonParts = descStr.split(' - ');
               if (reasonParts.length > 1) {
                 reason = reasonParts[1];
               }

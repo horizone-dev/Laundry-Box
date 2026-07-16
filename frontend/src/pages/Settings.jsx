@@ -3024,10 +3024,11 @@ export default function Settings() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                       <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '1.25rem', borderRadius: '10px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                          <span style={{ fontWeight: 700, color: '#1E293B', fontSize: '0.9rem' }}>v1.0.5 (Latest Version)</span>
+                          <span style={{ fontWeight: 700, color: '#1E293B', fontSize: '0.9rem' }}>v1.0.6 (Latest Version)</span>
                           <span style={{ fontSize: '0.75rem', background: '#DBEAFE', color: '#1E40AF', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>Active</span>
                         </div>
                         <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.85rem', color: '#475569', lineHeight: '1.6' }}>
+                          <li><b>Accounts Page Fix:</b> Resolved rendering crash on Accounts page due to null transaction descriptions.</li>
                           <li><b>Credit Limit Default Fix:</b> Resolved shop default limit display inside customer database view.</li>
                           <li><b>Delete Order Fix:</b> Resolved deletion crashes and unique constraints on recycled order IDs.</li>
                           <li><b>Sequential Numbers:</b> Enabled continuous sequence logic for both Order and Receipt IDs.</li>
