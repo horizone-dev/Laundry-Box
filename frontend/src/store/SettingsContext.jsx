@@ -28,6 +28,7 @@ export function SettingsProvider({ children }) {
     isTaxEnabled: true,
     taxMethod: 'inclusive',
     invoiceTemplate: 'standard',
+    posLayoutTemplate: 'standard',
     waCountryCode: '971',
     currencySymbol: 'د.إ',
     activationCode: '',
@@ -186,6 +187,7 @@ export function SettingsProvider({ children }) {
             isTaxEnabled: shopSettings?.isTaxEnabled ?? true,
             taxMethod: shopSettings?.taxMethod || 'inclusive',
             invoiceTemplate: shopSettings?.invoiceTemplate || 'standard',
+            posLayoutTemplate: shopSettings?.posLayoutTemplate || 'standard',
             waCountryCode: shopSettings?.waCountryCode || '971',
             currencySymbol: shopSettings?.currencySymbol || 'د.إ',
             activationCode: shopSettings?.activationCode || '',
@@ -442,6 +444,7 @@ export function SettingsProvider({ children }) {
           branchName:   updated.branchName,
           branchApiKey: updated.branchApiKey,
           branchId:     updated.branchId,
+          posLayoutTemplate: updated.posLayoutTemplate,
           // System Configuration Module toggles
           workflowEnabled: updated.workflowEnabled,
           zReportEnabled: updated.zReportEnabled,

@@ -314,7 +314,6 @@ export default function TaxReport() {
       <div className={styles.headerRow}>
         <div className={styles.headerInfo}>
           <h1>{settings.taxName || 'VAT'} Statements</h1>
-          <p>Consolidated Output vs Input tax statement report.</p>
         </div>
         <div className={styles.headerActions} data-noprint="true">
           <button className="btn btn-secondary" onClick={handleExportCSV}>

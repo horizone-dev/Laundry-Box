@@ -298,20 +298,20 @@ export default function CustomerStatement() {
             });
           }
 
-          if (o.refundStatus === 'Returned' && deletedPaySum > 0) {
+          if (o.refundStatus === 'Returned' && (o.paidAmount || 0) > 0) {
             rows.push({
               date: o.returnedAt || o.updatedAt || o.createdAt,
               type: 'refund',
               ref: `REF-${o.id}`,
               description: `Refund – ${o.refundMethod || 'Cash'}`,
               itemsSummary: `Refund for Deleted Order ${cleanRef}`,
-              debit: deletedPaySum,
+              debit: o.paidAmount,
               credit: 0,
               status: 'SUCCESS',
               dueAmount: 0
             });
           }
-          if (o.refundStatus === 'Converted to Advance' && deletedPaySum > 0) {
+          if (o.refundStatus === 'Converted to Advance' && (o.paidAmount || 0) > 0) {
             rows.push({
               date: o.updatedAt || o.createdAt,
               type: 'payment',
@@ -319,7 +319,7 @@ export default function CustomerStatement() {
               description: 'Converted to Advance',
               itemsSummary: `Advance from Deleted Order ${cleanRef}`,
               debit: 0,
-              credit: deletedPaySum,
+              credit: o.paidAmount,
               status: 'SUCCESS',
               dueAmount: 0
             });
@@ -503,7 +503,6 @@ export default function CustomerStatement() {
       <div className={styles.header}>
         <div className={styles.headerInfo}>
           <h1>Customer Statement</h1>
-          <p className={styles.subtext}>Full billing ledger with running balance for any customer.</p>
         </div>
 
         {selectedCustomer && (

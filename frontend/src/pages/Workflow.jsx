@@ -810,7 +810,6 @@ export default function Workflow() {
       <div className={styles.header}>
         <div className={styles.headerInfo}>
           <h1>{t('workflow', settings.language) || 'Workflow Board'}</h1>
-          <p className={styles.subtext}>Monitor and transition operational laundry stages visually.</p>
         </div>
 
         <div className={styles.headerActions}>

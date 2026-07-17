@@ -185,6 +185,7 @@ export default function Orders() {
     }
   };
   const [workflowFilter, setWorkflowFilter] = useState('All'); // 'All', 'Confirmed', 'Processing', 'Ready', 'Delivered'
+  const [showFilters, setShowFilters] = useState(false);
   const [isPrintingTags, setIsPrintingTags] = useState(false);
   const [dateRange, setDateRange] = useState('All');
   const [customStart, setCustomStart] = useState('');
@@ -1332,9 +1333,6 @@ export default function Orders() {
       <div className={styles.headerRow}>
         <div className={styles.headerTitle}>
           <h1>{t('orderManagement', settings.language)}</h1>
-          <p>
-            {t('orderManagementSub', settings.language)}
-          </p>
         </div>
         <div className={styles.headerActions}>
           <div className={styles.searchBox}>
@@ -1346,6 +1344,26 @@ export default function Orders() {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              background: showFilters ? '#EFF6FF' : 'white',
+              border: showFilters ? '1px solid #3B82F6' : '1px solid #E2E8F0',
+              borderRadius: '10px',
+              padding: '0 0.75rem',
+              height: '40px',
+              cursor: 'pointer',
+              color: showFilters ? '#2563EB' : '#64748B',
+              fontWeight: 700,
+              fontSize: '0.85rem',
+              boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
+            }}
+          >
+            <Filter size={16} /> Filters
+          </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'white', border: '1px solid #E2E8F0', borderRadius: '10px', padding: '0 0.75rem', height: '40px', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}>
             <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>SORT:</span>
             <select
@@ -1404,72 +1422,78 @@ export default function Orders() {
         </div>
       </div>
 
-      <div className={styles.subFilterRow}>
-          <Filter size={16} color="#64748B" />
-          <button
-            className={`${styles.filterTab} ${workflowFilter === 'All' ? styles.filterTabActive : ''}`}
-            onClick={() => setWorkflowFilter('All')}
-          >
-            {t('all', settings.language)} ({workflowCounts.All})
-          </button>
-          <button
-            className={`${styles.filterTab} ${workflowFilter === 'Confirmed' ? styles.filterTabActive : ''}`}
-            onClick={() => setWorkflowFilter('Confirmed')}
-          >
-            {t('confirmed', settings.language)} ({workflowCounts.Confirmed})
-          </button>
-          <button
-            className={`${styles.filterTab} ${workflowFilter === 'Processing' ? styles.filterTabActive : ''}`}
-            onClick={() => setWorkflowFilter('Processing')}
-          >
-            {t('processing', settings.language)} ({workflowCounts.Processing})
-          </button>
-          <button
-            className={`${styles.filterTab} ${workflowFilter === 'Ready' ? styles.filterTabActive : ''}`}
-            onClick={() => setWorkflowFilter('Ready')}
-          >
-            {t('ready', settings.language)} ({workflowCounts.Ready})
-          </button>
-          <button
-            className={`${styles.filterTab} ${workflowFilter === 'Delivered' ? styles.filterTabActive : ''}`}
-            onClick={() => setWorkflowFilter('Delivered')}
-          >
-            {t('delivered', settings.language)} ({workflowCounts.Delivered})
-          </button>
-
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Calendar size={16} color="#64748B" />
-            <select
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value)}
-              style={{ border: '1px solid #E2E8F0', padding: '0.4rem 0.8rem', borderRadius: '8px', fontWeight: 600, outline: 'none', fontSize: '0.85rem' }}
-            >
-              <option value="All">All Time</option>
-              <option value="Today">Today</option>
-              <option value="This Month">This Month</option>
-              <option value="This Year">This Year</option>
-              <option value="Custom">Custom Range</option>
-            </select>
-
-            {dateRange === 'Custom' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <input
-                  type="date"
-                  value={customStart}
-                  onChange={(e) => setCustomStart(e.target.value)}
-                  style={{ border: '1px solid #E2E8F0', padding: '0.35rem 0.5rem', borderRadius: '8px', fontSize: '0.8rem', outline: 'none' }}
-                />
-                <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>to</span>
-                <input
-                  type="date"
-                  value={customEnd}
-                  onChange={(e) => setCustomEnd(e.target.value)}
-                  style={{ border: '1px solid #E2E8F0', padding: '0.35rem 0.5rem', borderRadius: '8px', fontSize: '0.8rem', outline: 'none' }}
-                />
-              </div>
+      {showFilters && (
+        <div className={styles.subFilterRow}>
+            {settings.workflowEnabled && (
+              <>
+                <Filter size={16} color="#64748B" />
+                <button
+                  className={`${styles.filterTab} ${workflowFilter === 'All' ? styles.filterTabActive : ''}`}
+                  onClick={() => setWorkflowFilter('All')}
+                >
+                  {t('all', settings.language)} ({workflowCounts.All})
+                </button>
+                <button
+                  className={`${styles.filterTab} ${workflowFilter === 'Confirmed' ? styles.filterTabActive : ''}`}
+                  onClick={() => setWorkflowFilter('Confirmed')}
+                >
+                  {t('confirmed', settings.language)} ({workflowCounts.Confirmed})
+                </button>
+                <button
+                  className={`${styles.filterTab} ${workflowFilter === 'Processing' ? styles.filterTabActive : ''}`}
+                  onClick={() => setWorkflowFilter('Processing')}
+                >
+                  {t('processing', settings.language)} ({workflowCounts.Processing})
+                </button>
+                <button
+                  className={`${styles.filterTab} ${workflowFilter === 'Ready' ? styles.filterTabActive : ''}`}
+                  onClick={() => setWorkflowFilter('Ready')}
+                >
+                  {t('ready', settings.language)} ({workflowCounts.Ready})
+                </button>
+                <button
+                  className={`${styles.filterTab} ${workflowFilter === 'Delivered' ? styles.filterTabActive : ''}`}
+                  onClick={() => setWorkflowFilter('Delivered')}
+                >
+                  {t('delivered', settings.language)} ({workflowCounts.Delivered})
+                </button>
+              </>
             )}
-          </div>
+
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Calendar size={16} color="#64748B" />
+              <select
+                value={dateRange}
+                onChange={(e) => setDateRange(e.target.value)}
+                style={{ border: '1px solid #E2E8F0', padding: '0.4rem 0.8rem', borderRadius: '8px', fontWeight: 600, outline: 'none', fontSize: '0.85rem' }}
+              >
+                <option value="All">All Time</option>
+                <option value="Today">Today</option>
+                <option value="This Month">This Month</option>
+                <option value="This Year">This Year</option>
+                <option value="Custom">Custom Range</option>
+              </select>
+
+              {dateRange === 'Custom' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <input
+                    type="date"
+                    value={customStart}
+                    onChange={(e) => setCustomStart(e.target.value)}
+                    style={{ border: '1px solid #E2E8F0', padding: '0.35rem 0.5rem', borderRadius: '8px', fontSize: '0.8rem', outline: 'none' }}
+                  />
+                  <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>to</span>
+                  <input
+                    type="date"
+                    value={customEnd}
+                    onChange={(e) => setCustomEnd(e.target.value)}
+                    style={{ border: '1px solid #E2E8F0', padding: '0.35rem 0.5rem', borderRadius: '8px', fontSize: '0.8rem', outline: 'none' }}
+                  />
+                </div>
+              )}
+            </div>
         </div>
+      )}
 
 
       {/* Table Section */}
@@ -1484,8 +1508,7 @@ export default function Orders() {
                 <th>{t('whatsapp', settings.language)}</th>
                 <th>{t('totalAmount', settings.language)}</th>
                 <th>{t('paymentMethodLabel', settings.language)}</th>
-                <th>{t('status', settings.language)}</th>
-                <th className={styles.actionsHeader}>{t('paymentStatus', settings.language)}</th>
+                <th>{t('actions', settings.language) || 'Actions'}</th>
               </tr>
             </thead>
             <tbody>
@@ -1561,97 +1584,38 @@ export default function Orders() {
                       )}
                     </td>
                     <td>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', alignItems: 'flex-start' }}>
-                        {order.isDeleted ? (
-                          <span className={`${styles.statusBadge} ${order.refundStatus === 'Returned' ? styles.statusDelivered :
-                              order.refundStatus === 'Refund Pending' ? styles.statusPending :
-                                styles.statusCancelled
-                            }`}>
-                            {order.refundStatus || 'Deleted'}
+                      {order.isDeleted ? (
+                        <span className={styles.statusBadge} style={{ background: '#F1F5F9', color: '#475569', border: '1px solid #CBD5E1', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 600, fontSize: '0.75rem' }}>
+                          Deleted
+                        </span>
+                      ) : order.status === 'Delivered' ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{ fontSize: '0.75rem', color: '#10B981', fontWeight: 700 }}>DELIVERED</span>
+                          <span style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 500 }}>
+                            {(() => {
+                              try {
+                                const history = typeof order.statusHistory === 'string'
+                                  ? JSON.parse(order.statusHistory || '[]')
+                                  : (order.statusHistory || []);
+                                const delEntry = history.find(h => h.status === 'Delivered');
+                                if (delEntry && delEntry.timestamp) return formatDateTime(delEntry.timestamp);
+                              } catch (e) {}
+                              return formatDateTime(order.updatedAt);
+                            })()}
                           </span>
-                        ) : !['Payment Pending', 'Paid', 'Credit'].includes(order.status) ? (
-                          <span className={`${styles.statusBadge} ${STATUS_COLORS[order.status]}`}>
-                            {translateStatus(order.status)}
-                          </span>
-                        ) : (
-                          <span className={`${styles.statusBadge} ${styles.statusProcessing}`}>
-                            {t('confirmed', settings.language)}
-                          </span>
-                        )}
-                        {!order.isDeleted && order.status !== 'Delivered' && (
-                          <button
-                            className={styles.deliverBtn}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleUpdateStatus('Delivered', order);
-                            }}
-                          >
-                            <Truck size={12} /> {t('deliver', settings.language)}
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                    <td className={styles.actionsCell}>
-                      <div className={styles.actionCellContainer}>
-                        <div className={styles.paymentCol}>
-                          {order.isDeleted ? (
-                            <span className={styles.statusBadge} style={{ background: '#F1F5F9', color: '#475569', border: '1px solid #CBD5E1', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 600, fontSize: '0.75rem' }}>
-                              Deleted
-                            </span>
-                          ) : order.paymentStatus === 'Paid' ? (
-                            <span className={styles.paidActionBadge}>
-                              <CheckCircle size={14} /> {t('paid', settings.language)}
-                            </span>
-                          ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
-                              <span className={styles.creditActionBadge}>
-                                <AlertCircle size={14} /> {order.paymentStatus ? t(order.paymentStatus.toLowerCase(), settings.language) : t('notPaid', settings.language)}
-                              </span>
-                              {order.nomodCheckoutId && (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
-                                  {order.nomodPaymentStatus === 'Pending' && getDaysPending(order.nomodLinkDate) >= (settings.pendingPaymentWarningDays || 3) && (
-                                    <span className={styles.statusBadge} style={{ background: '#FFFBEB', color: '#B45309', border: '1px solid #FDE68A', padding: '0.15rem 0.35rem', fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                      <AlertTriangle size={10} /> Pending {getDaysPending(order.nomodLinkDate)}d
-                                    </span>
-                                  )}
-                                  <div style={{ display: 'flex', gap: '4px', marginTop: '2px' }}>
-                                    {order.nomodPaymentStatus === 'Pending' && (
-                                      <button
-                                        type="button"
-                                        onClick={async (e) => {
-                                          e.stopPropagation();
-                                          const res = await paymentService.checkNow(order.id, order.nomodCheckoutId);
-                                          if (res.success) {
-                                            alert(`Nomod status is: ${res.status}`);
-                                            fetchOrders();
-                                          } else {
-                                            alert("Failed checking status: " + res.error);
-                                          }
-                                        }}
-                                        style={{ padding: '2px 6px', fontSize: '0.65rem', background: '#3B82F6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '2px' }}
-                                      >
-                                        <RefreshCw size={10} /> Check
-                                      </button>
-                                    )}
-                                    {(order.nomodPaymentStatus === 'Pending' || order.nomodPaymentStatus === 'Expired' || order.nomodPaymentStatus === 'Failed') && (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleResendPaymentLink(order);
-                                        }}
-                                        style={{ padding: '2px 6px', fontSize: '0.65rem', background: '#EC4899', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '2px' }}
-                                      >
-                                        <Send size={10} /> Resend
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
                         </div>
-                      </div>
+                      ) : (
+                        <button
+                          className={styles.deliverBtn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleUpdateStatus('Delivered', order);
+                          }}
+                          style={{ margin: 0 }}
+                        >
+                          <Truck size={12} /> {t('deliver', settings.language)}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -1833,21 +1797,23 @@ export default function Orders() {
                     </div>
                   ) : (
                     <>
-                      <div className={styles.statusAction}>
-                        <label>{t('workflowStatus', settings.language)}</label>
-                        <div className={styles.statusSelectWrapper}>
-                          <select
-                            value={['Payment Pending', 'Credit', 'Pending'].includes(selectedOrder.status) ? 'Confirmed' : selectedOrder.status}
-                            onChange={(e) => handleUpdateStatus(e.target.value)}
-                            className={styles.statusSelect}
-                          >
-                            {(settings.workflowStatuses || ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled']).map((status) => (
-                              <option key={status} value={status}>{translateStatus(status)}</option>
-                            ))}
-                          </select>
-                          <ChevronDown size={18} />
+                      {settings.workflowEnabled && (
+                        <div className={styles.statusAction}>
+                          <label>{t('workflowStatus', settings.language)}</label>
+                          <div className={styles.statusSelectWrapper}>
+                            <select
+                              value={['Payment Pending', 'Credit', 'Pending'].includes(selectedOrder.status) ? 'Confirmed' : selectedOrder.status}
+                              onChange={(e) => handleUpdateStatus(e.target.value)}
+                              className={styles.statusSelect}
+                            >
+                              {(settings.workflowStatuses || ['Confirmed', 'Picked Up', 'Washing', 'Drying', 'Ironing', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered', 'Cancelled']).map((status) => (
+                                <option key={status} value={status}>{translateStatus(status)}</option>
+                              ))}
+                            </select>
+                            <ChevronDown size={18} />
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {selectedOrder.nomodCheckoutId && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0', marginTop: '1rem', textAlign: 'left' }}>

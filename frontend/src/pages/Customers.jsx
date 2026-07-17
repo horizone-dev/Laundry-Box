@@ -59,7 +59,8 @@ export default function Customers() {
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
-    address: ''
+    address: '',
+    openingBalance: ''
   });
   const [showEditCreditLimitModal, setShowEditCreditLimitModal] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
@@ -191,15 +192,15 @@ export default function Customers() {
           const id = `CUST-${nextNum}`;
 
           await window.electronAPI.dbQuery(
-            'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [id, DEFAULT_SHOP_ID, formData.name, formData.phone, '', formData.address, 0, 0, timestamp]
+            'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, balance, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [id, DEFAULT_SHOP_ID, formData.name, formData.phone, '', formData.address, 0, parseFloat(formData.openingBalance) || 0, 0, timestamp]
           );
           alert('Customer created successfully!');
         }
         fetchCustomers();
         setShowModal(false);
         setEditingCustomer(null);
-        setFormData({ name: '', phone: '', address: '' });
+        setFormData({ name: '', phone: '', address: '', openingBalance: '' });
       } catch (err) {
         console.error("Failed to save customer:", err);
       }
@@ -209,11 +210,11 @@ export default function Customers() {
         setCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
       } else {
         const id = `CUST-${customers.length + 1}`;
-        setCustomers([{ ...formData, id, orders: 0, lastDate: 'Just now', tag: 'New', balance: 0, creditLimit: 0 }, ...customers]);
+        setCustomers([{ ...formData, id, orders: 0, lastDate: 'Just now', tag: 'New', balance: parseFloat(formData.openingBalance) || 0, creditLimit: 0 }, ...customers]);
       }
       setShowModal(false);
       setEditingCustomer(null);
-      setFormData({ name: '', phone: '', address: '' });
+      setFormData({ name: '', phone: '', address: '', openingBalance: '' });
     }
   };
 
@@ -2010,7 +2011,6 @@ export default function Customers() {
       <div className={styles.headerRow} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className={styles.headerTitle}>
           <h1>Customers</h1>
-          <p>Manage and view your customer database and order history.</p>
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           {/* Unified search bar */}
@@ -2027,7 +2027,7 @@ export default function Customers() {
 
           <button className="btn btn-primary" onClick={() => {
             setEditingCustomer(null);
-            setFormData({ name: '', phone: settings.waCountryCode ? `+${settings.waCountryCode.replace(/\+/g, '')}` : '+971', address: '' });
+            setFormData({ name: '', phone: settings.waCountryCode ? `+${settings.waCountryCode.replace(/\+/g, '')}` : '+971', address: '', openingBalance: '' });
             setShowModal(true);
           }}>
             <UserPlus size={18} /> Add Customer
@@ -2055,7 +2055,10 @@ export default function Customers() {
                 <td style={{ fontWeight: 700, color: '#64748B', fontSize: '0.8rem' }}>
                   {customer.id?.split('-')[1]?.substring(0, 8) || customer.id || idx + 1}
                 </td>
-                <td style={{ fontWeight: 600, color: '#1E293B' }}>
+                <td 
+                  style={{ fontWeight: 600, color: 'var(--primary)', cursor: 'pointer' }}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleViewCustomerInsight(customer); }}
+                >
                   {customer.name}
                 </td>
                 <td>
@@ -2200,8 +2203,24 @@ export default function Customers() {
                         value={formData.address}
                         onChange={(e) => setFormData({...formData, address: e.target.value})}
                       />
-                    </div>
                   </div>
+                </div>
+
+                  {!editingCustomer && (
+                    <div className={styles.formGroup}>
+                      <label>Opening Balance</label>
+                      <div className={styles.inputWrapper}>
+                        <DollarSign size={18} />
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          placeholder="0.00" 
+                          value={formData.openingBalance}
+                          onChange={(e) => setFormData({...formData, openingBalance: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
               <div className={styles.modalFooter}>

@@ -234,7 +234,6 @@ export default function CreditOverridesReport() {
       <motion.div className={styles.headerRow} variants={itemVariants}>
         <div className={styles.headerInfo}>
           <h1>Credit Override Audit Log</h1>
-          <p className={styles.subtext}>Monitor all customer credit limit overrides, manager approvals, and failed attempts.</p>
         </div>
         <div className={styles.headerActions}>
           <button className="btn btn-secondary" onClick={exportCSV}>

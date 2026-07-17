@@ -1385,22 +1385,7 @@ export default function MainLayout() {
       {/* Main Area */}
       <main className={styles.main}>
         <header className={styles.header}>
-          {role !== 'super_admin' && (
-            <div className={styles.searchBar}>
-              <Search size={18} color="#94A3B8" />
-              <input
-                type="text"
-                placeholder="Search orders, customers, or services..."
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    customNavigate(`/orders?search=${e.target.value}`);
-                  }
-                }}
-              />
-            </div>
-          )}
-
-          <div className={styles.headerRight} style={role === 'super_admin' ? { marginLeft: 'auto' } : {}}>
+          <div className={styles.headerRight} style={{ marginLeft: 'auto' }}>
             {role !== 'super_admin' && (
               <div className={styles.headerIcons}>
                 <button

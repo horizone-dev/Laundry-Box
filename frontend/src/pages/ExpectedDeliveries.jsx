@@ -509,7 +509,6 @@ export default function ExpectedDeliveries() {
       <div className={styles.header}>
         <div className={styles.titleArea}>
           <h1>{t('expecteddeliveries', settings.language)}</h1>
-          <p>Track laundry orders sorted by expected delivery date, configure inline updates, and fulfill deliveries.</p>
         </div>
         <div className={styles.actions}>
           <div className={styles.searchBox}>
@@ -600,16 +599,18 @@ export default function ExpectedDeliveries() {
         </div>
 
         <div className={styles.selectFilters}>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className={styles.dropdownSelect}
-          >
-            <option value="All">All Statuses</option>
-            {getWorkflowStatuses().map(status => (
-              <option key={status} value={status}>{status}</option>
-            ))}
-          </select>
+          {settings.workflowEnabled && (
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className={styles.dropdownSelect}
+            >
+              <option value="All">All Statuses</option>
+              {getWorkflowStatuses().map(status => (
+                <option key={status} value={status}>{status}</option>
+              ))}
+            </select>
+          )}
 
           {dateFilter === 'Custom' && (
             <div className={styles.customDateWrapper}>
@@ -640,8 +641,7 @@ export default function ExpectedDeliveries() {
               <th>Customer</th>
               <th>Created Date</th>
               <th>Expected Date & Time</th>
-              <th>Status</th>
-              <th>Payment</th>
+              {settings.workflowEnabled && <th>Status</th>}
               <th>Dues</th>
               <th>Actions</th>
             </tr>
@@ -710,27 +710,24 @@ export default function ExpectedDeliveries() {
                             </div>
                           </div>
                         </td>
-                        <td>
-                          <div className={styles.selectWrapper}>
-                            <select
-                              value={order.status || 'Confirmed'}
-                              onChange={(e) => handleUpdateStatus(order, e.target.value)}
-                              className={`${styles.inlineSelect} ${getStatusBadgeClass(order.status)}`}
-                            >
-                              {getWorkflowStatuses().map(status => (
-                                <option key={status} value={status} style={{ background: '#FFF', color: '#000' }}>
-                                  {status}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`${styles.badge} ${getStatusBadgeClass(order.paymentStatus)}`}>
-                            {order.paymentStatus || 'Pending'}
-                          </span>
-                        </td>
-                        <td className={styles.amount}>
+                        {settings.workflowEnabled && (
+                          <td>
+                            <div className={styles.selectWrapper}>
+                              <select
+                                value={order.status || 'Confirmed'}
+                                onChange={(e) => handleUpdateStatus(order, e.target.value)}
+                                className={`${styles.inlineSelect} ${getStatusBadgeClass(order.status)}`}
+                              >
+                                {getWorkflowStatuses().map(status => (
+                                  <option key={status} value={status} style={{ background: '#FFF', color: '#000' }}>
+                                    {status}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </td>
+                        )}
+                         <td className={styles.amount}>
                           <div className={styles.duesCell}>
                             <span className={styles.dueAmount}>
                               <CurrencySymbol size={11} /> {(order.dueAmount ?? order.totalAmount ?? 0).toFixed(2)}

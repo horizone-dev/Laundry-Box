@@ -733,7 +733,6 @@ export default function Settlement() {
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
           <h2>Credit Ledger</h2>
-          <p>Manage customer accounts & settlements</p>
         </div>
 
         <div className={styles.searchContainer}>
@@ -816,7 +815,6 @@ export default function Settlement() {
           <div className={styles.dashboardView}>
             <div className={styles.dashboardHeader}>
               <h1>Credit Settlements Dashboard</h1>
-              <p>Global financial health, collections & credit accounts</p>
             </div>
 
             {/* Gradient KPI Cards */}

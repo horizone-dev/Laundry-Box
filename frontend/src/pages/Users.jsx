@@ -193,7 +193,6 @@ const Users = () => {
       <header className={styles.header}>
         <div>
           <h1 className={styles.title}>User Management</h1>
-          <p className={styles.subtitle}>Manage your team members and their access levels</p>
         </div>
         <button className={styles.addUserBtn} onClick={() => { setEditingUser(null); setFormData({ name: '', phone: '', role: 'cashier', password: '', pin: '' }); setShowModal(true); }}>
           <UserPlus size={18} />

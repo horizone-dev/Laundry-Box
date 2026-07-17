@@ -260,7 +260,6 @@ export default function ServicesReport() {
       <motion.div className={styles.headerRow} variants={itemVariants}>
         <div className={styles.headerInfo}>
           <h1>{t('servicesreport', settings.language)}</h1>
-          <p className={styles.subtext}>Analyze laundry services sales volume, revenue breakdown, category charts, and popular treatment types.</p>
         </div>
         <div className={styles.headerActions}>
           <button className={styles.refreshBtn} onClick={fetchOrders} title="Refresh Data">

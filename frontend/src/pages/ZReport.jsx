@@ -1017,7 +1017,6 @@ export default function ZReport() {
           </div>
           <div>
             <h1>Z Report (Daily Close Report)</h1>
-            <p className={styles.subtext}>Register closeout and financial statement summary.</p>
           </div>
         </div>
         

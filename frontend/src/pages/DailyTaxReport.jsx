@@ -350,7 +350,6 @@ export default function DailyTaxReport() {
       <div className={styles.headerRow}>
         <div className={styles.headerInfo}>
           <h1>{t('dailytaxreport', settings.language)}</h1>
-          <p>Daily consolidated summary of Output Tax (Sales) vs Input Tax (Expenses).</p>
         </div>
         <div className={styles.headerActions} data-noprint="true">
           <button className="btn btn-secondary" onClick={handleExportCSV}>

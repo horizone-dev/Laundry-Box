@@ -473,7 +473,6 @@ export default function Dashboard() {
       <div className={styles.headerRow}>
         <div className={styles.headerTitle}>
           <h1>Good morning, {role}! 👋</h1>
-          <p>Here's what's happening with your business today.</p>
         </div>
         <div className={styles.headerFilters}>
           <div className={styles.datePickerWrapper}>

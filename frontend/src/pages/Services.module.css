@@ -658,6 +658,11 @@
   gap: 1rem;
   box-shadow: var(--shadow-sm);
   transition: all 0.25s;
+  cursor: grab;
+}
+
+.categoryCard:active {
+  cursor: grabbing;
 }
 
 .categoryCard:hover {

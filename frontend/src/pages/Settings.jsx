@@ -318,7 +318,7 @@ export default function Settings() {
     ? ['System Configuration', 'Nomod', 'Maintenance']
     : [
       'General',
-      'Order Workflow',
+      ...(settings.workflowEnabled ? ['Order Workflow'] : []),
       'Company Info',
       'Tax Settings',
       'Bill Templates',
@@ -474,6 +474,7 @@ export default function Settings() {
         noModPayEnabled: true,
         paymentHistoryEnabled: true,
         zReportClosingType: 'Day Close',
+        posLayoutTemplate: 'standard',
         silentPrinting: true,
         pdfDownloadPath: ''
       };
@@ -896,7 +897,6 @@ export default function Settings() {
       <div className={styles.headerRow}>
         <div className={styles.headerMain}>
           <h1>Settings</h1>
-          <p>Configure company profiles, bill templates, and system preferences.</p>
         </div>
         <div className={styles.headerActions}>
           <button className={styles.saveBtn} onClick={handleSaveAllChanges}>
@@ -3088,6 +3088,22 @@ export default function Settings() {
                 </p>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '1rem' }}>
+                    <div style={{ flex: 1 }}>
+                      <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>POS Layout Style</h4>
+                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Choose between standard layout (with photos/icons) and classic layout (without photos)</p>
+                    </div>
+                    <select
+                      className={styles.inputField}
+                      style={{ width: '200px', padding: '0.4rem 0.75rem', fontSize: '0.9rem' }}
+                      value={settings.posLayoutTemplate || 'standard'}
+                      onChange={(e) => updateSettings({ posLayoutTemplate: e.target.value })}
+                    >
+                      <option value="standard">Standard (With Photos)</option>
+                      <option value="classic">Classic (No Photos)</option>
+                    </select>
+                  </div>
+
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '1rem' }}>
                     <div style={{ flex: 1 }}>
                       <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>NoMOD Pay</h4>

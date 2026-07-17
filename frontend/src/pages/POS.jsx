@@ -3,9 +3,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search, Plus, Minus, ShoppingBag, Trash2, CheckCircle,
   X, ChevronDown, Shirt, Bed, Wind, Layers, Package,
-  Droplet, Zap, Heart, Sparkles, User, CreditCard, Wallet,
+  Droplet, Zap, Heart, Sparkles, User, CreditCard, Wallet, DollarSign,
   Gift, Printer, Receipt, Edit3, UserPlus, Phone, MapPin, Landmark,
-  Calendar, FileText, AlertTriangle, AlertCircle, Info, Lock, Clock, QrCode, BedDouble, ClipboardList
+  Calendar, FileText, AlertTriangle, AlertCircle, Info, Lock, Clock, QrCode, BedDouble, ClipboardList,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 const Dress = Shirt;
 import axios from 'axios';
@@ -48,6 +49,49 @@ export default function POS() {
   const [selectedService, setSelectedService] = useState(null);
   const [serviceConfig, setServiceConfig] = useState({ selectedTypeIds: [], addons: [], qty: 1, customPrice: null, description: '', deliveryMethod: 'Hanger' });
   const [editingCartIdx, setEditingCartIdx] = useState(null); // index of cart item being edited
+  const [showAddTypeDropdown, setShowAddTypeDropdown] = useState(false);
+  const addTypeDropdownRef = React.useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (addTypeDropdownRef.current && !addTypeDropdownRef.current.contains(event.target)) {
+        setShowAddTypeDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  const [canScrollCategoriesLeft, setCanScrollCategoriesLeft] = useState(false);
+  const [canScrollCategoriesRight, setCanScrollCategoriesRight] = useState(false);
+  const categoryTabsRef = React.useRef(null);
+
+  const checkCategoryScroll = () => {
+    const el = categoryTabsRef.current;
+    if (el) {
+      setCanScrollCategoriesLeft(el.scrollLeft > 5);
+      setCanScrollCategoriesRight(el.scrollWidth - el.scrollLeft - el.clientWidth > 5);
+    }
+  };
+
+  const scrollCategories = (direction) => {
+    const el = categoryTabsRef.current;
+    if (el) {
+      const scrollAmount = direction === 'left' ? -200 : 200;
+      el.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(checkCategoryScroll, 150);
+    window.addEventListener('resize', checkCategoryScroll);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', checkCategoryScroll);
+    };
+  }, [categories]);
 
   useEffect(() => {
     if (cartEndRef.current) {
@@ -67,7 +111,15 @@ export default function POS() {
   }, [selectedService]);
 
   const availableTypesForService = React.useMemo(() => {
-    if (!selectedService || selectedService.isTemporary) return [];
+    if (!selectedService) return [];
+    if (selectedService.isTemporary) {
+      return serviceTypes.map(t => ({
+        id: t.id,
+        name: t.name,
+        icon: t.icon || 'Shirt',
+        price: 0
+      }));
+    }
     return servicePricing.map(p => {
       const globalType = serviceTypes.find(t => t.id === p.serviceTypeId);
       return {
@@ -271,7 +323,7 @@ export default function POS() {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastOrderInfo, setLastOrderInfo] = useState(null);
-  const [customerFormData, setCustomerFormData] = useState({ name: '', phone: '', address: '' });
+  const [customerFormData, setCustomerFormData] = useState({ name: '', phone: '', address: '', openingBalance: '' });
 
   // Credit Limit Protection states
   const [showCreditWarning, setShowCreditWarning] = useState(false);
@@ -481,23 +533,30 @@ export default function POS() {
         const id = `CUST-${nextNum}`;
 
         await window.electronAPI.dbQuery(
-          'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, DEFAULT_SHOP_ID, customerFormData.name, customerFormData.phone, '', customerFormData.address, 0, 0, timestamp]
+          'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, balance, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [id, DEFAULT_SHOP_ID, customerFormData.name, customerFormData.phone, '', customerFormData.address, 0, parseFloat(customerFormData.openingBalance) || 0, 0, timestamp]
         );
-        handleSelectCustomer({ id, ...customerFormData });
+        handleSelectCustomer({ id, ...customerFormData, balance: parseFloat(customerFormData.openingBalance) || 0 });
         setShowCustomerModal(false);
         setCustomerFormData({
           name: '',
           phone: settings.waCountryCode ? `+${settings.waCountryCode.replace(/\+/g, '')}` : '+971',
-          address: ''
+          address: '',
+          openingBalance: ''
         });
       } catch (err) {
         console.error("Failed to save customer:", err);
       }
     } else {
       const id = `CUST-temp`;
-      handleSelectCustomer({ id, ...customerFormData });
+      handleSelectCustomer({ id, ...customerFormData, balance: parseFloat(customerFormData.openingBalance) || 0 });
       setShowCustomerModal(false);
+      setCustomerFormData({
+        name: '',
+        phone: settings.waCountryCode ? `+${settings.waCountryCode.replace(/\+/g, '')}` : '+971',
+        address: '',
+        openingBalance: ''
+      });
     }
   };
 
@@ -647,18 +706,32 @@ export default function POS() {
     }
 
     if (selectedService.isTemporary) {
-      const unitPrice = serviceConfig.customPrice !== null && serviceConfig.customPrice !== ''
+      const baseTempPrice = serviceConfig.customPrice !== null && serviceConfig.customPrice !== ''
         ? parseFloat(serviceConfig.customPrice)
         : activeCalculatedPrice;
+
+      const selectedTypes = (serviceConfig.selectedTypeIds || []).map(typeId => {
+        const selectedTypeObj = availableTypesForService.find(t => t.id === typeId);
+        return {
+          id: typeId,
+          name: selectedTypeObj ? selectedTypeObj.name : 'Unknown',
+          price: 0
+        };
+      });
+
+      const joinedTypeName = selectedTypes.length > 0 ? selectedTypes.map(t => t.name).join(' + ') : 'Custom';
+      const actualTypes = selectedTypes.length > 0 ? selectedTypes : [{ id: 'custom', name: 'Custom', price: baseTempPrice }];
+      
+      const finalPrice = baseTempPrice + activeAddonPrice;
 
       const newItem = {
         id: editingCartIdx !== null ? cart[editingCartIdx].id : Date.now().toString(),
         serviceId: selectedService.id,
         name: selectedService.name.trim(),
-        price: unitPrice,
-        type: 'Custom',
-        types: [{ id: 'custom', name: 'Custom', price: unitPrice }],
-        addons: [],
+        price: finalPrice,
+        type: joinedTypeName,
+        types: actualTypes,
+        addons: activeSelectedAddons.map(a => a.name),
         qty: parseInt(serviceConfig.qty, 10) || 1,
         taxRate: selectedService.taxRate || settings.taxRate || 0,
         description: serviceConfig.description || '',
@@ -2395,10 +2468,77 @@ export default function POS() {
           <button className={styles.manageCustBtn} onClick={() => navigate('/orders')}>
             <ClipboardList size={18} /> Orders
           </button>
+          <div style={{ position: 'relative' }} ref={addTypeDropdownRef}>
+            <button
+              type="button"
+              className={styles.manageCustBtn}
+              onClick={() => setShowAddTypeDropdown(!showAddTypeDropdown)}
+              title="Add Item"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#2563EB', color: 'white', border: 'none', width: '40px', height: '100%', borderRadius: '12px', cursor: 'pointer', padding: 0 }}
+            >
+              <Plus size={18} />
+            </button>
+            {showAddTypeDropdown && (
+              <div style={{ position: 'absolute', top: '110%', right: 0, background: 'white', border: '1px solid #E2E8F0', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 100, width: '160px', display: 'flex', flexDirection: 'column', padding: '0.25rem 0' }}>
+                <div
+                  onClick={() => {
+                    setShowAddTypeDropdown(false);
+                    handleServiceClick({ id: 'temp-' + Date.now(), name: '', price: 0, icon: 'Package', isTemporary: true });
+                  }}
+                  style={{ padding: '0.5rem 0.75rem', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, color: '#334155', transition: 'background 0.15s', textAlign: 'left' }}
+                  onMouseEnter={(e) => e.target.style.background = '#F1F5F9'}
+                  onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                >
+                  Temporary Item
+                </div>
+                <div
+                  onClick={() => {
+                    setShowAddTypeDropdown(false);
+                    navigate('/services');
+                  }}
+                  style={{ padding: '0.5rem 0.75rem', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, color: '#334155', borderTop: '1px solid #F1F5F9', transition: 'background 0.15s', textAlign: 'left' }}
+                  onMouseEnter={(e) => e.target.style.background = '#F1F5F9'}
+                  onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                >
+                  Select/Add Service
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className={styles.categoriesRow}>
-          <div className={styles.categoryTabs}>
+        <div className={styles.categoriesRow} style={{ position: 'relative', width: '100%', display: 'flex', alignItems: 'center' }}>
+          {canScrollCategoriesLeft && (
+            <button
+              type="button"
+              onClick={() => scrollCategories('left')}
+              aria-label="Scroll categories left"
+              style={{
+                position: 'absolute',
+                left: '-8px',
+                zIndex: 10,
+                background: 'white',
+                border: '1px solid #E2E8F0',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
+              }}
+            >
+              <ChevronLeft size={16} />
+            </button>
+          )}
+
+          <div
+            className={styles.categoryTabs}
+            ref={categoryTabsRef}
+            onScroll={checkCategoryScroll}
+            style={{ width: '100%', paddingLeft: canScrollCategoriesLeft ? '24px' : '0px', paddingRight: canScrollCategoriesRight ? '24px' : '0px', transition: 'padding 0.2s' }}
+          >
             <button
               className={`${styles.categoryTab} ${selectedCategory === 'All' ? styles.active : ''}`}
               onClick={() => setSelectedCategory('All')}
@@ -2415,6 +2555,31 @@ export default function POS() {
               </button>
             ))}
           </div>
+
+          {canScrollCategoriesRight && (
+            <button
+              type="button"
+              onClick={() => scrollCategories('right')}
+              aria-label="Scroll categories right"
+              style={{
+                position: 'absolute',
+                right: '-8px',
+                zIndex: 10,
+                background: 'white',
+                border: '1px solid #E2E8F0',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
+              }}
+            >
+              <ChevronRight size={16} />
+            </button>
+          )}
         </div>
 
         <div className={styles.itemsGrid}>
@@ -2425,23 +2590,19 @@ export default function POS() {
               return matchesSearch && (itemSearch ? true : matchesCategory);
             })
             .map((service) => (
-              <div key={service.id} className={styles.itemCard} onClick={() => handleServiceClick(service)}>
-                <div className={styles.itemIcon}>
-                  {service.image ? (
-                    <img src={service.image} alt={service.name} className={styles.itemImg} />
-                  ) : getIcon(service.icon, 36)}
-                </div>
+              <div key={service.id} className={`${styles.itemCard} ${settings.posLayoutTemplate === 'classic' ? styles.classicCard : ''}`} onClick={() => handleServiceClick(service)}>
+                {settings.posLayoutTemplate !== 'classic' && (
+                  <div className={styles.itemIcon}>
+                    {service.image ? (
+                      <img src={service.image} alt={service.name} className={styles.itemImg} />
+                    ) : getIcon(service.icon, 36)}
+                  </div>
+                )}
                 <span className={styles.itemName}>{service.name}</span>
                 <span className={styles.itemPrice}><CurrencySymbol size={16} /> {service.price.toFixed(2)}</span>
               </div>
             ))}
-          <div className={`${styles.itemCard} ${styles.addItemCard}`} style={{ borderStyle: 'solid', borderColor: '#3B82F6', background: '#EFF6FF', cursor: 'pointer' }} onClick={() => handleServiceClick({ id: 'temp-' + Date.now(), name: '', price: 0, icon: 'Package', isTemporary: true })}>
-            <Plus size={32} color="#2563EB" />
-            <span style={{ fontWeight: 800, fontSize: '0.8rem', color: '#2563EB', marginTop: '0.5rem' }}>TEMPORARY ITEM</span>
-          </div>
-          <div className={`${styles.itemCard} ${styles.addItemCard}`} onClick={() => navigate('/services')}>
-            <Plus size={32} color="#CBD5E1" />
-          </div>
+
         </div>
       </div>
 
@@ -2752,8 +2913,6 @@ export default function POS() {
                 </div>
               )}
 
-              {!selectedService.isTemporary && (
-                <>
                   <div className={styles.modalSection}>
                     <h3 className={styles.modalSectionTitle}>Treatment / Service Type</h3>
                     <div className={styles.serviceTypeGrid}>
@@ -2800,8 +2959,6 @@ export default function POS() {
                       })}
                     </div>
                   </div>
-                </>
-              )}
 
               <div className={styles.modalSection}>
                 <h3 className={styles.modalSectionTitle}>Delivery / Packaging Method</h3>
@@ -2999,6 +3156,20 @@ export default function POS() {
                       placeholder="Customer address"
                       value={customerFormData.address}
                       onChange={(e) => setCustomerFormData({ ...customerFormData, address: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>OPENING BALANCE</label>
+                  <div className={styles.posInputWrapper}>
+                    <DollarSign size={18} />
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={customerFormData.openingBalance}
+                      onChange={(e) => setCustomerFormData({ ...customerFormData, openingBalance: e.target.value })}
                     />
                   </div>
                 </div>

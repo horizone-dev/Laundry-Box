@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Plus, Search, Scissors, Zap, Sparkles, Tag, X, Layout,
   Shirt, Bed, Wind, Droplet, Heart, Layers, Camera,
-  Image as ImageIcon, Trash2, Edit2, Package, BedDouble
+  Image as ImageIcon, Trash2, Edit2, Package, BedDouble, GripVertical
 } from 'lucide-react';
 const Dress = Shirt;
 import Cropper from 'react-easy-crop';
@@ -254,6 +254,40 @@ export default function Services({ defaultTab = 'list' }) {
     }
   };
 
+  const handleCategoryDragStart = (e, index) => {
+    e.dataTransfer.setData('text/plain', index);
+  };
+
+  const handleCategoryDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleCategoryDrop = async (e, targetIdx) => {
+    e.preventDefault();
+    const sourceIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+    if (isNaN(sourceIdx) || sourceIdx === targetIdx) return;
+
+    const updatedCategories = [...categories];
+    const [removed] = updatedCategories.splice(sourceIdx, 1);
+    updatedCategories.splice(targetIdx, 0, removed);
+
+    setCategories(updatedCategories);
+
+    if (window.electronAPI?.dbQuery) {
+      try {
+        for (let i = 0; i < updatedCategories.length; i++) {
+          await window.electronAPI.dbQuery(
+            'UPDATE service_categories SET sortOrder = ? WHERE id = ?',
+            [i, updatedCategories[i].id]
+          );
+        }
+        fetchData();
+      } catch (err) {
+        console.error("Failed to update categories sorting order:", err);
+      }
+    }
+  };
+
 
 
   const processImage = (file) => {
@@ -332,8 +366,8 @@ export default function Services({ defaultTab = 'list' }) {
           query = 'UPDATE service_categories SET name=?, updatedAt=? WHERE id=?';
           params = [formData.name, timestamp, editId];
         } else {
-          query = 'INSERT INTO service_categories (id, shopId, name, updatedAt) VALUES (?, ?, ?, ?)';
-          params = [id, shopId, formData.name, timestamp];
+          query = 'INSERT INTO service_categories (id, shopId, name, sortOrder, updatedAt) VALUES (?, ?, ?, ?, ?)';
+          params = [id, shopId, formData.name, categories.length, timestamp];
         }
       } else if (showModal === 'type') {
         if (editId) {
@@ -392,7 +426,6 @@ export default function Services({ defaultTab = 'list' }) {
       <div className={styles.header}>
         <div className={styles.headerTitle}>
           <h1>Service Management</h1>
-          <p>Configure and manage your laundry items, pricing models, categories, and custom enhancements.</p>
         </div>
       </div>
 
@@ -684,8 +717,19 @@ export default function Services({ defaultTab = 'list' }) {
               <div className={styles.categoriesGrid}>
                 {paginatedCategories.map(c => {
                   const serviceCount = services.filter(s => s.category === c.name).length;
+                  const originalIdx = categories.findIndex(item => item.id === c.id);
                   return (
-                    <div key={c.id} className={styles.categoryCard}>
+                    <div
+                      key={c.id}
+                      className={styles.categoryCard}
+                      draggable={true}
+                      onDragStart={(e) => handleCategoryDragStart(e, originalIdx)}
+                      onDragOver={handleCategoryDragOver}
+                      onDrop={(e) => handleCategoryDrop(e, originalIdx)}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', color: '#94A3B8', cursor: 'grab', paddingRight: '0.25rem' }}>
+                        <GripVertical size={16} />
+                      </div>
                       <div className={styles.categoryIconBox}>
                         <Layout size={20} />
                       </div>
