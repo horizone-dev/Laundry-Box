@@ -61,6 +61,15 @@ exports.signup = async (req, res) => {
         return res.status(400).json({ error: 'User already exists with this name, phone, or User ID.' });
       }
 
+      // Check if PIN is already in use
+      if (pin) {
+        for (const u of users) {
+          if (u.pin && await bcrypt.compare(pin, u.pin)) {
+            return res.status(400).json({ error: 'This PIN is already in use by another user.' });
+          }
+        }
+      }
+
       const passHash = await bcrypt.hash(password || '0000', 10);
       const pinHash = await bcrypt.hash(pin || '0000', 10);
 
@@ -84,6 +93,15 @@ exports.signup = async (req, res) => {
     }
 
     // MongoDB path
+    if (pin) {
+      const allUsers = await User.find({});
+      for (const u of allUsers) {
+        if (u.pin && await u.comparePin(pin)) {
+          return res.status(400).json({ error: 'This PIN is already in use by another user.' });
+        }
+      }
+    }
+
     const user = new User({ shopId, name, phone, password, pin, userId, role });
     await user.save();
     
@@ -97,80 +115,6 @@ exports.signup = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { identifier, secret, method } = req.body; // identifier: email/phone/name/userId, secret: password/pin
-
-    // Hardcoded Default Admin Login Bypass
-    if (
-      (identifier === 'super admin' || identifier === '+9710588851680') &&
-      secret === 'Admin123'
-    ) {
-      const hardcodedUser = {
-        _id: 'local_admin_2',
-        name: 'Horizon inc',
-        userId: 'super admin',
-        phone: '+9710588851680',
-        role: 'super_admin',
-        shopId: 'SHOP_01'
-      };
-      const token = jwt.sign(
-        { id: hardcodedUser._id, shopId: hardcodedUser.shopId },
-        process.env.JWT_SECRET || 'secret',
-        { expiresIn: '7d' }
-      );
-      return res.json({
-        token,
-        user: hardcodedUser
-      });
-    }
-
-    // Hardcoded Default Manager Login Bypass
-    if (
-      (method === 'pin' && (!identifier || identifier.trim() === '') && secret === '1234') ||
-      ((identifier === 'manager' || identifier === '+9710599999999') &&
-       (secret === 'Manager123' || secret === '1234'))
-    ) {
-      const hardcodedUser = {
-        _id: 'local_manager_bypass',
-        name: 'Manager User',
-        userId: 'manager',
-        phone: '+9710599999999',
-        role: 'manager',
-        shopId: 'SHOP_01'
-      };
-      const token = jwt.sign(
-        { id: hardcodedUser._id, shopId: hardcodedUser.shopId },
-        process.env.JWT_SECRET || 'secret',
-        { expiresIn: '7d' }
-      );
-      return res.json({
-        token,
-        user: hardcodedUser
-      });
-    }
-
-    // Hardcoded Default Cashier Login Bypass
-    if (
-      (method === 'pin' && (!identifier || identifier.trim() === '') && secret === '1111') ||
-      ((identifier === 'cashier' || identifier === '+9710577777777') &&
-       (secret === 'Cashier123' || secret === '1111'))
-    ) {
-      const hardcodedUser = {
-        _id: 'local_cashier_bypass',
-        name: 'Cashier User',
-        userId: 'cashier',
-        phone: '+9710577777777',
-        role: 'cashier',
-        shopId: 'SHOP_01'
-      };
-      const token = jwt.sign(
-        { id: hardcodedUser._id, shopId: hardcodedUser.shopId },
-        process.env.JWT_SECRET || 'secret',
-        { expiresIn: '7d' }
-      );
-      return res.json({
-        token,
-        user: hardcodedUser
-      });
-    }
 
     if (!isMongoConnected()) {
       await initLocalDb();
@@ -309,6 +253,15 @@ exports.updateUser = async (req, res) => {
       const userIdx = users.findIndex(u => u._id === req.params.id);
       if (userIdx === -1) return res.status(404).json({ message: 'User not found' });
 
+      // Check if PIN is already in use by another user
+      if (pin) {
+        for (const u of users) {
+          if (u._id !== req.params.id && u.pin && await bcrypt.compare(pin, u.pin)) {
+            return res.status(400).json({ error: 'This PIN is already in use by another user.' });
+          }
+        }
+      }
+
       if (name) users[userIdx].name = name;
       if (phone !== undefined) users[userIdx].phone = phone;
       if (role) users[userIdx].role = role;
@@ -324,11 +277,21 @@ exports.updateUser = async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
+    // Check if PIN is already in use by another user in MongoDB
+    if (pin) {
+      const allUsers = await User.find({ _id: { $ne: req.params.id } });
+      for (const u of allUsers) {
+        if (u.pin && await u.comparePin(pin)) {
+          return res.status(400).json({ error: 'This PIN is already in use by another user.' });
+        }
+      }
+      user.pin = pin;
+    }
+
     if (name) user.name = name;
     if (phone !== undefined) user.phone = phone;
     if (role) user.role = role;
     if (password) user.password = password;
-    if (pin) user.pin = pin;
 
     await user.save();
     res.json({ message: 'User updated successfully', user });
@@ -361,16 +324,6 @@ exports.verifyManagerPin = async (req, res) => {
     const { pin } = req.body;
     if (!pin) {
       return res.status(400).json({ valid: false, message: 'PIN is required' });
-    }
-
-    // Hardcoded Admin PIN Bypass
-    if (pin === 'Admin123') {
-      return res.json({ valid: true, managerName: 'Horizon inc' });
-    }
-
-    // Hardcoded Manager PIN Bypass
-    if (pin === 'Manager123' || pin === '1234') {
-      return res.json({ valid: true, managerName: 'Manager User' });
     }
 
     if (!isMongoConnected()) {

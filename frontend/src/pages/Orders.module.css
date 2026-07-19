@@ -184,9 +184,8 @@
 .dateText {
   vertical-align: middle !important;
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
   color: #334155;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -216,7 +215,7 @@
 
 .custName {
   display: block;
-  font-weight: 800;
+  font-weight: 500;
   font-size: 1rem;
   color: #1E293B;
   margin-bottom: 0.3rem;
@@ -231,7 +230,7 @@
 
 .custPhone {
   font-size: 0.9rem;
-  font-weight: 700;
+  font-weight: 500;
   color: #334155;
   line-height: 1;
 }
@@ -246,7 +245,7 @@
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.65rem;
-  font-weight: 800;
+  font-weight: 500;
   cursor: pointer;
   transition: transform 0.2s;
   line-height: 1;
@@ -259,7 +258,7 @@
 }
 
 .amountText {
-  font-weight: 900;
+  font-weight: 500;
   font-size: 1.05rem;
   color: var(--text-primary);
 }

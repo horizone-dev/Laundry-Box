@@ -235,7 +235,8 @@ export default function Login({ onLogin }) {
               <div className={styles.inputWrapper}>
                 <Lock size={18} />
                 <input 
-                  type={showSecret ? 'text' : (method === 'pin' ? 'tel' : 'password')} 
+                  type={showSecret ? 'text' : 'password'} 
+                  inputMode={method === 'pin' ? 'numeric' : undefined}
                   placeholder={method === 'pin' ? "••••" : "••••••••"} 
                   value={secret}
                   onChange={(e) => setSecret(e.target.value)}

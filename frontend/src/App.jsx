@@ -18,6 +18,7 @@ import CreditOverridesReport from './pages/CreditOverridesReport';
 import DeletedOrders from './pages/DeletedOrders';
 import ExpectedDeliveries from './pages/ExpectedDeliveries';
 import ServicesReport from './pages/ServicesReport';
+import SalesReport from './pages/SalesReport';
 import Invoice from './pages/Invoice';
 import NomodHistory from './pages/NomodHistory';
 import Login from './pages/Login';
@@ -64,6 +65,7 @@ function App() {
           </Route>
           <Route path="reports">
             <Route index element={<Navigate to="services" replace />} />
+            <Route path="sales" element={<SalesReport />} />
             <Route path="services" element={<ServicesReport />} />
             <Route path="revenue" element={<RevenueReport />} />
             <Route path="expenses" element={<Expenses />} />

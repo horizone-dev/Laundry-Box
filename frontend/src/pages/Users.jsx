@@ -115,7 +115,7 @@ const Users = () => {
       
       if (editingUser) {
         await axios.put(`${AUTH_API}/users/${editingUser._id}`, payload);
-        if (editingUser.email === user.email || editingUser.userId === user.userId || editingUser._id === user._id) {
+        if (user._id && editingUser._id === user._id) {
           const updatedUser = { ...user, ...payload };
           delete updatedUser.password;
           sessionStorage.setItem('user', JSON.stringify(updatedUser));
@@ -164,9 +164,10 @@ const Users = () => {
   const openEdit = (user) => {
     setEditingUser(user);
     setFormData({
-      name: user.name,
-      email: user.email,
-      role: user.role,
+      name: user.name || '',
+      phone: user.phone || '',
+      email: user.email || '',
+      role: user.role || 'cashier',
       password: '',
       pin: ''
     });

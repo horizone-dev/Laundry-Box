@@ -1407,3 +1407,60 @@
   background: #1D4ED8;
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
 }
+
+.nomodBtnGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  width: 100%;
+  margin-top: 1.25rem;
+}
+
+.nomodActionBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid #E2E8F0;
+  background: #F8FAFC;
+  color: #334155;
+}
+
+.nomodActionBtn:hover {
+  background: #F1F5F9;
+  border-color: #CBD5E1;
+  color: #0F172A;
+  transform: translateY(-1px);
+}
+
+.nomodActionBtnPrimary {
+  background: #2563EB;
+  color: white;
+  border-color: #2563EB;
+}
+
+.nomodActionBtnPrimary:hover {
+  background: #1D4ED8;
+  border-color: #1D4ED8;
+  color: white;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+.nomodActionBtnSuccess {
+  background: #10B981;
+  color: white;
+  border-color: #10B981;
+}
+
+.nomodActionBtnSuccess:hover {
+  background: #0D9488;
+  border-color: #0D9488;
+  color: white;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+}

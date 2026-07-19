@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ShoppingCart, Users, ClipboardList, Settings, Layers,
   BarChart3, Zap, Plus, Search, Bell, HelpCircle, LifeBuoy, Wifi, WifiOff, RefreshCw, Activity, LogOut, Wallet,
   DollarSign, X, CheckCircle, CreditCard, ShoppingBag, Trash2, Building2, Hash, FileText,
-  AlertTriangle, ShieldCheck, Clock, Package, Truck, Phone, Cpu, Lock
+  AlertTriangle, ShieldCheck, Clock, Package, Truck, Phone, Cpu, Lock, Share2, Download, Send, Printer
 } from 'lucide-react';
 import axios from 'axios';
 import WhatsAppIcon from '../components/WhatsAppIcon';
@@ -579,7 +579,7 @@ export default function MainLayout() {
       permissionKey: 'orders',
       subItems: [
         { path: '/orders', label: 'All Orders' },
-        { path: '/settlement', label: 'Settle Invoice' },
+        { path: '/settlement', label: 'SETTLE INVOICE' },
         { path: '/orders/expected-delivery', label: 'Expected Deliveries' },
         { path: '/orders/deleted', label: 'Deleted Orders' }
       ]
@@ -600,8 +600,7 @@ export default function MainLayout() {
       icon: BarChart3,
       permissionKey: 'reports',
       subItems: [
-        { path: '/reports/services', label: 'Services Report' },
-        { path: '/reports/revenue', label: 'Revenue' },
+        { path: '/reports/sales', label: 'SALES REPORT' },
         { path: '/reports/expenses', label: 'Expenses' },
         { path: '/reports/tax', label: 'Tax Statements' },
         { path: '/reports/daily-tax', label: 'Daily Tax Report' },
@@ -1775,7 +1774,7 @@ const timestamp = getLocalISOString();
                         <option value="Cash">Cash</option>
                         <option value="Card">Card</option>
                         <option value="UPI">UPI</option>
-                        {settings.enableNomod && <option value="Nomod">Nomod Link</option>}
+                        {settings.noModPayEnabled && settings.enableNomod && <option value="Nomod">Nomod Link</option>}
                         <option value="Multipayment">Multipayment</option>
                       </select>
                     </div>
@@ -1836,11 +1835,11 @@ const timestamp = getLocalISOString();
 
       {nomodLinkModal.show && (
         <div className={styles.modalOverlay} style={{ zIndex: 9999 }}>
-          <div className={styles.quickModal} style={{ width: '450px' }} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div className={styles.titleWithIcon}>
+          <div className={styles.quickModal} style={{ width: '450px', padding: '1.5rem', borderRadius: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader} style={{ borderBottom: '1px solid #F1F5F9', paddingBottom: '0.75rem', marginBottom: '1rem' }}>
+              <div className={styles.titleWithIcon} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <CreditCard color="#2563EB" size={24} />
-                <h2>Nomod Payment Link</h2>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0F172A' }}>Nomod Payment Link</h2>
               </div>
               <button className={styles.closeBtn} onClick={() => setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 })}>
                 <X size={20} />
@@ -1848,33 +1847,125 @@ const timestamp = getLocalISOString();
             </div>
 
             <div className={styles.modalBody} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
-                <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>SETTLEMENT AMOUNT</span>
-                <h1 style={{ margin: '0.25rem 0 0 0', color: '#1E293B', fontSize: '2rem', fontWeight: 800 }}>
+              <div style={{ background: '#F8FAFC', padding: '1rem', borderRadius: '14px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+                <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800, letterSpacing: '0.05em' }}>SETTLEMENT AMOUNT</span>
+                <h1 style={{ margin: '0.25rem 0 0 0', color: '#1E293B', fontSize: '2.25rem', fontWeight: 900 }}>
                   {settings.currencySymbol || 'AED'} {nomodLinkModal.amount.toFixed(2)}
                 </h1>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
-                <div style={{ padding: '10px', background: 'white', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                <div style={{ padding: '12px', background: 'white', borderRadius: '16px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
                   <QRCodeCanvas
                     id="nomod-quick-settle-qr-canvas"
                     value={nomodLinkModal.url}
-                    size={160}
+                    size={180}
                     level="H"
                   />
                 </div>
               </div>
 
-              <div className={styles.inputGroup}>
-                <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>Nomod Checkout URL</label>
-                <input
-                  type="text"
-                  readOnly
-                  value={nomodLinkModal.url}
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E2E8F0', background: '#F1F5F9', marginTop: '0.25rem', fontSize: '0.85rem' }}
-                />
+              <div className={styles.inputGroup} style={{ gap: '0.25rem' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569' }}>NOMOD CHECKOUT URL</label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    value={nomodLinkModal.url}
+                    style={{ flex: 1, padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', background: '#F1F5F9', fontSize: '0.85rem', fontWeight: 600, color: '#475569' }}
+                  />
+                  <button
+                    type="button"
+                    className={styles.nomodActionBtn}
+                    style={{ padding: '0.5rem 0.75rem' }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(nomodLinkModal.url);
+                      alert("Payment Link copied to clipboard!");
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
               </div>
+
+              {/* Action Buttons Grid */}
+              <div className={styles.nomodBtnGrid}>
+                <button
+                  type="button"
+                  className={`${styles.nomodActionBtn} ${styles.nomodActionBtnPrimary}`}
+                  onClick={() => {
+                    const canvas = document.getElementById('nomod-quick-settle-qr-canvas');
+                    if (canvas) {
+                      if (window.electronAPI?.printHtml) {
+                        window.electronAPI.printHtml({
+                          html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
+                          css: '',
+                          printerName: settings.billingPrinter,
+                          silent: settings.silentPrinting !== false
+                        });
+                      } else {
+                        const win = window.open('', '', 'width=400,height=400');
+                        win.document.write(`<html><body style="display:flex;justify-content:center;align-items:center;height:90vh;"><img id="qr-img" src="${canvas.toDataURL()}" style="width:300px;height:300px;"/>
+                        <script>
+                          document.getElementById('qr-img').onload = function() {
+                            window.print();
+                            window.close();
+                          };
+                        </script>
+                        </body></html>`);
+                        win.document.close();
+                      }
+                    }
+                  }}
+                >
+                  <Printer size={16} /> Print QR
+                </button>
+
+                <button
+                  type="button"
+                  className={`${styles.nomodActionBtn} ${styles.nomodActionBtnSuccess}`}
+                  onClick={() => {
+                    const customerPhone = selectedSettleTarget?.type === 'customer' ? selectedSettleTarget.data.phone : (selectedSettleTarget?.data.customerPhone || '');
+                    const customerName = selectedSettleTarget?.type === 'customer' ? selectedSettleTarget.data.name : (selectedSettleTarget?.data.customerName || 'Customer');
+                    const text = `Please pay ${settings.currencySymbol || 'AED'} ${nomodLinkModal.amount.toFixed(2)} to settle your laundry balance: ${nomodLinkModal.url}`;
+                    let cleanPhone = customerPhone.toString().replace(/\D/g, '');
+                    let finalPhone = cleanPhone;
+                    if (cleanPhone && !customerPhone.toString().trim().startsWith('+')) {
+                      const countryCode = settings.waCountryCode || '971';
+                      const cleanCountryCode = countryCode.replace(/\D/g, '');
+                      if (cleanCountryCode && !finalPhone.startsWith(cleanCountryCode)) {
+                        finalPhone = cleanCountryCode + finalPhone;
+                      }
+                    }
+                    const url = `https://wa.me/${finalPhone}?text=${encodeURIComponent(text)}`;
+                    if (window.electronAPI?.openExternal) {
+                      window.electronAPI.openExternal(url);
+                    } else {
+                      window.open(url, '_blank');
+                    }
+                  }}
+                >
+                  <Send size={16} /> WhatsApp
+                </button>
+
+                <button
+                  type="button"
+                  className={styles.nomodActionBtn}
+                  style={{ gridColumn: 'span 2' }}
+                  onClick={() => {
+                    const canvas = document.getElementById('nomod-quick-settle-qr-canvas');
+                    if (canvas) {
+                      const a = document.createElement('a');
+                      a.download = `QR-${nomodLinkModal.linkId || 'quick-settle'}.png`;
+                      a.href = canvas.toDataURL();
+                      a.click();
+                    }
+                  }}
+                >
+                  <Download size={16} /> Save QR Code
+                </button>
+              </div>
+
             </div>
           </div>
         </div>
