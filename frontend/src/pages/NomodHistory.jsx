@@ -41,11 +41,20 @@ export default function NomodHistory() {
     setLoading(true);
     try {
       const res = await window.electronAPI.dbQuery(
-        `SELECT * FROM nomod_transactions ORDER BY createdAt DESC`,
+        `SELECT 
+           checkoutId AS id,
+           REPLACE(REPLACE(description, 'Order #', ''), 'LNK-', '') AS orderId,
+           customerName,
+           date AS createdAt,
+           status,
+           amount
+         FROM payment_links
+         WHERE checkoutId IS NOT NULL AND checkoutId != ''
+         ORDER BY date DESC`,
         []
       );
       if (res.success) {
-        setTxns(res.data || []);
+        setTxns(res.results || res.data || []);
       }
     } catch (err) {
       console.error("Failed to load Nomod transactions:", err);

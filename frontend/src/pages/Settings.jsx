@@ -323,7 +323,7 @@ export default function Settings() {
       'Tax Settings',
       'Bill Templates',
       'Bank',
-      ...(isManager && settings.allowManagerNomodConfig ? ['Nomod'] : []),
+      ...(isManager ? ['Nomod'] : []),
       'WhatsApp Config',
       'Damage Notes',
       'Printers',
@@ -2463,6 +2463,20 @@ export default function Settings() {
                       Sent from the print Invoice page when choosing to send details via WhatsApp.
                     </p>
                   </div>
+
+                  <div className={styles.formGroup}>
+                    <label>Nomod Payment Link Request Message Template</label>
+                    <textarea
+                      className={styles.inputField}
+                      style={{ minHeight: '100px', padding: '0.75rem', fontFamily: 'inherit', resize: 'vertical', width: '100%', boxSizing: 'border-box', border: '1px solid #CBD5E1', borderRadius: '8px' }}
+                      placeholder="e.g. Dear {customerName}, here is your payment link for order {orderId}: {paymentLink}"
+                      value={settings.waNomodPaymentTemplate || ''}
+                      onChange={(e) => updateSettings({ waNomodPaymentTemplate: e.target.value })}
+                    />
+                    <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
+                      Sent when generating and sharing a Nomod online payment link via WhatsApp. Use placeholders like <code>{"{customerName}"}</code>, <code>{"{orderId}"}</code>, <code>{"{total}"}</code>, <code>{"{dueAmount}"}</code>, <code>{"{paymentLink}"}</code>, and <code>{"{shopName}"}</code>.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2645,6 +2659,26 @@ export default function Settings() {
                       <div className={styles.switchHandle}></div>
                     </div>
                   </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #F1F5F9', paddingTop: '1.25rem' }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>Receipt Print Size</h4>
+                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Choose page format style for physical receipt printing</p>
+                    </div>
+                    <div style={{ width: '220px' }}>
+                      <select
+                        className={styles.inputField}
+                        style={{ height: '36px', padding: '0 0.5rem', fontSize: '0.8rem' }}
+                        value={settings.receiptPrintSize || 'auto'}
+                        onChange={(e) => updateSettings({ receiptPrintSize: e.target.value })}
+                      >
+                        <option value="auto">Auto (Compact = Thermal, A5 for others)</option>
+                        <option value="thermal">Thermal (80mm)</option>
+                        <option value="A5">A5 Paper Size</option>
+                        <option value="A4">A4 Paper Size</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -2731,6 +2765,35 @@ export default function Settings() {
                             Reset to Default (Downloads)
                           </button>
                         )}
+                      </div>
+
+                      <div style={{ marginTop: '1.5rem', borderTop: '1px solid #E2E8F0', paddingTop: '1.25rem' }}>
+                        <label style={{ display: 'block', fontWeight: 600, color: '#1E293B', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                          PDF Page Format
+                        </label>
+                        <select
+                          value={settings.pdfPageSize || 'A5'}
+                          onChange={(e) => updateSettings({ pdfPageSize: e.target.value })}
+                          style={{
+                            padding: '0.6rem 1rem',
+                            borderRadius: '8px',
+                            border: '1.5px solid #E2E8F0',
+                            background: 'white',
+                            color: '#1E293B',
+                            fontWeight: 500,
+                            fontSize: '0.875rem',
+                            outline: 'none',
+                            minWidth: '180px'
+                          }}
+                        >
+                          <option value="A4">A4 (Standard Document)</option>
+                          <option value="A5">A5 (Half-Page Receipt - Default)</option>
+                          <option value="A6">A6 (Small Slip)</option>
+                          <option value="thermal">Thermal Roll (80mm Width)</option>
+                        </select>
+                        <p style={{ color: '#64748B', fontSize: '0.78rem', marginTop: '0.35rem' }}>
+                          Select the paper dimensions for the downloaded PDF invoice.
+                        </p>
                       </div>
                     </div>
                   </div>

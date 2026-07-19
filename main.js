@@ -50,16 +50,16 @@ function checkNetworkError(err) {
     'socket hang up',
     'network timeout'
   ];
-  
+
   const errMsg = err.message || '';
   const errStack = err.stack || '';
   const errCode = err.code || '';
   const errStr = String(err);
 
-  return networkErrors.some(code => 
-    errMsg.includes(code) || 
-    errStack.includes(code) || 
-    errCode.includes(code) || 
+  return networkErrors.some(code =>
+    errMsg.includes(code) ||
+    errStack.includes(code) ||
+    errCode.includes(code) ||
     errStr.includes(code)
   );
 }
@@ -70,7 +70,7 @@ process.on('uncaughtException', (err) => {
     logStartup(`[Network Uncaught Exception - Ignored] ${err ? (err.stack || err.message || err) : 'Unknown network error'}`);
     return; // Continue running normally in offline mode
   }
-  
+
   try {
     const errorMsg = err ? (err.stack || err.message || err) : 'Unknown error';
     logStartup(`CRITICAL UNCAUGHT EXCEPTION: ${errorMsg}`);
@@ -78,7 +78,7 @@ process.on('uncaughtException', (err) => {
       'Laundry Box - Startup Crash',
       `A critical unhandled exception occurred during startup:\n\n${errorMsg}\n\nThe application will now close.`
     );
-  } catch (_) {}
+  } catch (_) { }
   process.exit(1);
 });
 
@@ -95,7 +95,7 @@ process.on('unhandledRejection', (reason) => {
       'Laundry Box - Promise Rejection',
       `An unhandled Promise rejection occurred during startup:\n\n${errorMsg}\n\nThe application will now close.`
     );
-  } catch (_) {}
+  } catch (_) { }
   process.exit(1);
 });
 
@@ -206,7 +206,7 @@ function createWindow() {
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     try {
       fs.appendFileSync(path.join(app.getPath('userData'), 'frontend_console.log'), `[LVL:${level}] ${message} (${path.basename(sourceId)}:${line})\n`);
-    } catch (_) {}
+    } catch (_) { }
   });
 
   // Log any page load failures
@@ -224,7 +224,7 @@ function createWindow() {
     logStartup('BrowserWindow: ready-to-show event fired. Displaying main window.');
     mainWindow.show();
   });
-  
+
   if (isDev) {
     logStartup('Opening DevTools in development mode...');
     mainWindow.webContents.openDevTools();
@@ -256,12 +256,12 @@ function createWindow() {
 
 function startBackend() {
   const isDev = !app.isPackaged;
-  const scriptPath = isDev 
+  const scriptPath = isDev
     ? path.join(__dirname, 'backend', 'server.js')
     : path.join(process.resourcesPath, 'backend', 'server.js');
 
   logStartup(`Backend process startup requested. Script path: ${scriptPath}`);
-  
+
   if (!fs.existsSync(scriptPath)) {
     logStartup(`CRITICAL ERROR: Backend script not found at ${scriptPath}`);
     return;
@@ -272,7 +272,7 @@ function startBackend() {
     backendProcess = spawn(process.execPath, [scriptPath], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PORT: '3000' }
     });
-    
+
     logStartup(`Backend process spawned successfully. PID: ${backendProcess.pid}`);
 
     backendProcess.stdout.on('data', (data) => {
@@ -290,7 +290,7 @@ function startBackend() {
     backendProcess.on('close', (code, signal) => {
       logStartup(`Backend Process closed: Code = ${code}, Signal = ${signal}`);
     });
-    
+
     backendProcess.on('exit', (code, signal) => {
       logStartup(`Backend Process exited: Code = ${code}, Signal = ${signal}`);
     });
@@ -302,7 +302,7 @@ function startBackend() {
 async function waitForServer(url, timeout = 10000) {
   const start = Date.now();
   logStartup(`Initiating health check for local server at: ${url} (Timeout: ${timeout}ms)...`);
-  
+
   while (true) {
     try {
       const response = await new Promise((resolve, reject) => {
@@ -311,22 +311,22 @@ async function waitForServer(url, timeout = 10000) {
           url: url,
           timeout: 2000
         });
-        
+
         request.on('response', (res) => {
           resolve(res.statusCode === 200);
         });
-        
+
         request.on('error', (err) => {
           reject(err);
         });
-        
+
         request.on('login', () => {
           resolve(false);
         });
-        
+
         request.end();
       });
-      
+
       if (response) {
         logStartup("Server is ready! Health check succeeded.");
         return true;
@@ -346,7 +346,7 @@ async function waitForServer(url, timeout = 10000) {
 
 app.whenReady().then(async () => {
   logStartup('System initialization: app whenReady fired.');
-  
+
   // Register global app lifecycle gone handlers
   app.on('render-process-gone', (event, webContents, details) => {
     logStartup(`CRITICAL: Renderer process terminated unexpectedly. Reason: ${details.reason}, Exit Code: ${details.exitCode}`);
@@ -364,7 +364,7 @@ app.whenReady().then(async () => {
     logStartup('CRITICAL ERROR: Failed to initialize SQLite database', dbErr);
     throw dbErr; // Let the process error handlers catch it and exit cleanly
   }
-  
+
   logStartup('Initializing Email service scheduler...');
   try {
     emailService.initScheduler();
@@ -372,7 +372,7 @@ app.whenReady().then(async () => {
   } catch (emailErr) {
     logStartup('Warning: Email service scheduler failed to start:', emailErr);
   }
-  
+
   // Seed initial data if tables are empty
   const db = getDB();
   const serviceCount = db.prepare('SELECT COUNT(*) as count FROM services').get().count;
@@ -380,7 +380,7 @@ app.whenReady().then(async () => {
     logStartup("Database is empty. Seeding initial POS services and category data...");
     const shopId = 'SHOP_01';
     const now = new Date().toISOString();
-    
+
     const insertService = db.prepare('INSERT INTO services (id, shopId, name, price, icon, category, image, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     insertService.run('1', shopId, "Men's Shirt", 3.50, 'Shirt', 'Laundry', generateServiceSVG("Men's Shirt", 'Laundry'), now);
     insertService.run('2', shopId, "Women's Dress", 8.00, 'Heart', 'Laundry', generateServiceSVG("Women's Dress", 'Laundry'), now);
@@ -408,10 +408,10 @@ app.whenReady().then(async () => {
 
   // App open -> server auto start
   startBackend();
-  
+
   // -> server ready check
   await waitForServer('http://127.0.0.1:3000/api/health');
-  
+
   // -> then UI load
   createWindow();
 
@@ -540,22 +540,16 @@ function checkCustomerCreditLimitRules(db, customerId, amountToAdd) {
 
   const currentOutstanding = customer.balance || 0;
   const creditLimit = customer.creditLimit !== undefined && customer.creditLimit !== null && customer.creditLimit !== 0
-    ? customer.creditLimit 
+    ? customer.creditLimit
     : (settings.defaultCreditLimit ?? 500);
   const newOutstanding = currentOutstanding + amountToAdd;
 
-  // Block if ALREADY at/over limit OR if new order would exceed limit
   if (currentOutstanding >= creditLimit || newOutstanding > creditLimit) {
-    if (enableManagerOverride) {
-      const override = activeOverrides[customerId];
-      if (override && (Date.now() - override.timestamp < 1000 * 15) && Math.abs(override.amount - amountToAdd) < 0.05) {
-        return null; // Allowed!
-      } else {
-        return 'CREDIT_LIMIT_EXCEEDED';
-      }
-    } else {
-      return `Credit limit exceeded. Credit limit protection is enabled. Transaction blocked.`;
+    const override = activeOverrides[customerId];
+    if (override && (Date.now() - override.timestamp < 1000 * 15) && Math.abs(override.amount - amountToAdd) < 0.05) {
+      return null; // Allowed!
     }
+    return 'CREDIT_LIMIT_EXCEEDED';
   }
 
   return null;
@@ -590,7 +584,7 @@ function validateQueryCreditLimit(db, query, params) {
     if (setMatch) {
       const setClause = setMatch[1];
       const dueAmount = getParamValue(setClause, 'dueAmount', params);
-      
+
       if (dueAmount !== null) {
         const whereMatch = cleanQuery.match(/WHERE\s+id\s*=\s*(.+)$/i);
         let orderId = null;
@@ -649,7 +643,7 @@ ipcMain.handle('verify-manager-pin', async (event, { pin, customerId, customerNa
     const db = getDB();
     const shopResult = db.prepare('SELECT settings FROM shops LIMIT 1').get();
     const settings = shopResult && shopResult.settings ? JSON.parse(shopResult.settings) : {};
-    
+
     const correctPin = settings.orderDeletePin || '0000';
     let pinOwner = null;
     if (String(pin) === String(correctPin)) {
@@ -678,7 +672,7 @@ ipcMain.handle('verify-manager-pin', async (event, { pin, customerId, customerNa
         timestamp: Date.now(),
         amount: orderAmount
       };
-      
+
       logOverrideEvent(db, {
         customerId,
         customerName,
@@ -691,7 +685,7 @@ ipcMain.handle('verify-manager-pin', async (event, { pin, customerId, customerNa
         exceededAmount,
         actionType: 'APPROVED'
       });
-      
+
       return { success: true, message: 'Manager Override Approved' };
     } else {
       logOverrideEvent(db, {
@@ -706,7 +700,7 @@ ipcMain.handle('verify-manager-pin', async (event, { pin, customerId, customerNa
         exceededAmount,
         actionType: 'FAILED_PIN'
       });
-      
+
       return { success: false, error: 'Incorrect PIN! Access Denied.' };
     }
   } catch (err) {
@@ -740,7 +734,7 @@ ipcMain.handle('log-override-rejection', (event, { customerId, customerName, ord
 ipcMain.handle('db-query', (event, { query, params }) => {
   try {
     const db = getDB();
-    
+
     // Check credit limit rules
     validateQueryCreditLimit(db, query, params || []);
 
@@ -799,7 +793,7 @@ function logNomodRequest(url, method, apiKey, settings, body = null) {
   const trimmedLen = apiKeyExists ? apiKey.trim().length : 0;
   const spaces = apiKeyExists ? (apiKey.length !== apiKey.trim().length) : false;
   const hasNewline = apiKeyExists ? (apiKey.includes('\n') || apiKey.includes('\r')) : false;
-  
+
   console.log(`
 [NoMOD Debug - Request]
 Environment: ${settings.nomodEnv || 'sandbox'}
@@ -853,7 +847,7 @@ ipcMain.handle('create-nomod-checkout', async (event, { amount, currency, custom
   const apiKey = settings.nomodApiKey;
   const mode = settings.nomodEnv || 'sandbox';
   const url = 'https://api.nomod.com/v1/links';
-  
+
   try {
     const linkId = `LNK-${Date.now().toString().slice(-4)}`;
 
@@ -995,7 +989,7 @@ ipcMain.handle('retrieve-nomod-checkout-status', async (event, { checkoutId, use
     // Step 2: No charges yet. Fetch link to see if it's active or disabled
     const linkUrl = `https://api.nomod.com/v1/links/${checkoutId}`;
     logNomodRequest(linkUrl, 'GET', apiKey, settings);
-    
+
     const linkStartTime = Date.now();
     const linkResponse = await fetch(linkUrl, {
       method: 'GET',
@@ -1045,10 +1039,10 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
 
     logTracker(orderId, `Requesting checkout status from Nomod service for checkoutId: ${checkoutId}`, 'debug');
     const res = await nomodService.getCheckoutStatus(checkoutId, apiKey);
-    
+
     if (!res.success) {
       logTracker(orderId, `Nomod checkout status request failed: ${res.error} (type: ${res.errorType || 'unknown'})`, 'warn');
-      
+
       if (res.errorType === 'unauthorized') {
         logTracker(orderId, `Stopping tracker due to 401 Unauthorized credentials error.`, 'error');
         return { isFinal: true, stopReason: 'unauthorized' };
@@ -1056,7 +1050,7 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
       if (res.errorType === 'notFound') {
         logTracker(orderId, `Checkout not found (404). Stopping tracker and marking status as Failed.`, 'error');
         const nowStr = new Date().toISOString();
-        
+
         const dbTransaction = db.transaction(() => {
           if (orderId.startsWith('SETTLE-')) {
             db.prepare(`UPDATE payment_links SET status = 'Failed' WHERE checkoutId = ?`).run(checkoutId);
@@ -1066,13 +1060,13 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
           }
         });
         dbTransaction();
-        
+
         if (mainWindow && !mainWindow.webContents.isDestroyed()) {
           mainWindow.webContents.send('payment-status-changed', { orderId, checkoutId, status: 'Failed' });
         }
         return { isFinal: true, stopReason: 'notFound' };
       }
-      
+
       return { isFinal: false, stopReason: 'network_error' };
     }
 
@@ -1181,7 +1175,7 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
               if (txnExists === 0) {
                 const _nowT = new Date(paidAt || nowStr);
                 const txnTimestamp = `${_nowT.getFullYear()}-${String(_nowT.getMonth() + 1).padStart(2, '0')}-${String(_nowT.getDate()).padStart(2, '0')} ${String(_nowT.getHours()).padStart(2, '0')}:${String(_nowT.getMinutes()).padStart(2, '0')}:${String(_nowT.getSeconds()).padStart(2, '0')}`;
-                
+
                 db.prepare(`
                   INSERT INTO account_transactions 
                   (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
@@ -1301,7 +1295,7 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
             if (txnExists === 0) {
               const _nowT = new Date(paidAt || nowStr);
               const txnTimestamp = `${_nowT.getFullYear()}-${String(_nowT.getMonth() + 1).padStart(2, '0')}-${String(_nowT.getDate()).padStart(2, '0')} ${String(_nowT.getHours()).padStart(2, '0')}:${String(_nowT.getMinutes()).padStart(2, '0')}:${String(_nowT.getSeconds()).padStart(2, '0')}`;
-              
+
               db.prepare(`
                 INSERT INTO account_transactions 
                 (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
@@ -1514,19 +1508,57 @@ ipcMain.handle('print-to-pdf', async (event, options) => {
   let printWin = null;
   let tmpPath = '';
   try {
-    const { filename = 'Invoice.pdf', html = '', css = '', pdfDownloadPath = '' } = options || {};
+    const { filename = 'Invoice.pdf', html = '', css = '', pdfDownloadPath = '', origin = '', pageSize = 'A5' } = options || {};
+    console.log("print-to-pdf IPC received options: filename =", filename, "pdfDownloadPath =", pdfDownloadPath, "origin =", origin, "pageSize =", pageSize);
 
     // Use target download path if configured, otherwise default to user's Downloads directory
     const targetFolder = pdfDownloadPath && fs.existsSync(pdfDownloadPath)
       ? pdfDownloadPath
       : app.getPath('downloads');
-    const filePath = path.join(targetFolder, filename);
+    let filePath = path.join(targetFolder, filename);
+
+    if (fs.existsSync(filePath)) {
+      const { response } = await dialog.showMessageBox(mainWindow || null, {
+        type: 'question',
+        buttons: ['Replace', 'Keep Both (Rename)', 'Cancel'],
+        defaultId: 1,
+        title: 'File Already Exists',
+        message: `A file named "${filename}" already exists in your destination folder. What would you like to do?`,
+        cancelId: 2
+      });
+
+      if (response === 2) {
+        return { success: false, error: 'Cancelled' };
+      } else if (response === 1) {
+        // Keep Both (Auto-rename)
+        const ext = path.extname(filename);
+        const base = path.basename(filename, ext);
+        let counter = 1;
+        while (fs.existsSync(filePath)) {
+          filePath = path.join(targetFolder, `${base} (${counter})${ext}`);
+          counter++;
+        }
+      }
+    }
+
+    // Define CSS page size override based on pageSize to force Chromium rendering layout size
+    let pageCssRule = '';
+    if (pageSize === 'thermal') {
+      pageCssRule = '@page { size: 80mm 200mm; margin: 0; }';
+    } else if (pageSize === 'A4') {
+      pageCssRule = '@page { size: A4; margin: 10mm; }';
+    } else if (pageSize === 'A6') {
+      pageCssRule = '@page { size: A6; margin: 3mm; }';
+    } else {
+      pageCssRule = '@page { size: A5; margin: 5mm; }'; // Default A5
+    }
 
     // Build a standalone HTML document with all styles embedded
     const fullHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  ${origin ? `<base href="${origin}/">` : ''}
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1534,8 +1566,10 @@ ipcMain.handle('print-to-pdf', async (event, options) => {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
       background: white;
       color: #1E293B;
+      ${pageSize === 'thermal' ? 'padding: 0 4mm !important;' : ''}
     }
     ${css}
+    ${pageCssRule}
 
     /* Print Override Fixes to prevent blank/invisible pages */
     @media print {
@@ -1571,8 +1605,8 @@ ipcMain.handle('print-to-pdf', async (event, options) => {
       width: 600,
       height: 900,
       show: false,
-      webPreferences: { 
-        nodeIntegration: false, 
+      webPreferences: {
+        nodeIntegration: false,
         contextIsolation: true,
         paintWhenInitiallyHidden: true
       }
@@ -1627,7 +1661,7 @@ ipcMain.handle('print-to-pdf', async (event, options) => {
             }
           });
         `),
-        new Promise(resolve => setTimeout(resolve, 3000)) // Safety timeout threshold of 3 seconds
+        new Promise(resolve => setTimeout(resolve, 500)) // Safety timeout threshold of 500ms
       ]);
     } catch (jsErr) {
       console.warn('Print Window: Resource check scripting error (proceeding to print anyway):', jsErr.message);
@@ -1636,12 +1670,12 @@ ipcMain.handle('print-to-pdf', async (event, options) => {
     // Delay to let Chromium layout/repaint the DOM before exporting
     await new Promise(resolve => setTimeout(resolve, 250));
 
-    // Print to PDF — exact A5
+    // Print to PDF — exact A5 with default margins
     const data = await printWin.webContents.printToPDF({
       printBackground: true,
-      pageSize: 'A5',
+      pageSize: pageSize === 'thermal' ? { width: 80000, height: 200000 } : pageSize,
       landscape: false,
-      marginsType: 1,
+      marginsType: 0,
     });
 
     fs.writeFileSync(filePath, data);
@@ -1654,13 +1688,13 @@ ipcMain.handle('print-to-pdf', async (event, options) => {
     if (printWin) {
       try {
         printWin.close();
-      } catch (_) {}
+      } catch (_) { }
     }
     // Clean up temporary HTML file
     if (tmpPath && fs.existsSync(tmpPath)) {
       try {
         fs.unlinkSync(tmpPath);
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 });
@@ -1751,7 +1785,7 @@ ipcMain.handle('import-database', async () => {
     // Attempt to re-initialize if closed but failed
     try {
       initDB(app.getPath('userData'));
-    } catch (_) {}
+    } catch (_) { }
     return { success: false, error: err.message };
   }
 });
@@ -1844,7 +1878,7 @@ function getGitHubToken() {
 ipcMain.on('check-for-updates', async (event) => {
   const isDev = !app.isPackaged;
   event.reply('update-status', { type: 'checking' });
-  
+
   if (isDev) {
     try {
       console.log('Update Check [DEV]: Fetching latest release from GitHub API...');
@@ -1853,25 +1887,25 @@ ipcMain.on('check-for-updates', async (event) => {
       if (token) {
         headers['Authorization'] = `token ${token}`;
       }
-      
+
       const response = await fetch('https://api.github.com/repos/horizone-dev/Laundry-Box/releases/latest', {
         headers
       });
-      
+
       if (!response.ok) {
         throw new Error(`GitHub API returned status ${response.status}`);
       }
-      
+
       const data = await response.json();
       const latestVersion = data.tag_name; // e.g., "v1.0.0"
       const currentVersion = app.getVersion(); // e.g., "1.0.0"
-      
+
       console.log(`Update Check [DEV]: Current Version = v${currentVersion}, Latest GitHub Release = ${latestVersion}`);
-      
+
       const cleanVersion = (v) => v.replace(/^v/, '').trim();
       const currentParsed = cleanVersion(currentVersion).split('.').map(Number);
       const latestParsed = cleanVersion(latestVersion).split('.').map(Number);
-      
+
       let isNewer = false;
       for (let i = 0; i < 3; i++) {
         const c = currentParsed[i] || 0;
@@ -1881,12 +1915,12 @@ ipcMain.on('check-for-updates', async (event) => {
           break;
         }
       }
-      
+
       if (isNewer) {
         console.log(`Update Check [DEV]: Update available! v${cleanVersion(latestVersion)}`);
-        event.reply('update-status', { 
-          type: 'available', 
-          version: cleanVersion(latestVersion), 
+        event.reply('update-status', {
+          type: 'available',
+          version: cleanVersion(latestVersion),
           releaseNotes: data.body || 'No release notes provided.'
         });
       } else {
@@ -1916,7 +1950,7 @@ ipcMain.on('download-update', (event) => {
   if (isDev) {
     let progress = 0;
     event.reply('update-status', { type: 'downloading', progress });
-    
+
     if (downloadInterval) clearInterval(downloadInterval);
     downloadInterval = setInterval(() => {
       progress += Math.floor(Math.random() * 15) + 5;
@@ -1993,7 +2027,8 @@ ipcMain.handle('get-printers', async () => {
   return [];
 });
 
-ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent }) => {
+ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent, pageSize }) => {
+  console.log("[main.js] print-invoice received options: printerName =", printerName, "silent =", silent, "pageSize =", pageSize);
   if (printerName && printerName !== 'System Default Printer') {
     try {
       const printers = await event.sender.getPrintersAsync();
@@ -2057,17 +2092,18 @@ ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent }
         `),
         new Promise(resolve => setTimeout(resolve, 500))
       ]);
-    } catch (_) {}
+    } catch (_) { }
 
     // Short layout settle delay
     await new Promise(resolve => setTimeout(resolve, 150));
 
     const result = await new Promise((resolve) => {
       printWin.webContents.print({
-        silent: true,   // Always silent — no dialog
+        silent: silent !== false,   // Respect user preference (defaults to true)
         printBackground: true,
         margins: { marginType: 'printableArea' },
         scaleFactor: 100,
+        pageSize: pageSize || 'A5', // Pass options custom size or string format
         deviceName: (printerName === 'System Default Printer' || !printerName) ? '' : printerName
       }, (success, failureReason) => {
         if (success) {
@@ -2083,14 +2119,17 @@ ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent }
     return { success: false, error: err.message };
   } finally {
     if (printWin) {
-      try {
-        printWin.close();
-      } catch (_) {}
+      const winToClose = printWin;
+      setTimeout(() => {
+        try {
+          winToClose.close();
+        } catch (_) { }
+      }, 1500); // 1.5 second safety delay to let printer spooler process data fully
     }
     if (tmpPath && fs.existsSync(tmpPath)) {
       try {
         fs.unlinkSync(tmpPath);
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 });
@@ -2150,12 +2189,12 @@ ipcMain.handle('print-html', async (event, { html, css, printerName, silent }) =
     if (printWin) {
       try {
         printWin.close();
-      } catch (_) {}
+      } catch (_) { }
     }
     if (tmpPath && fs.existsSync(tmpPath)) {
       try {
         fs.unlinkSync(tmpPath);
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 });

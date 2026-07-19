@@ -213,7 +213,66 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
   const docTitleAr = settings.invoiceDocTitleAr || 'فاتورة ضريبية';
   const footerTagline = settings.invoiceFooterTagline || '';
 
+
   const formatLabel = (en, ar) => showBilingual ? `${en} / ${ar}` : en;
+
+  const formatExpectedDate = (rawDate) => {
+    if (!rawDate) return '';
+    try {
+      const d = new Date(rawDate);
+      if (isNaN(d.getTime())) {
+        return rawDate;
+      }
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      const datePart = `${day}/${month}/${year}`;
+      
+      let hours = d.getHours();
+      const minutes = String(d.getMinutes()).padStart(2, '0');
+      let ampm = '';
+      if (settings.timeFormat === '12h') {
+        ampm = hours >= 12 ? ' PM' : ' AM';
+        hours = hours % 12;
+        hours = hours ? hours : 12;
+      }
+      const timePart = `${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
+      return `${datePart} ${timePart}`;
+    } catch (e) {
+      return rawDate;
+    }
+  };
+
+  const getExpectedDateAndTimeParts = (rawDate) => {
+    if (!rawDate) return { datePart: '', timePart: '' };
+    try {
+      const d = new Date(rawDate);
+      if (isNaN(d.getTime())) {
+        if (rawDate.includes(' ')) {
+          const parts = rawDate.split(' ');
+          return { datePart: parts[0], timePart: parts.slice(1).join(' ') };
+        }
+        return { datePart: rawDate, timePart: '' };
+      }
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      const datePart = `${day}/${month}/${year}`;
+      
+      let hours = d.getHours();
+      const minutes = String(d.getMinutes()).padStart(2, '0');
+      let ampm = '';
+      if (settings.timeFormat === '12h') {
+        ampm = hours >= 12 ? ' PM' : ' AM';
+        hours = hours % 12;
+        hours = hours ? hours : 12;
+      }
+      const timePart = `${String(hours).padStart(2, '0')}:${minutes}${ampm}`;
+      return { datePart, timePart };
+    } catch (e) {
+      return { datePart: rawDate, timePart: '' };
+    }
+  };
 
   const getInvoiceStatus = () => {
     const payStatus = order.paymentStatus?.toLowerCase();
@@ -224,37 +283,16 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
     return order.status;
   };
 
-  const isHorizon = settings.invoiceTemplate === 'horizon' || settings.invoiceTemplate === 'compact 2';
+  const isCompact2 = settings.invoiceTemplate === 'compact 2' || settings.invoiceTemplate === 'horizon';
 
-  if (isHorizon) {
+  if (isCompact2) {
     const totalBalanceVal = (order.totalBalance !== undefined) ? order.totalBalance : (order.dueAmount || 0);
     const invoiceStatus = getInvoiceStatus().toUpperCase();
     const formattedDate = order.date || '';
 
     return (
       <div className={`${styles.invoiceCard} ${styles.template_horizon}`} style={{ fontSize }}>
-        {/* Edit Mode Toggle Bar (hidden in preview and on print) */}
-        {!isPreview && (
-          <div className={styles.editModeBar} data-noprint="true">
-            {!editMode ? (
-              <button className={styles.editModeBtn} onClick={() => setEditMode(true)}>
-                <Pencil size={14} /> Edit Invoice
-              </button>
-            ) : (
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.8rem', color: '#3B82F6', fontWeight: 700 }}>
-                  ✏️ Edit Mode — Click any cell to edit
-                </span>
-                <button className={styles.editModeDoneBtn} onClick={handleSaveEdits}>
-                  <Check size={14} /> Done
-                </button>
-                <button className={styles.editModeCancelBtn} onClick={() => { setItems(order.items || []); setEditMode(false); }}>
-                  <X size={14} /> Reset
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+
 
         {/* 1. Brand Header */}
         <div className={styles.horizonHeaderWrap}>
@@ -270,12 +308,12 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           <div className={styles.horizonHeader}>
             <div className={styles.horizonBrandName}>{settings.companyName || 'HORIZON LAUNDRY'}</div>
             {showBilingual && settings.companyNameAr && <div className={styles.horizonBrandNameAr} dir="rtl">{settings.companyNameAr}</div>}
-            <div className={styles.horizonBrandSubline}>PREMIUM GARMENT CARE</div>
+            {settings.email && <div className={styles.horizonBrandSubline}>{settings.email}</div>}
             <div className={styles.horizonMetaLine}>
-              {settings.address || '123 Main Street, Business District'}
+              {settings.address || ''}
             </div>
             <div className={styles.horizonMetaLine}>
-              Tel: {settings.phone || '+971 50 123 4567'} {settings.trn && `| TRN: ${settings.trn}`}
+              {settings.phone && `Tel: ${settings.phone}`} {settings.trn && `| TRN: ${settings.trn}`}
             </div>
           </div>
         </div>
@@ -305,6 +343,12 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <span className={styles.horizonMetaValue}>{order.customerPhone}</span>
             </div>
           )}
+          {order.expectedDeliveryDate && (
+            <div className={styles.horizonMetaRow}>
+              <span className={styles.horizonMetaLabel}>{formatLabel('EXP. DELIVERY', 'تاريخ التسليم')}:</span>
+              <span className={styles.horizonMetaValue} style={{ color: '#E11D48', fontWeight: 'bold' }}>{formatExpectedDate(order.expectedDeliveryDate)}</span>
+            </div>
+          )}
         </div>
 
         {/* Services Table */}
@@ -313,7 +357,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             <tr>
               <th style={{ textAlign: 'left' }}>{formatLabel('SERVICES', 'الخدمات')}</th>
               <th style={{ textAlign: 'center', width: '15%' }}>{formatLabel('QTY', 'الكمية')}</th>
-              <th style={{ textAlign: 'right', width: '25%' }}>{settings.currencySymbol || 'AED'}</th>
+              <th style={{ textAlign: 'right', width: '25%' }}>{formatLabel('TOTAL', 'المجموع')}</th>
             </tr>
           </thead>
           <tbody>
@@ -379,22 +423,22 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
         <div className={styles.horizonTotalsBlock}>
           <div className={styles.horizonTotalRow}>
             <span>{formatLabel('Subtotal (Incl. Tax)', 'الإجمالي قبل الضريبة')}:</span>
-            <span>{computedSubtotal.toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+            <span>{computedSubtotal.toFixed(2)}</span>
           </div>
           <div className={styles.horizonTotalRow}>
             <span>{formatLabel(`VAT Amount (${settings.isTaxEnabled ? settings.taxRate : 0}%)`, 'قيمة الضريبة')}:</span>
-            <span>{computedTax.toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+            <span>{computedTax.toFixed(2)}</span>
           </div>
           <div className={styles.horizonTotalRow}>
             <span>{formatLabel('Discounts', 'الخصومات')}:</span>
-            <span>{(parseFloat(order.discount) || 0).toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+            <span>{(parseFloat(order.discount) || 0).toFixed(2)}</span>
           </div>
           
           <div className={styles.horizonTotalDashedLine}></div>
 
           <div className={styles.horizonGrandTotalRow}>
             <span>{formatLabel('TOTAL AMOUNT', 'المجموع الكلي')}:</span>
-            <span>{computedTotal.toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+            <span>{computedTotal.toFixed(2)}</span>
           </div>
 
           <div className={styles.horizonTotalDashedLine}></div>
@@ -428,28 +472,31 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           <div className={styles.horizonBoxTitle}>{formatLabel('CUSTOMER STATEMENT', 'كشف الحساب')}</div>
           <div className={styles.horizonBoxRow}>
             <span>{formatLabel('Prev. Balance', 'الرصيد السابق')}:</span>
-            <span>{Math.abs(order.previousBalance || 0).toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+            <span>{Math.abs(order.previousBalance || 0).toFixed(2)}</span>
           </div>
           <div className={styles.horizonBoxRow}>
             <span>{formatLabel('New Balance', 'الرصيد الجديد')}:</span>
-            <span>{Math.abs(totalBalanceVal).toFixed(2)} {settings.currencySymbol || 'AED'}</span>
+            <span>{Math.abs(totalBalanceVal).toFixed(2)}</span>
           </div>
         </div>
 
         {/* Ready for Collection Box */}
-        {order.expectedDeliveryDate && (
-          <div className={styles.horizonCollectionBox}>
-            <div className={styles.horizonBoxTitle}>{formatLabel('READY FOR COLLECTION', 'جاهز للاستلام')}</div>
-            <div className={styles.horizonCollectionDate}>
-              {order.expectedDeliveryDate.split(' ')[0]}
-            </div>
-            {order.expectedDeliveryDate.includes(' ') && (
-              <div className={styles.horizonCollectionTime}>
-                BY {order.expectedDeliveryDate.split(' ').slice(1).join(' ')}
+        {order.expectedDeliveryDate && (() => {
+          const parts = getExpectedDateAndTimeParts(order.expectedDeliveryDate);
+          return (
+            <div className={styles.horizonCollectionBox}>
+              <div className={styles.horizonBoxTitle}>{formatLabel('READY FOR COLLECTION', 'جاهز للاستلام')}</div>
+              <div className={styles.horizonCollectionDate}>
+                {parts.datePart}
               </div>
-            )}
-          </div>
-        )}
+              {parts.timePart && (
+                <div className={styles.horizonCollectionTime}>
+                  BY {parts.timePart}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Bullet guidelines */}
         {showTerms && termsText && (
@@ -466,7 +513,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
         {/* Compliance QR corner */}
         {showQrCode && (
           <div className={styles.horizonQrContainer}>
-            <QRCodeSVG value={order.id.toString()} size={85} />
+            <QRCodeSVG value={`https://hzl.io/t/${order.id}`} size={85} />
             <div className={styles.horizonTrackText}>TRACK ORDER: hzl.io/t/{order.id}</div>
           </div>
         )}
@@ -493,28 +540,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
       style={{ fontSize, '--invoice-accent': accentColor }}
     >
 
-      {/* ── Edit Mode Toggle Bar (hidden in preview and on print) ── */}
-      {!isPreview && (
-        <div className={styles.editModeBar} data-noprint="true">
-          {!editMode ? (
-            <button className={styles.editModeBtn} onClick={() => setEditMode(true)}>
-              <Pencil size={14} /> Edit Invoice
-            </button>
-          ) : (
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.8rem', color: '#3B82F6', fontWeight: 700 }}>
-                ✏️ Edit Mode — Click any cell to edit
-              </span>
-              <button className={styles.editModeDoneBtn} onClick={handleSaveEdits}>
-                <Check size={14} /> Done
-              </button>
-              <button className={styles.editModeCancelBtn} onClick={() => { setItems(order.items || []); setEditMode(false); }}>
-                <X size={14} /> Reset
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+
 
       {/* 1. Header */}
       {isCompact ? (
@@ -542,7 +568,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           </div>
           {showQrCode && (
             <div className={styles.thermalQrCorner}>
-              <QRCodeSVG value={order.id.toString()} size={48} />
+              <QRCodeSVG value={`https://hzl.io/t/${order.id}`} size={48} />
             </div>
           )}
         </div>
@@ -991,7 +1017,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               {showQrCode && (
                 <div className={styles.complianceQrBox}>
                   <div className={styles.qrWrapper}>
-                    <QRCodeSVG value={order.id.toString()} size={85} />
+                    <QRCodeSVG value={`https://hzl.io/t/${order.id}`} size={85} />
                   </div>
                 </div>
               )}

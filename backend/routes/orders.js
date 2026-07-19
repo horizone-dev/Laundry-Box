@@ -133,11 +133,14 @@ router.patch('/:id/status', async (req, res) => {
   }
 });
 
-// POST /api/orders - Create order (for sync or direct creation)
+// POST /api/orders - Create or update order (for sync or direct creation)
 router.post('/', async (req, res) => {
   try {
-    const order = new Order(req.body);
-    await order.save();
+    const order = await Order.findOneAndUpdate(
+      { id: req.body.id },
+      req.body,
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
     res.status(201).json(order);
   } catch (err) {
     res.status(400).json({ message: err.message });

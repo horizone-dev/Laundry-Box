@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ShoppingCart, Users, ClipboardList, Settings, Layers,
   BarChart3, Zap, Plus, Search, Bell, HelpCircle, LifeBuoy, Wifi, WifiOff, RefreshCw, Activity, LogOut, Wallet,
   DollarSign, X, CheckCircle, CreditCard, ShoppingBag, Trash2, Building2, Hash, FileText,
-  AlertTriangle, ShieldCheck, Clock, Package, Truck, Phone, Cpu
+  AlertTriangle, ShieldCheck, Clock, Package, Truck, Phone, Cpu, Lock
 } from 'lucide-react';
 import axios from 'axios';
 import WhatsAppIcon from '../components/WhatsAppIcon';
@@ -30,6 +30,7 @@ export default function MainLayout() {
   const [isOnline, setIsOnline] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [overrideModal, setOverrideModal] = useState({ show: false, resolve: null, reject: null, pinValue: '', error: '' });
   const profileRef = useRef(null);
   const navigate = useNavigate();
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
@@ -787,6 +788,18 @@ export default function MainLayout() {
     }
   };
 
+  const getManagerPinViaModal = () => {
+    return new Promise((resolve, reject) => {
+      setOverrideModal({
+        show: true,
+        resolve,
+        reject,
+        pinValue: '',
+        error: ''
+      });
+    });
+  };
+
   const processQuickSettle = async (isOverridden = false) => {
     if (!selectedSettleTarget || !settleAmount || parseFloat(settleAmount) <= 0) return;
 
@@ -795,7 +808,7 @@ export default function MainLayout() {
       const amount = parseFloat(settleAmount);
       const discount = parseFloat(quickDiscountAmount || 0) || 0;
       const totalReduction = amount + discount;
-      const timestamp = getLocalISOString();
+const timestamp = getLocalISOString();
       const customerId = selectedSettleTarget.type === 'customer'
         ? selectedSettleTarget.data.id
         : selectedSettleTarget.data.customerId;
@@ -807,12 +820,13 @@ export default function MainLayout() {
           setIsUpdating(false);
           return;
         }
-        const pin = prompt("Credit Limit Exceeded! Enter Manager Secure PIN to approve override:");
-        if (!pin) {
-          alert("Access Denied: PIN is required.");
+        let pin = '';
+        try {
+          pin = await getManagerPinViaModal();
+        } catch (err) {
           setIsUpdating(false);
           return;
-        }
+        };
         const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
         const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
         const userId = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
@@ -1861,6 +1875,91 @@ export default function MainLayout() {
                   style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E2E8F0', background: '#F1F5F9', marginTop: '0.25rem', fontSize: '0.85rem' }}
                 />
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {overrideModal.show && (
+        <div className={styles.modalOverlay} onClick={() => {
+          overrideModal.reject(new Error("Cancelled"));
+          setOverrideModal({ show: false, resolve: null, reject: null, pinValue: '', error: '' });
+        }}>
+          <div className={styles.statusModal} style={{ maxWidth: '450px', borderRadius: '24px', background: 'white', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)', padding: '2rem' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '1.5rem' }}>
+              <Lock size={24} color="#D97706" style={{ marginTop: '2px' }} />
+              <div>
+                <h2 style={{ color: '#D97706', margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>Manager Authorization</h2>
+                <p style={{ color: '#64748B', margin: '2px 0 0 0', fontSize: '0.85rem', fontWeight: 500, opacity: 0.9 }}>Enter Manager secure PIN to approve override.</p>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 800, color: '#475569', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
+                ENTER MANAGER SECURE PIN TO APPROVE
+              </label>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', border: '1.5px solid #E2E8F0', borderRadius: '12px', padding: '0.75rem 1rem', background: '#F8FAFC' }}>
+                <Lock size={18} color="#94A3B8" />
+                <input
+                  type="password"
+                  maxLength={4}
+                  required
+                  value={overrideModal.pinValue}
+                  onChange={(e) => setOverrideModal(prev => ({ ...prev, pinValue: e.target.value.replace(/\D/g, ''), error: '' }))}
+                  placeholder="••••"
+                  style={{ 
+                    width: '100%', 
+                    padding: '0px', 
+                    fontSize: '1.5rem', 
+                    letterSpacing: '0.5rem', 
+                    textAlign: 'left',
+                    border: 'none',
+                    background: 'transparent',
+                    outline: 'none',
+                    color: '#1E293B'
+                  }}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && overrideModal.pinValue) {
+                      overrideModal.resolve(overrideModal.pinValue);
+                      setOverrideModal({ show: false, resolve: null, reject: null, pinValue: '', error: '' });
+                    }
+                  }}
+                />
+              </div>
+
+              {overrideModal.error && (
+                <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 600 }}>
+                  {overrideModal.error}
+                </p>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  overrideModal.reject(new Error("Cancelled"));
+                  setOverrideModal({ show: false, resolve: null, reject: null, pinValue: '', error: '' });
+                }}
+                style={{ background: 'none', border: 'none', color: '#64748B', fontWeight: 600, fontSize: '0.95rem', cursor: 'pointer', padding: '0.5rem 0' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (overrideModal.pinValue) {
+                    overrideModal.resolve(overrideModal.pinValue);
+                    setOverrideModal({ show: false, resolve: null, reject: null, pinValue: '', error: '' });
+                  }
+                }}
+                style={{ background: '#D97706', color: 'white', border: 'none', borderRadius: '10px', padding: '0.75rem 1.5rem', fontWeight: 600, fontSize: '0.95rem', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(217, 119, 6, 0.2)' }}
+                disabled={!overrideModal.pinValue}
+              >
+                Approve Override
+              </button>
             </div>
           </div>
         </div>

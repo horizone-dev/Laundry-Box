@@ -48,7 +48,7 @@
   padding: 2.25rem;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 0;
   max-width: 900px;
   margin: 0 auto;
 }
@@ -1848,22 +1848,24 @@
 
 .horizonItemsTable td {
   padding: 0.45rem 0;
-  font-size: 0.75rem;
-  font-weight: 700;
+  font-size: 0.82rem;
+  font-weight: 800;
   vertical-align: top;
-  border-bottom: 0.5px solid #E2E8F0;
+  border-bottom: 0.5px solid #000000;
+  color: #000000;
 }
 
 .horizonItemName {
   font-weight: 900;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
+  color: #000000;
 }
 
 .horizonItemSubText {
-  font-size: 0.68rem;
-  color: #475569;
-  font-style: italic;
-  margin-top: 0.1rem;
+  font-size: 0.78rem;
+  color: #000000;
+  font-weight: 700;
+  margin-top: 0.15rem;
   display: block;
 }
 
@@ -1931,23 +1933,26 @@
 }
 
 .horizonCollectionBox {
-  border: 1px solid #000000;
+  border: 1.5px solid #000000;
   border-radius: 4px;
   padding: 0.5rem 0.75rem;
   margin-bottom: 0.75rem;
   text-align: center;
+  color: #000000 !important;
 }
 
 .horizonCollectionDate {
-  font-size: 1.05rem;
+  font-size: 1.15rem;
   font-weight: 900;
   letter-spacing: 1px;
-  margin: 0.2rem 0;
+  margin: 0.25rem 0;
+  color: #000000 !important;
 }
 
 .horizonCollectionTime {
-  font-size: 0.72rem;
-  font-weight: 800;
+  font-size: 0.8rem;
+  font-weight: 900;
+  color: #000000 !important;
 }
 
 .horizonGuidelinesList {

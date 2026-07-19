@@ -127,6 +127,7 @@ export function SettingsProvider({ children }) {
     waCustomerBalanceTemplate: 'Hello {customerName}! This is a friendly reminder regarding your outstanding balance of {dueAmount} at {shopName}. Please settle it at your earliest convenience. Thank you!',
     waGeneralTemplate: 'Hello! This is from {shopName}. We\'re reaching out regarding your account.',
     waInvoiceShareTemplate: '*INVOICE RECEIVED*\n\nHello! Here is your invoice for order *{orderId}*.\n\n*Items:*\n{itemsSummary}\n\n*Total Amount: {total}*',
+    waNomodPaymentTemplate: '*PAYMENT REQUEST - {shopName}*\n\nDear {customerName},\n\nHere is your payment link for Order #{orderId} totaling *{total}*.\n\n*Total Due:* {dueAmount}\n*Pay Securely Online:* {paymentLink}\n\nThank you for choosing {shopName}!',
     // ─── Web Dashboard ──────────────────────────────────────────
     branchName: '',          // e.g., "Dubai Mall Branch" — shown on web dashboard
     branchApiKey: '',        // Cryptographically secure sync API key
@@ -138,6 +139,8 @@ export function SettingsProvider({ children }) {
     zReportClosingType: 'Day Close',
     silentPrinting: true,
     pdfDownloadPath: '',
+    pdfPageSize: 'A5',
+    receiptPrintSize: 'auto',
   });
 
   const settingsRef = useRef(settings);
@@ -286,6 +289,7 @@ export function SettingsProvider({ children }) {
             waCustomerBalanceTemplate: shopSettings?.waCustomerBalanceTemplate ?? 'Hello {customerName}! This is a friendly reminder regarding your outstanding balance of {dueAmount} at {shopName}. Please settle it at your earliest convenience. Thank you!',
             waGeneralTemplate: shopSettings?.waGeneralTemplate ?? 'Hello! This is from {shopName}. We\'re reaching out regarding your account.',
             waInvoiceShareTemplate: shopSettings?.waInvoiceShareTemplate ?? '*INVOICE RECEIVED*\n\nHello! Here is your invoice for order *{orderId}*.\n\n*Items:*\n{itemsSummary}\n\n*Total Amount: {total}*',
+            waNomodPaymentTemplate: shopSettings?.waNomodPaymentTemplate ?? '*PAYMENT REQUEST - {shopName}*\n\nDear {customerName},\n\nHere is your payment link for Order #{orderId} totaling *{total}*.\n\n*Total Due:* {dueAmount}\n*Pay Securely Online:* {paymentLink}\n\nThank you for choosing {shopName}!',
             // ─── Web Dashboard ───────────────────────────────────────
             branchName:   shopSettings?.branchName   || '',
             branchApiKey: shopSettings?.branchApiKey || '',
@@ -298,6 +302,8 @@ export function SettingsProvider({ children }) {
             zReportClosingType: shopSettings?.zReportClosingType || 'Day Close',
             silentPrinting: shopSettings?.silentPrinting ?? true,
             pdfDownloadPath: shopSettings?.pdfDownloadPath || '',
+            pdfPageSize: shopSettings?.pdfPageSize || 'A5',
+            receiptPrintSize: shopSettings?.receiptPrintSize || 'auto',
           });
           window.localStorage.setItem('billingPrinter', shopSettings?.billingPrinter || '');
           window.localStorage.setItem('tagPrinter', shopSettings?.tagPrinter || '');
@@ -389,6 +395,8 @@ export function SettingsProvider({ children }) {
           tagPrinter: updated.tagPrinter,
           silentPrinting: updated.silentPrinting,
           pdfDownloadPath: updated.pdfDownloadPath,
+          pdfPageSize: updated.pdfPageSize,
+          receiptPrintSize: updated.receiptPrintSize,
           enablePaymentLinks: updated.enablePaymentLinks,
           paymentBaseUrl: updated.paymentBaseUrl,
           allowManagerStripeConfig: updated.allowManagerStripeConfig,
@@ -440,6 +448,7 @@ export function SettingsProvider({ children }) {
           waCustomerBalanceTemplate: updated.waCustomerBalanceTemplate,
           waGeneralTemplate: updated.waGeneralTemplate,
           waInvoiceShareTemplate: updated.waInvoiceShareTemplate,
+          waNomodPaymentTemplate: updated.waNomodPaymentTemplate,
           // ─── Web Dashboard ───────────────────────────────────────
           branchName:   updated.branchName,
           branchApiKey: updated.branchApiKey,

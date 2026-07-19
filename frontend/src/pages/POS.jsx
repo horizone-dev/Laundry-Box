@@ -840,13 +840,31 @@ export default function POS() {
       .filter(a => (item.addons || []).includes(a.name))
       .map(a => a.id);
 
+    // Compute standard base + options price to detect custom overrides
+    let svcPricing = [];
+    if (svc && !svc.isTemporary) {
+      try {
+        svcPricing = typeof svc.pricing === 'string'
+          ? JSON.parse(svc.pricing || '[]')
+          : (svc.pricing || []);
+      } catch (e) {
+        svcPricing = [];
+      }
+    }
+    const matches = svcPricing.filter(p => resolvedTypeIds.includes(p.serviceTypeId));
+    const typePrice = matches.reduce((sum, p) => sum + (p.price || 0), 0);
+    const addonPrice = addons.filter(a => resolvedAddonIds.includes(a.id)).reduce((sum, a) => sum + a.price, 0);
+    const calculatedStandardPrice = svc.isTemporary ? (svc.price || 0) : (typePrice + addonPrice);
+
+    const isOverridden = Math.abs((item.price || 0) - calculatedStandardPrice) > 0.01;
+
     setEditingCartIdx(idx);
     setSelectedService(svc);
     setServiceConfig({
       selectedTypeIds: resolvedTypeIds,
       addons: resolvedAddonIds,
       qty: item.qty,
-      customPrice: item.price,
+      customPrice: isOverridden ? item.price : null,
       description: item.description || '',
       deliveryMethod: item.deliveryMethod || 'Hanger'
     });
@@ -1158,14 +1176,25 @@ export default function POS() {
           if (oldOrderRes.success && oldOrderRes.data.length > 0) {
             const oldOrder = oldOrderRes.data[0];
 
-            if (oldOrder.paymentStatus === 'Credit' || oldOrder.paymentStatus === 'Partial') {
+            const previouslyPaid = oldOrder.paidAmount || 0;
+            const updatedPaidAmount = previouslyPaid + totalPaid + appliedAdvance;
+            const updatedDueAmount = Math.max(0, total - updatedPaidAmount);
+
+            let updatedPayStatus = PAYMENT_STATUS.PARTIAL;
+            if (Math.abs(updatedPaidAmount - total) < 0.01) {
+              updatedPayStatus = PAYMENT_STATUS.PAID;
+            } else if (updatedPaidAmount === 0) {
+              updatedPayStatus = PAYMENT_STATUS.CREDIT;
+            }
+
+            if (oldOrder.customerId && oldOrder.customerId !== 'Walk-in') {
               await window.electronAPI.dbQuery(
                 'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-                [oldOrder.dueAmount, getLocalISOString(), oldOrder.customerId]
+                [oldOrder.dueAmount || 0, getLocalISOString(), oldOrder.customerId]
               );
             }
 
-            const newStatus = newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.PAYMENT_PENDING : oldOrder.status;
+            const newStatus = updatedPayStatus === PAYMENT_STATUS.PAID ? ORDER_STATUS.CONFIRMED : (updatedPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.PAYMENT_PENDING : oldOrder.status);
 
             const updateResult = await window.electronAPI.dbQuery(
                `UPDATE orders SET 
@@ -1178,9 +1207,9 @@ export default function POS() {
                  selectedCustomer ? selectedCustomer.id : 'Walk-in',
                  newStatus,
                  total,
-                 newPaidAmount,
-                 newDueAmount,
-                 newPayStatus,
+                 updatedPaidAmount,
+                 updatedDueAmount,
+                 updatedPayStatus,
                  JSON.stringify(cart),
                  combinedExpectedDelivery,
                  specialInstructions,
@@ -1194,20 +1223,20 @@ export default function POS() {
              );
 
              if (!updateResult || !updateResult.success) {
-               if (oldOrder.paymentStatus === 'Credit' || oldOrder.paymentStatus === 'Partial') {
+               if (oldOrder.customerId && oldOrder.customerId !== 'Walk-in') {
                  await window.electronAPI.dbQuery(
                    'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-                   [oldOrder.dueAmount, getLocalISOString(), oldOrder.customerId]
+                   [oldOrder.dueAmount || 0, getLocalISOString(), oldOrder.customerId]
                  );
                }
                alert('Failed to update order: ' + (updateResult?.error || 'Unknown error'));
                return;
              }
 
-             if ((newPayStatus === 'Credit' || newPayStatus === 'Partial') && selectedCustomer) {
+             if (selectedCustomer && selectedCustomer.id !== 'Walk-in') {
                await window.electronAPI.dbQuery(
                  'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-                 [newDueAmount, getLocalISOString(), selectedCustomer.id]
+                 [updatedDueAmount, getLocalISOString(), selectedCustomer.id]
                );
              }
 
@@ -1327,6 +1356,10 @@ export default function POS() {
                   }
                }
              }
+
+            if (window.electronAPI?.runDataHealer) {
+              await window.electronAPI.runDataHealer();
+            }
 
             setEditOrderId(null);
             setCart([]);
@@ -1653,18 +1686,26 @@ export default function POS() {
           if (oldOrderRes.success && oldOrderRes.data.length > 0) {
             const oldOrder = oldOrderRes.data[0];
 
-            if (oldOrder.paymentStatus === 'Credit' || oldOrder.paymentStatus === 'Partial') {
-              await window.electronAPI.dbQuery(
-                'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-                [oldOrder.dueAmount, getLocalISOString(), oldOrder.customerId]
-              );
+            const previouslyPaid = oldOrder.paidAmount || 0;
+            const updatedPaidAmount = previouslyPaid;
+            const updatedDueAmount = Math.max(0, total - updatedPaidAmount);
+
+            let updatedPayStatus = PAYMENT_STATUS.CREDIT;
+            if (updatedDueAmount === 0) {
+              updatedPayStatus = PAYMENT_STATUS.PAID;
+            } else if (updatedPaidAmount > 0) {
+              updatedPayStatus = PAYMENT_STATUS.PARTIAL;
             }
 
-            const newStatus = ORDER_STATUS.PAYMENT_PENDING;
-            const newPaidAmount = 0;
-            const newDueAmount = total;
-            const newPayStatus = PAYMENT_STATUS.CREDIT;
-            const newPayMethod = PAYMENT_METHODS.NOT_PAID;
+            const newPayMethod = updatedPaidAmount > 0 ? (oldOrder.paymentMethod || 'Cash') : PAYMENT_METHODS.NOT_PAID;
+            const newStatus = updatedDueAmount <= 0.01 ? (oldOrder.status === ORDER_STATUS.PAYMENT_PENDING ? ORDER_STATUS.CONFIRMED : oldOrder.status) : (updatedPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.PAYMENT_PENDING : oldOrder.status);
+
+            if (oldOrder.customerId && oldOrder.customerId !== 'Walk-in') {
+              await window.electronAPI.dbQuery(
+                'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+                [oldOrder.dueAmount || 0, getLocalISOString(), oldOrder.customerId]
+              );
+            }
 
             const updateResult = await window.electronAPI.dbQuery(
               `UPDATE orders SET 
@@ -1676,9 +1717,9 @@ export default function POS() {
                 selectedCustomer ? selectedCustomer.id : 'Walk-in',
                 newStatus,
                 total,
-                newPaidAmount,
-                newDueAmount,
-                newPayStatus,
+                updatedPaidAmount,
+                updatedDueAmount,
+                updatedPayStatus,
                 JSON.stringify(cart),
                 combinedExpectedDelivery,
                 specialInstructions,
@@ -1689,20 +1730,22 @@ export default function POS() {
             );
 
             if (!updateResult || !updateResult.success) {
-              if (oldOrder.paymentStatus === 'Credit' || oldOrder.paymentStatus === 'Partial') {
+              if (oldOrder.customerId && oldOrder.customerId !== 'Walk-in') {
                 await window.electronAPI.dbQuery(
                   'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-                  [oldOrder.dueAmount, getLocalISOString(), oldOrder.customerId]
+                  [oldOrder.dueAmount || 0, getLocalISOString(), oldOrder.customerId]
                 );
               }
               alert('Failed to update order: ' + (updateResult?.error || 'Unknown error'));
               return;
             }
 
-            await window.electronAPI.dbQuery(
-              'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-              [newDueAmount, getLocalISOString(), selectedCustomer.id]
-            );
+            if (selectedCustomer && selectedCustomer.id !== 'Walk-in') {
+              await window.electronAPI.dbQuery(
+                'UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+                [updatedDueAmount, getLocalISOString(), selectedCustomer.id]
+              );
+            }
 
             axios.post(`${API_BASE_URL}/orders`, {
               id: editOrderId,
@@ -1714,14 +1757,18 @@ export default function POS() {
               branchId: DEFAULT_BRANCH_ID,
               status: newStatus,
               totalAmount: total,
-              paidAmount: newPaidAmount,
-              dueAmount: newDueAmount,
-              paymentStatus: newPayStatus,
+              paidAmount: updatedPaidAmount,
+              dueAmount: updatedDueAmount,
+              paymentStatus: updatedPayStatus,
               paymentMethod: newPayMethod,
               items: cart,
               expectedDeliveryDate: combinedExpectedDelivery,
               specialInstructions
             }).catch(e => console.warn(e));
+
+            if (window.electronAPI?.runDataHealer) {
+              await window.electronAPI.runDataHealer();
+            }
 
             setEditOrderId(null);
             setCart([]);
@@ -2610,7 +2657,6 @@ export default function POS() {
       <aside className={styles.cartSection}>
         <div className={styles.cartHeader}>
           <div className={styles.cartTitle}>
-            <h3>Current Order</h3>
             <div className={styles.customerSearchContainer}>
               {!selectedCustomer ? (
                 <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
@@ -3424,91 +3470,84 @@ export default function POS() {
           </div>
         </div>
       )}
-
-      {/* Credit Limit Warning Modal */}
       {showCreditWarning && creditWarningDetails && (
         <div className={styles.modalOverlay} onClick={handleCancelOverride}>
-          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader} style={{ background: '#FEF2F2', borderBottom: '1px solid #FEE2E2' }}>
-              <div className={styles.modalTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <AlertTriangle size={24} color="#EF4444" />
-                <div>
-                  <h2 style={{ color: '#991B1B', margin: 0 }}>Credit Limit Exceeded</h2>
-                  <p style={{ color: '#B91C1C', margin: 0, fontSize: '0.8rem' }}>This customer has exceeded their credit threshold.</p>
-                </div>
+          <div className={styles.statusModal} style={{ maxWidth: '450px', borderRadius: '24px', background: 'white', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)', padding: '2rem' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '1.5rem' }}>
+              <AlertTriangle size={24} color="#EF4444" style={{ marginTop: '2px' }} />
+              <div>
+                <h2 style={{ color: '#EF4444', margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>Credit Limit Exceeded</h2>
+                <p style={{ color: '#EF4444', margin: '2px 0 0 0', fontSize: '0.85rem', fontWeight: 500, opacity: 0.9 }}>This customer has exceeded their credit threshold.</p>
               </div>
             </div>
             <form onSubmit={handleVerifyManagerPin}>
-              <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
-                <div style={{ background: '#F8FAFC', borderRadius: '12px', padding: '1rem', border: '1px solid #E2E8F0', marginBottom: '1.25rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Customer Name:</span>
-                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{creditWarningDetails.customerName}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Limit:</span>
-                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.creditLimit.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Outstanding Balance:</span>
-                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.currentOutstanding.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Balance Increase:</span>
-                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.orderAmount.toFixed(2)}</span>
-                  </div>
-                  <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.5rem 0' }} />
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>New Outstanding Balance:</span>
-                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.newOutstanding.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
-                    <span>Exceeded Amount:</span>
-                    <span>{settings.currencySymbol} {creditWarningDetails.exceededAmount.toFixed(2)}</span>
-                  </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.95rem', color: '#64748B', marginBottom: '1.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Customer Name:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{creditWarningDetails.customerName}</span>
                 </div>
-
-                {settings.enableManagerOverride ? (
-                  <div className={styles.formGroup} style={{ marginTop: '1rem' }}>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>ENTER MANAGER SECURE PIN TO APPROVE</label>
-                    <div className={styles.posInputWrapper} style={{ marginTop: '0.5rem' }}>
-                      <Lock size={18} />
-                      <input
-                        type="password"
-                        required
-                        maxLength={4}
-                        placeholder="Enter 4-Digit PIN"
-                        value={managerPinValue}
-                        onChange={(e) => setManagerPinValue(e.target.value.replace(/\D/g, ''))}
-                        style={{ fontSize: '1.25rem', letterSpacing: '0.25rem' }}
-                        autoFocus
-                      />
-                    </div>
-                    {managerPinError && (
-                      <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 600 }}>{managerPinError}</p>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: '12px', padding: '0.75rem 1rem', color: '#C53030', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                    <AlertCircle size={18} />
-                    <span>Credit Limit Protection is active and Manager Override is disabled.</span>
-                  </div>
-                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Credit Limit:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}><CurrencySymbol size={14} /> {creditWarningDetails.creditLimit.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Outstanding Balance:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}><CurrencySymbol size={14} /> {creditWarningDetails.currentOutstanding.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Credit Balance Change:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}><CurrencySymbol size={14} /> {creditWarningDetails.orderAmount.toFixed(2)}</span>
+                </div>
+                <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.25rem 0' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>New Outstanding Balance:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}><CurrencySymbol size={14} /> {creditWarningDetails.newOutstanding.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
+                  <span>Exceeded Amount:</span>
+                  <span><CurrencySymbol size={14} /> {creditWarningDetails.exceededAmount.toFixed(2)}</span>
+                </div>
               </div>
-              <div className={styles.modalFooter} style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem' }}>
+
+              {settings.enableManagerOverride ? (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 800, color: '#475569', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>ENTER MANAGER SECURE PIN TO APPROVE</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', border: '1.5px solid #E2E8F0', borderRadius: '12px', padding: '0.75rem 1rem', background: '#F8FAFC' }}>
+                    <Lock size={18} color="#94A3B8" />
+                    <input
+                      type="password"
+                      required
+                      maxLength={4}
+                      placeholder="••••"
+                      value={managerPinValue}
+                      onChange={(e) => setManagerPinValue(e.target.value.replace(/\D/g, ''))}
+                      style={{ fontSize: '1.5rem', letterSpacing: '0.5rem', border: 'none', background: 'transparent', outline: 'none', width: '100%', color: '#1E293B' }}
+                      autoFocus
+                    />
+                  </div>
+                  {managerPinError && (
+                    <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 600 }}>{managerPinError}</p>
+                  )}
+                </div>
+              ) : (
+                <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: '12px', padding: '0.75rem 1rem', color: '#C53030', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
+                  <AlertCircle size={18} />
+                  <span>Credit Limit Protection is active and Manager Override is disabled.</span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
                 <button
                   type="button"
-                  className={styles.secondaryBtn}
                   onClick={handleCancelOverride}
-                  style={{ flex: 1 }}
+                  style={{ background: 'none', border: 'none', color: '#64748B', fontWeight: 600, fontSize: '0.95rem', cursor: 'pointer', padding: '0.5rem 0' }}
                 >
                   Cancel
                 </button>
                 {creditWarningDetails.overrideAllowed && settings.enableManagerOverride && (
                   <button
                     type="submit"
-                    className={styles.saveBtn}
-                    style={{ flex: 1, background: '#D97706', color: 'white' }}
+                    style={{ background: '#D97706', color: 'white', border: 'none', borderRadius: '10px', padding: '0.75rem 1.5rem', fontWeight: 600, fontSize: '0.95rem', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(217, 119, 6, 0.2)' }}
                   >
                     Approve Override
                   </button>

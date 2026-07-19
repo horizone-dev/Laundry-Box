@@ -69,6 +69,8 @@ export default function Accounts() {
     description: '',
     amount: ''
   });
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
 
   // Refunds State
   const [refunds, setRefunds] = useState([]);
@@ -314,7 +316,7 @@ export default function Accounts() {
         }
 
         // Load Payment Links
-        const paymentLinksRes = await window.electronAPI.dbQuery("SELECT * FROM payment_links ORDER BY date DESC", []);
+        const paymentLinksRes = await window.electronAPI.dbQuery("SELECT * FROM payment_links WHERE channel = 'Nomod' ORDER BY date DESC", []);
         if (paymentLinksRes.success) {
           setPaymentLinks(paymentLinksRes.data);
         }
@@ -666,6 +668,14 @@ export default function Accounts() {
     alert("Restricted: Deleting transactions is not allowed to maintain account integrity.");
   };
 
+  const filteredCustomers = useMemo(() => {
+    if (!customerSearchQuery) return dbCustomers;
+    return dbCustomers.filter(c =>
+      c.name?.toLowerCase().includes(customerSearchQuery.toLowerCase()) ||
+      c.phone?.toLowerCase().includes(customerSearchQuery.toLowerCase())
+    );
+  }, [dbCustomers, customerSearchQuery]);
+
   /* ─── Filtering & Search ──────────────────────────── */
   const activeTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -815,6 +825,7 @@ export default function Accounts() {
     }
     setShowNewLinkCard(false);
     setLinkFormData({ customerId: '', description: '', amount: '' });
+    setCustomerSearchQuery('');
   };
 
   // Refund handler
@@ -1201,7 +1212,7 @@ export default function Accounts() {
             </div>
 
             {/* Gateway Card */}
-            {settings.noModPayEnabled !== false && (
+            {false && (
               <div
                 className={`${styles.accountCard} ${activeAccountType === 'GATEWAY' ? styles.accountCardActive : ''}`}
                 onClick={() => navigate('/accounts/gateway')}
@@ -1405,13 +1416,25 @@ export default function Accounts() {
                   ) : (
                     paginatedTransactions.map(t => {
                       // Retrieve transaction creator directly from database fields, fallback to System/Unknown
-                      const creatorName = t.createdBy || (t.category === 'Sales Settlement' || t.category === 'Sales' ? 'System' : 'Unknown');
+                      let roleLabel = '';
+                      if (t.createdByRole) {
+                        if (t.createdByRole === 'super_admin') roleLabel = 'Super Admin';
+                        else if (t.createdByRole === 'manager') roleLabel = 'Manager';
+                        else if (t.createdByRole === 'cashier') roleLabel = 'Cashier';
+                      }
+
+                      let displayCreator = '';
+                      if (roleLabel && t.createdBy && t.createdBy !== 'System' && t.createdBy !== 'Unknown') {
+                        displayCreator = `${roleLabel}: ${t.createdBy}`;
+                      } else {
+                        displayCreator = t.createdBy || (t.category === 'Sales Settlement' || t.category === 'Sales' ? 'System' : 'Unknown');
+                      }
 
                       return (
                         <tr key={t.id} className={styles.ledgerRow}>
                           <td>
                             <div className={styles.createdCell}>
-                              <div className={styles.creatorBold}>{creatorName}</div>
+                              <div className={styles.creatorBold}>{displayCreator}</div>
                               <div className={styles.dateGray}>
                                 {formatDate(t.date)} {new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </div>
@@ -1483,19 +1506,61 @@ export default function Accounts() {
           {showNewLinkCard && (
             <form onSubmit={handleCreatePaymentLink} className={styles.tabFormCard}>
               <div className={styles.formGrid}>
-                <div className={styles.formGroup}>
+                <div className={styles.formGroup} style={{ position: 'relative' }}>
                   <label>Select Customer</label>
-                  <select
-                    value={linkFormData.customerId}
-                    onChange={(e) => setLinkFormData({ ...linkFormData, customerId: e.target.value })}
-                    className={styles.modalSelect}
-                    required
-                  >
-                    <option value="">-- Choose Customer --</option>
-                    {dbCustomers.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
-                    ))}
-                  </select>
+                  <input
+                    type="text"
+                    placeholder="Search customer by name or phone..."
+                    value={customerSearchQuery}
+                    onChange={(e) => {
+                      setCustomerSearchQuery(e.target.value);
+                      setShowCustomerDropdown(true);
+                    }}
+                    onFocus={() => setShowCustomerDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 250)}
+                    className={styles.modalInput}
+                    required={!linkFormData.customerId}
+                  />
+                  {showCustomerDropdown && (
+                    <div style={{
+                      position: 'absolute',
+                      background: 'white',
+                      border: '1px solid #E2E8F0',
+                      borderRadius: '8px',
+                      maxHeight: '200px',
+                      overflowY: 'auto',
+                      width: '100%',
+                      zIndex: 1000,
+                      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                      top: '100%'
+                    }}>
+                      {filteredCustomers.length === 0 ? (
+                        <div style={{ padding: '8px 12px', color: '#64748B' }}>No customer found</div>
+                      ) : (
+                        filteredCustomers.map(c => (
+                          <div
+                            key={c.id}
+                            onClick={() => {
+                              setLinkFormData({ ...linkFormData, customerId: c.id });
+                              setCustomerSearchQuery(`${c.name} (${c.phone})`);
+                              setShowCustomerDropdown(false);
+                            }}
+                            style={{
+                              padding: '8px 12px',
+                              cursor: 'pointer',
+                              borderBottom: '1px solid #F1F5F9',
+                              transition: 'background 0.2s',
+                              color: '#1E293B'
+                            }}
+                            onMouseEnter={(e) => e.target.style.background = '#F8FAFC'}
+                            onMouseLeave={(e) => e.target.style.background = 'white'}
+                          >
+                            {c.name} ({c.phone})
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className={styles.formGroup}>
                   <label>Amount ({settings.currencySymbol || 'AED'})</label>
@@ -1522,7 +1587,7 @@ export default function Accounts() {
 
               </div>
               <div className={styles.formActions}>
-                <button type="button" className={styles.btnSecondary} onClick={() => setShowNewLinkCard(false)}>Cancel</button>
+                <button type="button" className={styles.btnSecondary} onClick={() => { setShowNewLinkCard(false); setCustomerSearchQuery(''); }}>Cancel</button>
                 <button type="submit" className={styles.btnPrimary}>Generate Link</button>
               </div>
             </form>
@@ -1610,65 +1675,6 @@ export default function Accounts() {
                           >
                             <Share2 size={12} /> Share WhatsApp
                           </button>
-
-                          {link.status === 'Active' && (
-                            <button
-                              onClick={async () => {
-                                if (window.confirm('Mark this payment link as PAID?')) {
-                                  if (window.electronAPI?.dbQuery) {
-                                    try {
-                                      await window.electronAPI.dbQuery("UPDATE payment_links SET status = 'Paid' WHERE id = ?", [link.id]);
-
-                                      const txnId = `TXN-LNK-PAY-${Date.now()}`;
-                                      const timestamp = getLocalDateTime();
-                                      const nowIso = getLocalISOString();
-
-                                      await window.electronAPI.dbQuery(
-                                        `INSERT INTO account_transactions 
-                                         (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
-                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
-                                        [
-                                          txnId,
-                                          DEFAULT_SHOP_ID,
-                                          'BANK',
-                                          'INCOME',
-                                          'Service Payment',
-                                          link.amount,
-                                          `Online Payment - ${link.customerName} - ${link.description} (Link ${link.id})`,
-                                          timestamp,
-                                          nowIso,
-                                          'CreditCard',
-                                          settings.bankAccounts && settings.bankAccounts.length > 0 ? settings.bankAccounts[0].id : null,
-                                          user.name || user.username || 'System',
-                                          user.id || 'SYSTEM',
-                                          user.role || 'system'
-                                        ]
-                                      );
-
-                                      fetchData();
-                                    } catch (err) {
-                                      console.error('Failed to mark payment link as paid:', err);
-                                    }
-                                  } else {
-                                    setPaymentLinks(prev => prev.map(l => l.id === link.id ? { ...l, status: 'Paid' } : l));
-                                  }
-                                }
-                              }}
-                              title="Mark as Paid"
-                              style={{
-                                background: '#3b82f6',
-                                color: 'white',
-                                border: 'none',
-                                padding: '5px 10px',
-                                borderRadius: '6px',
-                                cursor: 'pointer',
-                                fontSize: '0.75rem',
-                                fontWeight: '600'
-                              }}
-                            >
-                              Mark Paid
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -1917,7 +1923,7 @@ export default function Accounts() {
                   >
                     {activeAccountType === 'CASH' ? (
                       <>
-                        {settings.noModPayEnabled !== false && <option value="GATEWAY">Nomod Payment Link</option>}
+                        {false && <option value="GATEWAY">Nomod Payment Link</option>}
                         {settings.bankAccounts?.length > 0 ? (
                           settings.bankAccounts.map(b => (
                             <option key={b.id} value={b.id}>{b.bankName}</option>
@@ -1940,7 +1946,7 @@ export default function Accounts() {
                     ) : (
                       <>
                         <option value="CASH">Cash</option>
-                        {settings.noModPayEnabled !== false && <option value="GATEWAY">Nomod Payment Link</option>}
+                        {false && <option value="GATEWAY">Nomod Payment Link</option>}
                         {settings.bankAccounts
                           ?.filter(b => b.id !== activeBankAccountId)
                           .map(b => (

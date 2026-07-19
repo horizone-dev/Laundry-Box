@@ -3,7 +3,7 @@ import {
   Search, Filter, ChevronLeft, ChevronRight, Calendar,
   Clock, Package, CheckCircle, AlertCircle, ChevronDown,
   X, Printer, CreditCard, Wallet, User, History, QrCode, Phone, DollarSign, Truck, Trash2, AlertTriangle, Info, Lock, Edit3, Layers,
-  RefreshCw, Send
+  RefreshCw, Send, MoreVertical, ExternalLink, Download
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
@@ -187,6 +187,28 @@ export default function Orders() {
   const [workflowFilter, setWorkflowFilter] = useState('All'); // 'All', 'Confirmed', 'Processing', 'Ready', 'Delivered'
   const [showFilters, setShowFilters] = useState(false);
   const [isPrintingTags, setIsPrintingTags] = useState(false);
+  const [pdfToast, setPdfToast] = useState(null);
+
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data) {
+        if (event.data.type === 'pdf-downloaded') {
+          setPdfToast({ success: true, filePath: event.data.filePath });
+          setTimeout(() => {
+            setPdfToast(null);
+          }, 5000);
+        } else if (event.data.type === 'pdf-error') {
+          setPdfToast({ success: false, error: event.data.error });
+          setTimeout(() => {
+            setPdfToast(null);
+          }, 7000);
+        }
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
   const [dateRange, setDateRange] = useState('All');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
@@ -374,7 +396,7 @@ export default function Orders() {
     if (method === 'UPI' || method.toUpperCase() === 'UPI') return t('upi', settings.language);
     if (method === 'Not Paid') return t('notPaid', settings.language) || 'Not Paid';
     if (method === 'Multipayment') return 'Multipayment';
-    if (method === 'Advance' || method.toUpperCase() === 'ADVANCE') return 'Advance';
+    if (method === 'Advance' || method.toUpperCase() === 'ADVANCE' || method.toUpperCase() === 'SYSTEM AUTO') return 'Advance';
     return method;
   };
 
@@ -886,6 +908,38 @@ export default function Orders() {
     navigate(`/invoice/${encodeURIComponent(orderId)}`);
   };
 
+  const handleDownloadPDF = (orderId) => {
+    console.log("handleDownloadPDF clicked in Orders.jsx! orderId =", orderId);
+    const cleanId = orderId ? orderId.toString().replace('#', '') : '';
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'absolute';
+    iframe.style.left = '-9999px';
+    iframe.style.top = '-9999px';
+    iframe.style.width = '100px';
+    iframe.style.height = '100px';
+    iframe.style.border = 'none';
+    
+    const targetSrc = `${window.location.origin}${window.location.pathname}#/invoice/${cleanId}?download=force&t=${Date.now()}`;
+    console.log("Appending iframe with src:", targetSrc);
+    iframe.src = targetSrc;
+
+    iframe.onload = () => {
+      console.log("Iframe loaded target source successfully, sending order data via postMessage:", targetSrc);
+      iframe.contentWindow.postMessage({
+        type: 'load-invoice-data',
+        orderData: selectedOrder
+      }, '*');
+    };
+
+    document.body.appendChild(iframe);
+    setTimeout(() => {
+      if (iframe.parentNode) {
+        console.log("Removing background iframe.");
+        document.body.removeChild(iframe);
+      }
+    }, 15000);
+  };
+
   const handlePrintTags = () => {
     document.body.classList.add('printing-tags');
     setIsPrintingTags(true);
@@ -1231,7 +1285,7 @@ export default function Orders() {
     // Auto generate / retrieve payment link if there is a due balance
     let paymentLinkUrl = '';
     const due = orderMatch ? (orderMatch.dueAmount ?? (orderMatch.totalAmount - (orderMatch.paidAmount || 0))) : 0;
-    if (due > 0 && orderMatch && settings.enablePaymentLinks !== false) {
+    if (due > 0 && orderMatch && settings.enablePaymentLinks !== false && settings.enableNomod) {
       if (window.electronAPI?.dbQuery) {
         try {
           const searchRes = await window.electronAPI.dbQuery(
@@ -1328,7 +1382,7 @@ export default function Orders() {
   };
 
   return (
-    <div className={styles.ordersPage}>
+    <div className={`${styles.ordersPage} ${selectedOrder ? styles.modalActive : ''}`}>
       {/* Header */}
       <div className={styles.headerRow}>
         <div className={styles.headerTitle}>
@@ -1385,7 +1439,7 @@ export default function Orders() {
           <div className={styles.kpiInfo}>
             <span className={styles.kpiLabel}>{t('totalAmount', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#0F172A' }}>
-              <CurrencySymbol size={18} /> {totalAmount.toFixed(2)}
+              {totalAmount.toFixed(2)}
             </span>
             <span className={styles.kpiSub}>{orders.length} {t('invoices', settings.language)}</span>
           </div>
@@ -1395,7 +1449,7 @@ export default function Orders() {
           <div className={styles.kpiInfo}>
             <span className={styles.kpiLabel}>{t('paid', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#10B981' }}>
-              <CurrencySymbol size={18} /> {totalPaid.toFixed(2)}
+              {totalPaid.toFixed(2)}
             </span>
             <span className={styles.kpiSub}>{orders.filter(o => (o.dueAmount === 0 || o.dueAmount === null) && o.totalAmount > 0).length} {t('invoices', settings.language)}</span>
           </div>
@@ -1405,7 +1459,7 @@ export default function Orders() {
           <div className={styles.kpiInfo}>
             <span className={styles.kpiLabel}>{t('pending', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#F97316' }}>
-              <CurrencySymbol size={18} /> {totalPending.toFixed(2)}
+              {totalPending.toFixed(2)}
             </span>
             <span className={styles.kpiSub}>{orders.filter(o => o.dueAmount > 0).length} {t('invoices', settings.language)}</span>
           </div>
@@ -1415,7 +1469,7 @@ export default function Orders() {
           <div className={styles.kpiInfo}>
             <span className={styles.kpiLabel}>{t('overdue', settings.language)}</span>
             <span className={styles.kpiValue} style={{ color: '#EF4444' }}>
-              <CurrencySymbol size={18} /> {overdueAmount.toFixed(2)}
+              {overdueAmount.toFixed(2)}
             </span>
             <span className={styles.kpiSub}>{overdueOrdersList.length} {t('invoices', settings.language)}</span>
           </div>
@@ -1503,7 +1557,7 @@ export default function Orders() {
             <thead>
               <tr>
                 <th>{t('orderId', settings.language)}</th>
-                <th>{t('date', settings.language)}</th>
+                <th>{settings.language === 'Arabic' ? 'التاريخ والوقت' : 'DATE & TIME'}</th>
                 <th>{t('customer', settings.language)}</th>
                 <th>{t('whatsapp', settings.language)}</th>
                 <th>{t('totalAmount', settings.language)}</th>
@@ -1524,12 +1578,8 @@ export default function Orders() {
                     setSelectedOrder(order);
                     setShowStatusModal(true);
                   }}>
-                    <td className={styles.orderIdCell}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <div>
-                          <span className={styles.idText}>{settings.invoicePrefix || ''}{order.id}</span>
-                        </div>
-                      </div>
+                    <td style={{ verticalAlign: 'middle' }}>
+                      <span className={styles.idText}>{settings.invoicePrefix || ''}{order.id}</span>
                     </td>
                     <td className={styles.dateText}>{formatDateTime(order.createdAt)}</td>
                     <td>
@@ -1538,7 +1588,6 @@ export default function Orders() {
                           {order.customerName || (order.customerId === 'Walk-in' ? t('walkInCustomer', settings.language) : order.customerId)}
                         </span>
                         <div className={styles.custPhoneRow}>
-                          <Phone size={12} color="#2563EB" />
                           <span className={styles.custPhone}>
                             {order.customerPhone || order.phone || t('noPhone', settings.language)}
                           </span>
@@ -1561,7 +1610,7 @@ export default function Orders() {
                         <span className={styles.noWaText}>-</span>
                       )}
                     </td>
-                    <td className={styles.amountText}><CurrencySymbol size={14} /> {order.totalAmount?.toFixed(2)}</td>
+                    <td className={styles.amountText}>{order.totalAmount?.toFixed(2)}</td>
                     <td>
                       {order.paymentStatus === 'Paid' || order.paymentStatus === 'Partial' ? (
                         order.paymentMethod ? (
@@ -1646,60 +1695,73 @@ export default function Orders() {
         <div className={styles.modalOverlay}>
           <div className={styles.detailsModal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
-              <div>
-                <h2>{t('order', settings.language)} {settings.invoicePrefix || ''}{selectedOrder.orderId || selectedOrder.id}</h2>
-                <p>{t('createdOn', settings.language)} {formatDateTime(selectedOrder.createdAt)}</p>
+              <div className={styles.headerLeft}>
+                <button className={styles.backBtn} onClick={() => setSelectedOrder(null)}>
+                  <ChevronLeft size={20} />
+                </button>
+                <div>
+                  <div className={styles.headerTitleRow}>
+                    <h2>Order #{settings.invoicePrefix || ''}{selectedOrder.orderId || selectedOrder.id}</h2>
+                  </div>
+                  <p>{t('createdOn', settings.language)} {formatDateTime(selectedOrder.createdAt)}</p>
+                </div>
               </div>
-              <X size={24} className={styles.closeBtn} onClick={() => setSelectedOrder(null)} />
+              <div className={styles.headerRightActions}>
+                <button className={styles.headerActionBtn} onClick={() => handlePrint(selectedOrder.id)}>
+                  <Printer size={16} /> Print Receipt
+                </button>
+                <button className={styles.headerActionBtn} onClick={handlePrintTags}>
+                  <QrCode size={16} /> Print Tags
+                </button>
+                <button className={styles.headerActionBtn} onClick={() => handleDownloadPDF(selectedOrder.id)}>
+                  <Download size={16} /> Download PDF
+                </button>
+              </div>
             </div>
 
             <div className={styles.modalContent}>
               <div className={styles.detailsGrid}>
                 {/* Left: Info */}
                 <div className={styles.infoCol}>
-                  <div className={styles.section}>
-                    <h3>{t('customerInfo', settings.language)}</h3>
-                    <div className={styles.infoCard}>
-                      <User size={16} />
-                      <div>
-                        <p className={styles.infoVal}>
-                          {selectedOrder.customerName || (selectedOrder.customerId === 'Walk-in' ? t('walkInCustomer', settings.language) : selectedOrder.customerId)}
-                        </p>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <p className={styles.infoSub}>
-                            {selectedOrder.customerPhone || selectedOrder.phone || t('noPhone', settings.language)} • {selectedOrder.customerId}
-                          </p>
-                          <button
-                            className={styles.waBtnMini}
-                            onClick={() => handleWhatsApp(selectedOrder.customerPhone || selectedOrder.phone, selectedOrder.id)}
-                          >
-                            <WhatsAppIcon size={12} /> {t('whatsapp', settings.language)}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {selectedOrder.expectedDeliveryDate && (
-                    <div className={`${styles.section} ${styles.expectedDeliverySection}`}>
-                      <h3>Expected Delivery</h3>
+                  <div className={styles.customerDeliveryRow}>
+                    <div className={styles.section} style={{ flex: 1 }}>
+                      <h3>{t('customerInfo', settings.language)}</h3>
                       <div className={styles.infoCard}>
-                        <Clock size={16} />
+                        <User size={16} />
                         <div>
                           <p className={styles.infoVal}>
-                            {(() => {
-                              const rawDate = selectedOrder.expectedDeliveryDate || '';
-                              if (rawDate.includes(' ')) {
-                                const [datePart, timePart] = rawDate.split(' ');
-                                return `${formatDate(datePart)} at ${timePart}`;
-                              }
-                              return rawDate ? formatDate(rawDate) : 'Not Scheduled';
-                            })()}
+                            {selectedOrder.customerName || (selectedOrder.customerId === 'Walk-in' ? t('walkInCustomer', settings.language) : selectedOrder.customerId)}
                           </p>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <p className={styles.infoSub}>
+                              {selectedOrder.customerPhone || selectedOrder.phone || t('noPhone', settings.language)} • {selectedOrder.customerId}
+                            </p>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  )}
+
+                    {selectedOrder.expectedDeliveryDate && (
+                      <div className={`${styles.section} ${styles.expectedDeliverySection}`} style={{ flex: 1 }}>
+                        <h3>Expected Delivery</h3>
+                        <div className={styles.infoCard}>
+                          <Clock size={16} />
+                          <div>
+                            <p className={styles.infoVal}>
+                              {(() => {
+                                const rawDate = selectedOrder.expectedDeliveryDate || '';
+                                if (rawDate.includes(' ')) {
+                                  const [datePart, timePart] = rawDate.split(' ');
+                                  return `${formatDate(datePart)} at ${timePart}`;
+                                }
+                                return rawDate ? formatDate(rawDate) : 'Not Scheduled';
+                              })()}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
                   <div className={styles.section}>
                     <h3>{t('orderItems', settings.language)}</h3>
@@ -1712,21 +1774,42 @@ export default function Orders() {
                             : (selectedOrder.items || []);
                         } catch (e) { console.error("Failed to parse items", e); }
 
-                        return (Array.isArray(items) ? items : []).map((item, i) => {
-                          // Build treatment label from types array or fallback to type string
-                          let treatmentLabel = '';
-                          if (item.types && Array.isArray(item.types) && item.types.length > 0) {
-                            treatmentLabel = item.types.map(tp => tp.name).join(' + ');
-                          } else if (item.type) {
-                            treatmentLabel = item.type;
-                          }
-                          return (
-                            <div key={i} className={styles.orderItem}>
-                              <span>{item.qty} x {item.name}{treatmentLabel ? ` (${treatmentLabel})` : ''}{item.deliveryMethod ? ` [${item.deliveryMethod}]` : ''}</span>
-                              <span><CurrencySymbol size={12} /> {((item.price || 0) * (item.qty || 1)).toFixed(2)}</span>
-                            </div>
-                          );
-                        });
+                        return (
+                          <table className={styles.itemsTable}>
+                            <thead>
+                              <tr>
+                                <th style={{ textAlign: 'left' }}>Item</th>
+                                <th style={{ textAlign: 'center' }}>Qty</th>
+                                <th style={{ textAlign: 'right' }}>Unit Price</th>
+                                <th style={{ textAlign: 'right' }}>Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(Array.isArray(items) ? items : []).map((item, i) => {
+                                let treatmentLabel = '';
+                                if (item.types && Array.isArray(item.types) && item.types.length > 0) {
+                                  treatmentLabel = item.types.map(tp => tp.name).join(' + ');
+                                } else if (item.type) {
+                                  treatmentLabel = item.type;
+                                }
+                                const itemUnitPrice = item.price || 0;
+                                const itemTotalAmount = itemUnitPrice * (item.qty || 1);
+                                return (
+                                  <tr key={i}>
+                                    <td>
+                                      {i + 1}. {item.name}
+                                      {treatmentLabel ? ` (${treatmentLabel})` : ''}
+                                      {item.deliveryMethod ? ` [${item.deliveryMethod}]` : ''}
+                                    </td>
+                                    <td style={{ textAlign: 'center' }}>{item.qty}</td>
+                                    <td style={{ textAlign: 'right' }}>{itemUnitPrice.toFixed(2)}</td>
+                                    <td style={{ textAlign: 'right' }}>{itemTotalAmount.toFixed(2)}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        );
                       })()}
                       <div className={styles.orderTotal}>
                         <span>
@@ -1735,7 +1818,7 @@ export default function Orders() {
                             : `${t('paymentStatus', settings.language)}: ${t(selectedOrder.paymentStatus?.toLowerCase() || 'notPaid', settings.language)}`
                           }
                         </span>
-                        <span><CurrencySymbol size={14} /> {(selectedOrder.totalAmount || 0).toFixed(2)}</span>
+                        <span>{(selectedOrder.totalAmount || 0).toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
@@ -1767,8 +1850,79 @@ export default function Orders() {
                   </div>
                 </div>
 
-                {/* Right: Actions & QR */}
-                <div className={styles.actionCol}>
+                {/* Right Column: Order Summary & Status & Workflow */}
+                <div className={styles.summaryCol}>
+                  <div className={styles.section}>
+                    <h3>Order Summary</h3>
+                    {(() => {
+                      const items = (() => {
+                        try {
+                          return typeof selectedOrder.items === 'string'
+                            ? JSON.parse(selectedOrder.items || '[]')
+                            : (selectedOrder.items || []);
+                        } catch (e) {
+                          return [];
+                        }
+                      })();
+
+                      const itemsTotal = items.reduce((sum, item) => sum + ((parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0)), 0);
+                      const taxRate = settings.isTaxEnabled ? (parseFloat(settings.taxRate || 0) / 100) : 0;
+                      
+                      let computedSubtotal = 0;
+                      let computedTax = 0;
+                      let computedTotal = selectedOrder.totalAmount || 0;
+                      let computedDiscount = 0;
+
+                      if (settings.isTaxEnabled) {
+                        computedSubtotal = computedTotal / (1 + taxRate);
+                        computedTax = computedTotal - computedSubtotal;
+                        if (settings.taxMethod === 'exclusive') {
+                          computedDiscount = itemsTotal - computedSubtotal;
+                        } else {
+                          computedDiscount = itemsTotal - computedTotal;
+                        }
+                      } else {
+                        computedSubtotal = computedTotal;
+                        computedTax = 0;
+                        computedDiscount = itemsTotal - computedTotal;
+                      }
+                      
+                      if (computedDiscount < 0.01) computedDiscount = 0;
+
+                      return (
+                        <div className={styles.summaryList}>
+                          <div className={styles.summaryRow}>
+                            <span>Item Total</span>
+                            <span>{itemsTotal.toFixed(2)}</span>
+                          </div>
+                          <div className={styles.summaryRow}>
+                            <span>Discount</span>
+                            <span>{computedDiscount.toFixed(2)}</span>
+                          </div>
+                          <div className={styles.summaryRow}>
+                            <span>{settings.taxName || 'Tax'} ({settings.isTaxEnabled ? settings.taxRate : 0}%)</span>
+                            <span>{computedTax.toFixed(2)}</span>
+                          </div>
+                          <div className={`${styles.summaryRow} ${styles.summaryTotalRow}`}>
+                            <span>Total Amount</span>
+                            <span>{computedTotal.toFixed(2)}</span>
+                          </div>
+                          <div className={`${styles.summaryRow} ${styles.summaryPaidRow}`}>
+                            <span>Paid Amount</span>
+                            <span className={styles.paidVal}>{(selectedOrder.paidAmount || 0).toFixed(2)}</span>
+                          </div>
+                          <div className={`${styles.summaryRow} ${styles.summaryDueRow}`}>
+                            <span>Due Amount</span>
+                            <span className={selectedOrder.dueAmount > 0 ? styles.dueValRed : styles.dueValGreen}>
+                              {(selectedOrder.dueAmount || 0).toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+
 
                   {selectedOrder.isDeleted ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0', marginTop: '1rem', textAlign: 'left' }}>
@@ -1798,8 +1952,8 @@ export default function Orders() {
                   ) : (
                     <>
                       {settings.workflowEnabled && (
-                        <div className={styles.statusAction}>
-                          <label>{t('workflowStatus', settings.language)}</label>
+                        <div className={styles.section}>
+                          <h3>Workflow Status</h3>
                           <div className={styles.statusSelectWrapper}>
                             <select
                               value={['Payment Pending', 'Credit', 'Pending'].includes(selectedOrder.status) ? 'Confirmed' : selectedOrder.status}
@@ -1816,30 +1970,44 @@ export default function Orders() {
                       )}
 
                       {selectedOrder.nomodCheckoutId && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0', marginTop: '1rem', textAlign: 'left' }}>
-                          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <CreditCard size={14} /> Nomod Payment Link
-                          </span>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
-                            <span style={{ fontSize: '0.85rem', color: '#475569' }}>Nomod Status:</span>
-                            <span style={{ 
-                              fontWeight: 'bold', 
-                              fontSize: '0.85rem',
-                              color: selectedOrder.nomodPaymentStatus === 'Paid' ? '#16A34A' : (selectedOrder.nomodPaymentStatus === 'Pending' ? '#2563EB' : '#DC2626')
-                            }}>
-                              {selectedOrder.nomodPaymentStatus}
+                        <div className={styles.nomodCard}>
+                          <div className={styles.nomodHeader}>
+                            <div className={styles.nomodTitleGroup}>
+                              <CreditCard size={15} className={styles.nomodIcon} />
+                              <span className={styles.nomodTitle}>Nomod Payment</span>
+                            </div>
+                            <span className={`${styles.nomodBadge} ${styles[selectedOrder.nomodPaymentStatus?.toLowerCase()] || ''}`}>
+                              {selectedOrder.nomodPaymentStatus || 'Pending'}
                             </span>
                           </div>
-                          {selectedOrder.nomodLinkDate && (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ fontSize: '0.8rem', color: '#64748B' }}>Generated:</span>
-                              <span style={{ fontSize: '0.8rem', color: '#1E293B' }}>{formatDateTime(selectedOrder.nomodLinkDate)}</span>
-                            </div>
-                          )}
-                          <div style={{ display: 'flex', gap: '8px', marginTop: '0.4rem' }}>
+
+                          <div className={styles.nomodBody}>
+                            {selectedOrder.nomodLinkDate && (
+                              <div className={styles.nomodRow}>
+                                <span className={styles.nomodLabel}>Generated:</span>
+                                <span className={styles.nomodValue}>{formatDateTime(selectedOrder.nomodLinkDate)}</span>
+                              </div>
+                            )}
+                            {selectedOrder.nomodPaymentLink && selectedOrder.nomodPaymentStatus === 'Pending' && (
+                              <div className={styles.nomodRow}>
+                                <span className={styles.nomodLabel}>Checkout:</span>
+                                <a 
+                                  href={selectedOrder.nomodPaymentLink} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  className={styles.nomodLink}
+                                >
+                                  Open Checkout <ExternalLink size={12} />
+                                </a>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className={styles.nomodActions}>
                             {selectedOrder.nomodPaymentStatus === 'Pending' && (
                               <button
                                 type="button"
+                                className={styles.nomodBtnPrimary}
                                 onClick={async () => {
                                   const res = await paymentService.checkNow(selectedOrder.id, selectedOrder.nomodCheckoutId);
                                   if (res.success) {
@@ -1850,66 +2018,59 @@ export default function Orders() {
                                     alert("Failed checking status: " + res.error);
                                   }
                                 }}
-                                style={{ flex: 1, padding: '6px 12px', fontSize: '0.8rem', background: '#3B82F6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                               >
-                                Check Status
+                                <RefreshCw size={13} /> Check Status
                               </button>
                             )}
                             {(selectedOrder.nomodPaymentStatus === 'Pending' || selectedOrder.nomodPaymentStatus === 'Expired' || selectedOrder.nomodPaymentStatus === 'Failed') && (
                               <button
                                 type="button"
+                                className={styles.nomodBtnSecondary}
                                 onClick={() => handleResendPaymentLink(selectedOrder)}
-                                style={{ flex: 1, padding: '6px 12px', fontSize: '0.8rem', background: '#EC4899', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                               >
-                                Resend Link
+                                <Send size={13} /> Resend Link
                               </button>
                             )}
                           </div>
                         </div>
-                      )} </>
+                      )}
+                    </>
                   )}
-
-                  <div className={styles.actionBtns}>
-                    <button
-                      className={styles.printBtn}
-                      onClick={() => handlePrint(selectedOrder.id)}
-                    >
-                      <Printer size={18} /> {t('printReceipt', settings.language)}
-                    </button>
-                    {!selectedOrder.isDeleted && (
-                      <>
-                        <button
-                          className={styles.tagBtn}
-                          style={{ background: '#4F46E5', color: 'white' }}
-                          onClick={() => {
-                            setSelectedOrder(null);
-                            setShowModal(false);
-                            navigate(`/pos?editOrderId=${selectedOrder.id}`);
-                          }}
-                        >
-                          <Edit3 size={18} /> Edit Order
-                        </button>
-                        <button
-                          className={styles.tagBtn}
-                          onClick={handlePrintTags}
-                        >
-                          <QrCode size={18} /> {t('printGarmentTags', settings.language)}
-                        </button>
-                        <button
-                          className={`${styles.tagBtn} ${styles.deleteBtn}`}
-                          onClick={() => {
-                            setOrderToDelete(selectedOrder);
-                            setDeleteOption('refund');
-                            setShowPinModal(true);
-                          }}
-                        >
-                          <Trash2 size={18} /> Delete Order
-                        </button>
-                      </>
-                    )}
-                  </div>
                 </div>
               </div>
+            </div>
+
+            <div className={styles.modalStickyFooter}>
+              {!selectedOrder.isDeleted && (
+                <>
+                  <button
+                    className={`${styles.footerActionBtn} ${styles.blueBtn}`}
+                    onClick={() => {
+                      setSelectedOrder(null);
+                      setShowModal(false);
+                      navigate(`/pos?editOrderId=${selectedOrder.id}`);
+                    }}
+                  >
+                    <Edit3 size={18} /> Edit Order
+                  </button>
+                  <button
+                    className={`${styles.footerActionBtn} ${styles.whiteBtn}`}
+                    onClick={() => handleWhatsApp(selectedOrder.customerPhone || selectedOrder.phone, selectedOrder.id)}
+                  >
+                    <WhatsAppIcon size={18} /> Send WhatsApp Receipt
+                  </button>
+                  <button
+                    className={`${styles.footerActionBtn} ${styles.redBtn}`}
+                    onClick={() => {
+                      setOrderToDelete(selectedOrder);
+                      setDeleteOption('refund');
+                      setShowPinModal(true);
+                    }}
+                  >
+                    <Trash2 size={18} /> Delete Order
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -2172,87 +2333,82 @@ export default function Orders() {
       {/* Credit Limit Warning Modal */}
       {showCreditWarning && creditWarningDetails && (
         <div className={styles.modalOverlay} onClick={handleCancelOverride}>
-          <div className={`${styles.modal} ${styles.tempModal}`} style={{ maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader} style={{ background: '#FEF2F2', borderBottom: '1px solid #FEE2E2' }}>
-              <div className={styles.modalTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <AlertTriangle size={24} color="#EF4444" />
-                <div>
-                  <h2 style={{ color: '#991B1B', margin: 0 }}>Credit Limit Exceeded</h2>
-                  <p style={{ color: '#B91C1C', margin: 0, fontSize: '0.8rem' }}>This customer has exceeded their credit threshold.</p>
-                </div>
+          <div className={styles.statusModal} style={{ maxWidth: '450px', borderRadius: '24px', background: 'white', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)', padding: '2rem' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '1.5rem' }}>
+              <AlertTriangle size={24} color="#EF4444" style={{ marginTop: '2px' }} />
+              <div>
+                <h2 style={{ color: '#EF4444', margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>Credit Limit Exceeded</h2>
+                <p style={{ color: '#EF4444', margin: '2px 0 0 0', fontSize: '0.85rem', fontWeight: 500, opacity: 0.9 }}>This customer has exceeded their credit threshold.</p>
               </div>
             </div>
             <form onSubmit={handleVerifyManagerPin}>
-              <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
-                <div style={{ background: '#F8FAFC', borderRadius: '12px', padding: '1rem', border: '1px solid #E2E8F0', marginBottom: '1.25rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Customer Name:</span>
-                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{creditWarningDetails.customerName}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Limit:</span>
-                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.creditLimit.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Outstanding Balance:</span>
-                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.currentOutstanding.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Credit Balance Increase:</span>
-                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.orderAmount.toFixed(2)}</span>
-                  </div>
-                  <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.5rem 0' }} />
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>New Outstanding Balance:</span>
-                    <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.newOutstanding.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
-                    <span>Exceeded Amount:</span>
-                    <span>{settings.currencySymbol} {creditWarningDetails.exceededAmount.toFixed(2)}</span>
-                  </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.95rem', color: '#64748B', marginBottom: '1.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Customer Name:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{creditWarningDetails.customerName}</span>
                 </div>
-
-                {settings.enableManagerOverride ? (
-                  <div className={styles.formGroup} style={{ marginTop: '1rem' }}>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>ENTER MANAGER SECURE PIN TO APPROVE</label>
-                    <div className={styles.posInputWrapper} style={{ marginTop: '0.5rem' }}>
-                      <Lock size={18} />
-                      <input
-                        type="password"
-                        required
-                        maxLength={4}
-                        placeholder="Enter 4-Digit PIN"
-                        value={managerPinValue}
-                        onChange={(e) => setManagerPinValue(e.target.value.replace(/\D/g, ''))}
-                        style={{ fontSize: '1.25rem', letterSpacing: '0.25rem' }}
-                        autoFocus
-                      />
-                    </div>
-                    {managerPinError && (
-                      <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 600 }}>{managerPinError}</p>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: '12px', padding: '0.75rem 1rem', color: '#C53030', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                    <AlertCircle size={18} />
-                    <span>Credit Limit Protection is active and Manager Override is disabled.</span>
-                  </div>
-                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Credit Limit:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.creditLimit.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Outstanding Balance:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.currentOutstanding.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>Credit Balance Increase:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.orderAmount.toFixed(2)}</span>
+                </div>
+                <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.25rem 0' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 500 }}>New Outstanding Balance:</span>
+                  <span style={{ color: '#1E293B', fontWeight: 700 }}>{settings.currencySymbol} {creditWarningDetails.newOutstanding.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontWeight: 700 }}>
+                  <span>Exceeded Amount:</span>
+                  <span>{settings.currencySymbol} {creditWarningDetails.exceededAmount.toFixed(2)}</span>
+                </div>
               </div>
-              <div className={styles.modalFooter} style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem' }}>
+
+              {settings.enableManagerOverride ? (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 800, color: '#475569', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>ENTER MANAGER SECURE PIN TO APPROVE</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', border: '1.5px solid #E2E8F0', borderRadius: '12px', padding: '0.75rem 1rem', background: '#F8FAFC' }}>
+                    <Lock size={18} color="#94A3B8" />
+                    <input
+                      type="password"
+                      required
+                      maxLength={4}
+                      placeholder="••••"
+                      value={managerPinValue}
+                      onChange={(e) => setManagerPinValue(e.target.value.replace(/\D/g, ''))}
+                      style={{ fontSize: '1.5rem', letterSpacing: '0.5rem', border: 'none', background: 'transparent', outline: 'none', width: '100%', color: '#1E293B' }}
+                      autoFocus
+                    />
+                  </div>
+                  {managerPinError && (
+                    <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 600 }}>{managerPinError}</p>
+                  )}
+                </div>
+              ) : (
+                <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: '12px', padding: '0.75rem 1rem', color: '#C53030', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
+                  <AlertCircle size={18} />
+                  <span>Credit Limit Protection is active and Manager Override is disabled.</span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
                 <button
                   type="button"
-                  className={styles.secondaryBtn}
                   onClick={handleCancelOverride}
-                  style={{ flex: 1 }}
+                  style={{ background: 'none', border: 'none', color: '#64748B', fontWeight: 600, fontSize: '0.95rem', cursor: 'pointer', padding: '0.5rem 0' }}
                 >
                   Cancel
                 </button>
                 {creditWarningDetails.overrideAllowed && settings.enableManagerOverride && (
                   <button
                     type="submit"
-                    className={styles.saveBtn}
-                    style={{ flex: 1, background: '#D97706', color: 'white' }}
+                    style={{ background: '#D97706', color: 'white', border: 'none', borderRadius: '10px', padding: '0.75rem 1.5rem', fontWeight: 600, fontSize: '0.95rem', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(217, 119, 6, 0.2)' }}
                   >
                     Approve Override
                   </button>
@@ -2485,6 +2641,66 @@ export default function Orders() {
             </div>
           </div>
         </div>
+      )}
+      {pdfToast && (
+        <>
+          <style>{`
+            @keyframes toastSlideIn {
+              0% { transform: translateX(120%) scale(0.9); opacity: 0; }
+              70% { transform: translateX(-10px) scale(1.02); opacity: 1; }
+              100% { transform: translateX(0) scale(1); opacity: 1; }
+            }
+            @keyframes toastProgress {
+              0% { width: 100%; }
+              100% { width: 0%; }
+            }
+            .premium-toast {
+              position: fixed;
+              top: 24px;
+              right: 24px;
+              background: rgba(15, 23, 42, 0.95);
+              backdrop-filter: blur(8px);
+              color: white;
+              padding: 1rem 1.5rem;
+              border-radius: 12px;
+              box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
+              display: flex;
+              align-items: center;
+              gap: 16px;
+              z-index: 999999;
+              font-family: 'Inter', sans-serif;
+              max-width: 400px;
+              border: 1px solid rgba(255, 255, 255, 0.1);
+              border-left: 5px solid ${pdfToast.success ? '#10B981' : '#EF4444'};
+              animation: toastSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+              overflow: hidden;
+            }
+            .premium-toast-progress {
+              position: absolute;
+              bottom: 0;
+              left: 0;
+              height: 3px;
+              background: ${pdfToast.success ? '#10B981' : '#EF4444'};
+              animation: toastProgress ${pdfToast.success ? '5s' : '7s'} linear forwards;
+            }
+          `}</style>
+          <div className="premium-toast">
+            {pdfToast.success ? (
+              <CheckCircle size={22} style={{ color: '#10B981', flexShrink: 0 }} />
+            ) : (
+              <AlertTriangle size={22} style={{ color: '#EF4444', flexShrink: 0 }} />
+            )}
+            <div style={{ display: 'flex', display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontWeight: 700, fontSize: '0.92rem', letterSpacing: '-0.01em' }}>
+                {pdfToast.success ? 'Invoice PDF Saved' : 'Download Failed'}
+              </span>
+              <span style={{ fontSize: '0.78rem', opacity: 0.85, marginTop: '2px', wordBreak: 'break-all', fontWeight: 400 }}>
+                {pdfToast.success ? pdfToast.filePath : pdfToast.error}
+              </span>
+            </div>
+            <div className="premium-toast-progress" />
+          </div>
+        </>
       )}
 
     </div>

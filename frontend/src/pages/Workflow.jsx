@@ -782,6 +782,7 @@ export default function Workflow() {
     if (method === 'Bank' || method.toUpperCase() === 'BANK') return t('bankaccount', settings.language);
     if (method === 'Not Paid') return t('notPaid', settings.language) || 'Not Paid';
     if (method === 'Multipayment') return 'Multipayment';
+    if (method === 'Advance' || method.toUpperCase() === 'ADVANCE' || method.toUpperCase() === 'SYSTEM AUTO') return 'Advance';
     return method;
   };
 

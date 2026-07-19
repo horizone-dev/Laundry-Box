@@ -734,7 +734,7 @@
 }
 
 .header {
-  height: 50px;
+  height: 62px;
   background-color: #FFFFFF;
   border-bottom: 1px solid #E2E8F0;
   display: flex;
@@ -993,7 +993,7 @@
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: 0 1rem 1rem 1rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.5rem;
 }
 
 .syncStatus {

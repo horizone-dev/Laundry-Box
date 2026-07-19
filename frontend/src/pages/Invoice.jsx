@@ -6,17 +6,35 @@ import InvoiceTemplate from '../components/InvoiceTemplate';
 import DressTag from '../components/DressTag';
 import { getLocalDateTime } from '../utils/dateUtils';
 import styles from './Invoice.module.css';
+import rawInvoiceCss from './Invoice.module.css?inline';
 import { paymentService } from '../services/paymentService';
 
 export default function Invoice() {
+  const electronAPI = window.electronAPI || window.parent?.electronAPI;
   const { id } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { settings, formatDate } = useSettings();
+  const { settings, formatDate, originalSettings } = useSettings();
   const [order, setOrder] = useState(null);
+  const [errorMsg, setErrorMsg] = useState(null);
   const [isPrintingTags, setIsPrintingTags] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfToast, setPdfToast] = useState(null);
+  const [showFormatDropdown, setShowFormatDropdown] = useState(false);
   const invoiceRef = React.useRef();
+
+  useEffect(() => {
+    if (pdfToast) {
+      const timer = setTimeout(() => {
+        setPdfToast(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [pdfToast]);
+
+  useEffect(() => {
+    console.log("Invoice component mounted: id =", id, "download =", searchParams.get('download'), "origin =", window.location.origin);
+  }, [id, searchParams]);
 
   const getDaysPending = (dateStr) => {
     if (!dateStr) return 0;
@@ -28,7 +46,8 @@ export default function Invoice() {
 
   useEffect(() => {
     const fetchOrder = async () => {
-      if (window.electronAPI?.dbQuery) {
+      console.log("Invoice page fetchOrder starting. ID =", id, "electronAPI =", !!electronAPI);
+      if (electronAPI?.dbQuery) {
         try {
           // Try multiple ID formats for robustness
           const idVariations = [
@@ -38,30 +57,52 @@ export default function Invoice() {
             id.replace('#', '').replace('AG-', ''),
             id.replace('#', '').replace(settings.invoicePrefix || '', '')
           ];
-
+          console.log("ID Variations to query:", idVariations);
           let rawOrder = null;
           for (const variant of idVariations) {
-            const res = await window.electronAPI.dbQuery(
+            const res = await electronAPI.dbQuery(
               `SELECT orders.*, customers.name as customerName, customers.phone as customerPhone,
                       payment_links.date AS nomodLinkDate
                FROM orders 
                LEFT JOIN customers ON orders.customerId = customers.id 
                LEFT JOIN payment_links ON orders.nomodCheckoutId = payment_links.checkoutId
-               WHERE orders.id = ? OR orders.billNumber = ?`,
-              [variant, variant]
+               WHERE orders.id = ?`,
+              [variant]
             );
-            if (res.success && res.data.length > 0) {
-              rawOrder = res.data[0];
+            const rows = res.results || res.data || [];
+            if (res && res.success && rows.length > 0) {
+              rawOrder = rows[0];
               break;
             }
           }
 
           if (rawOrder) {
+            let items = [];
+            let history = [];
+            let payBreakdown = null;
+
+            try {
+              items = typeof rawOrder.items === 'string' ? JSON.parse(rawOrder.items || '[]') : (rawOrder.items || []);
+            } catch (e) {
+              console.error("JSON parse items error:", e);
+            }
+            try {
+              history = typeof rawOrder.statusHistory === 'string' ? JSON.parse(rawOrder.statusHistory || '[]') : (rawOrder.statusHistory || []);
+            } catch (e) {
+              console.error("JSON parse history error:", e);
+            }
+            try {
+              payBreakdown = typeof rawOrder.paymentBreakdown === 'string' ? JSON.parse(rawOrder.paymentBreakdown || 'null') : rawOrder.paymentBreakdown;
+            } catch (e) {
+              console.error("JSON parse paymentBreakdown error:", e);
+            }
+
             let customerBalance = 0;
             if (rawOrder.customerId && rawOrder.customerId !== 'Walk-in') {
-              const custRes = await window.electronAPI.dbQuery('SELECT balance FROM customers WHERE id = ?', [rawOrder.customerId]);
-              if (custRes.success && custRes.data.length > 0) {
-                customerBalance = custRes.data[0].balance || 0;
+              const custRes = await electronAPI.dbQuery('SELECT balance FROM customers WHERE id = ?', [rawOrder.customerId]);
+              const custRows = custRes.results || custRes.data || [];
+              if (custRes.success && custRows.length > 0) {
+                customerBalance = custRows[0].balance || 0;
               }
             }
 
@@ -84,14 +125,14 @@ export default function Invoice() {
 
             if (rawOrder.customerId && rawOrder.customerId !== 'Walk-in') {
               totalBalance = customerBalance;
-              
+
               let totalPaidManual = paidAmount;
               if (parsedBreakdown) {
                 totalPaidManual = (parseFloat(parsedBreakdown.cash) || 0) +
-                                  (parseFloat(parsedBreakdown.card) || 0) +
-                                  (parseFloat(parsedBreakdown.upi) || 0) +
-                                  (parseFloat(parsedBreakdown.bank) || 0) +
-                                  (parseFloat(parsedBreakdown.nomod) || 0);
+                  (parseFloat(parsedBreakdown.card) || 0) +
+                  (parseFloat(parsedBreakdown.upi) || 0) +
+                  (parseFloat(parsedBreakdown.bank) || 0) +
+                  (parseFloat(parsedBreakdown.nomod) || 0);
               }
               const balanceDiff = rawOrder.totalAmount - totalPaidManual;
               previousBalance = totalBalance - balanceDiff;
@@ -179,45 +220,30 @@ export default function Invoice() {
               })(),
               specialInstructions: rawOrder.specialInstructions || ''
             });
+            setErrorMsg(null);
           } else {
-            useFallback();
+            console.log("No order found in database for variations, waiting for postMessage data...");
+            setErrorMsg(`Order ID "${id}" was not found in the local database. Variations searched: ${idVariations.join(', ')}`);
           }
         } catch (err) {
-          useFallback();
+          console.error("Database query failed, waiting for postMessage data...", err);
+          setErrorMsg(`Database query failed: ${err.message}`);
         }
       } else {
-        useFallback();
+        console.log("No electronAPI.dbQuery, waiting for postMessage data...");
+        setErrorMsg("Electron database access (window.electronAPI) is not available. Please ensure the app is running inside Electron.");
       }
     };
 
-    const useFallback = () => {
-      setOrder({
-        id: id,
-        billNumber: `ORD-${Date.now().toString().slice(-6)}`,
-        date: 'Oct 24, 2023, 10:00 AM',
-        createdAt: new Date().toISOString(),
-        customer: 'Eleanor Shellstrop',
-        customerPhone: '+971501234567',
-        residency: '"The Good Place" Residency',
-        status: 'PAID',
-        paymentStatus: 'Paid',
-        items: [
-          { name: 'Premium Suit Dry Clean', sub: 'Professional grade chemical cleaning & steaming', qty: 2, price: 25.00, total: 50.00, deliveryMethod: 'Hanger' },
-          { name: 'Egyptian Cotton Shirts', sub: 'Gentle wash, starch, and custom pressing', qty: 5, price: 8.00, total: 40.00, deliveryMethod: 'Folded' },
-          { name: 'Silk Scarf Special Care', sub: 'Delicate hand-wash with eco-solvent treatment', qty: 1, price: 15.00, total: 15.00, deliveryMethod: 'Bagged' },
-        ],
-        subtotal: 105.00,
-        tax: 8.40,
-        total: 113.40,
-        paidAmount: 113.40,
-        previousBalance: 0.00,
-        totalBalance: 0.00,
-        expectedDeliveryDate: '2026-06-02 17:00',
-        specialInstructions: 'Handle with care'
-      });
-    };
-
     fetchOrder();
+
+    const handlePostMessageData = (event) => {
+      if (event.data && event.data.type === 'load-invoice-data') {
+        console.log("Invoice page received postMessage data:", event.data.orderData);
+        setOrder(event.data.orderData);
+      }
+    };
+    window.addEventListener('message', handlePostMessageData);
 
     const unsubscribe = paymentService.subscribe(({ orderId, status }) => {
       const cleanOrderId = orderId ? orderId.replace('#', '') : '';
@@ -227,8 +253,21 @@ export default function Invoice() {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      window.removeEventListener('message', handlePostMessageData);
+    };
   }, [id, settings]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!order) {
+        console.warn("Invoice data loading timed out.");
+        setErrorMsg("Order details could not be loaded. Please ensure the order exists.");
+      }
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [order]);
 
   // ── Build a self-contained thermal receipt HTML from order data ──
   const buildReceiptHtml = (ord, stg) => {
@@ -258,7 +297,7 @@ export default function Invoice() {
           ${types ? `<div style="font-size:11px;color:#000;">${types}</div>` : ''}
           ${delivery}
           <div style="display:flex;justify-content:space-between;font-size:12px;">
-            <span>Qty: ${item.qty} &times; ${(parseFloat(item.price)||0).toFixed(2)}</span>
+            <span>Qty: ${item.qty} &times; ${(parseFloat(item.price) || 0).toFixed(2)}</span>
             <span>${sym} ${lineTotal}</span>
           </div>
         </div>`;
@@ -269,7 +308,7 @@ export default function Invoice() {
     const manualPaid = Math.max(0, (ord.paidAmount || 0) - advanceDeducted);
 
     return `
-      <div style="font-family:'Courier New',Courier,monospace;font-size:12px;color:#000;background:#fff;width:100%;max-width:80mm;margin:0 auto;padding:8px;">
+      <div style="font-family:'Courier New',Courier,monospace;font-size:12px;color:#000;background:#fff;width:100%;max-width:80mm;margin:0;padding:8px;">
         ${logoSrc ? `<div style="text-align:center;margin-bottom:4px;"><img src="${logoSrc}" style="max-height:50px;max-width:60mm;" /></div>` : ''}
         <div style="text-align:center;font-size:15px;font-weight:900;">${stg.companyName || 'Laundry Box'}</div>
         ${bi && stg.companyNameAr ? `<div style="text-align:center;font-size:13px;direction:rtl;">${stg.companyNameAr}</div>` : ''}
@@ -303,7 +342,7 @@ export default function Invoice() {
     if (!ord || !ord.items) return '';
     const tags = [];
     const items = typeof ord.items === 'string' ? JSON.parse(ord.items) : ord.items;
-    
+
     items.forEach(item => {
       for (let i = 0; i < item.qty; i++) {
         tags.push({
@@ -318,7 +357,7 @@ export default function Invoice() {
     const formattedDate = formatDate(ord.createdAt);
 
     return `
-      <div style="font-family:'Inter', sans-serif; background:white; color:black; width:100%; max-width:80mm; margin:0 auto; padding:8px;">
+      <div style="font-family:'Inter', sans-serif; background:white; color:black; width:100%; max-width:80mm; margin:0; padding:8px;">
         ${tags.map((tag, idx) => `
           <div style="border:1px dashed #000; padding:8px; display:flex; flex-direction:column; width:100%; height:140px; margin-bottom:10px; page-break-inside:avoid; overflow:hidden;">
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #000; padding-bottom:4px; margin-bottom:6px;">
@@ -352,7 +391,7 @@ export default function Invoice() {
   };
 
   const executeNativePrint = async (forceSilent = null, printerType = 'billing') => {
-    if (window.electronAPI?.printInvoice && order) {
+    if (electronAPI?.printInvoice && order) {
       const printerName = printerType === 'tag' ? settings.tagPrinter : settings.billingPrinter;
 
       if (!printerName) {
@@ -363,17 +402,52 @@ export default function Invoice() {
         return;
       }
 
-      const html = printerType === 'tag' ? buildTagHtml(order, settings) : buildReceiptHtml(order, settings);
+      let html = '';
+      if (printerType === 'tag') {
+        html = buildTagHtml(order, settings);
+      } else {
+        const area = document.getElementById('printable-invoice-area');
+        html = area ? area.innerHTML : buildReceiptHtml(order, settings);
+      }
 
-      const res = await window.electronAPI.printInvoice({
+      // Convert relative asset paths to absolute URLs so Electron print window can load them
+      const origin = window.location.origin;
+      html = html.replace(/src="\/src\/assets\//g, `src="${origin}/src/assets/`);
+      html = html.replace(/src="\/assets\//g, `src="${origin}/assets/`);
+
+      const printSize = settings.receiptPrintSize || 'auto';
+      let pageSizeRule = '';
+      let pageSizeArg = 'A5';
+      if (printerType === 'tag') {
+        pageSizeRule = 'size: 80mm auto;';
+        pageSizeArg = { width: 80000, height: 200000 };
+      } else if (printSize === 'thermal') {
+        pageSizeRule = 'size: 80mm auto;';
+        pageSizeArg = { width: 80000, height: 200000 };
+      } else if (printSize === 'A5') {
+        pageSizeRule = 'size: A5;';
+        pageSizeArg = 'A5';
+      } else if (printSize === 'A4') {
+        pageSizeRule = 'size: A4;';
+        pageSizeArg = 'A4';
+      } else {
+        const isCompactTemplate = ['compact', 'compact 2'].includes(settings.invoiceTemplate);
+        pageSizeRule = isCompactTemplate ? 'size: 80mm auto;' : 'size: A5;';
+        pageSizeArg = isCompactTemplate ? { width: 80000, height: 200000 } : 'A5';
+      }
+      const pageMargin = printerType === 'tag' ? '0' : '2mm';
+
+      const res = await electronAPI.printInvoice({
         html,
         css: `
+          ${rawInvoiceCss || ''}
           * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           body { margin: 0; padding: 0; background: white; }
-          @page { margin: 2mm; }
+          @page { margin: ${pageMargin}; ${pageSizeRule} }
         `,
         printerName,
-        silent: true
+        silent: settings.silentPrinting !== false,
+        pageSize: pageSizeArg
       });
 
       if (res && !res.success) {
@@ -393,20 +467,31 @@ export default function Invoice() {
 
 
 
-  // Auto-print if query param is set
+  // Auto-print or Auto-download if query param is set
   useEffect(() => {
+    if (!settings) return; // Wait until settings are loaded from DB
     const shouldPrint = searchParams.get('print') === 'force' || (searchParams.get('print') === 'true' && settings.autoPrint);
-    if (order && shouldPrint) {
-      const timer = setTimeout(() => {
-        executeNativePrint();
-      }, 800);
-      return () => clearTimeout(timer);
+    const shouldDownload = searchParams.get('download') === 'force';
+    if (order) {
+      if (shouldPrint) {
+        const timer = setTimeout(() => {
+          executeNativePrint();
+        }, 800);
+        return () => clearTimeout(timer);
+      } else if (shouldDownload) {
+        const timer = setTimeout(() => {
+          generatePDF();
+        }, 800);
+        return () => clearTimeout(timer);
+      }
     }
-  }, [order, searchParams, settings.autoPrint]);
+  }, [order, searchParams, settings]);
 
   // Native Electron PDF — captures pre-rendered invoice HTML for perfect Arabic rendering
-  const generatePDF = async () => {
-    if (!window.electronAPI?.printToPDF) {
+  const generatePDF = async (overridePageSize = null) => {
+    const selectedSize = overridePageSize || settings.pdfPageSize || 'A5';
+    console.log("generatePDF triggered inside Invoice.jsx! order =", order?.id, "selectedSize =", selectedSize);
+    if (!electronAPI?.printToPDF) {
       executeNativePrint(false);
       return true;
     }
@@ -414,10 +499,14 @@ export default function Invoice() {
 
     setPdfLoading(true);
     try {
+      const isSilent = searchParams.get('download') === 'force';
       const filename = `Invoice_${order.id.replace(/[#/\\:*?"<>|]/g, '')}.pdf`;
 
       // ── Collect all CSS from the document ──
       let css = '';
+      document.querySelectorAll('style').forEach(styleTag => {
+        css += styleTag.innerHTML + '\n';
+      });
       for (const sheet of document.styleSheets) {
         try {
           const rules = Array.from(sheet.cssRules || []);
@@ -438,18 +527,35 @@ export default function Invoice() {
       }
       const html = clone.outerHTML;
 
-      const result = await window.electronAPI.printToPDF({ 
-        filename, 
-        html, 
-        css, 
-        pdfDownloadPath: settings.pdfDownloadPath || '' 
+      const result = await electronAPI.printToPDF({
+        filename,
+        html,
+        css,
+        pdfDownloadPath: settings.pdfDownloadPath || '',
+        origin: window.location.origin,
+        pageSize: selectedSize
       });
       if (result && result.success) {
-        alert(`Invoice PDF downloaded successfully!\nPath: ${result.filePath}`);
+        if (isSilent) {
+          window.parent?.postMessage({ type: 'pdf-downloaded', filePath: result.filePath }, '*');
+        } else {
+          setPdfToast({ success: true, message: `Saved to Downloads: ${filename}` });
+        }
+      } else {
+        if (isSilent) {
+          window.parent?.postMessage({ type: 'pdf-error', error: result?.error || 'PDF saving failed' }, '*');
+        } else {
+          setPdfToast({ success: false, message: result?.error || 'Unknown error' });
+        }
       }
-      return result.success;
+      return result && result.success;
     } catch (err) {
       console.error('PDF failed:', err);
+      if (isSilent) {
+        window.parent?.postMessage({ type: 'pdf-error', error: err.message }, '*');
+      } else {
+        setPdfToast({ success: false, message: err.message });
+      }
       return false;
     } finally {
       setPdfLoading(false);
@@ -500,9 +606,9 @@ export default function Invoice() {
     if (due > 0 && settings.enablePaymentLinks !== false && settings.enableNomod) {
       // Auto generate / retrieve payment link
       let paymentLinkUrl = '';
-      if (window.electronAPI?.dbQuery) {
+      if (electronAPI?.dbQuery) {
         try {
-          const searchRes = await window.electronAPI.dbQuery(
+          const searchRes = await electronAPI.dbQuery(
             `SELECT * FROM payment_links WHERE (description LIKE ? OR id = ?) AND status IN ('Active', 'Pending') LIMIT 1`,
             [`%${order.id}%`, `LNK-${order.billNumber}`]
           );
@@ -512,11 +618,11 @@ export default function Invoice() {
             const linkId = `LNK-${order.billNumber || Date.now().toString().slice(-4)}`;
             let url = '';
             let checkoutIdVal = linkId;
-            
+
             if (settings.enableNomod) {
               try {
                 const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
-                const checkoutRes = await window.electronAPI.createNomodCheckout({
+                const checkoutRes = await electronAPI.createNomodCheckout({
                   amount: due,
                   currency: settings.nomodCurrency || 'AED',
                   customer: {
@@ -526,11 +632,11 @@ export default function Invoice() {
                   orderId: order.id,
                   userRole: currentUser.role || 'staff'
                 });
- 
+
                 if (checkoutRes.success && checkoutRes.data && checkoutRes.data.url) {
                   url = checkoutRes.data.url;
                   checkoutIdVal = checkoutRes.data.id || linkId;
-                  await window.electronAPI.dbQuery(
+                  await electronAPI.dbQuery(
                     `UPDATE orders SET nomodCheckoutId = ?, nomodPaymentLink = ?, nomodPaymentStatus = 'Pending', isSynced = 0, updatedAt = ? 
                      WHERE id = ?`,
                     [checkoutIdVal, url, new Date().toISOString(), order.id]
@@ -560,9 +666,9 @@ export default function Invoice() {
               const paymentBase = (settings.paymentBaseUrl || 'https://pay.laundry.ae').replace(/\/$/, '');
               url = `${paymentBase}/lnk/${linkId.toLowerCase()}`;
             }
- 
+
             const dateStr = getLocalDateTime();
-            await window.electronAPI.dbQuery(
+            await electronAPI.dbQuery(
               `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
                VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?, ?)`,
               [
@@ -576,7 +682,7 @@ export default function Invoice() {
                 checkoutIdVal
               ]
             );
-            
+
             paymentService.startTracking(order.id, checkoutIdVal);
             paymentLinkUrl = url;
           }
@@ -589,13 +695,20 @@ export default function Invoice() {
       }
 
       if (paymentLinkUrl) {
-        message += `\n\nPlease pay online using this link: ${paymentLinkUrl}`;
+        const template = settings.waNomodPaymentTemplate || `*PAYMENT REQUEST - {shopName}*\n\nDear {customerName},\n\nHere is your payment link for Order #{orderId} totaling *{total}*.\n\n*Total Due:* {dueAmount}\n*Pay Securely Online:* {paymentLink}\n\nThank you for choosing {shopName}!`;
+        message = template
+          .replace(/{customerName}/g, order.customer || 'Customer')
+          .replace(/{orderId}/g, order.id)
+          .replace(/{total}/g, `${settings.currencySymbol || 'AED'} ${order.total.toFixed(2)}`)
+          .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${due.toFixed(2)}`)
+          .replace(/{paymentLink}/g, paymentLinkUrl)
+          .replace(/{shopName}/g, settings.shopName || 'Laundry Box');
       }
     }
 
     const url = `https://wa.me/${finalPhone}?text=${encodeURIComponent(message)}`;
-    if (window.electronAPI?.openExternal) {
-      window.electronAPI.openExternal(url);
+    if (electronAPI?.openExternal) {
+      electronAPI.openExternal(url);
     } else {
       window.open(url, '_blank');
     }
@@ -610,6 +723,16 @@ export default function Invoice() {
       document.body.classList.remove('printing-tags');
     }, 500);
   };
+
+  if (errorMsg) {
+    return (
+      <div className={styles.invoicePage} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '50vh', gap: '1rem' }}>
+        <h2 style={{ color: '#DC2626' }}>Loading Failed</h2>
+        <p style={{ color: '#64748B' }}>{errorMsg}</p>
+        <button className="btn btn-primary" onClick={() => navigate(-1)}>Go Back</button>
+      </div>
+    );
+  }
 
   if (!order) return <div className={styles.loading}>Loading Invoice...</div>;
 
@@ -628,19 +751,72 @@ export default function Invoice() {
           <button className={styles.printBtn} style={{ height: '36px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', borderRadius: '8px', border: '1.5px solid var(--primary)' }} onClick={handlePrintTags}>
             <Tag size={16} /> Print Garment Tags
           </button>
-          <button className={styles.pdfBtn} style={{ height: '36px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', borderRadius: '8px', border: '1.5px solid var(--secondary)', background: 'white', color: 'var(--secondary)' }} onClick={generatePDF} disabled={pdfLoading}>
-            <FileText size={16} /> {pdfLoading ? 'Generating...' : 'Download PDF'}
-          </button>
+          <div style={{ position: 'relative' }}>
+            <button className={styles.pdfBtn} style={{ height: '36px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', borderRadius: '8px', border: '1.5px solid var(--secondary)', background: 'white', color: 'var(--secondary)' }} onClick={() => setShowFormatDropdown(!showFormatDropdown)} disabled={pdfLoading}>
+              <FileText size={16} /> {pdfLoading ? 'Generating...' : 'Download PDF'}
+            </button>
+            {showFormatDropdown && (
+              <div style={{
+                position: 'absolute',
+                top: '42px',
+                right: '0',
+                zIndex: 1000,
+                background: 'white',
+                border: '1px solid #E2E8F0',
+                borderRadius: '10px',
+                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                padding: '0.5rem 0',
+                minWidth: '220px',
+                display: 'flex',
+                flexDirection: 'column'
+              }}>
+                <div style={{ padding: '0.5rem 1rem', fontSize: '0.78rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #F1F5F9', marginBottom: '0.35rem' }}>
+                  Choose PDF Layout
+                </div>
+                {[
+                  { value: 'A4', label: 'A4 (Standard Document)' },
+                  { value: 'A5', label: 'A5 (Half-Page Receipt)' },
+                  { value: 'A6', label: 'A6 (Small Slip)' },
+                  { value: 'thermal', label: 'Thermal Roll (80mm)' }
+                ].map(opt => (
+                  <button
+                    key={opt.value}
+                    style={{
+                      padding: '0.6rem 1rem',
+                      textAlign: 'left',
+                      background: 'none',
+                      border: 'none',
+                      fontSize: '0.85rem',
+                      color: '#334155',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      fontWeight: (settings.pdfPageSize || 'A5') === opt.value ? 700 : 400
+                    }}
+                    onClick={() => {
+                      setShowFormatDropdown(false);
+                      generatePDF(opt.value);
+                    }}
+                    onMouseEnter={(e) => e.target.style.background = '#F8FAFC'}
+                    onMouseLeave={(e) => e.target.style.background = 'none'}
+                  >
+                    <span>{opt.label}</span>
+                    {(settings.pdfPageSize || 'A5') === opt.value && (
+                      <span style={{ fontSize: '0.72rem', color: 'var(--secondary)', fontWeight: 600 }}>[Default]</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button className={styles.waBtn} style={{ height: '36px', padding: '0 1rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', borderRadius: '8px', border: '1.5px solid #25D366', background: 'white', color: '#25D366' }} onClick={handleWhatsApp}>
             <Send size={16} /> Send via WhatsApp
-          </button>
-          <button className={styles.closeBtn} onClick={() => navigate(-1)}>
-            <X size={18} /> Close
           </button>
         </div>
       </div>
 
-      <div ref={invoiceRef}>
+      <div ref={invoiceRef} id="printable-invoice-area">
         <InvoiceTemplate order={order} settings={settings} onOrderUpdate={(updated) => setOrder(updated)} />
       </div>
 
@@ -680,10 +856,10 @@ export default function Invoice() {
                 className="btn btn-primary"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '0.85rem', fontWeight: 700, background: '#EC4899', borderColor: '#EC4899' }}
                 onClick={async () => {
-                  if (!window.electronAPI) return;
+                  if (!electronAPI) return;
                   try {
                     if (order.nomodCheckoutId) {
-                      await window.electronAPI.dbQuery(
+                      await electronAPI.dbQuery(
                         "UPDATE payment_links SET status = 'Expired' WHERE checkoutId = ?",
                         [order.nomodCheckoutId]
                       );
@@ -693,7 +869,7 @@ export default function Invoice() {
                     const linkId = `LNK-${order.billNumber || Date.now().toString().slice(-4)}-${Date.now().toString().slice(-3)}`;
                     const due = order.dueAmount ?? (order.totalAmount - (order.paidAmount || 0));
 
-                    const checkoutRes = await window.electronAPI.createNomodCheckout({
+                    const checkoutRes = await electronAPI.createNomodCheckout({
                       amount: due,
                       currency: settings.nomodCurrency || 'AED',
                       customer: { name: order.customerName || order.customer, phone: order.customerPhone },
@@ -705,7 +881,7 @@ export default function Invoice() {
                       const newCheckoutId = checkoutRes.data.id || linkId;
 
                       const dateStr = getLocalDateTime();
-                      await window.electronAPI.dbQuery(
+                      await electronAPI.dbQuery(
                         `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
                          VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?, ?)`,
                         [
@@ -720,7 +896,7 @@ export default function Invoice() {
                         ]
                       );
 
-                      await window.electronAPI.dbQuery(
+                      await electronAPI.dbQuery(
                         "UPDATE orders SET nomodCheckoutId = ?, nomodPaymentStatus = 'Pending', updatedAt = ? WHERE id = ?",
                         [newCheckoutId, new Date().toISOString(), order.id]
                       );
@@ -749,6 +925,71 @@ export default function Invoice() {
         <div style={{ position: 'fixed', left: '-9999px', top: '-9999px', width: '80mm', opacity: 0 }}>
           <DressTag order={order} />
         </div>
+      )}
+
+      {pdfToast && (
+        <>
+          <style>{`
+            @keyframes toastSlideIn {
+              0% { transform: translateX(120%) scale(0.9); opacity: 0; }
+              70% { transform: translateX(-10px) scale(1.02); opacity: 1; }
+              100% { transform: translateX(0) scale(1); opacity: 1; }
+            }
+            @keyframes toastProgress {
+              0% { width: 100%; }
+              100% { width: 0%; }
+            }
+            .premium-toast {
+              position: fixed;
+              top: 24px;
+              right: 24px;
+              background: rgba(15, 23, 42, 0.95);
+              backdrop-filter: blur(8px);
+              color: white;
+              padding: 1rem 1.5rem;
+              border-radius: 12px;
+              box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
+              display: flex;
+              align-items: center;
+              gap: 16px;
+              z-index: 999999;
+              font-family: 'Inter', sans-serif;
+              max-width: 400px;
+              border: 1px solid rgba(255, 255, 255, 0.1);
+              border-left: 5px solid ${pdfToast.success ? '#10B981' : '#EF4444'};
+              animation: toastSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+              overflow: hidden;
+            }
+            .premium-toast-progress {
+              position: absolute;
+              bottom: 0;
+              left: 0;
+              height: 3px;
+              background: ${pdfToast.success ? '#10B981' : '#EF4444'};
+              animation: toastProgress 3s linear forwards;
+            }
+          `}</style>
+          <div className="premium-toast">
+            {pdfToast.success ? (
+              <svg style={{ width: '22px', height: '22px', color: '#10B981', flexShrink: 0, fill: 'none', stroke: 'currentColor', strokeWidth: '2' }} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            ) : (
+              <svg style={{ width: '22px', height: '22px', color: '#EF4444', flexShrink: 0, fill: 'none', stroke: 'currentColor', strokeWidth: '2' }} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontWeight: 700, fontSize: '0.92rem', letterSpacing: '-0.01em' }}>
+                {pdfToast.success ? 'Invoice PDF Saved' : 'Download Failed'}
+              </span>
+              <span style={{ fontSize: '0.78rem', opacity: 0.85, marginTop: '2px', wordBreak: 'break-all', fontWeight: 400 }}>
+                {pdfToast.message}
+              </span>
+            </div>
+            <div className="premium-toast-progress" />
+          </div>
+        </>
       )}
     </div>
   );
