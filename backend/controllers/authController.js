@@ -13,7 +13,8 @@ function isMongoConnected() {
 
 async function initLocalDb() {
   if (!fs.existsSync(USERS_FILE)) {
-    const adminPassHash = await bcrypt.hash('Admin123', 10);
+    const adminPassHash = await bcrypt.hash('Admin@123', 10);
+    const adminPinHash = await bcrypt.hash('disabled', 10);
     const defaultUsers = [
       {
         _id: 'local_admin_2',
@@ -21,7 +22,7 @@ async function initLocalDb() {
         phone: '+9710588851680',
         userId: 'super admin',
         password: adminPassHash,
-        pin: adminPassHash,
+        pin: adminPinHash,
         role: 'super_admin',
         shopId: 'SHOP_01',
         createdAt: new Date().toISOString()
@@ -124,7 +125,7 @@ exports.login = async (req, res) => {
       if (method === 'pin' && (!identifier || identifier.trim() === '')) {
         // Support PIN-only login if identifier is missing
         for (const u of users) {
-          if (await bcrypt.compare(secret, u.pin)) {
+          if (u.pin && await bcrypt.compare(secret, u.pin)) {
             user = u;
             break;
           }
@@ -156,7 +157,7 @@ exports.login = async (req, res) => {
 
       let isMatch = false;
       if (method === 'pin') {
-        isMatch = await bcrypt.compare(secret, user.pin);
+        isMatch = user.pin && await bcrypt.compare(secret, user.pin);
       } else {
         isMatch = await bcrypt.compare(secret, user.password);
       }
@@ -176,7 +177,7 @@ exports.login = async (req, res) => {
     if (method === 'pin' && (!identifier || identifier.trim() === '')) {
       const allUsers = await User.find({});
       for (const u of allUsers) {
-        if (await u.comparePin(secret)) {
+        if (u.pin && await u.comparePin(secret)) {
           user = u;
           break;
         }
@@ -354,9 +355,13 @@ exports.verifyManagerPin = async (req, res) => {
 
 exports.resetUsers = async (req, res) => {
   try {
-    const adminPassHash = await bcrypt.hash('Admin123', 10);
+    const adminPassHash = await bcrypt.hash('Admin@123', 10);
     const cashierPassHash = await bcrypt.hash('Admin123', 10);
     const managerPassHash = await bcrypt.hash('Admin123', 10);
+
+    const adminPinHash = await bcrypt.hash('disabled', 10);
+    const cashierPinHash = await bcrypt.hash('0000', 10);
+    const managerPinHash = await bcrypt.hash('1234', 10);
 
     const defaultUsers = [
       {
@@ -365,7 +370,7 @@ exports.resetUsers = async (req, res) => {
         phone: '+9710588851680',
         userId: 'super admin',
         password: adminPassHash,
-        pin: adminPassHash,
+        pin: adminPinHash,
         role: 'super_admin',
         shopId: 'SHOP_01',
         createdAt: '2026-06-20T07:43:00.000Z'
@@ -376,7 +381,7 @@ exports.resetUsers = async (req, res) => {
         phone: '+971000000000',
         userId: 'cashier',
         password: cashierPassHash,
-        pin: cashierPassHash,
+        pin: cashierPinHash,
         role: 'cashier',
         shopId: 'SHOP_01',
         createdAt: '2026-06-20T07:43:00.000Z'
@@ -387,7 +392,7 @@ exports.resetUsers = async (req, res) => {
         phone: '+9710599999999',
         userId: 'manager',
         password: managerPassHash,
-        pin: managerPassHash,
+        pin: managerPinHash,
         role: 'manager',
         shopId: 'SHOP_01',
         createdAt: '2026-06-25T11:40:00.000Z'
@@ -398,15 +403,26 @@ exports.resetUsers = async (req, res) => {
       saveLocalUsers(defaultUsers);
     } else {
       await User.deleteMany({});
-      const seedUsers = defaultUsers.map(u => new User({
-        name: u.name,
-        phone: u.phone,
-        userId: u.userId,
-        password: 'Admin123',
-        pin: 'Admin123',
-        role: u.role,
-        shopId: u.shopId
-      }));
+      const seedUsers = defaultUsers.map(u => {
+        let pinVal = '0000';
+        let passVal = 'Admin123';
+        if (u.role === 'super_admin') {
+          pinVal = 'disabled';
+          passVal = 'Admin@123';
+        } else if (u.role === 'manager') {
+          pinVal = '1234';
+        }
+
+        return new User({
+          name: u.name,
+          phone: u.phone,
+          userId: u.userId,
+          password: passVal,
+          pin: pinVal,
+          role: u.role,
+          shopId: u.shopId
+        });
+      });
 
       for (const u of seedUsers) {
         await u.save();

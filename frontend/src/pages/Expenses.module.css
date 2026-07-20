@@ -87,7 +87,7 @@
   background: white;
   border-radius: 16px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  overflow: hidden;
+  position: relative;
 }
 
 .tableHeader {
@@ -313,51 +313,61 @@
   border-radius: 12px;
   border: 1px solid #E2E8F0;
   background: #F8FAFC;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
   color: #1E293B;
   outline: none;
-  transition: all 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .formGroup input:focus, .formGroup select:focus {
-  border-color: var(--primary);
+  border-color: #2563EB;
   background: white;
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
 }
 
 .modalFooter {
   padding: 1.5rem 2rem;
-  background: #F8FAFC;
+  background: white;
   display: flex;
   justify-content: flex-end;
   gap: 1rem;
+  border-top: 1px solid #F1F5F9;
 }
 
 .secondaryBtn {
-  padding: 0.85rem 1.75rem;
+  padding: 0.8rem 1.75rem;
   border-radius: 12px;
   border: 1px solid #E2E8F0;
   background: white;
   color: #64748B;
   font-weight: 700;
   cursor: pointer;
+  transition: all 0.2s;
+}
+
+.secondaryBtn:hover {
+  background: #F8FAFC;
+  color: #1E293B;
+  border-color: #CBD5E1;
 }
 
 .primaryBtn {
-  padding: 0.85rem 1.75rem;
+  padding: 0.8rem 1.75rem;
   border-radius: 12px;
   border: none;
-  background: var(--primary);
+  background: #2563EB;
   color: white;
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+  transition: all 0.2s;
 }
 
 .primaryBtn:hover {
-  background: var(--primary-hover);
+  background: #1D4ED8;
   transform: translateY(-1px);
+  box-shadow: 0 6px 12px -2px rgba(37, 99, 235, 0.3);
 }
 
 /* Tax Toggle Section */
@@ -431,7 +441,7 @@
 }
 
 input:checked + .slider {
-  background-color: var(--primary);
+  background-color: #10B981;
 }
 
 input:checked + .slider:before {
@@ -583,4 +593,23 @@ input:checked + .slider:before {
   background-repeat: no-repeat;
   background-position: right center;
   background-size: 10px;
+}
+
+@media print {
+  .headerRow > div:last-child,
+  .tableHeader,
+  .deleteBtn,
+  .pagination,
+  th:last-child,
+  td:last-child {
+    display: none !important;
+  }
+  .expensesPage {
+    padding: 0 !important;
+    background: white !important;
+  }
+  .tableCard {
+    border: none !important;
+    box-shadow: none !important;
+  }
 }

@@ -9,6 +9,7 @@ import Cropper from 'react-easy-crop';
 import getCroppedImg from '../utils/cropImage';
 import { DEFAULT_SHOP_ID, CATEGORIES, API_BASE_URL } from '../constants';
 import axios from 'axios';
+import { authApi } from '../services/api';
 import { useSettings } from '../store/SettingsContext';
 import Activation from './Activation';
 import { t } from '../utils/translations';
@@ -18,6 +19,7 @@ import EmailReportsSettings from '../components/EmailReportsSettings';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import defaultLogo from '../assets/logo.png';
+import CustomSelect from '../components/CustomSelect';
 import styles from './Settings.module.css';
 
 export default function Settings() {
@@ -46,6 +48,56 @@ export default function Settings() {
     originalSettings,
     setOriginalSettings
   } = useSettings();
+
+  const [isApiKeyUnlocked, setIsApiKeyUnlocked] = useState(false);
+  const [showApiKeyPinModal, setShowApiKeyPinModal] = useState(false);
+  const [apiKeyPinValue, setApiKeyPinValue] = useState('');
+  const [apiKeyPinError, setApiKeyPinError] = useState('');
+
+  const handleVerifyPinForApiKey = async () => {
+    setApiKeyPinError('');
+    if (!apiKeyPinValue) {
+      setApiKeyPinError('PIN is required');
+      return;
+    }
+    try {
+      const configuredPin = settings.orderDeletePin || '0000';
+      if (apiKeyPinValue === configuredPin) {
+        setIsApiKeyUnlocked(true);
+        setShowApiKeyPinModal(false);
+        setApiKeyPinValue('');
+        return;
+      }
+      
+      let isValid = false;
+      if (window.electronAPI?.verifyManagerPin) {
+        const userRole = user.role ? (user.role === 'super_admin' ? 'Super Admin' : user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ')) : 'Staff';
+        const userId = `${userRole}: ${user.name || user.username || 'User'}`;
+        const res = await window.electronAPI.verifyManagerPin({
+          pin: apiKeyPinValue,
+          userId
+        });
+        isValid = res && res.success;
+      } else {
+        const verifyRes = await authApi.verifyManagerPin(apiKeyPinValue);
+        isValid = verifyRes.data.valid;
+      }
+
+      if (isValid) {
+        setIsApiKeyUnlocked(true);
+        setShowApiKeyPinModal(false);
+        setApiKeyPinValue('');
+      } else {
+        setApiKeyPinError("Invalid Manager PIN!");
+      }
+    } catch (err) {
+      if (err.response && (err.response.status === 401 || err.response.status === 403)) {
+        setApiKeyPinError("Invalid Manager PIN!");
+      } else {
+        setApiKeyPinError("Verification failed or offline.");
+      }
+    }
+  };
 
   // Store initial settings copy when component mounts
   useEffect(() => {
@@ -974,13 +1026,45 @@ export default function Settings() {
                 <div className={styles.formGrid}>
                   <div className={styles.formGroup}>
                     <label>API Key</label>
-                    <input
-                      type="password"
-                      className={styles.inputField}
-                      placeholder="Live or Sandbox API Key (X-API-KEY)"
-                      value={settings.nomodApiKey || ''}
-                      onChange={(e) => updateSettings({ nomodApiKey: e.target.value })}
-                    />
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input
+                        type="password"
+                        className={styles.inputField}
+                        placeholder={isApiKeyUnlocked ? "Enter new API Key" : "••••••••••••••••"}
+                        value={isApiKeyUnlocked ? (settings.nomodApiKey || '') : '••••••••••••••••'}
+                        onChange={(e) => {
+                          if (isApiKeyUnlocked) {
+                            updateSettings({ nomodApiKey: e.target.value });
+                          }
+                        }}
+                        disabled={!isApiKeyUnlocked}
+                      />
+                      <button
+                        type="button"
+                        className={styles.saveBtn}
+                        style={{
+                          background: isApiKeyUnlocked ? '#10B981' : '#475569',
+                          padding: '0 1rem',
+                          fontSize: '0.8rem',
+                          whiteSpace: 'nowrap',
+                          height: '42px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        onClick={() => {
+                          if (isApiKeyUnlocked) {
+                            setIsApiKeyUnlocked(false);
+                            return;
+                          }
+                          setApiKeyPinError('');
+                          setApiKeyPinValue('');
+                          setShowApiKeyPinModal(true);
+                        }}
+                      >
+                        {isApiKeyUnlocked ? "Lock" : "Change Key"}
+                      </button>
+                    </div>
                   </div>
                   <div className={styles.formGroup}>
                     <label>Merchant ID</label>
@@ -994,14 +1078,14 @@ export default function Settings() {
                   </div>
                   <div className={styles.formGroup}>
                     <label>Environment</label>
-                    <select
-                      className={styles.inputField}
+                    <CustomSelect
                       value={settings.nomodEnv || 'sandbox'}
                       onChange={(e) => updateSettings({ nomodEnv: e.target.value })}
-                    >
-                      <option value="sandbox">Sandbox</option>
-                      <option value="live">Live</option>
-                    </select>
+                      options={[
+                        { value: 'sandbox', label: 'Sandbox' },
+                        { value: 'live', label: 'Live' }
+                      ]}
+                    />
                   </div>
                   <div className={styles.formGroup}>
                     <label>Default Currency</label>
@@ -1087,15 +1171,15 @@ export default function Settings() {
                 <div className={styles.formGrid}>
                   <div className={styles.formGroup}>
                     <label>System Language</label>
-                    <select
-                      className={styles.inputField}
+                    <CustomSelect
                       value={settings.language || 'English'}
                       onChange={(e) => updateSettings({ language: e.target.value })}
-                    >
-                      <option value="English">English</option>
-                      <option value="Arabic">Arabic (العربية)</option>
-                      <option value="Hindi">Hindi (हिन्दी)</option>
-                    </select>
+                      options={[
+                        { value: 'English', label: 'English' },
+                        { value: 'Arabic', label: 'Arabic (العربية)' },
+                        { value: 'Hindi', label: 'Hindi (हिन्दी)' }
+                      ]}
+                    />
                   </div>
                   <div className={styles.formGroup}>
                     <label>Currency Symbol</label>
@@ -1112,29 +1196,29 @@ export default function Settings() {
                   </div>
                   <div className={styles.formGroup}>
                     <label>Date Format</label>
-                    <select
-                      className={styles.inputField}
+                    <CustomSelect
                       value={settings.dateFormat || 'DD/MM/YYYY'}
                       onChange={(e) => updateSettings({ dateFormat: e.target.value })}
-                    >
-                      <option value="DD/MM/YYYY">DD/MM/YYYY</option>
-                      <option value="MM/DD/YYYY">MM/DD/YYYY</option>
-                      <option value="YYYY-MM-DD">YYYY-MM-DD</option>
-                      <option value="DD-MM-YYYY">DD-MM-YYYY</option>
-                      <option value="DD MMM YYYY">DD MMM YYYY (e.g. 25 May 2026)</option>
-                      <option value="MMM DD, YYYY">MMM DD, YYYY (e.g. May 25, 2026)</option>
-                    </select>
+                      options={[
+                        { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
+                        { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
+                        { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
+                        { value: 'DD-MM-YYYY', label: 'DD-MM-YYYY' },
+                        { value: 'DD MMM YYYY', label: 'DD MMM YYYY (e.g. 25 May 2026)' },
+                        { value: 'MMM DD, YYYY', label: 'MMM DD, YYYY (e.g. May 25, 2026)' }
+                      ]}
+                    />
                   </div>
                   <div className={styles.formGroup}>
                     <label>Time Format</label>
-                    <select
-                      className={styles.inputField}
+                    <CustomSelect
                       value={settings.timeFormat || '12h'}
                       onChange={(e) => updateSettings({ timeFormat: e.target.value })}
-                    >
-                      <option value="12h">12-Hour (AM/PM)</option>
-                      <option value="24h">24-Hour</option>
-                    </select>
+                      options={[
+                        { value: '12h', label: '12-Hour (AM/PM)' },
+                        { value: '24h', label: '24-Hour' }
+                      ]}
+                    />
                   </div>
                 </div>
               </div>
@@ -1156,16 +1240,16 @@ export default function Settings() {
                   </div>
                   <div className={styles.formGroup}>
                     <label>Default Payment Method</label>
-                    <select
-                      className={styles.inputField}
+                    <CustomSelect
                       value={settings.defaultPaymentMethod || 'Cash'}
                       onChange={(e) => updateSettings({ defaultPaymentMethod: e.target.value })}
-                    >
-                      <option value="Cash">Cash</option>
-                      <option value="Card">Card</option>
-                      <option value="UPI">UPI</option>
-                      <option value="Not Paid">Not Paid</option>
-                    </select>
+                      options={[
+                        { value: 'Cash', label: 'Cash' },
+                        { value: 'Card', label: 'Card' },
+                        { value: 'UPI', label: 'UPI' },
+                        { value: 'Not Paid', label: 'Not Paid' }
+                      ]}
+                    />
                   </div>
                   <div className={styles.formGroup}>
                     <label>Card Commission (%)</label>
@@ -1179,33 +1263,31 @@ export default function Settings() {
                   </div>
                   <div className={styles.formGroup}>
                     <label>Card Default Account</label>
-                    <select
-                      className={styles.inputField}
+                    <CustomSelect
                       value={settings.cardDefaultAccountId || ''}
                       onChange={(e) => updateSettings({ cardDefaultAccountId: e.target.value })}
-                    >
-                      <option value="">Select Account</option>
-                      {(settings.bankAccounts || []).map((acc) => (
-                        <option key={acc.id} value={acc.id}>
-                          {acc.bankName} ({acc.accountNumber})
-                        </option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: '', label: 'Select Account' },
+                        ...(settings.bankAccounts || []).map((acc) => ({
+                          value: acc.id,
+                          label: `${acc.bankName} (${acc.accountNumber})`
+                        }))
+                      ]}
+                    />
                   </div>
                   <div className={styles.formGroup}>
                     <label>UPI Default Account</label>
-                    <select
-                      className={styles.inputField}
+                    <CustomSelect
                       value={settings.upiDefaultAccountId || ''}
                       onChange={(e) => updateSettings({ upiDefaultAccountId: e.target.value })}
-                    >
-                      <option value="">Select Account</option>
-                      {(settings.bankAccounts || []).map((acc) => (
-                        <option key={acc.id} value={acc.id}>
-                          {acc.bankName} ({acc.accountNumber})
-                        </option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: '', label: 'Select Account' },
+                        ...(settings.bankAccounts || []).map((acc) => ({
+                          value: acc.id,
+                          label: `${acc.bankName} (${acc.accountNumber})`
+                        }))
+                      ]}
+                    />
                   </div>
                 </div>
               </div>
@@ -1728,15 +1810,11 @@ export default function Settings() {
                   </div>
                   <div className={styles.formGroup}>
                     <label>Emirate</label>
-                    <select
-                      className={styles.inputField}
+                    <CustomSelect
                       value={settings.emirate}
                       onChange={(e) => updateSettings({ emirate: e.target.value })}
-                    >
-                      {['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'Umm Al Quwain', 'Ras Al Khaimah', 'Fujairah'].map(e => (
-                        <option key={e} value={e}>{e}</option>
-                      ))}
-                    </select>
+                      options={['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'Umm Al Quwain', 'Ras Al Khaimah', 'Fujairah'].map(e => ({ value: e, label: e }))}
+                    />
                   </div>
                 </div>
               </div>
@@ -2064,15 +2142,15 @@ export default function Settings() {
                   </div>
                   <div className={styles.formGroup}>
                     <label>Invoice Font Size</label>
-                    <select
-                      className={styles.inputField}
+                    <CustomSelect
                       value={settings.invoiceFontSize || 'normal'}
                       onChange={(e) => updateSettings({ invoiceFontSize: e.target.value })}
-                    >
-                      <option value="small">Small (compact, more items fit)</option>
-                      <option value="normal">Normal (default)</option>
-                      <option value="large">Large (easier to read)</option>
-                    </select>
+                      options={[
+                        { value: 'small', label: 'Small (compact, more items fit)' },
+                        { value: 'normal', label: 'Normal (default)' },
+                        { value: 'large', label: 'Large (easier to read)' }
+                      ]}
+                    />
                   </div>
                 </div>
               </div>
@@ -2306,9 +2384,6 @@ export default function Settings() {
             <div className={styles.profileContainer}>
               <div className={styles.card}>
                 <h2 className={styles.cardTitle}>WhatsApp Integration Preferences</h2>
-                <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.5rem' }}>
-                  Configure your default country prefix and customizable messaging templates for customer communications.
-                </p>
 
                 <div className={styles.formGrid}>
                   <div className={styles.formGroup}>
@@ -2337,7 +2412,7 @@ export default function Settings() {
                   Define custom content templates for automated text notifications. Use placeholders like <code>{"{customerName}"}</code>, <code>{"{orderId}"}</code>, <code>{"{total}"}</code>, <code>{"{dueAmount}"}</code>, and <code>{"{deliveryDate}"}</code>.
                 </p>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0em' }}>
                   <div className={styles.formGroup}>
                     <label>New Order / Invoice Confirmation Message</label>
                     <textarea
@@ -2487,29 +2562,23 @@ export default function Settings() {
               <div className={styles.card}>
                 <div>
                   <h2 className={styles.cardTitle}>Printer Configuration</h2>
-                  <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.5rem' }}>
-                    Configure hardware printing settings. Silent printing directs print jobs instantly to the chosen printer without showing the print dialog.
-                  </p>
                 </div>
 
                 <div className={styles.formGrid}>
                   <div className={styles.formGroup}>
                     <label>Default Printer</label>
-                    <div className={styles.inputWrapper}>
-                      <select
-                        className={styles.inputField}
-                        value={settings.billingPrinter || ''}
-                        onChange={(e) => updateSettings({ billingPrinter: e.target.value })}
-                      >
-                        <option value="">Show Print Dialog (Ask Every Time)</option>
-                        <option value="System Default Printer">System Default Printer (Silent)</option>
-                        {availablePrinters.map(p => (
-                          <option key={p.name} value={p.name}>
-                            {p.name} {p.isDefault ? '(Default)' : ''} {isVirtualPrinter(p.name) ? '⚠️ (Virtual/No Silent)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <CustomSelect
+                      value={settings.billingPrinter || ''}
+                      onChange={(e) => updateSettings({ billingPrinter: e.target.value })}
+                      options={[
+                        { value: '', label: 'Show Print Dialog (Ask Every Time)' },
+                        { value: 'System Default Printer', label: 'System Default Printer (Silent)' },
+                        ...availablePrinters.map(p => ({
+                          value: p.name,
+                          label: `${p.name} ${p.isDefault ? '(Default)' : ''} ${isVirtualPrinter(p.name) ? '⚠️' : ''}`
+                        }))
+                      ]}
+                    />
                     <p style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.5rem', marginBottom: '0.5rem' }}>
                       Printers configured here will be used when printing billing invoices and receipts.
                     </p>
@@ -2561,21 +2630,18 @@ export default function Settings() {
 
                   <div className={styles.formGroup}>
                     <label>Garment Tag Printer</label>
-                    <div className={styles.inputWrapper}>
-                      <select
-                        className={styles.inputField}
-                        value={settings.tagPrinter || ''}
-                        onChange={(e) => updateSettings({ tagPrinter: e.target.value })}
-                      >
-                        <option value="">Show Print Dialog (Ask Every Time)</option>
-                        <option value="System Default Printer">System Default Printer (Silent)</option>
-                        {availablePrinters.map(p => (
-                          <option key={p.name} value={p.name}>
-                            {p.name} {p.isDefault ? '(Default)' : ''} {isVirtualPrinter(p.name) ? '⚠️ (Virtual/No Silent)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <CustomSelect
+                      value={settings.tagPrinter || ''}
+                      onChange={(e) => updateSettings({ tagPrinter: e.target.value })}
+                      options={[
+                        { value: '', label: 'Show Print Dialog (Ask Every Time)' },
+                        { value: 'System Default Printer', label: 'System Default Printer (Silent)' },
+                        ...availablePrinters.map(p => ({
+                          value: p.name,
+                          label: `${p.name} ${p.isDefault ? '(Default)' : ''} ${isVirtualPrinter(p.name) ? '⚠️' : ''}`
+                        }))
+                      ]}
+                    />
                     <p style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.5rem', marginBottom: '0.5rem' }}>
                       Printers configured here will be used when printing garment identification tags.
                     </p>
@@ -2666,17 +2732,16 @@ export default function Settings() {
                       <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Choose page format style for physical receipt printing</p>
                     </div>
                     <div style={{ width: '220px' }}>
-                      <select
-                        className={styles.inputField}
-                        style={{ height: '36px', padding: '0 0.5rem', fontSize: '0.8rem' }}
+                      <CustomSelect
                         value={settings.receiptPrintSize || 'auto'}
                         onChange={(e) => updateSettings({ receiptPrintSize: e.target.value })}
-                      >
-                        <option value="auto">Auto (Compact = Thermal, A5 for others)</option>
-                        <option value="thermal">Thermal (80mm)</option>
-                        <option value="A5">A5 Paper Size</option>
-                        <option value="A4">A4 Paper Size</option>
-                      </select>
+                        options={[
+                          { value: 'auto', label: 'Auto (Compact = Thermal, A5 for others)' },
+                          { value: 'thermal', label: 'Thermal (80mm)' },
+                          { value: 'A5', label: 'A5 Paper Size' },
+                          { value: 'A4', label: 'A4 Paper Size' }
+                        ]}
+                      />
                     </div>
                   </div>
                 </div>
@@ -2697,7 +2762,6 @@ export default function Settings() {
                 <div className={styles.cardHeader}>
                   <div>
                     <h2 className={styles.cardTitle}>Data Backup & Security</h2>
-                    <p style={{ fontSize: '0.85rem', color: '#64748B' }}>Export a manual copy of your local database to an external drive or cloud folder.</p>
                   </div>
                 </div>
 
@@ -2771,26 +2835,17 @@ export default function Settings() {
                         <label style={{ display: 'block', fontWeight: 600, color: '#1E293B', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
                           PDF Page Format
                         </label>
-                        <select
+                        <CustomSelect
                           value={settings.pdfPageSize || 'A5'}
                           onChange={(e) => updateSettings({ pdfPageSize: e.target.value })}
-                          style={{
-                            padding: '0.6rem 1rem',
-                            borderRadius: '8px',
-                            border: '1.5px solid #E2E8F0',
-                            background: 'white',
-                            color: '#1E293B',
-                            fontWeight: 500,
-                            fontSize: '0.875rem',
-                            outline: 'none',
-                            minWidth: '180px'
-                          }}
-                        >
-                          <option value="A4">A4 (Standard Document)</option>
-                          <option value="A5">A5 (Half-Page Receipt - Default)</option>
-                          <option value="A6">A6 (Small Slip)</option>
-                          <option value="thermal">Thermal Roll (80mm Width)</option>
-                        </select>
+                          options={[
+                            { value: 'A4', label: 'A4 (Standard Document)' },
+                            { value: 'A5', label: 'A5 (Half-Page Receipt - Default)' },
+                            { value: 'A6', label: 'A6 (Small Slip)' },
+                            { value: 'thermal', label: 'Thermal Roll (80mm Width)' }
+                          ]}
+                          style={{ minWidth: '180px', maxWidth: '300px' }}
+                        />
                         <p style={{ color: '#64748B', fontSize: '0.78rem', marginTop: '0.35rem' }}>
                           Select the paper dimensions for the downloaded PDF invoice.
                         </p>
@@ -2844,20 +2899,20 @@ export default function Settings() {
                       {settings.autoBackupPath && (
                         <div className={styles.formGroup} style={{ marginBottom: '1.25rem', maxWidth: '320px' }}>
                           <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#1E293B', display: 'block', marginBottom: '0.5rem' }}>Auto-Backup Interval</label>
-                          <select
-                            className={styles.inputField}
+                          <CustomSelect
                             value={settings.autoBackupInterval ?? 60}
                             onChange={(e) => updateSettings({ autoBackupInterval: parseInt(e.target.value) })}
-                          >
-                            <option value={60}>Every 1 Minute</option>
-                            <option value={300}>Every 5 Minutes</option>
-                            <option value={900}>Every 15 Minutes</option>
-                            <option value={1800}>Every 30 Minutes</option>
-                            <option value={3600}>Every 1 Hour</option>
-                            <option value={21600}>Every 6 Hours</option>
-                            <option value={86400}>Daily</option>
-                            <option value={0}>Disabled</option>
-                          </select>
+                            options={[
+                              { value: 60, label: 'Every 1 Minute' },
+                              { value: 300, label: 'Every 5 Minutes' },
+                              { value: 900, label: 'Every 15 Minutes' },
+                              { value: 1800, label: 'Every 30 Minutes' },
+                              { value: 3600, label: 'Every 1 Hour' },
+                              { value: 21600, label: 'Every 6 Hours' },
+                              { value: 86400, label: 'Daily' },
+                              { value: 0, label: 'Disabled' }
+                            ]}
+                          />
                         </div>
                       )}
 
@@ -3125,15 +3180,15 @@ export default function Settings() {
                       <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>POS Layout Style</h4>
                       <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Choose between standard layout (with photos/icons) and classic layout (without photos)</p>
                     </div>
-                    <select
-                      className={styles.inputField}
-                      style={{ width: '200px', padding: '0.4rem 0.75rem', fontSize: '0.9rem' }}
+                    <CustomSelect
                       value={settings.posLayoutTemplate || 'standard'}
                       onChange={(e) => updateSettings({ posLayoutTemplate: e.target.value })}
-                    >
-                      <option value="standard">Standard (With Photos)</option>
-                      <option value="classic">Classic (No Photos)</option>
-                    </select>
+                      options={[
+                        { value: 'standard', label: 'Standard (With Photos)' },
+                        { value: 'classic', label: 'Classic (No Photos)' }
+                      ]}
+                      style={{ width: '200px' }}
+                    />
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '1rem' }}>
@@ -3774,6 +3829,70 @@ export default function Settings() {
               >
                 Finish & Exit
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manager PIN Modal for API Key */}
+      {showApiKeyPinModal && (
+        <div className={styles.cropperModalOverlay} onClick={() => setShowApiKeyPinModal(false)}>
+          <div className={styles.cropperModal} style={{ width: '360px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.cropperHeader}>
+              <div className={styles.modalTitle}>
+                <Lock size={20} color="#475569" />
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1E293B', margin: 0 }}>Verify Manager PIN</h2>
+              </div>
+              <X size={24} className={styles.closeBtn} onClick={() => setShowApiKeyPinModal(false)} />
+            </div>
+
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p style={{ fontSize: '0.85rem', color: '#64748B', margin: 0, lineHeight: '1.5' }}>
+                Please enter your Manager PIN to authorize editing the Nomod API Key.
+              </p>
+              <div className={styles.formGroup} style={{ margin: 0 }}>
+                <input
+                  type="password"
+                  className={styles.inputField}
+                  placeholder="Enter Manager PIN"
+                  value={apiKeyPinValue}
+                  onChange={(e) => {
+                    setApiKeyPinError('');
+                    setApiKeyPinValue(e.target.value.replace(/\D/g, ''));
+                  }}
+                  autoFocus
+                  style={{ textAlign: 'center', fontWeight: 'bold', letterSpacing: '0.5rem', fontSize: '1.5rem', height: '50px' }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleVerifyPinForApiKey();
+                    }
+                  }}
+                />
+                {apiKeyPinError && (
+                  <p style={{ fontSize: '0.78rem', color: '#EF4444', margin: '0.5rem 0 0 0', fontWeight: '600', textAlign: 'center' }}>
+                    {apiKeyPinError}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className={styles.cropperControls} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', borderTop: '1px solid #F1F5F9' }}>
+              <div className={styles.cropperActions} style={{ width: '100%', gap: '0.75rem', display: 'flex' }}>
+                <button
+                  className={styles.secondaryBtn}
+                  style={{ flex: 1 }}
+                  onClick={() => setShowApiKeyPinModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={styles.primaryBtn}
+                  style={{ flex: 1, background: '#2563EB' }}
+                  onClick={handleVerifyPinForApiKey}
+                >
+                  Verify PIN
+                </button>
+              </div>
             </div>
           </div>
         </div>

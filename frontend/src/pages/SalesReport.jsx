@@ -10,6 +10,7 @@ import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
+import CustomSelect from '../components/CustomSelect';
 import { getLocalDateBounds, localStrIsWithinBounds, localTodayStr, parseLocalDateStr } from '../utils/dateFilters';
 import styles from './SalesReport.module.css';
 
@@ -799,15 +800,28 @@ export default function SalesReport() {
       )}
 
       <div className={styles.headerRow}>
-        <div className={styles.headerActions} style={{ marginLeft: 'auto' }}>
-          <button className="btn btn-secondary" onClick={handleExportCSV}>
-            <Download size={16} /> Export CSV
+        <div className={styles.headerActions} style={{ marginLeft: 'auto' }} data-noprint="true">
+          <button 
+            className="btn btn-secondary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '8px', color: '#1E293B', fontWeight: '600' }} 
+            onClick={handleExportCSV}
+          >
+            <Download size={18} /> Export CSV
           </button>
-          <button className="btn btn-secondary" onClick={handleDownloadPDF} disabled={pdfLoading}>
-            <FileText size={16} /> {pdfLoading ? 'Saving...' : 'Save PDF'}
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#2563EB', border: '1px solid #2563EB', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={handlePrint}
+          >
+            <Printer size={18} /> Print Report
           </button>
-          <button className="btn btn-primary" onClick={handlePrint}>
-            <Printer size={16} /> Print Report
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#10B981', border: '1px solid #10B981', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={handleDownloadPDF} 
+            disabled={pdfLoading}
+          >
+            <Download size={18} /> {pdfLoading ? 'Downloading...' : 'Download PDF'}
           </button>
         </div>
       </div>
@@ -849,17 +863,18 @@ export default function SalesReport() {
           </div>
           
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <select 
-              value={dateRange} 
+            <CustomSelect
+              value={dateRange}
               onChange={(e) => setDateRange(e.target.value)}
-              style={{ padding: '0.5rem 0.75rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', fontWeight: 600, color: '#475569' }}
-            >
-              <option value="All">All Time</option>
-              <option value="Today">Today</option>
-              <option value="This Week">This Week</option>
-              <option value="This Month">This Month</option>
-              <option value="Custom">Custom Date Range</option>
-            </select>
+              options={[
+                { value: 'All', label: 'All Time' },
+                { value: 'Today', label: 'Today' },
+                { value: 'This Week', label: 'This Week' },
+                { value: 'This Month', label: 'This Month' },
+                { value: 'Custom', label: 'Custom Date Range' }
+              ]}
+              style={{ width: '180px' }}
+            />
 
             {dateRange === 'Custom' && (
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>

@@ -677,15 +677,8 @@ export default function ZReport() {
       delivered: completedOrdersCount
     };
 
-    // 5. Service-wise Sales Grouping
-    const serviceSales = {
-      'Wash & Fold': { qty: 0, amount: 0 },
-      'Dry Cleaning': { qty: 0, amount: 0 },
-      'Ironing': { qty: 0, amount: 0 },
-      'Carpet Cleaning': { qty: 0, amount: 0 },
-      'Shoe Cleaning': { qty: 0, amount: 0 },
-      'Other Services': { qty: 0, amount: 0 }
-    };
+    // 5. Service-wise Sales Grouping (Dynamically group based on item category or item name)
+    const serviceSales = {};
 
     activeOrders.forEach(o => {
       let itemsList = [];
@@ -696,29 +689,14 @@ export default function ZReport() {
 
       itemsList.forEach(item => {
         const itemSubtotal = item.price * item.qty * (1 - discountRatio);
-        const nameLower = (item.name || '').toLowerCase();
-        const catLower = (item.category || '').toLowerCase();
+        const categoryKey = item.category || item.name || 'Other Services';
         const qty = item.qty || 1;
 
-        if (catLower.includes('fold') || nameLower.includes('fold') || catLower === 'laundry') {
-          serviceSales['Wash & Fold'].qty += qty;
-          serviceSales['Wash & Fold'].amount += itemSubtotal;
-        } else if (catLower.includes('dry') || nameLower.includes('dry') || nameLower.includes('suit') || nameLower.includes('dress')) {
-          serviceSales['Dry Cleaning'].qty += qty;
-          serviceSales['Dry Cleaning'].amount += itemSubtotal;
-        } else if (catLower.includes('iron') || nameLower.includes('iron') || nameLower.includes('press') || nameLower.includes('pressing') || catLower === 'alterations') {
-          serviceSales['Ironing'].qty += qty;
-          serviceSales['Ironing'].amount += itemSubtotal;
-        } else if (nameLower.includes('carpet') || nameLower.includes('rug')) {
-          serviceSales['Carpet Cleaning'].qty += qty;
-          serviceSales['Carpet Cleaning'].amount += itemSubtotal;
-        } else if (nameLower.includes('shoe') || nameLower.includes('sneaker')) {
-          serviceSales['Shoe Cleaning'].qty += qty;
-          serviceSales['Shoe Cleaning'].amount += itemSubtotal;
-        } else {
-          serviceSales['Other Services'].qty += qty;
-          serviceSales['Other Services'].amount += itemSubtotal;
+        if (!serviceSales[categoryKey]) {
+          serviceSales[categoryKey] = { qty: 0, amount: 0 };
         }
+        serviceSales[categoryKey].qty += qty;
+        serviceSales[categoryKey].amount += itemSubtotal;
       });
     });
 

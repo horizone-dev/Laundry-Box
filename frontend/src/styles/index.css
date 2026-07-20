@@ -165,6 +165,23 @@ input[type="radio"] {
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
 }
 
+/* Global Select Beautification */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 1.1rem;
+  padding-right: 2.5rem !important;
+  cursor: pointer;
+}
+
+select::-ms-expand {
+  display: none;
+}
+
 /* Glassmorphism */
 .glass {
   background: rgba(255, 255, 255, 0.7);
@@ -305,9 +322,14 @@ input[type="radio"] {
 }
 
 .base-table .num-col {
-  text-align: right;
+  text-align: left;
 }
 
 .base-table .center-col {
-  text-align: center;
+  text-align: left;
+}
+
+/* Force all table headers and cells to align left globally */
+table, table th, table td, thead th, tbody td, th, td, [class*="num"], [class*="center"], [class*="right"] {
+  text-align: left !important;
 }

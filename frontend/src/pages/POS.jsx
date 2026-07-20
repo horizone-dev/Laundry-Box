@@ -806,7 +806,7 @@ export default function POS() {
 
   // Helper to format currency
   const formatCurrency = (amount) => {
-    return `${settings.currencySymbol || 'AED'} ${parseFloat(amount || 0).toFixed(2)}`;
+    return `${parseFloat(amount || 0).toFixed(2)}`;
   };
 
   const removeCartItem = (idx) => {

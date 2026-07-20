@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { getLocalDateBounds, isWithinBounds, localStrIsWithinBounds } from '../utils/dateFilters';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
+import CustomSelect from '../components/CustomSelect';
 import styles from './TaxReport.module.css';
 
 const containerVariants = {
@@ -264,6 +265,18 @@ export default function TaxReport() {
 
   const netTaxPayable = totalSalesTax - totalExpenseTax;
 
+  const totals = useMemo(() => {
+    let gross = 0;
+    let net = 0;
+    let tax = 0;
+    filteredTransactions.forEach(tx => {
+      gross += tx.grossAmount;
+      net += tx.netAmount;
+      tax += tx.taxAmount;
+    });
+    return { gross, net, tax };
+  }, [filteredTransactions]);
+
   // Pagination – show 20 items per page
   const totalItems = filteredTransactions.length;
   const paginatedTransactions = useMemo(() => {
@@ -301,6 +314,60 @@ export default function TaxReport() {
     document.body.removeChild(link);
   };
 
+  // PDF DOWNLOAD
+  const handleDownloadPDF = async () => {
+    const filename = `${settings.taxName || 'VAT'}_Statement_Report_${new Date().toISOString().split('T')[0]}.pdf`;
+    if (!window.electronAPI?.printToPDF) {
+      if (window.appPrint) { window.appPrint(); } else { window.print(); }
+      return;
+    }
+
+    try {
+      let css = '';
+      document.querySelectorAll('style').forEach(styleTag => {
+        css += styleTag.innerHTML + '\n';
+      });
+      for (const sheet of document.styleSheets) {
+        try {
+          const rules = Array.from(sheet.cssRules || []);
+          css += rules.map(r => r.cssText).join('\n') + '\n';
+        } catch (_) {}
+      }
+
+      const reportContainer = document.querySelector(`.${styles.taxPage}`);
+      if (!reportContainer) throw new Error("Report content not found");
+
+      const clone = reportContainer.cloneNode(true);
+      
+      // Hide non-printable elements in the clone
+      const headerActions = clone.querySelector(`.${styles.headerActions}`);
+      if (headerActions) headerActions.style.display = 'none';
+
+      const toolbar = clone.querySelector(`.${styles.tableToolbar}`);
+      if (toolbar) toolbar.style.display = 'none';
+
+      const pagination = clone.querySelector('[class*="pagination"]');
+      if (pagination) pagination.style.display = 'none';
+
+      const html = clone.outerHTML;
+
+      await window.electronAPI.printToPDF({
+        filename,
+        html,
+        css,
+        pdfDownloadPath: settings.pdfDownloadPath || '',
+        origin: window.location.origin,
+        pageSize: 'A4'
+      });
+
+      alert(`Saved to Downloads: ${filename}`);
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      alert("Failed to generate PDF. Falling back to print.");
+      if (window.appPrint) { window.appPrint(); } else { window.print(); }
+    }
+  };
+
   if (!isAuthorized) return null;
 
   return (
@@ -316,11 +383,26 @@ export default function TaxReport() {
           <h1>{settings.taxName || 'VAT'} Statements</h1>
         </div>
         <div className={styles.headerActions} data-noprint="true">
-          <button className="btn btn-secondary" onClick={handleExportCSV}>
+          <button 
+            className="btn btn-secondary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '8px', color: '#1E293B', fontWeight: '600' }} 
+            onClick={handleExportCSV}
+          >
             <Download size={18} /> Export CSV
           </button>
-          <button className="btn btn-primary" onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}>
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#2563EB', border: '1px solid #2563EB', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}
+          >
             <Printer size={18} /> Print Report
+          </button>
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#10B981', border: '1px solid #10B981', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={handleDownloadPDF}
+          >
+            <Download size={18} /> Download PDF
           </button>
         </div>
       </div>
@@ -345,17 +427,18 @@ export default function TaxReport() {
           
           {/* Filters */}
           <div className={styles.filterControls}>
-            <div className={styles.customDateGrid}>
-              <select 
+             <div className={styles.customDateGrid}>
+              <CustomSelect 
                 value={dateRange} 
                 onChange={(e) => setDateRange(e.target.value)}
-                className={styles.filterSelect}
-              >
-                <option value="Today">Today</option>
-                <option value="This Month">This Month</option>
-                <option value="This Year">This Year</option>
-                <option value="Custom">Custom Date Range</option>
-              </select>
+                options={[
+                  { value: 'Today', label: 'Today' },
+                  { value: 'This Month', label: 'This Month' },
+                  { value: 'This Year', label: 'This Year' },
+                  { value: 'Custom', label: 'Custom Date Range' }
+                ]}
+                style={{ width: '185px' }}
+              />
 
               {dateRange === 'Custom' && (
                 <>
@@ -377,15 +460,16 @@ export default function TaxReport() {
               )}
             </div>
 
-            <select 
+            <CustomSelect 
               value={taxTypeFilter} 
               onChange={(e) => setTaxTypeFilter(e.target.value)}
-              className={styles.filterSelect}
-            >
-              <option value="All">All Transactions</option>
-              <option value="Sales">Sales Only (Output)</option>
-              <option value="Expenses">Expenses Only (Input)</option>
-            </select>
+              options={[
+                { value: 'All', label: 'All Transactions' },
+                { value: 'Sales', label: 'Sales Only (Output)' },
+                { value: 'Expenses', label: 'Expenses Only (Input)' }
+              ]}
+              style={{ width: '200px' }}
+            />
           </div>
         </div>
 
@@ -463,6 +547,23 @@ export default function TaxReport() {
                 </tr>
               )}
             </tbody>
+            {filteredTransactions.length > 0 && (
+              <tfoot>
+                <tr style={{ background: '#F8FAFC', fontWeight: 'bold', borderTop: '2px solid #E2E8F0' }}>
+                  <td colSpan="4" style={{ padding: '1rem', color: '#475569' }}>Total</td>
+                  <td className="num-col" style={{ padding: '1rem' }}>
+                    <CurrencySymbol size={12} /> {totals.gross.toFixed(2)}
+                  </td>
+                  <td className="num-col" style={{ padding: '1rem' }}>
+                    <CurrencySymbol size={12} /> {totals.net.toFixed(2)}
+                  </td>
+                  <td className="center-col" style={{ padding: '1rem', color: '#64748B' }}>-</td>
+                  <td className="num-col" style={{ padding: '1rem', color: '#7C3AED' }}>
+                    <CurrencySymbol size={12} /> {totals.tax.toFixed(2)}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
         

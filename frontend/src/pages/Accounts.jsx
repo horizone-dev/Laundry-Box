@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Wallet, Landmark, ArrowUpRight, ArrowDownLeft,
-  Plus, Search, Filter, Calendar, Printer,
+  Plus, Search, Filter, Calendar, Printer, Download,
   DollarSign, Receipt, CreditCard, ChevronRight,
   ArrowLeftRight, Trash2, CheckCircle, HelpCircle,
   Zap, Share2, Lock, Bell
@@ -1108,6 +1108,77 @@ export default function Accounts() {
     }
   };
 
+  // PDF DOWNLOAD
+  const handleDownloadPDF = async () => {
+    const activeAccountName = activeAccountType === 'CASH' ? 'Cash' : (
+      activeAccountType === 'GATEWAY' ? 'Nomod Payment Link' : (
+        settings.bankAccounts?.find(b => b.id === activeBankAccountId)?.bankName || 'Bank'
+      )
+    );
+    const filename = `${activeAccountName}_Ledger_Report_${new Date().toISOString().split('T')[0]}.pdf`;
+    if (!window.electronAPI?.printToPDF) {
+      handlePrint();
+      return;
+    }
+
+    try {
+      let css = '';
+      document.querySelectorAll('style').forEach(styleTag => {
+        css += styleTag.innerHTML + '\n';
+      });
+      for (const sheet of document.styleSheets) {
+        try {
+          const rules = Array.from(sheet.cssRules || []);
+          css += rules.map(r => r.cssText).join('\n') + '\n';
+        } catch (_) {}
+      }
+
+      const reportContainer = document.querySelector(`.${styles.page}`);
+      if (!reportContainer) throw new Error("Ledger content not found");
+
+      const clone = reportContainer.cloneNode(true);
+      
+      // Hide non-printable elements in the clone
+      const tabBar = clone.querySelector(`.${styles.topTabBar}`);
+      if (tabBar) tabBar.style.display = 'none';
+
+      const sidebar = clone.querySelector(`.${styles.sidebarCol}`);
+      if (sidebar) sidebar.style.display = 'none';
+
+      const headerControls = clone.querySelector(`.${styles.headerControls}`);
+      if (headerControls) headerControls.style.display = 'none';
+
+      const actionCols = clone.querySelectorAll(`.${styles.actionCol}`);
+      actionCols.forEach(col => col.style.display = 'none');
+
+      const deleteBtns = clone.querySelectorAll(`.${styles.deleteRowBtn}`);
+      deleteBtns.forEach(btn => btn.style.display = 'none');
+
+      // Adjust layout grid to take full width
+      const splitLayout = clone.querySelector(`.${styles.splitLayout}`);
+      if (splitLayout) {
+        splitLayout.style.display = 'block';
+      }
+
+      const html = clone.outerHTML;
+
+      await window.electronAPI.printToPDF({
+        filename,
+        html,
+        css,
+        pdfDownloadPath: settings.pdfDownloadPath || '',
+        origin: window.location.origin,
+        pageSize: 'A4'
+      });
+
+      alert(`Saved to Downloads: ${filename}`);
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      alert("Failed to generate PDF. Falling back to print.");
+      handlePrint();
+    }
+  };
+
   const renderDescriptionWithLinks = (description) => {
     if (!description) return 'Manual Entry';
 
@@ -1180,10 +1251,14 @@ export default function Accounts() {
       </div>
 
       {activeTab === 'Payments' ? (
-        <div className={styles.splitLayout}>
+        <div 
+          className={styles.splitLayout}
+          style={activeAccountType === 'GATEWAY' ? { gridTemplateColumns: '1fr' } : {}}
+        >
 
           {/* ── Left Sidebar (Accounts Cards) ──────────────── */}
-          <div className={styles.sidebarCol} data-noprint="true">
+          {activeAccountType !== 'GATEWAY' && (
+            <div className={styles.sidebarCol} data-noprint="true">
 
             {/* Cash Card */}
             <div
@@ -1312,6 +1387,7 @@ export default function Accounts() {
               <Plus size={16} /> + Add account
             </button>
           </div>
+          )}
 
           {/* ── Right Detail Pane (Transactions table) ─────── */}
           <div className={styles.detailCol}>
@@ -1387,6 +1463,9 @@ export default function Accounts() {
                   <button className={styles.applyBtn} onClick={fetchData}>Apply</button>
                   <button className={styles.printBtn} onClick={handlePrint} title="Print Statements">
                     <Printer size={16} /> Print
+                  </button>
+                  <button className={styles.printBtn} onClick={handleDownloadPDF} title="Download PDF">
+                    <Download size={16} /> Download PDF
                   </button>
                 </div>
               </div>
@@ -1853,7 +1932,7 @@ export default function Accounts() {
                 </div>
 
                 <div className={styles.formGroup}>
-                  <label>Amount ({settings.currencySymbol || 'AED'})</label>
+                  <label>Total Amount ({settings.currencySymbol || 'AED'})</label>
                   <input
                     type="number"
                     step="0.01"

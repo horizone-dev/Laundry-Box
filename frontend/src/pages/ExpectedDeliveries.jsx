@@ -13,6 +13,7 @@ import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
 import { t } from '../utils/translations';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { getLocalISOString, getLocalDateStr } from '../utils/dateUtils';
+import CustomSelect from '../components/CustomSelect';
 import styles from './ExpectedDeliveries.module.css';
 
 const API_BASE = API_BASE_URL;
@@ -600,16 +601,15 @@ export default function ExpectedDeliveries() {
 
         <div className={styles.selectFilters}>
           {settings.workflowEnabled && (
-            <select
+            <CustomSelect
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className={styles.dropdownSelect}
-            >
-              <option value="All">All Statuses</option>
-              {getWorkflowStatuses().map(status => (
-                <option key={status} value={status}>{status}</option>
-              ))}
-            </select>
+              options={[
+                { value: 'All', label: 'All Statuses' },
+                ...getWorkflowStatuses().map(status => ({ value: status, label: status }))
+              ]}
+              style={{ width: '200px' }}
+            />
           )}
 
           {dateFilter === 'Custom' && (
@@ -729,7 +729,7 @@ export default function ExpectedDeliveries() {
                         )}
                          <td className={styles.amount}>
                           <div className={styles.duesCell}>
-                            <span className={styles.dueAmount}>
+                            <span className={(order.dueAmount ?? order.totalAmount ?? 0) === 0 ? styles.dueAmountZero : styles.dueAmount}>
                               <CurrencySymbol size={11} /> {(order.dueAmount ?? order.totalAmount ?? 0).toFixed(2)}
                             </span>
                             <span className={styles.totalAmountSub}>

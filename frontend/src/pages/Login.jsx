@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Mail, Lock, Eye, EyeOff, ArrowRight, Activity, 
-  User, Key, ShieldCheck, Fingerprint, ShieldAlert, Cpu
+  User, Key, ShieldCheck, Fingerprint, ShieldAlert, Cpu, X
 } from 'lucide-react';
 import { authApi } from '../services/api';
 import { useSettings } from '../store/SettingsContext';
@@ -23,6 +23,168 @@ export default function Login({ onLogin }) {
   const [showSecret, setShowSecret] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+
+  // Forgot PIN State
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotStep, setForgotStep] = useState(1); // 1: Select User, 2: Enter OTP, 3: Reset PIN
+  const [userList, setUserList] = useState([]);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [generatedOtp, setGeneratedOtp] = useState('');
+  const [otpExpiry, setOtpExpiry] = useState(null);
+  const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
+  const [otpError, setOtpError] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [newPinConfirm, setNewPinConfirm] = useState('');
+  const [forgotEmailTarget, setForgotEmailTarget] = useState('');
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isUpdatingPin, setIsUpdatingPin] = useState(false);
+  const [timerCount, setTimerCount] = useState(0);
+
+  const handleOpenForgotModal = async () => {
+    setShowForgotModal(true);
+    setForgotStep(1);
+    setSelectedUser(null);
+    setOtpDigits(['', '', '', '', '', '']);
+    setOtpError('');
+    setNewPin('');
+    setNewPinConfirm('');
+    try {
+      const res = await authApi.getUsers();
+      // Filter out admin users
+      setUserList(res.data.filter(u => u.role !== 'admin' && u.role !== 'super_admin'));
+    } catch (err) {
+      console.error('Failed to load user list for Forgot PIN:', err);
+    }
+  };
+
+  const handleSendOtp = async () => {
+    if (!selectedUser) return;
+    setIsSendingOtp(true);
+    setOtpError('');
+
+    // Generate 6-digit random OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiry = Date.now() + 5 * 60 * 1000; // 5 minutes
+
+    // Figure out target email
+    let targetEmail = selectedUser.email;
+    if (!targetEmail) {
+      if (window.electronAPI?.getEmailSettings) {
+        const emailSettings = await window.electronAPI.getEmailSettings();
+        targetEmail = emailSettings?.ownerEmail;
+      }
+    }
+
+    if (!targetEmail) {
+      setOtpError('No recipient email configured for this user or shop settings.');
+      setIsSendingOtp(false);
+      return;
+    }
+
+    try {
+      if (window.electronAPI?.sendOtpEmail) {
+        const result = await window.electronAPI.sendOtpEmail({
+          recipient: targetEmail,
+          otp,
+          username: selectedUser.name
+        });
+
+        if (result.success) {
+          setGeneratedOtp(otp);
+          setOtpExpiry(expiry);
+          setForgotEmailTarget(targetEmail);
+          setForgotStep(2);
+          setTimerCount(300); // 5 minutes
+        } else {
+          setOtpError(result.error || 'Failed to send OTP email.');
+        }
+      } else {
+        setOtpError('Email dispatch API not available.');
+      }
+    } catch (err) {
+      setOtpError('Failed to send verification code.');
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
+  useEffect(() => {
+    if (timerCount > 0 && showForgotModal && forgotStep === 2) {
+      const interval = setInterval(() => {
+        setTimerCount(prev => prev - 1);
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [timerCount, showForgotModal, forgotStep]);
+
+  const handleOtpChange = (index, value) => {
+    if (isNaN(value)) return;
+    const newDigits = [...otpDigits];
+    newDigits[index] = value.substring(value.length - 1);
+    setOtpDigits(newDigits);
+
+    if (value && index < 5) {
+      const nextInput = document.getElementById(`otp-input-${index + 1}`);
+      if (nextInput) nextInput.focus();
+    }
+  };
+
+  const handleOtpKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !otpDigits[index] && index > 0) {
+      const prevInput = document.getElementById(`otp-input-${index - 1}`);
+      if (prevInput) prevInput.focus();
+    }
+  };
+
+  const handleVerifyOtp = () => {
+    const enteredOtp = otpDigits.join('');
+    if (enteredOtp.length < 6) {
+      setOtpError('Please enter the 6-digit code.');
+      return;
+    }
+    if (Date.now() > otpExpiry) {
+      setOtpError('OTP has expired. Please request a new one.');
+      return;
+    }
+    if (enteredOtp !== generatedOtp) {
+      setOtpError('Invalid OTP code.');
+      return;
+    }
+    setOtpError('');
+    setForgotStep(3);
+  };
+
+  const handleResetPin = async () => {
+    if (!newPin || newPin.length < 4) {
+      setOtpError('PIN must be at least 4 digits.');
+      return;
+    }
+    if (newPin !== newPinConfirm) {
+      setOtpError('PIN entries do not match.');
+      return;
+    }
+
+    setIsUpdatingPin(true);
+    setOtpError('');
+
+    try {
+      const res = await authApi.updateUser(selectedUser._id, {
+        ...selectedUser,
+        pin: newPin
+      });
+
+      if (res.data) {
+        alert('PIN reset successful! You can now log in.');
+        setShowForgotModal(false);
+      } else {
+        setOtpError('Failed to update PIN.');
+      }
+    } catch (err) {
+      setOtpError(err.response?.data?.message || 'Failed to reset PIN.');
+    } finally {
+      setIsUpdatingPin(false);
+    }
+  };
 
   // Hidden Shortcut Handler: CTRL + SHIFT + S
   useEffect(() => {
@@ -248,6 +410,14 @@ export default function Login({ onLogin }) {
               </div>
             </div>
 
+            {method === 'pin' && (
+              <div className={styles.forgotPinContainer}>
+                <button type="button" className={styles.forgotPinLink} onClick={handleOpenForgotModal}>
+                  Forgot PIN?
+                </button>
+              </div>
+            )}
+
             {isAdminActive && (
               <motion.div 
                 className={styles.inputGroup}
@@ -281,6 +451,148 @@ export default function Login({ onLogin }) {
           </footer>
         </motion.div>
       </div>
+      {/* Forgot PIN Modal */}
+      {showForgotModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowForgotModal(false)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h3><Lock size={20} /> Forgot Access PIN</h3>
+              <button className={styles.closeBtn} onClick={() => setShowForgotModal(false)} aria-label="Close modal">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className={styles.modalBody}>
+              {forgotStep === 1 && (
+                <>
+                  <p>Select your user profile to request a PIN reset verification code:</p>
+                  <div className={styles.userList}>
+                    {userList.map((usr) => (
+                      <div
+                        key={usr._id}
+                        className={`${styles.userItem} ${selectedUser?._id === usr._id ? styles.userItemActive : ''}`}
+                        onClick={() => setSelectedUser(usr)}
+                      >
+                        <div>
+                          <div className={styles.userName}>{usr.name}</div>
+                          <div className={styles.userRole}>{usr.role}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {otpError && <p style={{ color: '#EF4444', fontSize: '0.85rem', margin: 0 }}>{otpError}</p>}
+                  <button
+                    type="button"
+                    className={styles.actionBtn}
+                    onClick={handleSendOtp}
+                    disabled={!selectedUser || isSendingOtp}
+                  >
+                    {isSendingOtp ? 'Sending OTP...' : 'Send Verification OTP'}
+                  </button>
+                </>
+              )}
+
+              {forgotStep === 2 && (
+                <>
+                  <p>
+                    Enter the 6-digit verification code sent to the configured email:
+                  </p>
+                  <div className={styles.otpPreviewBox}>
+                    <Mail size={18} />
+                    <span>
+                      Sent to: {forgotEmailTarget.replace(/^(..)(.*)(@.*)$/, (_, p1, p2, p3) => p1 + '*'.repeat(p2.length) + p3)}
+                    </span>
+                  </div>
+                  <div className={styles.otpInputWrapper}>
+                    {otpDigits.map((digit, idx) => (
+                      <input
+                        key={idx}
+                        id={`otp-input-${idx}`}
+                        type="text"
+                        maxLength="1"
+                        className={styles.otpDigitInput}
+                        value={digit}
+                        onChange={(e) => handleOtpChange(idx, e.target.value)}
+                        onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                        autoComplete="off"
+                        inputMode="numeric"
+                      />
+                    ))}
+                  </div>
+                  {timerCount > 0 ? (
+                    <div className={styles.timerText}>
+                      Code expires in: <span className={styles.timerActive}>{Math.floor(timerCount / 60)}:{(timerCount % 60).toString().padStart(2, '0')}</span>
+                    </div>
+                  ) : (
+                    <div className={styles.timerText} style={{ color: '#EF4444' }}>
+                      Code expired. Please request a new one.
+                    </div>
+                  )}
+                  {otpError && <p style={{ color: '#EF4444', fontSize: '0.85rem', margin: 0, textAlign: 'center' }}>{otpError}</p>}
+                  <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                    <button
+                      type="button"
+                      className={`${styles.actionBtn} ${styles.secondaryBtn}`}
+                      onClick={() => setForgotStep(1)}
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.actionBtn}
+                      onClick={handleVerifyOtp}
+                      disabled={timerCount <= 0}
+                    >
+                      Verify Code
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {forgotStep === 3 && (
+                <>
+                  <p>Reset PIN for <strong>{selectedUser?.name}</strong>. Enter your new 4-digit access PIN:</p>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      placeholder="Enter new 4-digit PIN"
+                      maxLength="4"
+                      className={styles.otpDigitInput}
+                      style={{ width: '100%', height: '50px', fontSize: '1.25rem', letterSpacing: '4px' }}
+                      value={newPin}
+                      onChange={(e) => { if (!isNaN(e.target.value)) setNewPin(e.target.value); }}
+                      autoComplete="off"
+                    />
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      placeholder="Confirm new 4-digit PIN"
+                      maxLength="4"
+                      className={styles.otpDigitInput}
+                      style={{ width: '100%', height: '50px', fontSize: '1.25rem', letterSpacing: '4px' }}
+                      value={newPinConfirm}
+                      onChange={(e) => { if (!isNaN(e.target.value)) setNewPinConfirm(e.target.value); }}
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {otpError && <p style={{ color: '#EF4444', fontSize: '0.85rem', margin: 0 }}>{otpError}</p>}
+                  <button
+                    type="button"
+                    className={styles.actionBtn}
+                    onClick={handleResetPin}
+                    disabled={isUpdatingPin || newPin.length < 4 || newPin !== newPinConfirm}
+                  >
+                    {isUpdatingPin ? 'Updating PIN...' : 'Save New PIN'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

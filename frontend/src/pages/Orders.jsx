@@ -17,6 +17,7 @@ import { getLocalDateBounds, isWithinBounds } from '../utils/dateFilters';
 import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
 import CurrencySymbol from '../components/CurrencySymbol';
 import DressTag from '../components/DressTag';
+import CustomSelect from '../components/CustomSelect';
 import styles from './Orders.module.css';
 import { checkCreditLimit } from '../utils/creditLimit';
 import { paymentService } from '../services/paymentService';
@@ -1418,16 +1419,18 @@ export default function Orders() {
           >
             <Filter size={16} /> Filters
           </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'white', border: '1px solid #E2E8F0', borderRadius: '10px', padding: '0 0.75rem', height: '40px', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}>
-            <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>SORT:</span>
-            <select
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <span style={{ position: 'absolute', left: '12px', zIndex: 10, pointerEvents: 'none', fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>SORT:</span>
+            <CustomSelect
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              style={{ border: 'none', background: 'transparent', fontSize: '0.8rem', fontWeight: 700, color: '#1E293B', cursor: 'pointer', outline: 'none' }}
-            >
-              <option value="date">Latest Order</option>
-              <option value="payment">Latest Payment</option>
-            </select>
+              options={[
+                { value: 'date', label: 'Latest Order' },
+                { value: 'payment', label: 'Latest Payment' }
+              ]}
+              style={{ width: '180px' }}
+              paddingLeft="36px"
+            />
           </div>
         </div>
       </div>
@@ -1516,17 +1519,18 @@ export default function Orders() {
 
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Calendar size={16} color="#64748B" />
-              <select
+              <CustomSelect
                 value={dateRange}
                 onChange={(e) => setDateRange(e.target.value)}
-                style={{ border: '1px solid #E2E8F0', padding: '0.4rem 0.8rem', borderRadius: '8px', fontWeight: 600, outline: 'none', fontSize: '0.85rem' }}
-              >
-                <option value="All">All Time</option>
-                <option value="Today">Today</option>
-                <option value="This Month">This Month</option>
-                <option value="This Year">This Year</option>
-                <option value="Custom">Custom Range</option>
-              </select>
+                options={[
+                  { value: 'All', label: 'All Time' },
+                  { value: 'Today', label: 'Today' },
+                  { value: 'This Month', label: 'This Month' },
+                  { value: 'This Year', label: 'This Year' },
+                  { value: 'Custom', label: 'Custom Range' }
+                ]}
+                style={{ width: '150px' }}
+              />
 
               {dateRange === 'Custom' && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>

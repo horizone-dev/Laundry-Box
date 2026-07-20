@@ -9,6 +9,7 @@ import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
+import CustomSelect from '../components/CustomSelect';
 import styles from './CreditOverridesReport.module.css';
 import axios from 'axios';
 import { API_BASE_URL } from '../constants';
@@ -204,6 +205,16 @@ export default function CreditOverridesReport() {
   const totalFailed = logs.filter(l => l.actionType === 'FAILED_PIN').length;
   const totalRejected = logs.filter(l => l.actionType === 'REJECTED').length;
 
+  const totals = useMemo(() => {
+    let orderAmount = 0;
+    let exceededAmount = 0;
+    filteredLogs.forEach(log => {
+      orderAmount += log.orderAmount || 0;
+      exceededAmount += log.exceededAmount || 0;
+    });
+    return { orderAmount, exceededAmount };
+  }, [filteredLogs]);
+
   const exportCSV = () => {
     const headers = ['Date', 'Customer Name', 'Customer ID', 'Order ID', 'Approved By', 'Order Amount', 'Credit Limit', 'Balance Before', 'Exceeded Amount', 'Action'];
     const rows = filteredLogs.map(log => [
@@ -226,6 +237,60 @@ export default function CreditOverridesReport() {
     a.click();
   };
 
+  // PDF DOWNLOAD
+  const handleDownloadPDF = async () => {
+    const filename = `Credit_Overrides_Audit_Report_${new Date().toISOString().split('T')[0]}.pdf`;
+    if (!window.electronAPI?.printToPDF) {
+      if (window.appPrint) { window.appPrint(); } else { window.print(); }
+      return;
+    }
+
+    try {
+      let css = '';
+      document.querySelectorAll('style').forEach(styleTag => {
+        css += styleTag.innerHTML + '\n';
+      });
+      for (const sheet of document.styleSheets) {
+        try {
+          const rules = Array.from(sheet.cssRules || []);
+          css += rules.map(r => r.cssText).join('\n') + '\n';
+        } catch (_) {}
+      }
+
+      const reportContainer = document.querySelector(`.${styles.page}`);
+      if (!reportContainer) throw new Error("Report content not found");
+
+      const clone = reportContainer.cloneNode(true);
+      
+      // Hide non-printable elements in the clone
+      const headerActions = clone.querySelector(`.${styles.headerActions}`);
+      if (headerActions) headerActions.style.display = 'none';
+
+      const toolbar = clone.querySelector(`.${styles.toolbar}`);
+      if (toolbar) toolbar.style.display = 'none';
+
+      const pagination = clone.querySelector('[class*="pagination"]');
+      if (pagination) pagination.style.display = 'none';
+
+      const html = clone.outerHTML;
+
+      await window.electronAPI.printToPDF({
+        filename,
+        html,
+        css,
+        pdfDownloadPath: settings.pdfDownloadPath || '',
+        origin: window.location.origin,
+        pageSize: 'A4'
+      });
+
+      alert(`Saved to Downloads: ${filename}`);
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      alert("Failed to generate PDF. Falling back to print.");
+      if (window.appPrint) { window.appPrint(); } else { window.print(); }
+    }
+  };
+
   if (!isAuthorized) return null;
 
   return (
@@ -235,12 +300,27 @@ export default function CreditOverridesReport() {
         <div className={styles.headerInfo}>
           <h1>Credit Override Audit Log</h1>
         </div>
-        <div className={styles.headerActions}>
-          <button className="btn btn-secondary" onClick={exportCSV}>
-            <Download size={16} /> Export CSV
+        <div className={styles.headerActions} data-noprint="true">
+          <button 
+            className="btn btn-secondary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '8px', color: '#1E293B', fontWeight: '600' }} 
+            onClick={exportCSV}
+          >
+            <Download size={18} /> Export CSV
           </button>
-          <button className="btn btn-primary" onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}>
-            <Printer size={16} /> Print / PDF
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#2563EB', border: '1px solid #2563EB', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}
+          >
+            <Printer size={18} /> Print Report
+          </button>
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#10B981', border: '1px solid #10B981', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={handleDownloadPDF}
+          >
+            <Download size={18} /> Download PDF
           </button>
         </div>
       </motion.div>
@@ -261,17 +341,18 @@ export default function CreditOverridesReport() {
             />
           </div>
           <div className={styles.filterControls}>
-            <select
-              className={styles.filterSelect}
+            <CustomSelect
               value={dateRange}
               onChange={e => setDateRange(e.target.value)}
-            >
-              <option value="All Time">All Time</option>
-              <option value="Today">Today</option>
-              <option value="This Month">This Month</option>
-              <option value="This Year">This Year</option>
-              <option value="Custom">Custom Range</option>
-            </select>
+              options={[
+                { value: 'All Time', label: 'All Time' },
+                { value: 'Today', label: 'Today' },
+                { value: 'This Month', label: 'This Month' },
+                { value: 'This Year', label: 'This Year' },
+                { value: 'Custom', label: 'Custom Range' }
+              ]}
+              style={{ width: '185px' }}
+            />
             {dateRange === 'Custom' && (
               <div className={styles.customDates}>
                 <input type="date" className={styles.dateInput} value={customStart} onChange={e => setCustomStart(e.target.value)} />
@@ -280,16 +361,17 @@ export default function CreditOverridesReport() {
               </div>
             )}
 
-            <select
-              className={styles.filterSelect}
+            <CustomSelect
               value={actionFilter}
               onChange={e => setActionFilter(e.target.value)}
-            >
-              <option value="All">All Actions</option>
-              <option value="APPROVED">Approved</option>
-              <option value="FAILED_PIN">Failed PIN</option>
-              <option value="REJECTED">Rejected/Blocked</option>
-            </select>
+              options={[
+                { value: 'All', label: 'All Actions' },
+                { value: 'APPROVED', label: 'Approved' },
+                { value: 'FAILED_PIN', label: 'Failed PIN' },
+                { value: 'REJECTED', label: 'Rejected/Blocked' }
+              ]}
+              style={{ width: '180px' }}
+            />
 
             {searchTerm && (
               <button className={styles.clearBtn} onClick={() => setSearchTerm('')}>
@@ -371,6 +453,20 @@ export default function CreditOverridesReport() {
                   );
                 })}
               </tbody>
+              {filteredLogs.length > 0 && (
+                <tfoot>
+                  <tr style={{ background: '#F8FAFC', fontWeight: 'bold', borderTop: '2px solid #E2E8F0' }}>
+                    <td colSpan="4" style={{ padding: '1rem', color: '#475569' }}>Total</td>
+                    <td className="num-col" style={{ padding: '1rem' }}>
+                      <CurrencySymbol size={11} /> {totals.orderAmount.toFixed(2)}
+                    </td>
+                    <td colSpan="2" className="num-col" style={{ padding: '1rem', color: '#EF4444' }}>
+                      <CurrencySymbol size={11} /> {totals.exceededAmount.toFixed(2)}
+                    </td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         )}

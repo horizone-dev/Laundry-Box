@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { t } from '../utils/translations';
 import Pagination from '../components/Pagination';
+import CustomSelect from '../components/CustomSelect';
 import styles from './DailyTaxReport.module.css';
 
 const containerVariants = {
@@ -334,6 +335,60 @@ export default function DailyTaxReport() {
     document.body.removeChild(link);
   };
 
+  // PDF DOWNLOAD
+  const handleDownloadPDF = async () => {
+    const filename = `Daily_Tax_Report_${new Date().toISOString().split('T')[0]}.pdf`;
+    if (!window.electronAPI?.printToPDF) {
+      if (window.appPrint) { window.appPrint(); } else { window.print(); }
+      return;
+    }
+
+    try {
+      let css = '';
+      document.querySelectorAll('style').forEach(styleTag => {
+        css += styleTag.innerHTML + '\n';
+      });
+      for (const sheet of document.styleSheets) {
+        try {
+          const rules = Array.from(sheet.cssRules || []);
+          css += rules.map(r => r.cssText).join('\n') + '\n';
+        } catch (_) {}
+      }
+
+      const reportContainer = document.querySelector(`.${styles.taxPage}`);
+      if (!reportContainer) throw new Error("Report content not found");
+
+      const clone = reportContainer.cloneNode(true);
+      
+      // Hide non-printable elements in the clone
+      const headerActions = clone.querySelector(`.${styles.headerActions}`);
+      if (headerActions) headerActions.style.display = 'none';
+
+      const toolbar = clone.querySelector(`.${styles.tableToolbar}`);
+      if (toolbar) toolbar.style.display = 'none';
+
+      const pagination = clone.querySelector('[class*="pagination"]');
+      if (pagination) pagination.style.display = 'none';
+
+      const html = clone.outerHTML;
+
+      await window.electronAPI.printToPDF({
+        filename,
+        html,
+        css,
+        pdfDownloadPath: settings.pdfDownloadPath || '',
+        origin: window.location.origin,
+        pageSize: 'A4'
+      });
+
+      alert(`Saved to Downloads: ${filename}`);
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      alert("Failed to generate PDF. Falling back to print.");
+      if (window.appPrint) { window.appPrint(); } else { window.print(); }
+    }
+  };
+
   if (!isAuthorized) return null;
 
   const isRtl = settings.language === 'Arabic';
@@ -352,11 +407,26 @@ export default function DailyTaxReport() {
           <h1>{t('dailytaxreport', settings.language)}</h1>
         </div>
         <div className={styles.headerActions} data-noprint="true">
-          <button className="btn btn-secondary" onClick={handleExportCSV}>
+          <button 
+            className="btn btn-secondary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '8px', color: '#1E293B', fontWeight: '600' }} 
+            onClick={handleExportCSV}
+          >
             <Download size={18} /> Export CSV
           </button>
-          <button className="btn btn-primary" onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}>
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#2563EB', border: '1px solid #2563EB', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}
+          >
             <Printer size={18} /> Print Report
+          </button>
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#10B981', border: '1px solid #10B981', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={handleDownloadPDF}
+          >
+            <Download size={18} /> Download PDF
           </button>
         </div>
       </div>
@@ -369,16 +439,17 @@ export default function DailyTaxReport() {
           {/* Filters */}
           <div className={styles.filterControls}>
             <div className={styles.customDateGrid}>
-              <select 
+              <CustomSelect 
                 value={dateRange} 
                 onChange={(e) => setDateRange(e.target.value)}
-                className={styles.filterSelect}
-              >
-                <option value="Today">Today</option>
-                <option value="This Month">This Month</option>
-                <option value="This Year">This Year</option>
-                <option value="Custom">Custom Date Range</option>
-              </select>
+                options={[
+                  { value: 'Today', label: 'Today' },
+                  { value: 'This Month', label: 'This Month' },
+                  { value: 'This Year', label: 'This Year' },
+                  { value: 'Custom', label: 'Custom Date Range' }
+                ]}
+                style={{ width: '185px' }}
+              />
 
               {dateRange === 'Custom' && (
                 <>
@@ -447,6 +518,25 @@ export default function DailyTaxReport() {
                 </tr>
               )}
             </tbody>
+            {dailyData.length > 0 && (
+              <tfoot>
+                <tr style={{ background: '#F8FAFC', fontWeight: 'bold', borderTop: '2px solid #E2E8F0' }}>
+                  <td style={{ textAlign: isRtl ? 'right' : 'left', padding: '1rem', color: '#475569' }}>Total</td>
+                  <td className="num-col" style={{ padding: '1rem' }}>
+                    <CurrencySymbol size={12} /> {totals.salesGross.toFixed(2)}
+                  </td>
+                  <td className="num-col" style={{ padding: '1rem', color: '#16A34A' }}>
+                    + <CurrencySymbol size={12} /> {totals.salesTax.toFixed(2)}
+                  </td>
+                  <td className="num-col" style={{ padding: '1rem' }}>
+                    <CurrencySymbol size={12} /> {totals.expensesGross.toFixed(2)}
+                  </td>
+                  <td className="num-col" style={{ padding: '1rem', color: '#EF4444' }}>
+                    - <CurrencySymbol size={12} /> {totals.expensesTax.toFixed(2)}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
         

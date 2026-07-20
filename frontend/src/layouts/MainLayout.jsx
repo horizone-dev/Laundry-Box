@@ -561,13 +561,20 @@ export default function MainLayout() {
       // Close sidebar menus if clicking outside sidebar
       const sidebar = document.querySelector(`.${styles.sidebar}`);
       if (sidebar && !sidebar.contains(event.target) && expandedMenus.length > 0) {
-        setExpandedMenus([]);
+        const activeItem = navItems.find(item =>
+          item.subItems?.some(sub => sub.path === location.pathname)
+        );
+        if (activeItem) {
+          setExpandedMenus([activeItem.label]);
+        } else {
+          setExpandedMenus([]);
+        }
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isProfileOpen, isNotificationsOpen, isSupportOpen, expandedMenus]);
+  }, [isProfileOpen, isNotificationsOpen, isSupportOpen, expandedMenus, location.pathname]);
 
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permissionKey: 'dashboard' },
@@ -579,7 +586,7 @@ export default function MainLayout() {
       permissionKey: 'orders',
       subItems: [
         { path: '/orders', label: 'All Orders' },
-        { path: '/settlement', label: 'SETTLE INVOICE' },
+        { path: '/settlement', label: 'Settle Invoice' },
         { path: '/orders/expected-delivery', label: 'Expected Deliveries' },
         { path: '/orders/deleted', label: 'Deleted Orders' }
       ]
@@ -600,7 +607,7 @@ export default function MainLayout() {
       icon: BarChart3,
       permissionKey: 'reports',
       subItems: [
-        { path: '/reports/sales', label: 'SALES REPORT' },
+        { path: '/reports/sales', label: 'Sales Reports' },
         { path: '/reports/expenses', label: 'Expenses' },
         { path: '/reports/tax', label: 'Tax Statements' },
         { path: '/reports/daily-tax', label: 'Daily Tax Report' },
@@ -641,6 +648,20 @@ export default function MainLayout() {
       roleOnly: ['super_admin', 'manager']
     },
   ];
+
+  useEffect(() => {
+    const activeItem = navItems.find(item =>
+      item.subItems?.some(sub => sub.path === location.pathname)
+    );
+    if (activeItem) {
+      setExpandedMenus(prev => {
+        if (!prev.includes(activeItem.label)) {
+          return [activeItem.label];
+        }
+        return prev;
+      });
+    }
+  }, [location.pathname]);
 
   const showToast = (message, type = 'success') => {
     setDeliveryToast({ message, type });

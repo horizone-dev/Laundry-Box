@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   CreditCard, Search, RefreshCw, Calendar, 
-  DollarSign, CheckCircle, Clock, AlertTriangle 
+  DollarSign, CheckCircle, Clock, AlertTriangle,
+  Printer, Download
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
+import CustomSelect from '../components/CustomSelect';
 import styles from './Reports.module.css';
 
 export default function NomodHistory() {
@@ -93,15 +95,87 @@ export default function NomodHistory() {
     { label: 'Pending Links', value: pendingCount, icon: Clock, color: '#D97706', bg: '#FEF3C7' },
   ];
 
+  // PDF DOWNLOAD
+  const handleDownloadPDF = async () => {
+    const filename = `Nomod_Transaction_History_${new Date().toISOString().split('T')[0]}.pdf`;
+    if (!window.electronAPI?.printToPDF) {
+      if (window.appPrint) { window.appPrint(); } else { window.print(); }
+      return;
+    }
+
+    try {
+      let css = '';
+      document.querySelectorAll('style').forEach(styleTag => {
+        css += styleTag.innerHTML + '\n';
+      });
+      for (const sheet of document.styleSheets) {
+        try {
+          const rules = Array.from(sheet.cssRules || []);
+          css += rules.map(r => r.cssText).join('\n') + '\n';
+        } catch (_) {}
+      }
+
+      const reportContainer = document.querySelector(`.${styles.reportsPage}`);
+      if (!reportContainer) throw new Error("Report content not found");
+
+      const clone = reportContainer.cloneNode(true);
+      
+      // Hide non-printable elements in the clone
+      const headerActions = clone.querySelector(`.${styles.headerActions}`);
+      if (headerActions) headerActions.style.display = 'none';
+
+      const toolbar = clone.querySelector(`.${styles.tableToolbar}`);
+      if (toolbar) toolbar.style.display = 'none';
+
+      const pagination = clone.querySelector('[class*="pagination"]');
+      if (pagination) pagination.style.display = 'none';
+
+      const html = clone.outerHTML;
+
+      await window.electronAPI.printToPDF({
+        filename,
+        html,
+        css,
+        pdfDownloadPath: settings.pdfDownloadPath || '',
+        origin: window.location.origin,
+        pageSize: 'A4'
+      });
+
+      alert(`Saved to Downloads: ${filename}`);
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      alert("Failed to generate PDF. Falling back to print.");
+      if (window.appPrint) { window.appPrint(); } else { window.print(); }
+    }
+  };
+
   return (
     <div className={styles.reportsPage}>
       <div className={styles.headerRow}>
         <div className={styles.headerInfo}>
           <h1>Nomod Transaction History</h1>
         </div>
-        <div className={styles.headerActions}>
-          <button className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={fetchNomodData}>
+        <div className={styles.headerActions} data-noprint="true">
+          <button 
+            className="btn btn-secondary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '8px', color: '#1E293B', fontWeight: '600' }} 
+            onClick={fetchNomodData}
+          >
             <RefreshCw size={18} /> Refresh Data
+          </button>
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#2563EB', border: '1px solid #2563EB', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}
+          >
+            <Printer size={18} /> Print Report
+          </button>
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#10B981', border: '1px solid #10B981', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={handleDownloadPDF}
+          >
+            <Download size={18} /> Download PDF
           </button>
         </div>
       </div>
@@ -120,16 +194,17 @@ export default function NomodHistory() {
             />
           </div>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-             <select 
-               value={filterStatus} 
-               onChange={(e) => setFilterStatus(e.target.value)}
-               style={{ padding: '0.5rem 0.75rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', fontWeight: 600, color: '#475569' }}
-             >
-               <option value="All">All Statuses</option>
-               <option value="Paid">Paid</option>
-               <option value="Pending">Pending</option>
-               <option value="Expired">Expired</option>
-             </select>
+            <CustomSelect
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              options={[
+                { value: 'All', label: 'All Statuses' },
+                { value: 'Paid', label: 'Paid' },
+                { value: 'Pending', label: 'Pending' },
+                { value: 'Expired', label: 'Expired' }
+              ]}
+              style={{ width: '180px' }}
+            />
           </div>
         </div>
 

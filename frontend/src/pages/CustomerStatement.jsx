@@ -9,6 +9,7 @@ import {
 import { useSettings } from '../store/SettingsContext';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
+import CustomSelect from '../components/CustomSelect';
 import styles from './CustomerStatement.module.css';
 
 export default function CustomerStatement() {
@@ -618,20 +619,21 @@ export default function CustomerStatement() {
 
         {/* Date filters */}
         <div className={styles.dateFilters}>
-          <div className={styles.dateField}>
-            <Calendar size={14} color="#94A3B8" />
-            <select
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <Calendar size={14} color="#94A3B8" style={{ position: 'absolute', left: '12px', zIndex: 10, pointerEvents: 'none' }} />
+            <CustomSelect
               value={dateRange}
               onChange={e => setDateRange(e.target.value)}
-              className={styles.dateInput}
-              style={{ border: 'none', background: 'transparent', outline: 'none', fontWeight: 600, width: '150px' }}
-            >
-              <option value="All">All Time</option>
-              <option value="Today">Today</option>
-              <option value="This Month">This Month</option>
-              <option value="This Year">This Year</option>
-              <option value="Custom">Custom Range</option>
-            </select>
+              options={[
+                { value: 'All', label: 'All Time' },
+                { value: 'Today', label: 'Today' },
+                { value: 'This Month', label: 'This Month' },
+                { value: 'This Year', label: 'This Year' },
+                { value: 'Custom', label: 'Custom Range' }
+              ]}
+              style={{ width: '180px' }}
+              paddingLeft="14px"
+            />
           </div>
 
           {dateRange === 'Custom' && (

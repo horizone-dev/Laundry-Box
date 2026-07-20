@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getEmailSettings: () => ipcRenderer.invoke('get-email-settings'),
   saveEmailSettings: (settings) => ipcRenderer.invoke('save-email-settings', settings),
   testEmail: () => ipcRenderer.invoke('test-email'),
+  sendOtpEmail: (options) => ipcRenderer.invoke('send-otp-email', options),
 });
 
 // Override native alert to show custom HTML/CSS Toast notifications, confirm to refocus, and print for silent routing

@@ -30,7 +30,7 @@ export function SettingsProvider({ children }) {
     invoiceTemplate: 'standard',
     posLayoutTemplate: 'standard',
     waCountryCode: '971',
-    currencySymbol: 'د.إ',
+    currencySymbol: '',
     activationCode: '',
     expiryDate: '',
     isActivated: true,

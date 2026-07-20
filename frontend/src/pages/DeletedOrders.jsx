@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { getLocalDateBounds, isWithinBounds } from '../utils/dateFilters';
 import { getLocalISOString, getLocalDateStr } from '../utils/dateUtils';
+import CustomSelect from '../components/CustomSelect';
 import styles from './DeletedOrders.module.css';
 
 const containerVariants = {
@@ -358,16 +359,17 @@ export default function DeletedOrders() {
 
           <div className={styles.filterControls}>
             <Calendar size={16} color="#64748B" />
-            <select
+            <CustomSelect
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value)}
-              className={styles.filterSelect}
-            >
-              <option value="All">All Time</option>
-              <option value="Today">Today</option>
-              <option value="This Month">This Month</option>
-              <option value="Custom">Custom Date Range</option>
-            </select>
+              options={[
+                { value: 'All', label: 'All Time' },
+                { value: 'Today', label: 'Today' },
+                { value: 'This Month', label: 'This Month' },
+                { value: 'Custom', label: 'Custom Date Range' }
+              ]}
+              style={{ width: '185px' }}
+            />
 
             {dateRange === 'Custom' && (
               <div className={styles.customDates}>

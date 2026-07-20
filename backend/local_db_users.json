@@ -4,8 +4,8 @@
     "name": "Horizon inc",
     "phone": "+9710588851680",
     "userId": "super admin",
-    "password": "$2b$10$h2eXGY2V9aX1qkHFDUxwvOiVPpi9dn5U.OshIVx0WuW19QEJMeOjm",
-    "pin": "$2b$10$h2eXGY2V9aX1qkHFDUxwvOiVPpi9dn5U.OshIVx0WuW19QEJMeOjm",
+    "password": "$2b$10$1VPqov.NAz4SFhRzOtURk.DiJ9O5V2UWg.R6p2Fyfd3cEpq5wEsyK",
+    "pin": "$2b$10$pTJihnzvYiNYu9b43vJ2x.jt//wb6ZAg5vkNzS35GAYAFIofew5hK",
     "role": "super_admin",
     "shopId": "SHOP_01",
     "createdAt": "2026-06-20T07:43:00.000Z"
@@ -16,7 +16,7 @@
     "phone": "+971000000000",
     "userId": "cashier",
     "password": "$2b$10$PqXZKr.nzJdCwIV96G1seuCOEWig.FwkB0oTpgaaeYxADFqJqSL/y",
-    "pin": "$2b$10$PqXZKr.nzJdCwIV96G1seuCOEWig.FwkB0oTpgaaeYxADFqJqSL/y",
+    "pin": "$2b$10$982cYaoVw/ooYdLZN1GkIuljuwmkHDk5TkVXP64CFUVznc8/gBCFK",
     "role": "cashier",
     "shopId": "SHOP_01",
     "createdAt": "2026-06-20T07:43:00.000Z"
@@ -27,9 +27,10 @@
     "phone": "+9710599999999",
     "userId": "manager",
     "password": "$2b$10$hroPO5DnkgYDGOVxwdBdUu0Jzmasy7.JeP9mMP/fr4xAz8vwWotzO",
-    "pin": "$2b$10$hroPO5DnkgYDGOVxwdBdUu0Jzmasy7.JeP9mMP/fr4xAz8vwWotzO",
+    "pin": "$2b$10$eQ.X8.Cc2CP3ZHK1s65r1erF2WNgC1WbME6W.XSnBokPiKNd1EAj.",
     "role": "manager",
     "shopId": "SHOP_01",
-    "createdAt": "2026-06-25T11:40:00.000Z"
+    "createdAt": "2026-06-25T11:40:00.000Z",
+    "updatedAt": "2026-07-20T05:24:19.175Z"
   }
 ]

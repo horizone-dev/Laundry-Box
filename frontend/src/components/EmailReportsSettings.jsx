@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Mail, Save, AlertCircle } from 'lucide-react';
+import CustomSelect from './CustomSelect';
 import styles from '../pages/Settings.module.css';
 
 export default function EmailReportsSettings({ registerSave, setIsSettingsDirty }) {
@@ -197,9 +198,6 @@ export default function EmailReportsSettings({ registerSave, setIsSettingsDirty 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h2 className={styles.cardTitle}>Daily Email Reports Configuration</h2>
-            <p style={{ color: '#64748b', fontSize: '0.875rem', margin: 0 }}>
-              Configure automated daily business reports to be sent directly to the owner.
-            </p>
           </div>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <button
@@ -270,17 +268,16 @@ export default function EmailReportsSettings({ registerSave, setIsSettingsDirty 
 
           <div className={styles.formGroup}>
             <label>Email Provider</label>
-            <select
-              className={styles.inputField}
-              name="provider"
+            <CustomSelect
               value={emailSettings.provider}
-              onChange={handleChange}
-            >
-              <option value="Gmail">Gmail</option>
-              <option value="Outlook">Outlook / Office365</option>
-              <option value="Zoho">Zoho Mail</option>
-              <option value="Custom SMTP">Custom SMTP</option>
-            </select>
+              onChange={(e) => handleChange({ target: { name: 'provider', value: e.target.value } })}
+              options={[
+                { value: 'Gmail', label: 'Gmail' },
+                { value: 'Outlook', label: 'Outlook / Office365' },
+                { value: 'Zoho', label: 'Zoho Mail' },
+                { value: 'Custom SMTP', label: 'Custom SMTP' }
+              ]}
+            />
           </div>
         </div>
 

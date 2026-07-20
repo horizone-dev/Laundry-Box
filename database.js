@@ -902,7 +902,7 @@ function runDataHealer(db) {
               SELECT IFNULL(SUM(dueAmount), 0) 
               FROM orders 
               WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-            ) - (
+            ) - MAX(0, (
               IFNULL((
                 SELECT SUM(amount) 
                 FROM payments 
@@ -914,7 +914,7 @@ function runDataHealer(db) {
                 JOIN payments p ON a.paymentId = p.id
                 WHERE p.customerId = customers.id AND o.status != 'Cancelled'
               ), 0)
-            ) - IFNULL((
+            )) - IFNULL((
               SELECT SUM(paidAmount)
               FROM deleted_orders
               WHERE deleted_orders.customerId = customers.id
@@ -926,7 +926,7 @@ function runDataHealer(db) {
                 SELECT IFNULL(SUM(dueAmount), 0) 
                 FROM orders 
                 WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-              ) - (
+              ) - MAX(0, (
                 IFNULL((
                   SELECT SUM(amount) 
                   FROM payments 
@@ -938,7 +938,7 @@ function runDataHealer(db) {
                   JOIN payments p ON a.paymentId = p.id
                   WHERE p.customerId = customers.id AND o.status != 'Cancelled'
                 ), 0)
-              ) - IFNULL((
+              )) - IFNULL((
                 SELECT SUM(paidAmount)
                 FROM deleted_orders
                 WHERE deleted_orders.customerId = customers.id
@@ -1040,7 +1040,7 @@ function runDataHealer(db) {
               SELECT IFNULL(SUM(dueAmount), 0) 
               FROM orders 
               WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-            ) - (
+            ) - MAX(0, (
               IFNULL((
                 SELECT SUM(amount) 
                 FROM payments 
@@ -1052,7 +1052,7 @@ function runDataHealer(db) {
                 JOIN payments p ON a.paymentId = p.id
                 WHERE p.customerId = customers.id AND o.status != 'Cancelled'
               ), 0)
-            ) - IFNULL((
+            )) - IFNULL((
               SELECT SUM(paidAmount)
               FROM deleted_orders
               WHERE deleted_orders.customerId = customers.id
@@ -1064,7 +1064,7 @@ function runDataHealer(db) {
                 SELECT IFNULL(SUM(dueAmount), 0) 
                 FROM orders 
                 WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-              ) - (
+              ) - MAX(0, (
                 IFNULL((
                   SELECT SUM(amount) 
                   FROM payments 
@@ -1076,7 +1076,7 @@ function runDataHealer(db) {
                   JOIN payments p ON a.paymentId = p.id
                   WHERE p.customerId = customers.id AND o.status != 'Cancelled'
                 ), 0)
-              ) - IFNULL((
+              )) - IFNULL((
                 SELECT SUM(paidAmount)
                 FROM deleted_orders
                 WHERE deleted_orders.customerId = customers.id

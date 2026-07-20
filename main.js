@@ -373,37 +373,11 @@ app.whenReady().then(async () => {
     logStartup('Warning: Email service scheduler failed to start:', emailErr);
   }
 
-  // Seed initial data if tables are empty
+  // Seed initial data if tables are empty (disabled to start with a clean database for new installations)
   const db = getDB();
   const serviceCount = db.prepare('SELECT COUNT(*) as count FROM services').get().count;
   if (serviceCount === 0) {
-    logStartup("Database is empty. Seeding initial POS services and category data...");
-    const shopId = 'SHOP_01';
-    const now = new Date().toISOString();
-
-    const insertService = db.prepare('INSERT INTO services (id, shopId, name, price, icon, category, image, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    insertService.run('1', shopId, "Men's Shirt", 3.50, 'Shirt', 'Laundry', generateServiceSVG("Men's Shirt", 'Laundry'), now);
-    insertService.run('2', shopId, "Women's Dress", 8.00, 'Heart', 'Laundry', generateServiceSVG("Women's Dress", 'Laundry'), now);
-    insertService.run('3', shopId, "Suit Jacket", 12.50, 'Layers', 'Dry Cleaning', generateServiceSVG("Suit Jacket", 'Dry Cleaning'), now);
-    insertService.run('4', shopId, "Pants", 5.00, 'Shirt', 'Laundry', generateServiceSVG("Pants", 'Laundry'), now);
-    insertService.run('5', shopId, "Bedding", 15.00, 'Bed', 'Laundry', generateServiceSVG("Bedding", 'Laundry'), now);
-
-    const insertType = db.prepare('INSERT INTO service_types (id, shopId, name, price, icon, updatedAt) VALUES (?, ?, ?, ?, ?, ?)');
-    insertType.run('wf', shopId, 'Wash & Fold', 4.50, 'Droplet', now);
-    insertType.run('dc', shopId, 'Dry Clean', 7.25, 'Wind', now);
-    insertType.run('po', shopId, 'Pressing Only', 3.00, 'Layers', now);
-
-    const insertAddon = db.prepare('INSERT INTO addons (id, shopId, name, price, icon, updatedAt) VALUES (?, ?, ?, ?, ?, ?)');
-    insertAddon.run('sd', shopId, 'Scented Detergent', 0.50, 'Droplet', now);
-    insertAddon.run('fs', shopId, 'Fabric Softener', 0.50, 'Sparkles', now);
-    insertAddon.run('ex', shopId, 'Express 4h', 5.00, 'Zap', now);
-
-    const insertCategory = db.prepare('INSERT INTO service_categories (id, shopId, name, icon, updatedAt) VALUES (?, ?, ?, ?, ?)');
-    insertCategory.run('cat1', shopId, 'Laundry', 'Droplet', now);
-    insertCategory.run('cat2', shopId, 'Dry Cleaning', 'Wind', now);
-    insertCategory.run('cat3', shopId, 'Alterations', 'Scissors', now);
-    insertCategory.run('cat4', shopId, 'Premium', 'Sparkles', now);
-    logStartup("Database seeding completed.");
+    logStartup("Database is empty. Fresh installation detected (seeding skipped to start clean).");
   }
 
   // App open -> server auto start
@@ -2214,6 +2188,57 @@ ipcMain.handle('save-email-settings', async (event, settings) => {
 
 ipcMain.handle('test-email', async () => {
   return await emailService.sendEmailReport(0);
+});
+
+ipcMain.handle('send-otp-email', async (event, { recipient, otp, username }) => {
+  try {
+    const settings = await emailService.getEmailSettings();
+    if (!settings || !settings.enabled) {
+      throw new Error('Email reporting is not enabled in settings.');
+    }
+    
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({
+      host: settings.smtpHost,
+      port: settings.smtpPort || 465,
+      secure: settings.smtpPort === 465,
+      auth: {
+        user: settings.username,
+        pass: settings.password
+      },
+      requireTLS: true,
+      tls: {
+        rejectUnauthorized: true,
+        minVersion: 'TLSv1.2'
+      }
+    });
+
+    const mailOptions = {
+      from: `"${settings.username}" <${settings.username}>`,
+      to: recipient,
+      subject: 'Security Verification PIN Reset OTP',
+      html: `
+        <div style="font-family: system-ui, -apple-system, sans-serif; padding: 24px; max-width: 500px; margin: 0 auto; border: 1px solid #E2E8F0; border-radius: 16px; background: white; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+          <h2 style="color: #0F172A; font-weight: 800; margin-bottom: 16px; font-size: 1.25rem;">PIN Reset Verification</h2>
+          <p style="color: #475569; font-size: 0.95rem; line-height: 1.5; margin-bottom: 24px;">
+            A request has been received to reset the login PIN for user <strong>${username}</strong>. Use the following One-Time Password (OTP) to complete the reset:
+          </p>
+          <div style="background: #F8FAFC; border: 1px solid #E2E8F0; padding: 16px; border-radius: 12px; text-align: center; margin-bottom: 24px;">
+            <span style="font-size: 2.25rem; font-weight: 800; letter-spacing: 6px; color: #2563EB;">${otp}</span>
+          </div>
+          <p style="color: #64748B; font-size: 0.8rem; line-height: 1.4; margin: 0;">
+            This OTP is valid for 5 minutes. If you did not request this code, please secure your system settings.
+          </p>
+        </div>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    return { success: true };
+  } catch (err) {
+    console.error('Failed to send OTP email via IPC:', err);
+    return { success: false, error: err.message };
+  }
 });
 
 function showPendingPaymentsReminder() {

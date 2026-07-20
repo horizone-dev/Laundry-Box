@@ -12,8 +12,8 @@ const seedSuperAdmin = async () => {
     const admin = new User({
       name: 'Horizon inc',
       phone: '+9710588851680',
-      password: 'Admin123',
-      pin: 'Admin123',
+      password: 'Admin@123',
+      pin: 'disabled',
       role: 'super_admin',
       shopId: 'SHOP_01',
       userId: 'super admin'

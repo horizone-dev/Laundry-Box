@@ -21,6 +21,9 @@ api.interceptors.request.use((config) => {
 export const authApi = {
   login: (credentials) => api.post('/auth/login', credentials),
   register: (userData) => api.post('/auth/register', userData),
+  getUsers: () => api.get('/auth/users'),
+  updateUser: (userId, userData) => api.put(`/auth/users/${userId}`, userData),
+  verifyManagerPin: (pin) => api.post('/auth/verify-manager-pin', { pin })
 };
 
 export const syncApi = {

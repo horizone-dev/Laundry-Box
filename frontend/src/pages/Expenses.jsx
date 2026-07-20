@@ -9,6 +9,7 @@ import { DEFAULT_SHOP_ID } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { getLocalISOString, getLocalDateStr, getLocalDateTime } from '../utils/dateUtils';
 import styles from './Expenses.module.css';
+import CustomSelect from '../components/CustomSelect';
 
 export default function Expenses() {
   const { settings, formatDate } = useSettings();
@@ -244,15 +245,167 @@ export default function Expenses() {
     document.body.removeChild(link);
   };
 
+  // PRINT
+  const handlePrint = () => {
+    if (window.appPrint) {
+      window.appPrint();
+    } else {
+      window.print();
+    }
+  };
+
+  // PDF DOWNLOAD
+  const handleDownloadPDF = async () => {
+    const filename = `Expenses_Report_${new Date().toISOString().split('T')[0]}.pdf`;
+    if (!window.electronAPI?.printToPDF) {
+      handlePrint();
+      return;
+    }
+
+    try {
+      let css = '';
+      document.querySelectorAll('style').forEach(styleTag => {
+        css += styleTag.innerHTML + '\n';
+      });
+      for (const sheet of document.styleSheets) {
+        try {
+          const rules = Array.from(sheet.cssRules || []);
+          css += rules.map(r => r.cssText).join('\n') + '\n';
+        } catch (_) {}
+      }
+
+      const reportContainer = document.querySelector(`.${styles.expensesPage}`);
+      if (!reportContainer) throw new Error("Expenses content not found");
+
+      const clone = reportContainer.cloneNode(true);
+      
+      // Add a clean heading for the PDF copy
+      const printHeader = document.createElement('h1');
+      printHeader.innerText = `Expenses Tracking Report`;
+      printHeader.style.marginBottom = '1.5rem';
+      printHeader.style.fontSize = '1.8rem';
+      printHeader.style.fontWeight = '800';
+      printHeader.style.color = '#0F172A';
+      clone.insertBefore(printHeader, clone.firstChild);
+
+      // Hide actions / buttons in the printed copy
+      const headerActions = clone.querySelector(`.${styles.headerRow} > div:last-child`);
+      if (headerActions) headerActions.style.display = 'none';
+
+      const tableHeader = clone.querySelector(`.${styles.tableHeader}`);
+      if (tableHeader) tableHeader.style.display = 'none';
+
+      // Hide delete action in table cells
+      clone.querySelectorAll(`.${styles.deleteBtn}`).forEach(btn => btn.style.display = 'none');
+      // Hide actions column header and cells
+      clone.querySelectorAll('tr').forEach(tr => {
+        const lastCell = tr.lastElementChild;
+        if (lastCell) {
+          if (lastCell.tagName === 'TH' && lastCell.innerText === 'Actions') {
+            lastCell.style.display = 'none';
+          } else if (lastCell.querySelector(`.${styles.deleteBtn}`)) {
+            lastCell.style.display = 'none';
+          }
+        }
+      });
+
+      const html = clone.outerHTML;
+
+      await window.electronAPI.printToPDF({
+        filename,
+        html,
+        css,
+        pdfDownloadPath: settings.pdfDownloadPath || '',
+        origin: window.location.origin,
+        pageSize: 'A4'
+      });
+
+      alert(`Saved to Downloads: ${filename}`);
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      alert("Failed to generate PDF. Falling back to print.");
+      handlePrint();
+    }
+  };
+
+  const totalAmountSum = React.useMemo(() => {
+    return filteredExpenses.reduce((sum, ex) => sum + (ex.amount || 0), 0);
+  }, [filteredExpenses]);
+
+  const totalTaxSum = React.useMemo(() => {
+    return filteredExpenses.reduce((sum, ex) => sum + (ex.taxAmount || 0), 0);
+  }, [filteredExpenses]);
+
+  const categoryOptions = React.useMemo(() => [
+    { value: 'All', label: 'All Categories' },
+    { value: 'Supplies', label: 'Supplies' },
+    { value: 'Salaries', label: 'Salaries' },
+    { value: 'Rent', label: 'Rent' },
+    { value: 'Utilities', label: 'Utilities' },
+    { value: 'Electricity', label: 'Electricity' },
+    { value: 'Maintenance', label: 'Maintenance' },
+    { value: 'Return', label: 'Return' },
+    { value: 'Other Expense', label: 'Other Expense' },
+    ...customCategories.map(cat => ({ value: cat, label: cat }))
+  ], [customCategories]);
+
+  const dateRangeOptions = React.useMemo(() => [
+    { value: 'All', label: 'All Time' },
+    { value: 'Today', label: 'Today' },
+    { value: 'Yesterday', label: 'Yesterday' },
+    { value: 'This Month', label: 'This Month' },
+    { value: 'This Year', label: 'This Year' },
+    { value: 'Custom', label: 'Custom Range' }
+  ], []);
+
+  const modalCategoryOptions = React.useMemo(() => [
+    { value: 'Supplies', label: 'Supplies' },
+    { value: 'Salaries', label: 'Salaries' },
+    { value: 'Rent', label: 'Rent' },
+    { value: 'Utilities', label: 'Utilities' },
+    { value: 'Electricity', label: 'Electricity' },
+    { value: 'Maintenance', label: 'Maintenance' },
+    { value: 'Return', label: 'Return' },
+    { value: 'Other Expense', label: 'Other Expense' },
+    ...customCategories.map(cat => ({ value: cat, label: cat })),
+    { value: 'ADD_CUSTOM', label: '+ Add Custom Category...' }
+  ], [customCategories]);
+
+  const paidFromOptions = React.useMemo(() => [
+    { value: 'CASH', label: 'Cash Account' },
+    { value: 'BANK', label: 'Bank Account' }
+  ], []);
+
   return (
     <div className={styles.expensesPage}>
       <div className={styles.headerRow}>
         <div className={styles.headerTitle}>
           <h1>Expenses Tracking</h1>
+          <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.95rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            Total Filtered Expenses: <span style={{ fontWeight: 700, color: '#EF4444', background: '#FEF2F2', padding: '0.1rem 0.6rem', borderRadius: '6px', border: '1px solid #FEE2E2' }}><CurrencySymbol size={14} /> {totalAmountSum.toFixed(2)}</span>
+          </p>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button className="btn btn-secondary" onClick={handleExportCSV}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }} data-noprint="true">
+          <button 
+            className="btn btn-secondary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '8px', color: '#1E293B', fontWeight: '600' }} 
+            onClick={handleExportCSV}
+          >
             <Download size={18} /> Export CSV
+          </button>
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#2563EB', border: '1px solid #2563EB', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={handlePrint}
+          >
+            <Printer size={18} /> Print Report
+          </button>
+          <button 
+            className="btn btn-primary" 
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', background: '#10B981', border: '1px solid #10B981', borderRadius: '8px', color: '#FFFFFF', fontWeight: '600' }} 
+            onClick={handleDownloadPDF}
+          >
+            <Download size={18} /> Download PDF
           </button>
           <button className="btn btn-primary" onClick={() => setShowModal(true)}>
             <Plus size={18} /> Add Expense
@@ -266,42 +419,26 @@ export default function Expenses() {
           <div className={styles.tableFilters}>
           </div>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <div className={styles.filterWrapper}>
-              <Filter size={14} className={styles.filterIcon} />
-              <select 
+            <div className={styles.filterWrapper} style={{ border: 'none', padding: 0, position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Filter size={14} style={{ position: 'absolute', left: '0.75rem', zIndex: 10, pointerEvents: 'none', color: '#64748B' }} />
+              <CustomSelect 
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
-                className={styles.filterSelect}
-              >
-                <option value="All">All Categories</option>
-                <option value="Supplies">Supplies</option>
-                <option value="Salaries">Salaries</option>
-                <option value="Rent">Rent</option>
-                <option value="Utilities">Utilities</option>
-                <option value="Electricity">Electricity</option>
-                <option value="Maintenance">Maintenance</option>
-                <option value="Return">Return</option>
-                <option value="Other Expense">Other Expense</option>
-                {customCategories.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
+                options={categoryOptions}
+                paddingLeft="0.75rem"
+                style={{ width: '180px' }}
+              />
             </div>
             
-            <div className={styles.filterWrapper}>
-              <Calendar size={14} className={styles.filterIcon} />
-              <select 
+            <div className={styles.filterWrapper} style={{ border: 'none', padding: 0, position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Calendar size={14} style={{ position: 'absolute', left: '0.75rem', zIndex: 10, pointerEvents: 'none', color: '#64748B' }} />
+              <CustomSelect 
                 value={selectedDateRange}
                 onChange={(e) => setSelectedDateRange(e.target.value)}
-                className={styles.filterSelect}
-              >
-                <option value="All">All Time</option>
-                <option value="Today">Today</option>
-                <option value="Yesterday">Yesterday</option>
-                <option value="This Month">This Month</option>
-                <option value="This Year">This Year</option>
-                <option value="Custom">Custom Range</option>
-              </select>
+                options={dateRangeOptions}
+                paddingLeft="0.75rem"
+                style={{ width: '160px' }}
+              />
             </div>
 
             {selectedDateRange === 'Custom' && (
@@ -372,6 +509,22 @@ export default function Expenses() {
               <tr><td colSpan="7" style={{ textAlign: 'center', padding: '2rem' }}>No expenses found matching the selected filters.</td></tr>
             )}
           </tbody>
+          {filteredExpenses.length > 0 && (
+            <tfoot>
+              <tr style={{ background: '#F8FAFC', fontWeight: 'bold', borderTop: '2px solid #E2E8F0' }}>
+                <td colSpan="3" style={{ textAlign: 'right', padding: '1rem', color: '#475569' }}>Total</td>
+                <td className={styles.amountCell} style={{ padding: '1rem', color: '#EF4444', fontWeight: 700 }}>
+                  <CurrencySymbol size={14} /> {totalAmountSum.toFixed(2)}
+                </td>
+                <td style={{ padding: '1rem', color: '#64748B' }}>
+                  {totalTaxSum > 0 ? (
+                    <><CurrencySymbol size={12} /> {totalTaxSum.toFixed(2)}</>
+                  ) : '-'}
+                </td>
+                <td colSpan="2"></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
 
         <div className={styles.pagination}>
@@ -435,8 +588,9 @@ export default function Expenses() {
                         </button>
                       </div>
                     ) : (
-                      <select 
+                      <CustomSelect
                         value={formData.category}
+                        options={modalCategoryOptions}
                         onChange={(e) => {
                           if (e.target.value === 'ADD_CUSTOM') {
                             setShowCustomCategoryInput(true);
@@ -445,20 +599,7 @@ export default function Expenses() {
                             setFormData({...formData, category: e.target.value});
                           }
                         }}
-                      >
-                        <option value="Supplies">Supplies</option>
-                        <option value="Salaries">Salaries</option>
-                        <option value="Rent">Rent</option>
-                        <option value="Utilities">Utilities</option>
-                        <option value="Electricity">Electricity</option>
-                        <option value="Maintenance">Maintenance</option>
-                        <option value="Return">Return</option>
-                        <option value="Other Expense">Other Expense</option>
-                        {customCategories.map(cat => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                        <option value="ADD_CUSTOM">+ Add Custom Category...</option>
-                      </select>
+                      />
                     )}
                   </div>
                 </div>
@@ -474,13 +615,11 @@ export default function Expenses() {
                   </div>
                   <div className={styles.formGroup}>
                     <label>Paid From</label>
-                    <select 
+                    <CustomSelect 
                       value={formData.paymentSource}
+                      options={paidFromOptions}
                       onChange={(e) => setFormData({...formData, paymentSource: e.target.value})}
-                    >
-                      <option value="CASH">Cash Account</option>
-                      <option value="BANK">Bank Account</option>
-                    </select>
+                    />
                   </div>
                 </div>
 
