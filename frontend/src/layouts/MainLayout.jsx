@@ -4,7 +4,8 @@ import {
   LayoutDashboard, ShoppingCart, Users, ClipboardList, Settings, Layers,
   BarChart3, Zap, Plus, Search, Bell, HelpCircle, LifeBuoy, Wifi, WifiOff, RefreshCw, Activity, LogOut, Wallet,
   DollarSign, X, CheckCircle, CreditCard, ShoppingBag, Trash2, Building2, Hash, FileText,
-  AlertTriangle, ShieldCheck, Clock, Package, Truck, Phone, Cpu, Lock, Share2, Download, Send, Printer
+  AlertTriangle, ShieldCheck, Clock, Package, Truck, Phone, Cpu, Lock, Share2, Download, Send, Printer,
+  QrCode, Landmark, Check, ChevronDown
 } from 'lucide-react';
 import axios from 'axios';
 import WhatsAppIcon from '../components/WhatsAppIcon';
@@ -19,6 +20,112 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { paymentService } from '../services/paymentService';
 
 const API_BASE = API_BASE_URL;
+
+function PaymentMethodSelect({ value, onChange, settings }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const methods = [
+    { id: 'Cash', label: 'Cash Payment', icon: <Wallet size={16} color="#10B981" />, badgeBg: '#ECFDF5' },
+    { id: 'Card', label: 'Card Payment', icon: <CreditCard size={16} color="#2563EB" />, badgeBg: '#EFF6FF' },
+    { id: 'Bank', label: 'Bank Transfer', icon: <Landmark size={16} color="#4F46E5" />, badgeBg: '#EEF2FF' },
+    { id: 'Nomod', label: 'Nomod Pay (Link)', icon: <ShieldCheck size={16} color="#059669" />, badgeBg: '#D1FAE5' },
+    { id: 'Multipayment', label: 'Multipayment (Split)', icon: <Layers size={16} color="#F59E0B" />, badgeBg: '#FEF3C7' },
+  ];
+
+  const current = methods.find(m => m.id === value) || methods[0];
+
+  return (
+    <div ref={dropdownRef} style={{ position: 'relative', width: '100%' }}>
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0.65rem 0.85rem',
+          background: 'white',
+          border: '1.5px solid #CBD5E1',
+          borderRadius: '10px',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease',
+          boxShadow: isOpen ? '0 0 0 3px rgba(37, 99, 235, 0.15)' : '0 1px 2px rgba(0,0,0,0.03)',
+          borderColor: isOpen ? 'var(--primary)' : '#CBD5E1',
+          userSelect: 'none'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+          <div style={{ padding: '0.35rem', borderRadius: '6px', background: current.badgeBg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {current.icon}
+          </div>
+          <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#1E293B' }}>{current.label}</span>
+        </div>
+        <ChevronDown size={16} color="#64748B" style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }} />
+      </div>
+
+      {isOpen && (
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 6px)',
+          left: 0,
+          right: 0,
+          background: 'white',
+          border: '1px solid #E2E8F0',
+          borderRadius: '12px',
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.12), 0 8px 10px -6px rgba(0,0,0,0.05)',
+          padding: '0.4rem',
+          zIndex: 99999,
+          maxHeight: '250px',
+          overflowY: 'auto'
+        }}>
+          {methods.map((m) => {
+            const isSelected = value === m.id;
+            return (
+              <div
+                key={m.id}
+                onClick={() => {
+                  onChange(m.id);
+                  setIsOpen(false);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.55rem 0.75rem',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  background: isSelected ? '#EFF6FF' : 'transparent',
+                  color: isSelected ? 'var(--primary)' : '#334155',
+                  transition: 'background 0.15s ease'
+                }}
+                onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#F8FAFC'; }}
+                onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <div style={{ padding: '0.35rem', borderRadius: '6px', background: m.badgeBg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {m.icon}
+                  </div>
+                  <span style={{ fontWeight: isSelected ? 800 : 600, fontSize: '0.85rem' }}>{m.label}</span>
+                </div>
+                {isSelected && <Check size={16} color="var(--primary)" />}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function MainLayout() {
   const { settings, updateSettings, isSettingsDirty, setIsSettingsDirty, originalSettings, setOriginalSettings } = useSettings();
@@ -611,7 +718,7 @@ export default function MainLayout() {
         { path: '/reports/expenses', label: 'Expenses' },
         { path: '/reports/tax', label: 'Tax Statements' },
         { path: '/reports/daily-tax', label: 'Daily Tax Report' },
-        { path: '/reports/z-report', label: 'Z Report' },
+        { path: '/reports/z-report', label: 'Z Report (Day Close)' },
         { path: '/reports/credit-overrides', label: 'Credit Overrides' },
         { path: '/reports/nomod-history', label: 'Nomod History' },
       ]
@@ -1286,11 +1393,8 @@ const timestamp = getLocalISOString();
             ) : (
               <Layers color="#2563EB" size={24} />
             )}
-            <span className={styles.sidebarText}>{settings.companyName.toUpperCase()}</span>
+            <span className={`${styles.sidebarText} ${styles.logoText}`}>{settings.companyName.toUpperCase()}</span>
           </div>
-          {!settings.companyName.toUpperCase().includes('SYSTEM') && (
-            <span className={styles.logoSub}>MANAGEMENT SYSTEM</span>
-          )}
         </div>
 
         <nav className={styles.nav}>
@@ -1440,11 +1544,12 @@ const timestamp = getLocalISOString();
                 <button className={styles.headerSettleBtn} onClick={() => setShowQuickSettle(true)}>
                   <DollarSign size={18} /> Settle Bill
                 </button>
-                {(role === 'super_admin' || role === 'manager') && (
-                  <button className={styles.headerSettleBtn} onClick={() => customNavigate('/reports/z-report')} title="Z Report">
-                    <Activity size={18} /> Z Report
-                  </button>
-                )}
+                <button 
+                  className={styles.headerZReportBtn} 
+                  onClick={() => customNavigate('/reports/z-report')}
+                >
+                  <FileText size={18} /> Z Report
+                </button>
                 <div
                   ref={notificationRef}
                   className={styles.iconBtn}
@@ -1786,22 +1891,16 @@ const timestamp = getLocalISOString();
                     </div>
 
                     <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
-                      <label>Method</label>
-                      <select
-                        value={settleMethod}
-                        onChange={(e) => setSettleMethod(e.target.value)}
-                        style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0' }}
-                      >
-                        <option value="Cash">Cash</option>
-                        <option value="Card">Card</option>
-                        <option value="UPI">UPI</option>
-                        {settings.noModPayEnabled && settings.enableNomod && <option value="Nomod">Nomod Link</option>}
-                        <option value="Multipayment">Multipayment</option>
-                      </select>
+                      <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem', display: 'block' }}>Method</label>
+                      <PaymentMethodSelect 
+                        value={settleMethod} 
+                        onChange={(method) => setSettleMethod(method)}
+                        settings={settings}
+                      />
                     </div>
 
                     {settleMethod === 'Multipayment' && (
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '1rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', marginTop: '1rem' }}>
                         <div>
                           <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cash</label>
                           <input type="number" placeholder="0.00" value={quickCashAmount} onChange={(e) => setQuickCashAmount(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E2E8F0' }} />
@@ -1811,19 +1910,15 @@ const timestamp = getLocalISOString();
                           <input type="number" placeholder="0.00" value={quickCardAmount} onChange={(e) => setQuickCardAmount(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E2E8F0' }} />
                         </div>
                         <div>
-                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>UPI</label>
-                          <input type="number" placeholder="0.00" value={quickUpiAmount} onChange={(e) => setQuickUpiAmount(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E2E8F0' }} />
-                        </div>
-                        <div>
                           <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Bank</label>
                           <input type="number" placeholder="0.00" value={quickBankAmount} onChange={(e) => setQuickBankAmount(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E2E8F0' }} />
                         </div>
                       </div>
                     )}
 
-                    {(settleMethod === 'Card' || settleMethod === 'UPI' || (settleMethod === 'Multipayment' && (quickCardVal > 0 || quickUpiVal > 0 || quickBankVal > 0))) && settings.bankAccounts?.length > 0 && (
+                    {(settleMethod === 'Card' || (settleMethod === 'Multipayment' && (quickCardVal > 0 || quickBankVal > 0))) && settings.bankAccounts?.length > 0 && (
                       <div className={styles.inputGroup} style={{ marginTop: '1rem' }}>
-                        <label>{settleMethod === 'Card' ? 'Select Bank Account' : 'Select UPI Account'}</label>
+                        <label>Select Bank Account</label>
                         <select
                           value={selectedBank}
                           onChange={(e) => setSelectedBank(e.target.value)}

@@ -9,6 +9,7 @@
 /* Sidebar Styling */
 .sidebar {
   width: 80px;
+  flex-shrink: 0;
   background-color: #0F172A;
   /* Deep Navy/Dark */
   display: flex;
@@ -31,19 +32,25 @@
 .chevron,
 .subMenu,
 .trialStatusSidebar {
+  display: none !important;
   opacity: 0;
-  transition: opacity 0.2s ease;
   pointer-events: none;
 }
 
 .sidebar:hover .sidebarText,
-.sidebar:hover .logoSub,
 .sidebar:hover .chevron,
-.sidebar:hover .subMenu,
 .sidebar:hover .trialStatusSidebar {
+  display: inline-block !important;
   opacity: 1;
   pointer-events: auto;
-  transition: opacity 0.3s ease 0.1s;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar:hover .subMenu {
+  display: flex !important;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.3s ease;
 }
 
 .logo {
@@ -84,6 +91,14 @@
   font-weight: 600;
   color: #64748B;
   padding-left: 2.25rem;
+}
+
+.logoText {
+  white-space: normal !important;
+  line-height: 1.25 !important;
+  font-size: 1rem !important;
+  word-break: break-word !important;
+  max-width: 170px !important;
 }
 
 .nav {
@@ -231,6 +246,12 @@
   transform: translateY(-1px);
 }
 
+.headerIcons {
+  display: flex;
+  align-items: center;
+  gap: 1.75rem;
+}
+
 .headerNewOrderBtn,
 .headerDeliverBtn,
 .headerSettleBtn {
@@ -278,6 +299,28 @@
 .headerSettleBtn:hover {
   background: #EFF6FF;
   border-color: #BFDBFE;
+}
+
+.headerZReportBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.25rem;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid #A7F3D0;
+  background: #ECFDF5;
+  color: #047857;
+}
+
+.headerZReportBtn:hover {
+  background: #D1FAE5;
+  border-color: #6EE7B7;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);
 }
 
 /* Modal Styles */
@@ -794,7 +837,7 @@
 .headerIcons {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: 2.5rem;
   color: #64748B;
 }
 

@@ -554,11 +554,18 @@ function logEmailHistory(recipient, status, reason, retryCount = 0) {
 }
 
 async function sendEmailReport(retryCount = 0) {
+  let recipientForLog = 'Unknown';
   try {
     const settings = await getEmailSettings();
     if (!settings || !settings.enabled || !settings.ownerEmail || !settings.smtpHost) {
       return { success: false, message: 'Email reports are disabled or incomplete settings.' };
     }
+
+    recipientForLog = settings.ownerEmail
+      .split(/[;,]/)
+      .map(email => email.trim())
+      .filter(Boolean)
+      .join(', ');
 
     const stats = await getDailyStats();
     const htmlBody = await generateHtmlReport(stats);
@@ -665,19 +672,19 @@ async function sendEmailReport(retryCount = 0) {
 
     const mailOptions = {
       from: `"${stats.shopName}" <${settings.username}>`,
-      to: settings.ownerEmail,
+      to: recipientForLog,
       subject: `Daily Business Report - ${stats.shopName} - ${stats.dateStr}`,
       html: htmlBody,
       attachments
     };
 
     await transporter.sendMail(mailOptions);
-    logEmailHistory(settings.ownerEmail, 'Success', 'Email sent successfully', retryCount);
+    logEmailHistory(recipientForLog, 'Success', 'Email sent successfully', retryCount);
     return { success: true, message: 'Email sent successfully' };
 
   } catch (error) {
     console.error('Email send failed:', error);
-    logEmailHistory('Unknown', 'Failed', error.message || 'Unknown error', retryCount);
+    logEmailHistory(recipientForLog, 'Failed', error.message || 'Unknown error', retryCount);
     
     if (retryCount < 3) {
       const delays = [15 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000]; // 15, 30, 60 mins

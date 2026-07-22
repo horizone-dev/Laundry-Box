@@ -1196,7 +1196,7 @@ export default function Workflow() {
 
       {/* Settle payment selection modal */}
       {showPayModal && (
-        <div className={styles.payModalOverlay} onClick={() => { setShowPayModal(false); if (originalPayStatus) setSelectedOrder(prev => ({ ...prev, paymentStatus: originalPayStatus })); }}>
+        <div className={styles.payModalOverlay}>
           <div className={styles.payModal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ padding: '0 0 1rem 0' }}>
               <h2 style={{ fontSize: '1.15rem' }}>{t('confirmPayment', settings.language)}</h2>

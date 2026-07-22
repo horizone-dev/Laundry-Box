@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Mail, Save, AlertCircle } from 'lucide-react';
+import { Mail, Save, AlertCircle, Trash2 } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 import styles from '../pages/Settings.module.css';
 
@@ -25,6 +25,25 @@ export default function EmailReportsSettings({ registerSave, setIsSettingsDirty 
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState('');
+  const [ownerEmails, setOwnerEmails] = useState(['']);
+
+  const addEmailField = () => {
+    setOwnerEmails([...ownerEmails, '']);
+    if (setIsSettingsDirty) setIsSettingsDirty(true);
+  };
+
+  const removeEmailField = (index) => {
+    const updated = ownerEmails.filter((_, idx) => idx !== index);
+    setOwnerEmails(updated.length > 0 ? updated : ['']);
+    if (setIsSettingsDirty) setIsSettingsDirty(true);
+  };
+
+  const handleEmailChange = (index, value) => {
+    const updated = [...ownerEmails];
+    updated[index] = value;
+    setOwnerEmails(updated);
+    if (setIsSettingsDirty) setIsSettingsDirty(true);
+  };
 
   useEffect(() => {
     fetchSettings();
@@ -63,6 +82,10 @@ export default function EmailReportsSettings({ registerSave, setIsSettingsDirty 
             includeCollectionsCsv: settings.includeCollectionsCsv === 1 || settings.includeCollectionsCsv === true,
             includeOutstandingCsv: settings.includeOutstandingCsv === 1 || settings.includeOutstandingCsv === true
           };
+          const fetchedEmails = settings.ownerEmail
+            ? settings.ownerEmail.split(/[;,]/).map(e => e.trim()).filter(Boolean)
+            : [];
+          setOwnerEmails(fetchedEmails.length > 0 ? fetchedEmails : ['']);
           setEmailSettings(fetchedObj);
           initialEmailSettingsRef.current = fetchedObj;
         }
@@ -103,8 +126,8 @@ export default function EmailReportsSettings({ registerSave, setIsSettingsDirty 
     setSaving(true);
     setError('');
     
-    // Ensure host and port are populated for standard providers
-    const settingsToSave = { ...emailSettings };
+    const cleanedEmails = ownerEmails.map(e => e.trim()).filter(Boolean).join(', ');
+    const settingsToSave = { ...emailSettings, ownerEmail: cleanedEmails };
     if (settingsToSave.provider === 'Gmail') {
       settingsToSave.smtpHost = 'smtp.gmail.com';
       settingsToSave.smtpPort = 465;
@@ -147,10 +170,12 @@ export default function EmailReportsSettings({ registerSave, setIsSettingsDirty 
 
   useEffect(() => {
     if (initialEmailSettingsRef.current && setIsSettingsDirty) {
-      const isModified = JSON.stringify(emailSettings) !== JSON.stringify(initialEmailSettingsRef.current);
+      const cleanedEmails = ownerEmails.map(e => e.trim()).filter(Boolean).join(', ');
+      const currentWithEmails = { ...emailSettings, ownerEmail: cleanedEmails };
+      const isModified = JSON.stringify(currentWithEmails) !== JSON.stringify(initialEmailSettingsRef.current);
       setIsSettingsDirty(isModified);
     }
-  }, [emailSettings, setIsSettingsDirty]);
+  }, [emailSettings, ownerEmails, setIsSettingsDirty]);
 
   useEffect(() => {
     return () => {
@@ -167,7 +192,7 @@ export default function EmailReportsSettings({ registerSave, setIsSettingsDirty 
     return () => {
       if (registerSave) registerSave(null);
     };
-  }, [emailSettings, registerSave]);
+  }, [emailSettings, ownerEmails, registerSave]);
 
   const handleTestEmail = async () => {
     setTesting(true);
@@ -244,15 +269,70 @@ export default function EmailReportsSettings({ registerSave, setIsSettingsDirty 
           </div>
           
           <div className={styles.formGroup}>
-            <label>Owner Email Address</label>
-            <input
-              type="email"
-              className={styles.inputField}
-              name="ownerEmail"
-              value={emailSettings.ownerEmail}
-              onChange={handleChange}
-              placeholder="owner@example.com"
-            />
+            <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <span>Owner Email Addresses</span>
+              <button
+                type="button"
+                className={styles.addEmailBtn}
+                onClick={addEmailField}
+                disabled={!emailSettings.enabled}
+                style={{ 
+                  background: '#EFF6FF', 
+                  border: 'none', 
+                  color: '#2563EB', 
+                  padding: '0.25rem 0.6rem', 
+                  borderRadius: '6px', 
+                  fontSize: '0.75rem', 
+                  fontWeight: 700, 
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem'
+                }}
+              >
+                + Add Email
+              </button>
+            </label>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {ownerEmails.map((email, index) => (
+                <div key={index} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <input
+                    type="email"
+                    required
+                    className={styles.inputField}
+                    placeholder="owner@example.com"
+                    value={email}
+                    onChange={(e) => handleEmailChange(index, e.target.value)}
+                    disabled={!emailSettings.enabled}
+                    style={{ flex: 1 }}
+                  />
+                  {ownerEmails.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeEmailField(index)}
+                      disabled={!emailSettings.enabled}
+                      style={{ 
+                        background: '#FEE2E2', 
+                        border: 'none', 
+                        color: '#EF4444', 
+                        padding: '0.5rem', 
+                        borderRadius: '8px', 
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        height: '38px',
+                        width: '38px'
+                      }}
+                      title="Remove Email"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className={styles.formGroup}>
@@ -263,20 +343,6 @@ export default function EmailReportsSettings({ registerSave, setIsSettingsDirty 
               name="sendTime"
               value={emailSettings.sendTime}
               onChange={handleChange}
-            />
-          </div>
-
-          <div className={styles.formGroup}>
-            <label>Email Provider</label>
-            <CustomSelect
-              value={emailSettings.provider}
-              onChange={(e) => handleChange({ target: { name: 'provider', value: e.target.value } })}
-              options={[
-                { value: 'Gmail', label: 'Gmail' },
-                { value: 'Outlook', label: 'Outlook / Office365' },
-                { value: 'Zoho', label: 'Zoho Mail' },
-                { value: 'Custom SMTP', label: 'Custom SMTP' }
-              ]}
             />
           </div>
         </div>
@@ -359,6 +425,21 @@ export default function EmailReportsSettings({ registerSave, setIsSettingsDirty 
           )}
 
           <div className={styles.formGrid}>
+            <div className={styles.formGroup} style={{ gridColumn: '1 / -1', marginBottom: '0.5rem' }}>
+              <label>Email Provider</label>
+              <CustomSelect
+                value={emailSettings.provider}
+                onChange={(val) => handleChange({ target: { name: 'provider', value: val } })}
+                options={[
+                  { value: 'Gmail', label: 'Gmail' },
+                  { value: 'Outlook', label: 'Outlook / Office365' },
+                  { value: 'Zoho', label: 'Zoho Mail' },
+                  { value: 'Custom SMTP', label: 'Custom SMTP' }
+                ]}
+                disabled={!emailSettings.enabled}
+              />
+            </div>
+
             <div className={styles.formGroup}>
               <label>SMTP Host</label>
               <input

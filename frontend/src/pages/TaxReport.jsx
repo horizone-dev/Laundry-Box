@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { useNavigate } from 'react-router-dom';
-import { getLocalDateBounds, isWithinBounds, localStrIsWithinBounds } from '../utils/dateFilters';
+import { getLocalDateBounds, isWithinBounds, localStrIsWithinBounds, localTodayStr } from '../utils/dateFilters';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
 import CustomSelect from '../components/CustomSelect';
@@ -71,10 +71,10 @@ export default function TaxReport() {
   
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateRange, setDateRange] = useState('Today');
+  const [dateRange, setDateRange] = useState('This Month');
   const [taxTypeFilter, setTaxTypeFilter] = useState('All'); // All, Sales, Expenses
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
+  const [customStartDate, setCustomStartDate] = useState(localTodayStr());
+  const [customEndDate, setCustomEndDate] = useState(localTodayStr());
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
@@ -432,6 +432,7 @@ export default function TaxReport() {
                 value={dateRange} 
                 onChange={(e) => setDateRange(e.target.value)}
                 options={[
+                  { value: 'All', label: 'All Time' },
                   { value: 'Today', label: 'Today' },
                   { value: 'This Month', label: 'This Month' },
                   { value: 'This Year', label: 'This Year' },
@@ -441,22 +442,21 @@ export default function TaxReport() {
               />
 
               {dateRange === 'Custom' && (
-                <>
-                  <span className={styles.dateInputLabel}>From:</span>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   <input 
                     type="date" 
                     value={customStartDate} 
                     onChange={(e) => setCustomStartDate(e.target.value)}
                     className={styles.dateInput}
                   />
-                  <span className={styles.dateInputLabel}>To:</span>
+                  <span className={styles.dateDivider}>to</span>
                   <input 
                     type="date" 
                     value={customEndDate} 
                     onChange={(e) => setCustomEndDate(e.target.value)}
                     className={styles.dateInput}
                   />
-                </>
+                </div>
               )}
             </div>
 

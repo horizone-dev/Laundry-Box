@@ -11,3 +11,5 @@ backend/node_modules/
 data/
 frontend/.vite/
 .vite/
+brain/
+scratch/

@@ -1,6 +1,7 @@
 export const checkCreditLimit = async (customerId, netIncrease, settings) => {
   if (!customerId || customerId === 'Walk-in') return { blocked: false };
   if (!settings.enableCreditLimitProtection) return { blocked: false };
+  if (netIncrease <= 0) return { blocked: false };
 
   let currentOutstanding = 0;
   let creditLimit = settings.defaultCreditLimit ?? 500;

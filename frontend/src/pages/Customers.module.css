@@ -349,7 +349,7 @@
   width: 550px;
   max-width: 100%;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
+  overflow: visible;
   animation: modalScale 0.2s ease-out;
 }
 

@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, UserPlus, Download, Calendar, MoreHorizontal, 
   TrendingUp, ChevronLeft, ChevronRight, X, Phone, MapPin, CreditCard, Wallet, DollarSign, Trash2, Users, Edit2, Lock,
-  Printer, AlertTriangle, Eye
+  Printer, AlertTriangle, Eye, ArrowUpDown, ChevronDown, Check, Percent, QrCode, Landmark, ShieldCheck, Layers
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import WhatsAppIcon from '../components/WhatsAppIcon';
@@ -14,6 +14,112 @@ import { getLocalISOString, getLocalDateStr } from '../utils/dateUtils';
 import styles from './Customers.module.css';
 import { checkCreditLimit } from '../utils/creditLimit';
 import InvoiceTemplate from '../components/InvoiceTemplate';
+
+function PaymentMethodSelect({ value, onChange, settings }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const methods = [
+    { id: 'Cash', label: 'Cash Payment', icon: <Wallet size={16} color="#10B981" />, badgeBg: '#ECFDF5' },
+    { id: 'Card', label: 'Card Payment', icon: <CreditCard size={16} color="#2563EB" />, badgeBg: '#EFF6FF' },
+    { id: 'Bank', label: 'Bank Transfer', icon: <Landmark size={16} color="#4F46E5" />, badgeBg: '#EEF2FF' },
+    { id: 'Nomod', label: 'Nomod Pay (Link)', icon: <ShieldCheck size={16} color="#059669" />, badgeBg: '#D1FAE5' },
+    { id: 'Multipayment', label: 'Multipayment (Split)', icon: <Layers size={16} color="#F59E0B" />, badgeBg: '#FEF3C7' },
+  ];
+
+  const current = methods.find(m => m.id === value) || methods[0];
+
+  return (
+    <div ref={dropdownRef} style={{ position: 'relative', width: '100%' }}>
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0.65rem 0.85rem',
+          background: 'white',
+          border: '1.5px solid #CBD5E1',
+          borderRadius: '10px',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease',
+          boxShadow: isOpen ? '0 0 0 3px rgba(37, 99, 235, 0.15)' : '0 1px 2px rgba(0,0,0,0.03)',
+          borderColor: isOpen ? 'var(--primary)' : '#CBD5E1',
+          userSelect: 'none'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+          <div style={{ padding: '0.35rem', borderRadius: '6px', background: current.badgeBg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {current.icon}
+          </div>
+          <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#1E293B' }}>{current.label}</span>
+        </div>
+        <ChevronDown size={16} color="#64748B" style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }} />
+      </div>
+
+      {isOpen && (
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 6px)',
+          left: 0,
+          right: 0,
+          background: 'white',
+          border: '1px solid #E2E8F0',
+          borderRadius: '12px',
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.12), 0 8px 10px -6px rgba(0,0,0,0.05)',
+          padding: '0.4rem',
+          zIndex: 99999,
+          maxHeight: '250px',
+          overflowY: 'auto'
+        }}>
+          {methods.map((m) => {
+            const isSelected = value === m.id;
+            return (
+              <div
+                key={m.id}
+                onClick={() => {
+                  onChange(m.id);
+                  setIsOpen(false);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.55rem 0.75rem',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  background: isSelected ? '#EFF6FF' : 'transparent',
+                  color: isSelected ? 'var(--primary)' : '#334155',
+                  transition: 'background 0.15s ease'
+                }}
+                onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#F8FAFC'; }}
+                onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <div style={{ padding: '0.35rem', borderRadius: '6px', background: m.badgeBg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {m.icon}
+                  </div>
+                  <span style={{ fontWeight: isSelected ? 800 : 600, fontSize: '0.85rem' }}>{m.label}</span>
+                </div>
+                {isSelected && <Check size={16} color="var(--primary)" />}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Customers() {
   const navigate = useNavigate();
@@ -27,7 +133,7 @@ export default function Customers() {
   const [quickSettleSearch, setQuickSettleSearch] = useState('');
   const [customerBills, setCustomerBills] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [paymentData, setPaymentData] = useState({ amount: '', method: 'Cash' });
+  const [paymentData, setPaymentData] = useState({ amount: '', method: 'Cash', discount: '' });
   const [splitCash, setSplitCash] = useState('');
   const [splitCard, setSplitCard] = useState('');
   const [splitUPI, setSplitUPI] = useState('');
@@ -50,6 +156,7 @@ export default function Customers() {
       setSplitCard('');
       setSplitUPI('');
       setSplitBank('');
+      setPaymentData(prev => ({ ...prev, discount: '' }));
     }
   }, [showPaymentModal]);
   const [loading, setLoading] = useState(true);
@@ -74,12 +181,18 @@ export default function Customers() {
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'insight'
   const [insightTab, setInsightTab] = useState('sales'); // 'sales', 'payments', 'returns'
   const [customerPayments, setCustomerPayments] = useState([]);
+  const [customerDiscounts, setCustomerDiscounts] = useState([]);
   const [customerReturns, setCustomerReturns] = useState([]);
   const [selectedPaymentForAction, setSelectedPaymentForAction] = useState(null);
   const [showPaymentViewModal, setShowPaymentViewModal] = useState(false);
   const [showPaymentEditModal, setShowPaymentEditModal] = useState(false);
+  const [showDiscountEditModal, setShowDiscountEditModal] = useState(false);
+  const [selectedBillForDiscount, setSelectedBillForDiscount] = useState(null);
+  const [editDiscountValue, setEditDiscountValue] = useState('');
   const [editPaymentMethod, setEditPaymentMethod] = useState('Cash');
   const [editPaymentAmount, setEditPaymentAmount] = useState('');
+  const [editPaymentDiscount, setEditPaymentDiscount] = useState('');
+  const [editOrderGrossTotal, setEditOrderGrossTotal] = useState(0);
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinActionTarget, setPinActionTarget] = useState(null);
   const [selectedBillForPayment, setSelectedBillForPayment] = useState(null);
@@ -94,11 +207,235 @@ export default function Customers() {
     totalDiscount: 0
   });
 
+  const [orderToDelete, setOrderToDelete] = useState(null);
+  const [showOrderDeletePinModal, setShowOrderDeletePinModal] = useState(false);
+  const [orderDeletePinValue, setOrderDeletePinValue] = useState('');
+  const [orderDeletePinError, setOrderDeletePinError] = useState('');
+  const [deleteOption, setDeleteOption] = useState('refund');
+  const [refundMethod, setRefundMethod] = useState('Cash');
+  const [isDeletingOrder, setIsDeletingOrder] = useState(false);
+
+  const handleDeleteOrderInInsight = async () => {
+    if (!orderToDelete) return;
+    setIsDeletingOrder(true);
+    try {
+      let pinOwner = null;
+      const configuredPin = settings.orderDeletePin || '0000';
+
+      if (orderDeletePinValue === configuredPin) {
+        pinOwner = 'Shop Settings PIN';
+      } else {
+        if (window.electronAPI?.dbQuery) {
+          try {
+            const userCheck = await window.electronAPI.dbQuery(
+              `SELECT name, role FROM users WHERE (role IN ('admin', 'manager', 'super_admin')) AND (passcode = ? OR pin = ?)`,
+              [orderDeletePinValue, orderDeletePinValue]
+            );
+            if (userCheck.success && userCheck.data && userCheck.data.length > 0) {
+              pinOwner = `${userCheck.data[0].role}: ${userCheck.data[0].name}`;
+            }
+          } catch (dbErr) {
+            console.warn('Local users PIN check error:', dbErr);
+          }
+        }
+      }
+
+      if (!pinOwner) {
+        setOrderDeletePinError('Invalid Manager PIN. Please enter the Order Delete PIN configured in Settings.');
+        setIsDeletingOrder(false);
+        return;
+      }
+
+      const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+      const userRole = userSession.role ? (userSession.role === 'super_admin' ? 'Super Admin' : userSession.role.charAt(0).toUpperCase() + userSession.role.slice(1).replace('_', ' ')) : 'Staff';
+      const currentLoggedInUser = `${userRole}: ${userSession.name || userSession.username || 'User'}`;
+      const refundImmediately = deleteOption === 'refund';
+      let linkedPayments = [];
+
+      if (window.electronAPI?.dbQuery) {
+        const linkedPaymentsRes = await window.electronAPI.dbQuery(
+          'SELECT id, amount, createdAt, method FROM payments WHERE orderId = ?',
+          [orderToDelete.id]
+        );
+        linkedPayments = linkedPaymentsRes.success ? linkedPaymentsRes.data : [];
+
+        const allocationsRes = await window.electronAPI.dbQuery(
+          'SELECT paymentId, amountUsed FROM advance_allocations WHERE orderId = ?',
+          [orderToDelete.id]
+        );
+        const allocationsUsed = allocationsRes.success ? allocationsRes.data : [];
+
+        const totalPaidFromPayments = linkedPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+        const actualPaidAmt = Math.max(
+          parseFloat(orderToDelete.paidAmount) || 0,
+          (parseFloat(orderToDelete.totalAmount) || 0) - (parseFloat(orderToDelete.dueAmount) ?? parseFloat(orderToDelete.totalAmount)),
+          totalPaidFromPayments
+        );
+
+        const isPaid = actualPaidAmt > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus);
+        const initialReturnStatus = isPaid
+          ? (refundImmediately ? 'Returned' : 'Converted to Advance')
+          : 'N/A';
+        const initialRefundStatus = isPaid
+          ? (refundImmediately ? 'Returned' : 'Converted to Advance')
+          : 'Deleted';
+        const refundMethodVal = isPaid && refundImmediately ? refundMethod : null;
+        const returnedAtVal = isPaid && refundImmediately ? getLocalISOString() : null;
+
+        await window.electronAPI.dbQuery(
+          `INSERT OR REPLACE INTO deleted_orders (id, shopId, billNumber, customerId, customerName, customerPhone, totalAmount, items, createdAt, deletedAt, deletedBy, originalPaymentStatus, paidAmount, returnStatus, approvedBy, originalPaymentMethod, payments, refundMethod, returnedAt, refundStatus) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            orderToDelete.id,
+            orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
+            orderToDelete.billNumber || '',
+            orderToDelete.customerId || '',
+            orderToDelete.customerName || selectedCustomer?.name || '',
+            orderToDelete.customerPhone || orderToDelete.phone || selectedCustomer?.phone || '',
+            orderToDelete.totalAmount || 0,
+            typeof orderToDelete.items === 'string' ? orderToDelete.items : JSON.stringify(orderToDelete.items || []),
+            orderToDelete.createdAt || getLocalISOString(),
+            getLocalISOString(),
+            currentLoggedInUser,
+            orderToDelete.paymentStatus || 'Pending',
+            actualPaidAmt,
+            initialReturnStatus,
+            pinOwner,
+            orderToDelete.paymentMethod || 'CASH',
+            JSON.stringify(linkedPayments),
+            refundMethodVal,
+            returnedAtVal,
+            initialRefundStatus
+          ]
+        );
+
+        await window.electronAPI.dbQuery('DELETE FROM payments WHERE orderId = ?', [orderToDelete.id]);
+        await window.electronAPI.dbQuery('DELETE FROM orders WHERE id = ?', [orderToDelete.id]);
+
+        if (refundImmediately) {
+          for (const alloc of allocationsUsed) {
+            const payRes = await window.electronAPI.dbQuery('SELECT amount FROM payments WHERE id = ?', [alloc.paymentId]);
+            if (payRes.success && payRes.data.length > 0) {
+              const currentAmt = payRes.data[0].amount || 0;
+              const newAmt = Math.max(0, currentAmt - alloc.amountUsed);
+              if (newAmt <= 0.01) {
+                await window.electronAPI.dbQuery('DELETE FROM payments WHERE id = ?', [alloc.paymentId]);
+              } else {
+                await window.electronAPI.dbQuery('UPDATE payments SET amount = ?, isSynced = 0, updatedAt = ? WHERE id = ?', [newAmt, getLocalISOString(), alloc.paymentId]);
+              }
+            }
+          }
+        }
+
+        await window.electronAPI.dbQuery('DELETE FROM advance_allocations WHERE orderId = ?', [orderToDelete.id]);
+
+        if (isPaid && actualPaidAmt > 0) {
+          const allocSum = allocationsUsed.reduce((sum, a) => sum + (parseFloat(a.amountUsed) || 0), 0);
+          const cashPaidAmt = Math.max(0, actualPaidAmt - allocSum);
+
+          if (refundImmediately) {
+            if (cashPaidAmt > 0) {
+              const refundTxnId = `TXN-RETURN-${Date.now()}`;
+              const _now1 = new Date();
+              const txnTimestamp = `${_now1.getFullYear()}-${String(_now1.getMonth() + 1).padStart(2, '0')}-${String(_now1.getDate()).padStart(2, '0')} ${String(_now1.getHours()).padStart(2, '0')}:${String(_now1.getMinutes()).padStart(2, '0')}`;
+              const creatorName = userSession.name || userSession.username || 'System';
+              const creatorId = userSession.id || 'SYSTEM';
+              const creatorRole = userSession.role || 'system';
+
+              await window.electronAPI.dbQuery(
+                `INSERT INTO account_transactions 
+                 (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  refundTxnId,
+                  orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
+                  refundMethod === 'Bank' ? 'BANK' : 'CASH',
+                  'EXPENSE',
+                  'Return',
+                  cashPaidAmt,
+                  `Return - Order ${orderToDelete.id.startsWith('#') ? '' : '#'}${orderToDelete.id}`,
+                  txnTimestamp,
+                  0,
+                  getLocalISOString(),
+                  'Zap',
+                  refundMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null,
+                  creatorName || null,
+                  creatorId || null,
+                  creatorRole || null
+                ]
+              );
+            }
+          } else if (orderToDelete.customerId && orderToDelete.customerId !== 'Walk-in') {
+            if (cashPaidAmt > 0) {
+              const newAdvRef = await window.electronAPI.getNextPaymentReference('ADV');
+              const newAdvId = `ADV-CONV-${Date.now()}`;
+              await window.electronAPI.dbQuery(
+                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+                 VALUES (?, ?, NULL, ?, ?, 'Refund Advance', 'SUCCESS', ?, 0, ?, ?)`,
+                [newAdvId, orderToDelete.customerId || null, orderToDelete.shopId || DEFAULT_SHOP_ID || null, cashPaidAmt, getLocalISOString(), getLocalISOString(), newAdvRef || null]
+              );
+            }
+          }
+        }
+
+        await window.electronAPI.runDataHealer();
+      }
+
+      if (selectedCustomer) {
+        if (window.electronAPI?.dbQuery) {
+          const updatedCustRes = await window.electronAPI.dbQuery('SELECT * FROM customers WHERE id = ?', [selectedCustomer.id]);
+          if (updatedCustRes.success && updatedCustRes.data.length > 0) {
+            const freshCust = updatedCustRes.data[0];
+            setSelectedCustomer(freshCust);
+            await handleViewCustomerInsight(freshCust);
+          }
+        }
+        await fetchCustomers();
+      }
+
+      setShowOrderDeletePinModal(false);
+      setOrderToDelete(null);
+      setOrderDeletePinValue('');
+      setOrderDeletePinError('');
+      alert(`Order ${orderToDelete.id} and all its associated payments/transactions deleted successfully.`);
+    } catch (err) {
+      console.error('Failed to delete order:', err);
+      setOrderDeletePinError('Failed to delete order: ' + err.message);
+    } finally {
+      setIsDeletingOrder(false);
+    }
+  };
+
+
+  const [sortBy, setSortBy] = useState('newest');
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const sortDropdownRef = useRef(null);
+
+  const sortOptions = [
+    { value: 'newest', label: 'Newest First' },
+    { value: 'oldest', label: 'Oldest First' },
+    { value: 'id_asc', label: 'ID (Low → High)' },
+    { value: 'id_desc', label: 'ID (High → Low)' },
+    { value: 'name_asc', label: 'Name (A → Z)' },
+    { value: 'name_desc', label: 'Name (Z → A)' },
+    { value: 'due_desc', label: 'Highest Due First' },
+    { value: 'adv_desc', label: 'Highest Advance First' },
+  ];
 
   useEffect(() => {
     fetchCustomers();
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, sortBy]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(event.target)) {
+        setIsSortOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -149,7 +486,22 @@ export default function Customers() {
           query += ' WHERE ' + conditions.join(' AND ');
         }
         
-        query += ' GROUP BY c.id ORDER BY CAST(SUBSTR(c.id, 6) AS INTEGER) ASC';
+        let orderByClause = 'c.rowid DESC';
+        if (sortBy === 'oldest' || sortBy === 'id_asc') {
+          orderByClause = 'c.rowid ASC';
+        } else if (sortBy === 'newest' || sortBy === 'id_desc') {
+          orderByClause = 'c.rowid DESC';
+        } else if (sortBy === 'name_asc') {
+          orderByClause = 'c.name ASC';
+        } else if (sortBy === 'name_desc') {
+          orderByClause = 'c.name DESC';
+        } else if (sortBy === 'due_desc') {
+          orderByClause = 'c.balance DESC';
+        } else if (sortBy === 'adv_desc') {
+          orderByClause = 'c.balance ASC';
+        }
+
+        query += ` GROUP BY c.id ORDER BY ${orderByClause}`;
         
         const result = await window.electronAPI.dbQuery(query, params);
         if (result.success) {
@@ -169,13 +521,38 @@ export default function Customers() {
   const handleSaveCustomer = async (e) => {
     e.preventDefault();
     const timestamp = getLocalISOString();
+    const openBal = parseFloat(formData.openingBalance) || 0;
+
+    const cleanPhone = (formData.phone || '').trim();
+    const defaultCc = settings.waCountryCode ? `+${settings.waCountryCode.replace(/\+/g, '')}` : '+971';
+    if (!cleanPhone || cleanPhone === defaultCc || cleanPhone === '+' || cleanPhone.replace(/\D/g, '').length < 7) {
+      alert('Phone number is mandatory! Please enter a valid phone number.');
+      return;
+    }
 
     if (window.electronAPI?.dbQuery) {
       try {
+        // Check for duplicate customer with same phone number
+        const phoneDigits = cleanPhone.replace(/\D/g, '');
+        const existingCusts = await window.electronAPI.dbQuery('SELECT id, name, phone FROM customers');
+        if (existingCusts.success && existingCusts.data) {
+          const duplicate = existingCusts.data.find(c => {
+            if (editingCustomer && c.id === editingCustomer.id) return false;
+            const cDigits = (c.phone || '').replace(/\D/g, '');
+            return cDigits && cDigits === phoneDigits;
+          });
+          if (duplicate) {
+            alert(`A customer with phone number "${formData.phone}" already exists! (Customer: ${duplicate.name})`);
+            return;
+          }
+        }
+
+        let targetCustId = editingCustomer ? editingCustomer.id : null;
+
         if (editingCustomer) {
           await window.electronAPI.dbQuery(
-            'UPDATE customers SET name = ?, phone = ?, address = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-            [formData.name, formData.phone, formData.address, timestamp, editingCustomer.id]
+            'UPDATE customers SET name = ?, phone = ?, address = ?, openingBalance = ?, isSynced = 0, updatedAt = ? WHERE id = ?',
+            [formData.name, formData.phone, formData.address, openBal, timestamp, editingCustomer.id]
           );
           alert('Customer updated successfully!');
         } else {
@@ -189,15 +566,50 @@ export default function Customers() {
             });
             nextNum = Math.max(0, ...numbers) + 1;
           }
-          const id = `CUST-${nextNum}`;
+          targetCustId = `CUST-${nextNum}`;
 
           await window.electronAPI.dbQuery(
-            'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, balance, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [id, DEFAULT_SHOP_ID, formData.name, formData.phone, '', formData.address, 0, parseFloat(formData.openingBalance) || 0, 0, timestamp]
+            "DELETE FROM payments WHERE customerId = ? AND (orderId IS NULL OR orderId = '')",
+            [targetCustId]
+          );
+
+          await window.electronAPI.dbQuery(
+            'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, balance, openingBalance, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [targetCustId, DEFAULT_SHOP_ID, formData.name, formData.phone, '', formData.address, 0, openBal, openBal, 0, timestamp]
           );
           alert('Customer created successfully!');
         }
-        fetchCustomers();
+
+        if (openBal < 0) {
+          const advAmt = Math.abs(openBal);
+          const existingPay = await window.electronAPI.dbQuery(
+            "SELECT id FROM payments WHERE customerId = ? AND method = 'Opening Advance'",
+            [targetCustId]
+          );
+          if (existingPay.success && existingPay.data.length > 0) {
+            await window.electronAPI.dbQuery(
+              "UPDATE payments SET amount = ?, updatedAt = ? WHERE id = ?",
+              [advAmt, timestamp, existingPay.data[0].id]
+            );
+          } else {
+            const payIdAdv = `PAY-OPENING-${Date.now()}`;
+            const payRefAdv = await window.electronAPI.getNextPaymentReference('ADV');
+            await window.electronAPI.dbQuery(
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+               VALUES (?, ?, NULL, ?, ?, 'Opening Advance', 'SUCCESS', ?, 0, ?, ?)`,
+              [payIdAdv, targetCustId, DEFAULT_SHOP_ID, advAmt, timestamp, timestamp, payRefAdv]
+            );
+          }
+        }
+
+        if (window.electronAPI?.runDataHealer) {
+          await window.electronAPI.runDataHealer();
+        }
+
+        setSortBy('newest');
+        setSearchTerm('');
+        setCurrentPage(1);
+        await fetchCustomers();
         setShowModal(false);
         setEditingCustomer(null);
         setFormData({ name: '', phone: '', address: '', openingBalance: '' });
@@ -210,7 +622,7 @@ export default function Customers() {
         setCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
       } else {
         const id = `CUST-${customers.length + 1}`;
-        setCustomers([{ ...formData, id, orders: 0, lastDate: 'Just now', tag: 'New', balance: parseFloat(formData.openingBalance) || 0, creditLimit: 0 }, ...customers]);
+        setCustomers([{ ...formData, id, orders: 0, lastDate: 'Just now', tag: 'New', balance: openBal, openingBalance: openBal, creditLimit: 0 }, ...customers]);
       }
       setShowModal(false);
       setEditingCustomer(null);
@@ -297,7 +709,43 @@ export default function Customers() {
     if (window.electronAPI?.dbQuery) {
       try {
         const totalPaid = parseFloat(paymentData.amount);
+        const discountAmt = parseFloat(paymentData.discount) || 0;
         const timestamp = getLocalISOString();
+
+        // 0. Apply settlement discount to selected bill (or first pending bill) if discountAmt > 0
+        if (discountAmt > 0) {
+          let targetBill = selectedBillForPayment;
+          if (!targetBill) {
+            const pendingBillRes = await window.electronAPI.dbQuery(
+              "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND (dueAmount > 0 OR paymentStatus = 'Credit' OR paymentStatus = 'Partial') ORDER BY createdAt ASC LIMIT 1",
+              [selectedCustomer.id]
+            );
+            if (pendingBillRes.success && pendingBillRes.data.length > 0) {
+              targetBill = pendingBillRes.data[0];
+            }
+          }
+          if (targetBill) {
+            let breakdownObj = {};
+            let oldDisc = 0;
+            try {
+              if (targetBill.paymentBreakdown) {
+                breakdownObj = typeof targetBill.paymentBreakdown === 'string' ? JSON.parse(targetBill.paymentBreakdown) : targetBill.paymentBreakdown;
+                oldDisc = parseFloat(breakdownObj.discount || breakdownObj.discountAmount || 0) || 0;
+              }
+            } catch (e) {}
+            const newDisc = oldDisc + discountAmt;
+            const grossTotal = (targetBill.totalAmount || 0) + oldDisc;
+            const newNetTotal = Math.max(0, grossTotal - newDisc);
+            const newDue = Math.max(0, newNetTotal - (targetBill.paidAmount || 0));
+            const newPayStatus = newDue <= 0 ? 'Paid' : ((targetBill.paidAmount || 0) > 0 ? 'Partial' : 'Credit');
+            breakdownObj.discount = newDisc;
+
+            await window.electronAPI.dbQuery(
+              "UPDATE orders SET totalAmount = ?, dueAmount = ?, paymentStatus = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
+              [newNetTotal, newDue, newPayStatus, JSON.stringify(breakdownObj), timestamp, targetBill.id]
+            );
+          }
+        }
 
         console.log(`Starting settlement for ${selectedCustomer.name}. Amount: ${totalPaid}`);
 
@@ -506,6 +954,13 @@ export default function Customers() {
   const handleDeleteCustomer = async (id) => {
     if (window.electronAPI?.dbQuery) {
       try {
+        // Fetch full customer record to check balance & openingBalance
+        const custRes = await window.electronAPI.dbQuery('SELECT * FROM customers WHERE id = ?', [id]);
+        const cust = custRes?.data?.[0];
+
+        // Check for non-zero balance or openingBalance
+        const hasBalance = cust && (Math.abs(cust.balance || 0) > 0.01 || Math.abs(cust.openingBalance || 0) > 0.01);
+
         // Check for orders
         const ordersRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM orders WHERE customerId = ?', [id]);
         const ordersCount = ordersRes?.data?.[0]?.count || 0;
@@ -518,8 +973,8 @@ export default function Customers() {
         const deletedRes = await window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM deleted_orders WHERE customerId = ?', [id]);
         const deletedCount = deletedRes?.data?.[0]?.count || 0;
 
-        if (ordersCount > 0 || paymentsCount > 0 || deletedCount > 0) {
-          alert("Restricted: Cannot delete this customer because they have associated orders, payments, or transaction history.");
+        if (hasBalance || ordersCount > 0 || paymentsCount > 0 || deletedCount > 0) {
+          alert("Cannot delete customer! This customer has active transaction history, orders, pending balance, or advance amount.");
           return;
         }
 
@@ -630,7 +1085,41 @@ export default function Customers() {
     if (pinActionTarget === 'delete_payment' && selectedPaymentForAction) {
       handleDeletePaymentRecord(selectedPaymentForAction.id);
     } else if (pinActionTarget === 'edit_payment' && selectedPaymentForAction) {
-      setShowPaymentEditModal(true);
+      let existingDisc = 0;
+      let gross = 0;
+      if (selectedPaymentForAction.orderId && window.electronAPI?.dbQuery) {
+        window.electronAPI.dbQuery("SELECT * FROM orders WHERE id = ?", [selectedPaymentForAction.orderId]).then(res => {
+          if (res.success && res.data.length > 0) {
+            const ord = res.data[0];
+            try {
+              if (ord.paymentBreakdown) {
+                const bd = typeof ord.paymentBreakdown === 'string' ? JSON.parse(ord.paymentBreakdown) : ord.paymentBreakdown;
+                existingDisc = parseFloat(bd.discount || bd.discountAmount || 0) || 0;
+              }
+            } catch (e) {}
+            if (existingDisc === 0 && ord.items) {
+              try {
+                const itemsArr = typeof ord.items === 'string' ? JSON.parse(ord.items) : ord.items;
+                if (Array.isArray(itemsArr) && itemsArr.length > 0) {
+                  const itemsTotal = itemsArr.reduce((s, i) => s + ((parseFloat(i.qty) || 0) * (parseFloat(i.price) || 0)), 0);
+                  const taxRate = settings.isTaxEnabled ? ((settings.taxRate || 0) / 100) : 0;
+                  const grossWithTax = settings.taxMethod === 'exclusive' ? (itemsTotal * (1 + taxRate)) : itemsTotal;
+                  const diff = grossWithTax - (ord.totalAmount || 0);
+                  if (diff > 0.05) existingDisc = parseFloat(diff.toFixed(2));
+                }
+              } catch (e) {}
+            }
+            gross = (ord.totalAmount || 0) + existingDisc;
+          }
+          setEditOrderGrossTotal(gross);
+          setEditPaymentDiscount(existingDisc ? existingDisc.toString() : '0');
+          setShowPaymentEditModal(true);
+        });
+      } else {
+        setEditOrderGrossTotal(0);
+        setEditPaymentDiscount('0');
+        setShowPaymentEditModal(true);
+      }
     }
   };
 
@@ -732,14 +1221,10 @@ export default function Customers() {
     const newMethod = editPaymentMethod;
     const oldAmount = parseFloat(payment.amount) || 0;
     const newAmount = parseFloat(editPaymentAmount) || 0;
+    const newDisc = parseFloat(editPaymentDiscount) || 0;
 
     if (newAmount <= 0) {
       alert("Please enter a valid amount greater than 0.");
-      return;
-    }
-
-    if (oldMethod === newMethod && oldAmount === newAmount) {
-      setShowPaymentEditModal(false);
       return;
     }
 
@@ -768,20 +1253,25 @@ export default function Customers() {
         if (orderRes.success && orderRes.data.length > 0) {
           const order = orderRes.data[0];
           let paymentBreakdown = {};
+          let oldDisc = 0;
           try {
             if (order.paymentBreakdown) {
               paymentBreakdown = typeof order.paymentBreakdown === 'string' ? JSON.parse(order.paymentBreakdown) : order.paymentBreakdown;
+              oldDisc = parseFloat(paymentBreakdown.discount || paymentBreakdown.discountAmount || 0) || 0;
             }
           } catch (e) {}
 
           const oldKey = oldMethod.toLowerCase();
           const newKey = newMethod.toLowerCase();
 
-          // Adjust payment breakdown
           if (paymentBreakdown[oldKey] !== undefined) {
             paymentBreakdown[oldKey] = Math.max(0, (paymentBreakdown[oldKey] || 0) - oldAmount);
           }
           paymentBreakdown[newKey] = (paymentBreakdown[newKey] || 0) + newAmount;
+          paymentBreakdown.discount = newDisc;
+
+          const grossTotal = (order.totalAmount || 0) + oldDisc;
+          const newNetTotal = Math.max(0, grossTotal - newDisc);
 
           let activeMethods = Object.keys(paymentBreakdown).filter(k => k !== 'discount' && k !== 'advance' && paymentBreakdown[k] > 0);
           const keyMap = { cash: 'Cash', card: 'Card', upi: 'UPI', bank: 'Bank Transfer' };
@@ -791,18 +1281,18 @@ export default function Customers() {
           }
 
           const newPaidAmount = (order.paidAmount || 0) + diff;
-          const newDueAmount = (order.dueAmount || 0) - diff;
+          const newDueAmount = Math.max(0, newNetTotal - newPaidAmount);
 
           let newPaymentStatus = 'Partial';
-          if (newPaidAmount >= order.totalAmount) {
+          if (newDueAmount <= 0) {
             newPaymentStatus = 'Paid';
           } else if (newPaidAmount <= 0) {
-            newPaymentStatus = 'Pending';
+            newPaymentStatus = 'Credit';
           }
 
           await window.electronAPI.dbQuery(
-            "UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
-            [newPaidAmount, newDueAmount, newPaymentStatus, finalMethodName, JSON.stringify(paymentBreakdown), timestamp, payment.orderId]
+            "UPDATE orders SET totalAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
+            [newNetTotal, newPaidAmount, newDueAmount, newPaymentStatus, finalMethodName, JSON.stringify(paymentBreakdown), timestamp, payment.orderId]
           );
         }
       }
@@ -833,6 +1323,10 @@ export default function Customers() {
 
       await window.electronAPI.dbQuery("COMMIT");
 
+      if (window.electronAPI?.runDataHealer) {
+        await window.electronAPI.runDataHealer();
+      }
+
       setShowPaymentEditModal(false);
       setSelectedPaymentForAction(null);
       
@@ -852,22 +1346,87 @@ export default function Customers() {
     }
   };
 
+  const handleSaveDiscountEdit = async () => {
+    if (!selectedBillForDiscount || !window.electronAPI?.dbQuery) return;
+    const newDisc = parseFloat(editDiscountValue) || 0;
+    if (newDisc < 0) {
+      alert("Discount cannot be negative.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const timestamp = getLocalISOString();
+      const bill = selectedBillForDiscount;
+
+      let oldDisc = 0;
+      let breakdownObj = {};
+      try {
+        if (bill.paymentBreakdown) {
+          breakdownObj = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
+          oldDisc = parseFloat(breakdownObj.discount || breakdownObj.discountAmount || 0) || 0;
+        }
+      } catch (e) {}
+
+      const grossTotal = (bill.totalAmount || 0) + oldDisc;
+      const newNetTotal = Math.max(0, grossTotal - newDisc);
+      const newDue = Math.max(0, newNetTotal - (bill.paidAmount || 0));
+      const newPayStatus = newDue <= 0 ? 'Paid' : ((bill.paidAmount || 0) > 0 ? 'Partial' : 'Credit');
+
+      breakdownObj.discount = newDisc;
+      const newBreakdownStr = JSON.stringify(breakdownObj);
+
+      await window.electronAPI.dbQuery(
+        `UPDATE orders SET totalAmount = ?, dueAmount = ?, paymentStatus = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
+        [newNetTotal, newDue, newPayStatus, newBreakdownStr, timestamp, bill.id]
+      );
+
+      if (window.electronAPI?.runDataHealer) {
+        await window.electronAPI.runDataHealer();
+      }
+
+      setShowDiscountEditModal(false);
+      setSelectedBillForDiscount(null);
+
+      const freshCustRes = await window.electronAPI.dbQuery(
+        "SELECT c.*, IFNULL(SUM(CASE WHEN o.status != 'Cancelled' THEN o.totalAmount ELSE 0 END), 0) as totalSales FROM customers c LEFT JOIN orders o ON c.id = o.customerId WHERE c.id = ? GROUP BY c.id",
+        [selectedCustomer.id]
+      );
+      if (freshCustRes.success && freshCustRes.data.length > 0) {
+        await handleViewCustomerInsight(freshCustRes.data[0]);
+      }
+      fetchCustomers();
+      alert("Discount updated successfully!");
+    } catch (err) {
+      console.error("Save discount edit error:", err);
+      alert("Failed to update discount.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   const handleViewCustomerInsight = async (customer) => {
-    setSelectedCustomer(customer);
     setLoading(true);
     if (window.electronAPI?.dbQuery) {
       try {
+        const freshCustRes = await window.electronAPI.dbQuery(
+          "SELECT * FROM customers WHERE id = ?",
+          [customer.id]
+        );
+        const activeCustomer = freshCustRes.success && freshCustRes.data.length > 0 ? freshCustRes.data[0] : customer;
+        setSelectedCustomer(activeCustomer);
+
         const result = await window.electronAPI.dbQuery(
           "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' ORDER BY createdAt DESC",
-          [customer.id]
+          [activeCustomer.id]
         );
         let bills = result.success ? result.data : [];
         setCustomerBills(bills.filter(b => b.status !== 'Cancelled'));
 
         const deletedRes = await window.electronAPI.dbQuery(
           "SELECT * FROM deleted_orders WHERE customerId = ? ORDER BY deletedAt DESC",
-          [customer.id]
+          [activeCustomer.id]
         );
         let deletedBills = deletedRes.success ? deletedRes.data : [];
 
@@ -888,25 +1447,53 @@ export default function Customers() {
 
         const paymentsRes = await window.electronAPI.dbQuery(
           "SELECT * FROM payments WHERE customerId = ? ORDER BY createdAt DESC",
-          [customer.id]
+          [activeCustomer.id]
         );
         let payments = paymentsRes.success ? paymentsRes.data : [];
-        // Filter out automatic system transactions
-        payments = payments.filter(p => p.method !== 'System Auto');
+        const discountPayments = payments.filter(p => p.method === 'Discount');
+        setCustomerDiscounts(discountPayments);
+        // Filter out automatic system transactions and discounts
+        payments = payments.filter(p => p.method !== 'System Auto' && p.method !== 'Discount');
         setCustomerPayments(payments);
 
         const totalSales = bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
         const salesReturn = bills.filter(b => b.status === 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0) +
           deletedBills.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
         
-        let totalDiscount = 0;
+        const getDiscountVal = (bill) => {
+          if (!bill) return 0;
+          if (typeof bill.discount === 'number' && bill.discount > 0) return bill.discount;
+          if (typeof bill.discountAmount === 'number' && bill.discountAmount > 0) return bill.discountAmount;
+          if (bill.paymentBreakdown) {
+            try {
+              const bd = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
+              if (bd) {
+                const val = parseFloat(bd.discount || bd.discountAmount || bd.discount_amount || bd.discountValue || 0);
+                if (!isNaN(val) && val > 0) return val;
+              }
+            } catch (e) {}
+          }
+          const payDisc = discountPayments.filter(p => p.orderId === bill.id).reduce((sum, p) => sum + (p.amount || 0), 0);
+          if (payDisc > 0) return payDisc;
+          if (bill.items) {
+            try {
+              const itemsArr = typeof bill.items === 'string' ? JSON.parse(bill.items) : bill.items;
+              if (Array.isArray(itemsArr) && itemsArr.length > 0) {
+                const itemsTotal = itemsArr.reduce((s, i) => s + ((parseFloat(i.qty) || 0) * (parseFloat(i.price) || 0)), 0);
+                const taxRate = settings.isTaxEnabled ? ((settings.taxRate || 0) / 100) : 0;
+                const grossWithTax = settings.taxMethod === 'exclusive' ? (itemsTotal * (1 + taxRate)) : itemsTotal;
+                const diff = grossWithTax - (bill.totalAmount || 0);
+                if (diff > 0.05) return parseFloat(diff.toFixed(2));
+              }
+            } catch (e) {}
+          }
+          return 0;
+        };
+
+        const generalDiscountSum = discountPayments.filter(p => !p.orderId).reduce((sum, p) => sum + (p.amount || 0), 0);
+        let totalDiscount = generalDiscountSum;
         bills.forEach(bill => {
-          try {
-            const breakdown = bill.paymentBreakdown ? JSON.parse(bill.paymentBreakdown) : null;
-            if (breakdown && breakdown.discount) {
-              totalDiscount += parseFloat(breakdown.discount) || 0;
-            }
-          } catch (e) {}
+          totalDiscount += getDiscountVal(bill);
         });
 
         const advStatsRes = await window.electronAPI.dbQuery(
@@ -917,18 +1504,17 @@ export default function Customers() {
               JOIN orders o ON a.orderId = o.id
               JOIN payments p ON a.paymentId = p.id
               WHERE p.customerId = ? AND o.status != 'Cancelled') as totalUsed`,
-          [customer.id, customer.id]
+          [activeCustomer.id, activeCustomer.id]
         );
         const advStats = advStatsRes.success && advStatsRes.data?.[0] ? advStatsRes.data[0] : { totalRecv: 0, totalUsed: 0 };
         const totalAdvanceReceived = advStats.totalRecv;
         const advanceUsed = advStats.totalUsed;
         
-        // Follow business rules for net customer balance to prevent negative values:
-        // - balance > 0: customer has outstanding due (Pending Due = balance, Available Advance = 0)
-        // - balance <= 0: customer has advance credit (Pending Due = 0, Available Advance = abs(balance))
-        const balanceVal = customer.balance || 0;
-        const pendingDue = balanceVal > 0 ? balanceVal : 0;
-        const availableAdvance = balanceVal < 0 ? Math.abs(balanceVal) : 0;
+        const availableAdvance = Math.max(0, totalAdvanceReceived - advanceUsed);
+        const dynamicBalance = (activeCustomer.openingBalance > 0 ? activeCustomer.openingBalance : 0) +
+          bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.dueAmount || 0), 0) -
+          availableAdvance;
+        const pendingDue = dynamicBalance > 0 ? dynamicBalance : 0;
 
         setSelectedCustomerStats({
           totalSales,
@@ -1237,6 +1823,7 @@ export default function Customers() {
               </div>
             </div>
 
+
             <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.25rem 0' }} />
 
             <div>
@@ -1258,7 +1845,13 @@ export default function Customers() {
                 <span style={{ color: '#64748B', fontWeight: 600 }}>Sales Return</span>
                 <span style={{ fontWeight: 700, color: '#1E293B' }}>{(selectedCustomerStats.salesReturn || 0).toFixed(2)}</span>
               </div>
+            </div>
 
+            <hr style={{ border: 'none', borderTop: '1px solid #E2E8F0', margin: '0.25rem 0' }} />
+
+            <div>
+              <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.5rem', marginBottom: '1rem', letterSpacing: '0.05em' }}>Discount Details</h3>
+              
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
                 <span style={{ color: '#64748B', fontWeight: 600 }}>Total Discount</span>
                 <span style={{ fontWeight: 700, color: '#1E293B' }}>{(selectedCustomerStats.totalDiscount || 0).toFixed(2)}</span>
@@ -1310,6 +1903,12 @@ export default function Customers() {
               >
                 Returns
               </button>
+              <button 
+                style={{ border: 'none', background: insightTab === 'discounts' ? 'var(--primary)' : 'transparent', color: insightTab === 'discounts' ? 'white' : '#64748B', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', transition: 'all 0.2s' }}
+                onClick={() => setInsightTab('discounts')}
+              >
+                Discounts
+              </button>
             </div>
 
             <div style={{ overflowX: 'auto', border: '1px solid #E2E8F0', borderRadius: '12px' }}>
@@ -1317,25 +1916,44 @@ export default function Customers() {
                 <table className={styles.customersTable} style={{ margin: 0, width: '100%' }}>
                   <thead>
                     <tr>
-                      <th style={{ background: '#F8FAFC' }}># Order</th>
-                      <th style={{ background: '#F8FAFC' }}>Date</th>
-                      <th style={{ background: '#F8FAFC' }}>Net Amount</th>
-                      <th style={{ background: '#F8FAFC' }}>Pay Mode</th>
+                      <th style={{ background: '#F8FAFC', textAlign: 'center' }}># Order</th>
+                      <th style={{ background: '#F8FAFC', textAlign: 'center' }}>Date</th>
+                      <th style={{ background: '#F8FAFC', textAlign: 'center' }}>Net Amount</th>
+                      <th style={{ background: '#F8FAFC', textAlign: 'center' }}>Pay Mode</th>
                       <th style={{ background: '#F8FAFC', width: '150px', textAlign: 'center' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {customerBills.length > 0 ? customerBills.map((bill) => (
                       <tr key={bill.id}>
-                        <td style={{ fontWeight: 700 }}>{settings.invoicePrefix || ''}{bill.id}</td>
-                        <td>{formatDate(bill.createdAt)}</td>
-                        <td><CurrencySymbol size={13} /> {(bill.totalAmount || 0).toFixed(2)}</td>
-                        <td style={{ fontWeight: 700, color: (bill.dueAmount || 0) <= 0 ? 'var(--secondary)' : ((bill.paidAmount || 0) > 0 ? 'var(--warning)' : 'var(--danger)') }}>
+                        <td style={{ fontWeight: 700, textAlign: 'center' }}>{settings.invoicePrefix || ''}{bill.id}</td>
+                        <td style={{ textAlign: 'center' }}>{formatDate(bill.createdAt)}</td>
+                        <td style={{ textAlign: 'center' }}><CurrencySymbol size={13} /> {(bill.totalAmount || 0).toFixed(2)}</td>
+                        <td style={{ fontWeight: 700, textAlign: 'center', color: (bill.dueAmount || 0) <= 0 ? 'var(--secondary)' : ((bill.paidAmount || 0) > 0 ? 'var(--warning)' : 'var(--danger)') }}>
                           {(bill.dueAmount || 0) <= 0 ? 'PAID' : ((bill.paidAmount || 0) > 0 ? 'PARTIAL' : 'CREDIT')}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', alignItems: 'center' }}>
-                            {/* View Order Detail */}
+                            {/* Settle Order / Collect payment (placed first for alignment & priority) */}
+                            <button 
+                              style={{ 
+                                background: 'none', 
+                                border: 'none', 
+                                color: 'var(--warning)', 
+                                cursor: bill.dueAmount > 0 ? 'pointer' : 'default',
+                                visibility: bill.dueAmount > 0 ? 'visible' : 'hidden'
+                              }}
+                              onClick={() => {
+                                if (bill.dueAmount > 0) {
+                                  setSelectedBillForPayment(bill);
+                                  setPaymentData({ amount: bill.dueAmount.toString(), method: 'Cash' });
+                                  setShowPaymentModal(true);
+                                }
+                              }}
+                              title="Collect payment"
+                            >
+                              <DollarSign size={16} />
+                            </button>
                             <button 
                               style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer' }}
                               onClick={() => {
@@ -1405,21 +2023,27 @@ export default function Customers() {
                             >
                               <Eye size={16} />
                             </button>
-                            {/* Settle Order */}
-                            {bill.dueAmount > 0 && (
-                              <button 
-                                style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
-                                onClick={() => {
-                                  setSelectedBillForPayment(bill);
-                                  setPaymentData({ amount: bill.dueAmount.toString(), method: 'Cash' });
-                                  setShowPaymentModal(true);
-                                }}
-                                title="Collect payment"
-                              >
-                                <DollarSign size={16} />
-                              </button>
-                            )}
-                            {/* Cancel/Delete Order button removed as per requirements */}
+                            {/* Edit Order */}
+                            <button
+                              style={{ background: 'none', border: 'none', color: '#2563EB', cursor: 'pointer' }}
+                              onClick={() => navigate(`/pos?editOrderId=${bill.id}`)}
+                              title="Edit Order"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            {/* Delete Order with Manager PIN */}
+                            <button
+                              style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer' }}
+                              onClick={() => {
+                                setOrderToDelete(bill);
+                                setOrderDeletePinValue('');
+                                setOrderDeletePinError('');
+                                setShowOrderDeletePinModal(true);
+                              }}
+                              title="Delete Order (Manager PIN Required)"
+                            >
+                              <Trash2 size={16} />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1550,13 +2174,207 @@ export default function Customers() {
                   </tbody>
                 </table>
               )}
+
+              {insightTab === 'discounts' && (
+                <table className={styles.customersTable} style={{ margin: 0, width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ background: '#F8FAFC' }}># Order</th>
+                      <th style={{ background: '#F8FAFC' }}>Date</th>
+                      <th style={{ background: '#F8FAFC' }}>Order Total</th>
+                      <th style={{ background: '#F8FAFC' }}>Discount Given</th>
+                      <th style={{ background: '#F8FAFC' }}>Net Payable</th>
+                      <th style={{ background: '#F8FAFC' }}>Pay Status</th>
+                      <th style={{ background: '#F8FAFC', width: '100px', textAlign: 'center' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const getDiscountVal = (bill) => {
+                        if (!bill) return 0;
+                        if (typeof bill.discount === 'number' && bill.discount > 0) return bill.discount;
+                        if (typeof bill.discountAmount === 'number' && bill.discountAmount > 0) return bill.discountAmount;
+                        if (bill.paymentBreakdown) {
+                          try {
+                            const bd = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
+                            if (bd) {
+                              const val = parseFloat(bd.discount || bd.discountAmount || bd.discount_amount || bd.discountValue || 0);
+                              if (!isNaN(val) && val > 0) return val;
+                            }
+                          } catch (e) {}
+                        }
+                        const payDisc = customerDiscounts.filter(p => p.orderId === bill.id).reduce((sum, p) => sum + (p.amount || 0), 0);
+                        if (payDisc > 0) return payDisc;
+                        if (bill.items) {
+                          try {
+                            const itemsArr = typeof bill.items === 'string' ? JSON.parse(bill.items) : bill.items;
+                            if (Array.isArray(itemsArr) && itemsArr.length > 0) {
+                              const itemsTotal = itemsArr.reduce((s, i) => s + ((parseFloat(i.qty) || 0) * (parseFloat(i.price) || 0)), 0);
+                              const taxRate = settings.isTaxEnabled ? ((settings.taxRate || 0) / 100) : 0;
+                              const grossWithTax = settings.taxMethod === 'exclusive' ? (itemsTotal * (1 + taxRate)) : itemsTotal;
+                              const diff = grossWithTax - (bill.totalAmount || 0);
+                              if (diff > 0.05) return parseFloat(diff.toFixed(2));
+                            }
+                          } catch (e) {}
+                        }
+                        return 0;
+                      };
+
+                      const discountedBills = customerBills.filter(bill => getDiscountVal(bill) > 0).map(bill => {
+                        const discVal = getDiscountVal(bill);
+                        return {
+                          id: bill.id,
+                          date: bill.createdAt,
+                          type: 'order',
+                          orderTotal: (bill.totalAmount || 0) + discVal,
+                          discount: discVal,
+                          netPayable: bill.totalAmount || 0,
+                          status: (bill.dueAmount || 0) <= 0 ? 'PAID' : ((bill.paidAmount || 0) > 0 ? 'PARTIAL' : 'CREDIT'),
+                          bill: bill
+                        };
+                      });
+
+                      const generalDiscounts = customerDiscounts.filter(p => !p.orderId).map(p => ({
+                        id: p.id,
+                        date: p.createdAt,
+                        type: 'general',
+                        orderTotal: null,
+                        discount: p.amount,
+                        netPayable: null,
+                        status: 'SUCCESS',
+                        payment: p
+                      }));
+
+                      const allDiscounts = [...discountedBills, ...generalDiscounts].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+                      if (allDiscounts.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan="7" style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>
+                              No discount records found for this customer.
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return allDiscounts.map((item) => {
+                        if (item.type === 'order') {
+                          const bill = item.bill;
+                          const discVal = item.discount;
+                          return (
+                            <tr key={bill.id}>
+                              <td style={{ fontWeight: 700 }}>{settings.invoicePrefix || ''}{bill.id}</td>
+                              <td>{formatDate(bill.createdAt)}</td>
+                              <td><CurrencySymbol size={13} /> {item.orderTotal.toFixed(2)}</td>
+                              <td style={{ fontWeight: 800, color: 'var(--danger)' }}>
+                                <CurrencySymbol size={13} /> {discVal.toFixed(2)}
+                              </td>
+                              <td style={{ fontWeight: 700 }}><CurrencySymbol size={13} /> {item.netPayable.toFixed(2)}</td>
+                              <td>
+                                <span style={{
+                                  padding: '0.2rem 0.5rem',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  background: (bill.dueAmount || 0) <= 0 ? '#DCFCE7' : '#FEF3C7',
+                                  color: (bill.dueAmount || 0) <= 0 ? '#15803D' : '#D97706'
+                                }}>
+                                  {item.status}
+                                </span>
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}>
+                                  <button 
+                                    style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer' }}
+                                    onClick={() => {
+                                      let parsedItems = [];
+                                      try {
+                                        if (bill.items && bill.items !== 'null') {
+                                          parsedItems = typeof bill.items === 'string' ? JSON.parse(bill.items) : bill.items;
+                                        }
+                                      } catch (e) {}
+                                      let parsedBreakdown = null;
+                                      try {
+                                        if (bill.paymentBreakdown && bill.paymentBreakdown !== 'null') {
+                                          parsedBreakdown = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
+                                        }
+                                      } catch (e) {}
+
+                                      setSelectedInvoiceForView({
+                                        ...bill,
+                                        id: bill.id,
+                                        billNumber: bill.billNumber || '',
+                                        date: formatDate(bill.createdAt),
+                                        customer: selectedCustomer?.name || bill.customerId,
+                                        customerId: bill.customerId,
+                                        customerPhone: selectedCustomer?.phone || '',
+                                        total: bill.totalAmount,
+                                        paidAmount: bill.paidAmount || 0,
+                                        dueAmount: bill.dueAmount ?? (bill.totalAmount - (bill.paidAmount || 0)),
+                                        items: parsedItems,
+                                        paymentBreakdown: parsedBreakdown
+                                      });
+                                    }}
+                                    title="View Order Details"
+                                  >
+                                    <Eye size={16} />
+                                  </button>
+                                  <button 
+                                    style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
+                                    onClick={() => {
+                                      setSelectedBillForDiscount(bill);
+                                      setEditDiscountValue(discVal.toString());
+                                      setShowDiscountEditModal(true);
+                                    }}
+                                    title="Edit Discount"
+                                  >
+                                    <Edit2 size={16} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        } else {
+                          const p = item.payment;
+                          return (
+                            <tr key={p.id}>
+                              <td style={{ color: '#64748B', fontStyle: 'italic' }}>General Account</td>
+                              <td>{formatDate(p.createdAt)}</td>
+                              <td>N/A</td>
+                              <td style={{ fontWeight: 800, color: 'var(--danger)' }}>
+                                <CurrencySymbol size={13} /> {item.discount.toFixed(2)}
+                              </td>
+                              <td>N/A</td>
+                              <td>
+                                <span style={{
+                                  padding: '0.2rem 0.5rem',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  background: '#DCFCE7',
+                                  color: '#15803D'
+                                }}>
+                                  APPLIED
+                                </span>
+                              </td>
+                              <td style={{ textAlign: 'center', color: '#64748B', fontSize: '0.85rem' }} colSpan="2">
+                                Settlement Adjustment
+                              </td>
+                            </tr>
+                          );
+                        }
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </div>
 
         {/* Re-render identical modal portals so that payment options work inside the detail page */}
         {showPaymentModal && (
-          <div className={styles.modalOverlay} onClick={() => { setShowPaymentModal(false); setSelectedBillForPayment(null); }}>
+          <div className={styles.modalOverlay}>
             <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
                 <div>
@@ -1597,26 +2415,33 @@ export default function Customers() {
                     </div>
                   </div>
 
-                  <div className={styles.formGroup}>
-                    <label>Payment Method</label>
+                  <div className={styles.formGroup} style={{ marginTop: '0.75rem' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>Discount Amount (Optional)</label>
                     <div className={styles.inputWrapper}>
-                      <Wallet size={18} />
-                      <select 
-                        style={{ background: 'transparent', border: 'none', width: '100%', outline: 'none', fontSize: '0.95rem' }}
-                        value={paymentData.method}
-                        onChange={(e) => setPaymentData({...paymentData, method: e.target.value})}
-                      >
-                        <option value="Cash">Cash Payment</option>
-                        <option value="Card">Card Payment</option>
-                        <option value="UPI">UPI Payment</option>
-                        <option value="Bank">Bank Transfer</option>
-                        <option value="Multipayment">Multipayment</option>
-                      </select>
+                      <Percent size={18} />
+                      <input 
+                        type="number" 
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        value={paymentData.discount || ''}
+                        onChange={(e) => setPaymentData(prev => ({ ...prev, discount: e.target.value }))}
+                        style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem' }}
+                      />
                     </div>
                   </div>
 
+                  <div className={styles.formGroup} style={{ marginTop: '0.75rem' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem', display: 'block' }}>Payment Method</label>
+                    <PaymentMethodSelect 
+                      value={paymentData.method} 
+                      onChange={(method) => setPaymentData(prev => ({ ...prev, method }))}
+                      settings={settings}
+                    />
+                  </div>
+
                   {paymentData.method === 'Multipayment' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '1rem', background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginTop: '1rem', background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
                       <div>
                         <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Cash</label>
                         <input type="number" placeholder="0.00" value={splitCash} onChange={(e) => setSplitCash(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
@@ -1624,10 +2449,6 @@ export default function Customers() {
                       <div>
                         <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Card</label>
                         <input type="number" placeholder="0.00" value={splitCard} onChange={(e) => setSplitCard(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>UPI</label>
-                        <input type="number" placeholder="0.00" value={splitUPI} onChange={(e) => setSplitUPI(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
                       </div>
                       <div>
                         <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Bank</label>
@@ -1719,39 +2540,57 @@ export default function Customers() {
         {/* Edit Payment Modal */}
         {showPaymentEditModal && selectedPaymentForAction && (
           <div className={styles.modalOverlay} onClick={() => setShowPaymentEditModal(false)}>
-            <div className={styles.modal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
-              <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
+            <div className={styles.modal} style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.25rem' }}>
                 <div>
-                  <h2 style={{ color: '#0F172A' }}>Edit Payment</h2>
-                  <p>Change payment details</p>
+                  <h2 style={{ color: '#0F172A', fontSize: '1.15rem' }}>Edit Payment</h2>
+                  <p style={{ fontSize: '0.8rem', color: '#64748B' }}>
+                    Receipt: {selectedPaymentForAction.paymentReference || selectedPaymentForAction.id}
+                  </p>
                 </div>
-                <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentEditModal(false)} />
+                <X size={22} className={styles.closeBtn} onClick={() => setShowPaymentEditModal(false)} />
               </div>
-              <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
+              <div className={styles.modalContent} style={{ padding: '1.25rem 1.5rem' }}>
                 <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
-                  <label>Payment Amount</label>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>Payment Amount</label>
                   <input 
                     type="number"
                     step="0.01"
                     required
                     value={editPaymentAmount}
                     onChange={(e) => setEditPaymentAmount(e.target.value)}
-                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem' }}
+                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem', fontWeight: 700 }}
                   />
                 </div>
-                <div className={styles.formGroup}>
-                  <label>Payment Method</label>
-                  <select 
-                    value={editPaymentMethod} 
-                    onChange={(e) => setEditPaymentMethod(e.target.value)}
-                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem' }}
-                  >
-                    <option value="Cash">Cash</option>
-                    <option value="Card">Card</option>
-                    <option value="UPI">UPI</option>
-                    <option value="Bank">Bank Transfer</option>
-                  </select>
-                </div>
+                  <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem', display: 'block' }}>Payment Method</label>
+                    <PaymentMethodSelect 
+                      value={editPaymentMethod} 
+                      onChange={(method) => setEditPaymentMethod(method)}
+                      settings={settings}
+                    />
+                  </div>
+                {selectedPaymentForAction.orderId && (
+                  <div className={styles.formGroup}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>Discount Amount (Order #{settings.invoicePrefix || ''}{selectedPaymentForAction.orderId})</label>
+                    <input 
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={editPaymentDiscount}
+                      onChange={(e) => {
+                        const newDiscStr = e.target.value;
+                        setEditPaymentDiscount(newDiscStr);
+                        const newDisc = parseFloat(newDiscStr) || 0;
+                        if (editOrderGrossTotal > 0) {
+                          const newNetPayable = Math.max(0, editOrderGrossTotal - newDisc);
+                          setEditPaymentAmount(newNetPayable.toFixed(2));
+                        }
+                      }}
+                      style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem', fontWeight: 700, color: 'var(--danger)' }}
+                    />
+                  </div>
+                )}
               </div>
               <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
                 <button 
@@ -1763,6 +2602,56 @@ export default function Customers() {
                 <button 
                   style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
                   onClick={handleSavePaymentEdit}
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Discount Modal */}
+        {showDiscountEditModal && selectedBillForDiscount && (
+          <div className={styles.modalOverlay} onClick={() => setShowDiscountEditModal(false)}>
+            <div className={styles.modal} style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.25rem' }}>
+                <div>
+                  <h2 style={{ color: '#0F172A', fontSize: '1.15rem' }}>Edit Order Discount</h2>
+                  <p style={{ fontSize: '0.8rem', color: '#64748B' }}>Order #{settings.invoicePrefix || ''}{selectedBillForDiscount.id}</p>
+                </div>
+                <X size={22} className={styles.closeBtn} onClick={() => setShowDiscountEditModal(false)} />
+              </div>
+              <div className={styles.modalContent} style={{ padding: '1.25rem 1.5rem' }}>
+                <div style={{ background: '#F1F5F9', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                    <span style={{ color: '#64748B' }}>Current Net Amount:</span>
+                    <span style={{ fontWeight: 700 }}><CurrencySymbol size={13} /> {(selectedBillForDiscount.totalAmount || 0).toFixed(2)}</span>
+                  </div>
+                </div>
+
+                <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>Discount Amount</label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={editDiscountValue}
+                    onChange={(e) => setEditDiscountValue(e.target.value)}
+                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem', fontWeight: 700 }}
+                  />
+                </div>
+              </div>
+              <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button 
+                  style={{ padding: '0.5rem 1rem', background: 'white', color: '#475569', border: '1px solid #CBD5E1', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                  onClick={() => setShowDiscountEditModal(false)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                  onClick={handleSaveDiscountEdit}
                 >
                   Save Changes
                 </button>
@@ -2001,6 +2890,159 @@ export default function Customers() {
             </div>
           </div>
         )}
+        {/* Order Delete Manager PIN Verification Modal */}
+        {showOrderDeletePinModal && orderToDelete && (
+          <div className={styles.modalOverlay}>
+            <div className={styles.modal} style={{ maxWidth: '420px', borderRadius: '12px', overflow: 'hidden', padding: 0, border: 'none' }} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader} style={{ backgroundColor: '#EF4444', color: 'white', padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'white', margin: 0, fontSize: '1.25rem', fontWeight: 800 }}>
+                  <Trash2 size={22} /> Confirm Deletion
+                </h2>
+                <X size={24} style={{ cursor: 'pointer', color: 'white' }} onClick={() => { setShowOrderDeletePinModal(false); setOrderToDelete(null); setOrderDeletePinValue(''); setOrderDeletePinError(''); }} />
+              </div>
+              
+              <form onSubmit={(e) => { e.preventDefault(); handleDeleteOrderInInsight(); }}>
+                <div style={{ padding: '1.5rem' }}>
+                  <p style={{ marginBottom: '1.2rem', color: '#64748B', fontSize: '0.9rem', lineHeight: '1.4' }}>
+                    You are deleting order <strong>{orderToDelete.id}</strong>. This action is permanent and cannot be undone.
+                  </p>
+
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '0.5rem' }}>
+                    Enter Manager/Admin Access PIN
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={4}
+                    value={orderDeletePinValue}
+                    onChange={(e) => {
+                      setOrderDeletePinValue(e.target.value.replace(/\D/g, ''));
+                      setOrderDeletePinError('');
+                    }}
+                    placeholder="••••"
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      textAlign: 'center',
+                      fontSize: '1.25rem',
+                      letterSpacing: '0.5rem',
+                      borderRadius: '8px',
+                      border: orderDeletePinError ? '2px solid #EF4444' : '1px solid #CBD5E1',
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                    autoFocus
+                  />
+
+                  {(orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus)) ? (
+                    <div style={{ margin: '1rem 0', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: '#F8FAFC', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        CHOOSE ACTION FOR PAYMENT (<CurrencySymbol size={11} />{(orderToDelete.paidAmount || 0).toFixed(2)}):
+                      </span>
+                      
+                      {/* Option 1: Refund */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
+                          <input
+                            type="radio"
+                            name="deleteOption"
+                            value="refund"
+                            checked={deleteOption === 'refund'}
+                            onChange={() => setDeleteOption('refund')}
+                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                          />
+                          Refund Customer
+                        </label>
+
+                        {deleteOption === 'refund' && (
+                          <div style={{ paddingLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.2rem' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748B' }}>Select Refund Account:</span>
+                            <div style={{ display: 'flex', gap: '1.25rem' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                                <input
+                                  type="radio"
+                                  name="refundMethod"
+                                  value="Cash"
+                                  checked={refundMethod === 'Cash'}
+                                  onChange={() => setRefundMethod('Cash')}
+                                  style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                                />
+                                Cash Account
+                              </label>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                                <input
+                                  type="radio"
+                                  name="refundMethod"
+                                  value="Bank"
+                                  checked={refundMethod === 'Bank'}
+                                  onChange={() => setRefundMethod('Bank')}
+                                  style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                                />
+                                Bank Account
+                              </label>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Option 2: Convert to Advance */}
+                      {orderToDelete.customerId && orderToDelete.customerId !== 'Walk-in' && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
+                            <input
+                              type="radio"
+                              name="deleteOption"
+                              value="advance"
+                              checked={deleteOption === 'advance'}
+                              onChange={() => setDeleteOption('advance')}
+                              style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                            />
+                            Convert Payment to Advance
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ margin: '1rem 0', background: '#F8FAFC', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Payment Status:</span>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748B', marginTop: '0.25rem' }}>
+                        Not Paid (No transactions recorded)
+                      </div>
+                    </div>
+                  )}
+
+                  {orderDeletePinError && (
+                    <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 500, textAlign: 'center' }}>
+                      {orderDeletePinError}
+                    </p>
+                  )}
+
+                  <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem' }}>
+                    <button
+                      type="button"
+                      style={{ flex: 1, padding: '0.65rem 1rem', background: 'white', border: '1px solid #CBD5E1', borderRadius: '8px', fontWeight: 700, color: '#475569', cursor: 'pointer' }}
+                      onClick={() => {
+                        setShowOrderDeletePinModal(false);
+                        setOrderToDelete(null);
+                        setOrderDeletePinValue('');
+                        setOrderDeletePinError('');
+                      }}
+                      disabled={isDeletingOrder}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      style={{ flex: 1.5, padding: '0.65rem 1rem', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', fontWeight: 700, color: '#64748B', cursor: isDeletingOrder || orderDeletePinValue.length < 4 ? 'not-allowed' : 'pointer', opacity: isDeletingOrder || orderDeletePinValue.length < 4 ? 0.6 : 1 }}
+                      disabled={isDeletingOrder || orderDeletePinValue.length < 4}
+                    >
+                      {isDeletingOrder ? 'Deleting...' : 'Authorize & Delete'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -2013,8 +3055,96 @@ export default function Customers() {
           <h1>Customers</h1>
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          {/* Custom Sleek Sort Dropdown */}
+          <div ref={sortDropdownRef} style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setIsSortOpen(!isSortOpen)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.55rem',
+                background: 'white',
+                border: '1px solid #CBD5E1',
+                borderRadius: '8px',
+                padding: '0.45rem 0.85rem',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                color: '#334155',
+                cursor: 'pointer',
+                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
+                transition: 'all 0.2s ease',
+                userSelect: 'none'
+              }}
+            >
+              <ArrowUpDown size={15} color="var(--primary)" />
+              <span>{sortOptions.find(o => o.value === sortBy)?.label || 'Sort By'}</span>
+              <ChevronDown
+                size={14}
+                color="#64748B"
+                style={{
+                  transform: isSortOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.2s ease'
+                }}
+              />
+            </button>
+
+            {isSortOpen && (
+              <div style={{
+                position: 'absolute',
+                top: 'calc(100% + 6px)',
+                right: 0,
+                background: 'white',
+                border: '1px solid #E2E8F0',
+                borderRadius: '12px',
+                boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.05)',
+                width: '230px',
+                padding: '0.4rem',
+                zIndex: 200
+              }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', padding: '0.4rem 0.65rem 0.25rem 0.65rem', letterSpacing: '0.05em' }}>
+                  Sort Customers By
+                </div>
+                {sortOptions.map((opt) => {
+                  const isSelected = sortBy === opt.value;
+                  return (
+                    <div
+                      key={opt.value}
+                      onClick={() => {
+                        setSortBy(opt.value);
+                        setIsSortOpen(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '0.5rem 0.65rem',
+                        borderRadius: '8px',
+                        fontSize: '0.85rem',
+                        fontWeight: isSelected ? 700 : 500,
+                        color: isSelected ? 'var(--primary)' : '#334155',
+                        background: isSelected ? '#F1F5F9' : 'transparent',
+                        cursor: 'pointer',
+                        transition: 'background 0.15s'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = '#F8FAFC';
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      <span>{opt.label}</span>
+                      {isSelected && <Check size={16} color="var(--primary)" />}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Unified search bar */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'white', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0.4rem 0.75rem', width: '280px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'white', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0.4rem 0.75rem', width: '260px' }}>
             <Search size={18} color="#64748B" />
             <input 
               type="text" 
@@ -2089,7 +3219,7 @@ export default function Customers() {
                         e.preventDefault(); e.stopPropagation();
                         setSelectedCustomer(customer);
                         setEditingCustomer(customer);
-                        setFormData({ name: customer.name, phone: customer.phone, address: customer.address || '' });
+                        setFormData({ name: customer.name, phone: customer.phone, address: customer.address || '', openingBalance: customer.openingBalance !== undefined && customer.openingBalance !== null ? customer.openingBalance.toString() : '' });
                         setShowModal(true);
                       }}
                       title="Edit Customer"
@@ -2180,13 +3310,13 @@ export default function Customers() {
                 </div>
 
                 <div className={styles.formGroup}>
-                    <label>Phone Number</label>
+                    <label>Phone Number <span style={{ color: 'var(--danger)' }}>*</span></label>
                     <div className={styles.inputWrapper}>
                       <Phone size={18} />
                       <input 
                         type="tel" 
-                        placeholder="+1 (555) 000-0000" 
-                        required 
+                        placeholder="+971 50 123 4567" 
+                        required
                         value={formData.phone}
                         onChange={(e) => setFormData({...formData, phone: e.target.value})}
                       />
@@ -2206,21 +3336,19 @@ export default function Customers() {
                   </div>
                 </div>
 
-                  {!editingCustomer && (
-                    <div className={styles.formGroup}>
-                      <label>Opening Balance</label>
-                      <div className={styles.inputWrapper}>
-                        <DollarSign size={18} />
-                        <input 
-                          type="number" 
-                          step="0.01"
-                          placeholder="0.00" 
-                          value={formData.openingBalance}
-                          onChange={(e) => setFormData({...formData, openingBalance: e.target.value})}
-                        />
-                      </div>
+                  <div className={styles.formGroup}>
+                    <label>Opening Balance <span style={{ fontSize: '0.75rem', fontWeight: 'normal', color: '#64748B' }}>(e.g. -500 for Advance, 500 for Due)</span></label>
+                    <div className={styles.inputWrapper}>
+                      <DollarSign size={18} />
+                      <input 
+                        type="number" 
+                        step="0.01"
+                        placeholder="0.00 (- for Advance, + for Due)" 
+                        value={formData.openingBalance}
+                        onChange={(e) => setFormData({...formData, openingBalance: e.target.value})}
+                      />
                     </div>
-                  )}
+                  </div>
                 </div>
 
               <div className={styles.modalFooter}>
@@ -2310,7 +3438,11 @@ export default function Customers() {
                   setShowBillsModal(false);
                   // Only auto-fill if balance is positive (due), otherwise let them enter amount
                   const autoAmount = selectedCustomer?.balance > 0 ? selectedCustomer.balance : '';
-                  setPaymentData({ ...paymentData, amount: autoAmount });
+                  setPaymentData({ amount: autoAmount, method: 'Cash', discount: '' });
+                  setSplitCash('');
+                  setSplitCard('');
+                  setSplitUPI('');
+                  setSplitBank('');
                   setShowPaymentModal(true);
                 }}
                 disabled={!selectedCustomer}
@@ -2321,8 +3453,8 @@ export default function Customers() {
           </div>
         </div>
       )}
-      {showPaymentModal && (
-        <div className={styles.modalOverlay} onClick={() => setShowPaymentModal(false)}>
+       {showPaymentModal && (
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
               <div>
@@ -2396,22 +3528,29 @@ export default function Customers() {
                   </div>
                 </div>
 
-                <div className={styles.formGroup}>
-                  <label>Payment Method</label>
+                <div className={styles.formGroup} style={{ marginTop: '0.75rem' }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem', display: 'block' }}>Discount Amount (Optional)</label>
                   <div className={styles.inputWrapper}>
-                    <Wallet size={18} />
-                    <select 
-                      style={{ background: 'transparent', border: 'none', width: '100%', outline: 'none', fontSize: '0.95rem' }}
-                      value={paymentData.method}
-                      onChange={(e) => setPaymentData({...paymentData, method: e.target.value})}
-                    >
-                      <option value="Cash">Cash Payment</option>
-                      <option value="Card">Card Payment</option>
-                      <option value="UPI">UPI Payment</option>
-                      <option value="Bank">Bank Transfer</option>
-                      <option value="Multipayment">Multipayment</option>
-                    </select>
+                    <Percent size={18} />
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      min="0"
+                      placeholder="0.00"
+                      value={paymentData.discount || ''}
+                      onChange={(e) => setPaymentData(prev => ({ ...prev, discount: e.target.value }))}
+                      style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem' }}
+                    />
                   </div>
+                </div>
+
+                <div className={styles.formGroup} style={{ marginTop: '0.75rem' }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem', display: 'block' }}>Payment Method</label>
+                  <PaymentMethodSelect 
+                    value={paymentData.method} 
+                    onChange={(method) => setPaymentData(prev => ({ ...prev, method }))}
+                    settings={settings}
+                  />
                 </div>
 
                 {paymentData.method === 'Multipayment' && (
@@ -2849,6 +3988,76 @@ export default function Customers() {
                   style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
                 >
                   Verify PIN
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Order Delete Manager PIN Verification Modal */}
+      {showOrderDeletePinModal && orderToDelete && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.modal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader} style={{ background: '#FEF2F2', borderBottom: '1px solid #FCA5A5', padding: '1.25rem 1.5rem' }}>
+              <div>
+                <h2 style={{ color: '#DC2626', fontSize: '1.1rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Trash2 size={20} /> Authorize Order Deletion
+                </h2>
+                <p style={{ color: '#991B1B', fontSize: '0.8rem', margin: '0.25rem 0 0 0' }}>
+                  Order #{settings.invoicePrefix || ''}{orderToDelete.id}
+                </p>
+              </div>
+              <X size={22} className={styles.closeBtn} onClick={() => { setShowOrderDeletePinModal(false); setOrderToDelete(null); }} />
+            </div>
+            
+            <form onSubmit={(e) => { e.preventDefault(); handleDeleteOrderInInsight(); }}>
+              <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <p style={{ fontSize: '0.85rem', color: '#64748B', margin: 0, lineHeight: '1.5' }}>
+                  Please enter the 4-digit <strong>Manager / Deletion PIN</strong> to delete this order. This action will permanently remove the order and reconcile balances.
+                </p>
+
+                <div className={styles.formGroup} style={{ margin: 0 }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem', display: 'block' }}>Manager PIN</label>
+                  <div className={styles.inputWrapper}>
+                    <Lock size={18} color="#94A3B8" />
+                    <input 
+                      type="password"
+                      maxLength={4}
+                      required
+                      autoFocus
+                      placeholder="••••"
+                      value={orderDeletePinValue}
+                      onChange={(e) => {
+                        setOrderDeletePinValue(e.target.value.replace(/\D/g, ''));
+                        setOrderDeletePinError('');
+                      }}
+                      style={{ letterSpacing: '0.5rem', textAlign: 'center', fontSize: '1.25rem', fontWeight: 'bold', width: '100%' }}
+                    />
+                  </div>
+                  {orderDeletePinError && (
+                    <p style={{ color: '#DC2626', fontSize: '0.75rem', fontWeight: 600, marginTop: '0.35rem' }}>
+                      {orderDeletePinError}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ padding: '1rem 1.5rem', background: '#F8FAFC', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button 
+                  type="button"
+                  style={{ padding: '0.5rem 1rem', background: 'white', color: '#475569', border: '1px solid #CBD5E1', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                  onClick={() => { setShowOrderDeletePinModal(false); setOrderToDelete(null); }}
+                  disabled={isDeletingOrder}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  disabled={isDeletingOrder || orderDeletePinValue.length < 4}
+                  style={{ padding: '0.5rem 1.25rem', background: '#DC2626', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 700, cursor: 'pointer', opacity: isDeletingOrder || orderDeletePinValue.length < 4 ? 0.6 : 1 }}
+                >
+                  {isDeletingOrder ? 'Deleting...' : 'Authorize & Delete'}
                 </button>
               </div>
             </form>

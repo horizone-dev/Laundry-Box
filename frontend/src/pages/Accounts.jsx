@@ -1422,28 +1422,22 @@ export default function Accounts() {
                 </div>
 
                 {dateRange === 'Custom' && (
-                  <div className={styles.customDateWrapper}>
-                    <div className={styles.filterGroup}>
-                      <label className={styles.fieldLabel}>From</label>
-                      <input
-                        type="date"
-                        value={customStart}
-                        onChange={(e) => setCustomStart(e.target.value)}
-                        className={styles.datePickerInput}
-                      />
-                    </div>
-                    <span className={styles.rangeSep}>to</span>
-                    <div className={styles.filterGroup}>
-                      <label className={styles.fieldLabel}>To</label>
-                      <input
-                        type="date"
-                        value={customEnd}
-                        onChange={(e) => setCustomEnd(e.target.value)}
-                        className={styles.datePickerInput}
-                      />
-                    </div>
-                  </div>
-                )}
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input 
+                  type="date" 
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="premium-date-input"
+                />
+                <span className="premium-range-divider">to</span>
+                <input 
+                  type="date" 
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="premium-date-input"
+                />
+              </div>
+            )}
 
                 <div className={styles.filterGroup}>
                   <label className={styles.fieldLabel}>Search</label>

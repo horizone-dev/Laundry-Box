@@ -1106,7 +1106,7 @@ export default function Settlement() {
 
       {/* ── REDESIGNED PAYMENT MODAL (COMPACTED) ── */}
       {showPayModal && selectedCustomer && (
-        <div className={styles.modalOverlay} onClick={() => setShowPayModal(false)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.payModalCard} onClick={(e) => e.stopPropagation()}>
             
             <div className={styles.modalHeaderRow} style={{ padding: '1rem 1.25rem' }}>
@@ -1611,7 +1611,7 @@ export default function Settlement() {
       )}
 
       {showCreditWarning && creditWarningDetails && (
-        <div className={styles.modalOverlay} onClick={handleCancelOverride}>
+        <div className={styles.modalOverlay}>
           <div className={styles.statusModal} style={{ maxWidth: '450px', borderRadius: '24px', background: 'white', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)', padding: '2rem' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '1.5rem' }}>
               <AlertTriangle size={24} color="#EF4444" style={{ marginTop: '2px' }} />

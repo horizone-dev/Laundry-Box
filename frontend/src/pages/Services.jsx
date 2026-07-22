@@ -11,6 +11,7 @@ import { DEFAULT_SHOP_ID, CATEGORIES } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
 import styles from './Services.module.css';
+import { PRESET_SERVICES, getPresetDataUri } from '../utils/presetServices';
 
 export default function Services({ defaultTab = 'list' }) {
   const { settings, updateSettings } = useSettings();
@@ -43,6 +44,11 @@ export default function Services({ defaultTab = 'list' }) {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('All');
   const [currentPage, setCurrentPage] = useState(1);
   const [showModal, setShowModal] = useState(null); // 'service', 'type', 'addon', 'category'
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+  const [deliveryFormData, setDeliveryFormData] = useState({ name: '', nameAr: '' });
+  const [editingDeliveryIdx, setEditingDeliveryIdx] = useState(null);
+  const [showPresetLibrary, setShowPresetLibrary] = useState(false);
+  const [presetSearchTerm, setPresetSearchTerm] = useState('');
 
   useEffect(() => {
     setCurrentPage(1);
@@ -56,6 +62,8 @@ export default function Services({ defaultTab = 'list' }) {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setShowModal(null);
+        setShowDeliveryModal(false);
+        setShowPresetLibrary(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -63,7 +71,7 @@ export default function Services({ defaultTab = 'list' }) {
   }, []);
 
   useEffect(() => {
-    if (showModal) {
+    if (showModal || showDeliveryModal || showPresetLibrary) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -71,7 +79,7 @@ export default function Services({ defaultTab = 'list' }) {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [showModal]);
+  }, [showModal, showDeliveryModal, showPresetLibrary]);
 
   const renderPagination = (items, page, setPage, label) => {
     if (loading) return null;
@@ -766,11 +774,9 @@ export default function Services({ defaultTab = 'list' }) {
                     className="btn btn-primary"
                     style={{ background: '#10B981' }}
                     onClick={() => {
-                      const name = prompt("Enter Packaging Method Name (English):", "");
-                      if (!name || !name.trim()) return;
-                      const nameAr = prompt("Enter Packaging Method Name (Arabic):", "");
-                      const updated = [...methods, { name: name.trim(), nameAr: (nameAr || '').trim(), isDefault: false }];
-                      updateSettings({ deliveryMethods: updated });
+                      setEditingDeliveryIdx(null);
+                      setDeliveryFormData({ name: '', nameAr: '' });
+                      setShowDeliveryModal(true);
                     }}
                   >
                     <Plus size={16} /> Add Method
@@ -812,12 +818,9 @@ export default function Services({ defaultTab = 'list' }) {
                           type="button"
                           style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
                           onClick={() => {
-                            const name = prompt("Edit English Name:", method.name);
-                            if (!name || !name.trim()) return;
-                            const nameAr = prompt("Edit Arabic Name:", method.nameAr || '');
-                            const updated = [...methods];
-                            updated[idx] = { ...method, name: name.trim(), nameAr: (nameAr || '').trim() };
-                            updateSettings({ deliveryMethods: updated });
+                            setEditingDeliveryIdx(idx);
+                            setDeliveryFormData({ name: method.name, nameAr: method.nameAr || '' });
+                            setShowDeliveryModal(true);
                           }}
                         >
                           Rename
@@ -850,7 +853,7 @@ export default function Services({ defaultTab = 'list' }) {
 
       {/* Slide-over Drawer for Service */}
       {showModal === 'service' && (
-        <div className={styles.slideOverOverlay} onClick={() => setShowModal(null)}>
+        <div className={styles.slideOverOverlay}>
           <div className={styles.slideOver} onClick={(e) => e.stopPropagation()}>
             <div className={styles.slideOverHeader}>
               <h2>{editId ? 'Edit' : 'Add New'} Service</h2>
@@ -890,6 +893,34 @@ export default function Services({ defaultTab = 'list' }) {
                   </div>
                 </div>
 
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <button
+                    type="button"
+                    style={{
+                      width: '100%',
+                      padding: '0.65rem 1rem',
+                      background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)',
+                      border: '1px dashed #3B82F6',
+                      borderRadius: '10px',
+                      color: '#1D4ED8',
+                      fontWeight: 800,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      transition: 'all 0.2s',
+                    }}
+                    onClick={() => {
+                      setPresetSearchTerm('');
+                      setShowPresetLibrary(true);
+                    }}
+                  >
+                    <Sparkles size={16} /> Choose from Preset Item Library (28 Items)
+                  </button>
+                </div>
+
                 <div className={styles.formGroup}>
                   <label>Name</label>
                   <input
@@ -910,34 +941,6 @@ export default function Services({ defaultTab = 'list' }) {
                       <option key={cat.id} value={cat.name}>{cat.name}</option>
                     ))}
                   </select>
-                </div>
-
-                <div className={styles.formGroup}>
-                  <label>Service Icon</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '0.5rem', marginTop: '0.5rem' }}>
-                    {['Shirt', 'Dress', 'Bed', 'BedDouble', 'Layers', 'Wind', 'Droplet', 'Heart', 'Sparkles', 'Zap', 'Package', 'Scissors', 'Tag', 'Layout'].map(iconName => (
-                      <button
-                        key={iconName}
-                        type="button"
-                        onClick={() => setFormData({ ...formData, icon: iconName })}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: '0.6rem',
-                          border: formData.icon === iconName ? '2px solid #3B82F6' : '1px solid #E2E8F0',
-                          borderRadius: '8px',
-                          background: formData.icon === iconName ? '#EFF6FF' : '#FFFFFF',
-                          color: formData.icon === iconName ? '#2563EB' : '#64748B',
-                          cursor: 'pointer',
-                          transition: 'all 0.2s'
-                        }}
-                        title={iconName}
-                      >
-                        {getIcon(iconName, 20)}
-                      </button>
-                    ))}
-                  </div>
                 </div>
 
                 <div className={styles.formGroup}>
@@ -1012,7 +1015,7 @@ export default function Services({ defaultTab = 'list' }) {
 
       {/* Standard Modal for Category/Type/Addon */}
       {showModal && showModal !== 'service' && (
-        <div className={styles.modalOverlay} onClick={() => setShowModal(null)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>{editId ? 'Edit' : 'Add New'} {showModal.charAt(0).toUpperCase() + showModal.slice(1)}</h2>
@@ -1063,6 +1066,67 @@ export default function Services({ defaultTab = 'list' }) {
         </div>
       )}
 
+      {/* Packaging Method Modal */}
+      {showDeliveryModal && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h2>{editingDeliveryIdx !== null ? 'Edit Packaging Method' : 'Add New Packaging Method'}</h2>
+              <X size={24} className={styles.closeBtn} onClick={() => setShowDeliveryModal(false)} />
+            </div>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const methods = settings.deliveryMethods || [];
+              if (!deliveryFormData.name.trim()) return;
+              let updated;
+              if (editingDeliveryIdx !== null) {
+                updated = [...methods];
+                updated[editingDeliveryIdx] = {
+                  ...updated[editingDeliveryIdx],
+                  name: deliveryFormData.name.trim(),
+                  nameAr: deliveryFormData.nameAr.trim()
+                };
+              } else {
+                updated = [
+                  ...methods,
+                  {
+                    name: deliveryFormData.name.trim(),
+                    nameAr: deliveryFormData.nameAr.trim(),
+                    isDefault: false
+                  }
+                ];
+              }
+              updateSettings({ deliveryMethods: updated });
+              setShowDeliveryModal(false);
+            }}>
+              <div className={styles.modalBody}>
+                <div className={styles.formGroup}>
+                  <label>Packaging Method Name (English)</label>
+                  <input
+                    type="text"
+                    required
+                    value={deliveryFormData.name}
+                    onChange={e => setDeliveryFormData({ ...deliveryFormData, name: e.target.value })}
+                  />
+                </div>
+                <div className={styles.formGroup}>
+                  <label>Packaging Method Name (Arabic)</label>
+                  <input
+                    type="text"
+                    value={deliveryFormData.nameAr}
+                    onChange={e => setDeliveryFormData({ ...deliveryFormData, nameAr: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className={styles.modalFooter}>
+                <button type="button" className={styles.secondaryBtn} onClick={() => setShowDeliveryModal(false)}>Cancel</button>
+                <button type="submit" className={styles.submitBtn}>Save Method</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Cropper Modal Overlay */}
       {imageToCrop && (
         <div className={styles.cropperModalOverlay}>
@@ -1105,6 +1169,149 @@ export default function Services({ defaultTab = 'list' }) {
               <button type="button" className={styles.cropSaveBtn} onClick={handleCropSave}>
                 Crop & Save
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Preset Library Modal Overlay */}
+      {showPresetLibrary && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          background: 'rgba(15, 23, 42, 0.6)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999,
+          padding: '1rem',
+        }} onClick={() => setShowPresetLibrary(false)}>
+          <div style={{
+            background: 'white',
+            width: '100%',
+            maxWidth: '850px',
+            maxHeight: '85vh',
+            borderRadius: '16px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }} onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid #F1F5F9',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0F172A', fontWeight: 800 }}>Laundry Item Preset Library</h3>
+                <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: '#64748B' }}>Choose a preset clothing item. It will automatically apply a beautiful vector SVG illustration, name, and category.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPresetLibrary(false)}
+                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            {/* Modal Search Bar */}
+            <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #F1F5F9', background: '#F8FAFC' }}>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <Search size={18} style={{ position: 'absolute', left: '12px', color: '#94A3B8' }} />
+                <input
+                  type="text"
+                  placeholder="Search by name (e.g. Dishdash, Ghutra, Abaya, Lungi...)"
+                  value={presetSearchTerm}
+                  onChange={(e) => setPresetSearchTerm(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.65rem 1rem 0.65rem 2.5rem',
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '8px',
+                    fontSize: '0.9rem',
+                    outline: 'none',
+                    transition: 'border-color 0.2s',
+                  }}
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            {/* Modal Body (Scrollable Grid) */}
+            <div style={{ padding: '1.5rem', overflowY: 'auto', flex: 1 }}>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
+                gap: '1rem'
+              }}>
+                {PRESET_SERVICES.filter(preset => 
+                  preset.name.toLowerCase().includes(presetSearchTerm.toLowerCase()) ||
+                  preset.nameAr.includes(presetSearchTerm)
+                ).map((preset, idx) => {
+                  const dataUri = getPresetDataUri(preset);
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => {
+                        setFormData({
+                          ...formData,
+                          name: `${preset.name} / ${preset.nameAr}`,
+                          image: dataUri,
+                          category: preset.category || formData.category,
+                          icon: 'Shirt'
+                        });
+                        setShowPresetLibrary(false);
+                      }}
+                      style={{
+                        border: '1px solid #E2E8F0',
+                        borderRadius: '12px',
+                        padding: '1rem 0.5rem',
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        background: '#FFFFFF',
+                        transition: 'all 0.2s',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = '#3B82F6';
+                        e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(59, 130, 246, 0.1)';
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = '#E2E8F0';
+                        e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.02)';
+                        e.currentTarget.style.transform = 'none';
+                      }}
+                    >
+                      <img 
+                        src={dataUri} 
+                        alt={preset.name}
+                        style={{
+                          width: '56px',
+                          height: '56px',
+                          borderRadius: '12px',
+                          objectFit: 'contain',
+                        }}
+                      />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#1E293B' }}>{preset.name}</span>
+                        <span style={{ fontSize: '0.8rem', color: '#64748B', fontWeight: 600 }}>{preset.nameAr}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

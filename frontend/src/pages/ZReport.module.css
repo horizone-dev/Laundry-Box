@@ -180,7 +180,9 @@
 }
 
 @keyframes spin {
-  100% { transform: rotate(360deg); }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* Shift Info Card */
@@ -188,7 +190,7 @@
   background: white;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
   padding: 0.75rem 1rem;
   margin-bottom: 0.75rem;
 }
@@ -258,7 +260,7 @@
   padding: 0.6rem 1rem;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.01);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.01);
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -267,7 +269,7 @@
 
 .kpiCard:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
 }
 
 .kpiVisual {
@@ -381,7 +383,7 @@
   background: white;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.01);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.01);
   padding: 0.75rem 1rem;
   display: flex;
   flex-direction: column;
@@ -676,7 +678,7 @@
   padding: 1rem 1.5rem;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
 }
 
 .actionBtn {
@@ -740,17 +742,20 @@
   body {
     background: white !important;
   }
+
   .no-print {
     display: none !important;
   }
+
   .print-only {
     display: block !important;
   }
+
   .zReportPage {
     padding: 0 !important;
     background: white !important;
   }
-  
+
   /* Thermal Print Styling (80mm Receipt layout) */
   .thermalTicket {
     width: 80mm;
@@ -812,7 +817,7 @@
     margin-top: 6mm;
     font-size: 10px;
   }
-  
+
   .ticketFooter p {
     margin: 4px 0;
   }
@@ -823,6 +828,7 @@
   .dashboardGrid {
     grid-template-columns: repeat(2, 1fr);
   }
+
   .spanTwoCols {
     grid-column: span 2;
   }
@@ -834,22 +840,28 @@
     align-items: flex-start;
     gap: 1rem;
   }
+
   .headerActions {
     width: 100%;
     justify-content: space-between;
   }
+
   .shiftDetailsGrid {
     grid-template-columns: repeat(2, 1fr);
   }
+
   .kpiGrid {
     grid-template-columns: repeat(2, 1fr);
   }
+
   .dashboardGrid {
     grid-template-columns: 1fr;
   }
+
   .spanTwoCols {
     grid-column: span 1;
   }
+
   .bottomActionBar {
     flex-direction: column;
   }

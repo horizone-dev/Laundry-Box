@@ -518,8 +518,29 @@ export default function POS() {
     e.preventDefault();
     const timestamp = getLocalISOString();
 
+    const cleanPhone = (customerFormData.phone || '').trim();
+    const defaultCc = settings.waCountryCode ? `+${settings.waCountryCode.replace(/\+/g, '')}` : '+971';
+    if (!cleanPhone || cleanPhone === defaultCc || cleanPhone === '+' || cleanPhone.replace(/\D/g, '').length < 7) {
+      alert('Mobile number is mandatory! Please enter a valid phone number.');
+      return;
+    }
+
     if (window.electronAPI?.dbQuery) {
       try {
+        // Check for duplicate customer with same phone number
+        const phoneDigits = cleanPhone.replace(/\D/g, '');
+        const existingCusts = await window.electronAPI.dbQuery('SELECT id, name, phone FROM customers');
+        if (existingCusts.success && existingCusts.data) {
+          const duplicate = existingCusts.data.find(c => {
+            const cDigits = (c.phone || '').replace(/\D/g, '');
+            return cDigits && cDigits === phoneDigits;
+          });
+          if (duplicate) {
+            alert(`A customer with phone number "${customerFormData.phone}" already exists! (Customer: ${duplicate.name})`);
+            return;
+          }
+        }
+
         const res = await window.electronAPI.dbQuery('SELECT id FROM customers');
         let nextNum = 1;
         if (res.success && res.data) {
@@ -531,12 +552,29 @@ export default function POS() {
           nextNum = Math.max(0, ...numbers) + 1;
         }
         const id = `CUST-${nextNum}`;
+        const openBal = parseFloat(customerFormData.openingBalance) || 0;
 
         await window.electronAPI.dbQuery(
-          'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, balance, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, DEFAULT_SHOP_ID, customerFormData.name, customerFormData.phone, '', customerFormData.address, 0, parseFloat(customerFormData.openingBalance) || 0, 0, timestamp]
+          'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, balance, openingBalance, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [id, DEFAULT_SHOP_ID, customerFormData.name, customerFormData.phone, '', customerFormData.address, 0, openBal, openBal, 0, timestamp]
         );
-        handleSelectCustomer({ id, ...customerFormData, balance: parseFloat(customerFormData.openingBalance) || 0 });
+
+        if (openBal < 0) {
+          const advAmt = Math.abs(openBal);
+          const payIdAdv = `PAY-OPENING-${Date.now()}`;
+          const payRefAdv = await window.electronAPI.getNextPaymentReference('ADV');
+          await window.electronAPI.dbQuery(
+            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+             VALUES (?, ?, NULL, ?, ?, 'Opening Advance', 'SUCCESS', ?, 0, ?, ?)`,
+            [payIdAdv, id, DEFAULT_SHOP_ID, advAmt, timestamp, timestamp, payRefAdv]
+          );
+        }
+
+        if (window.electronAPI?.runDataHealer) {
+          await window.electronAPI.runDataHealer();
+        }
+
+        handleSelectCustomer({ id, ...customerFormData, balance: openBal, openingBalance: openBal });
         setShowCustomerModal(false);
         setCustomerFormData({
           name: '',
@@ -1070,7 +1108,8 @@ export default function POS() {
       card: cardVal,
       upi: upiVal,
       bank: bankVal,
-      nomod: nomodVal
+      nomod: nomodVal,
+      discount: discount || 0
     });
 
     if (nomodVal > 0 && !isOverridden) {
@@ -2033,7 +2072,14 @@ export default function POS() {
             <p style={{ fontSize: '0.85rem', color: '#64748B' }}>Ticket #{pendingOrderId} • Customer: {selectedCustomer ? selectedCustomer.name : 'Walk-in Customer'}</p>
             {cart.map((item, idx) => (
               <div key={idx} className={styles.cartItem}>
-                <div className={styles.cartItemIcon}>{getIcon(services.find(s => s.name === item.name)?.icon)}</div>
+                <div className={styles.cartItemIcon}>
+                  {(() => {
+                    const sObj = services.find(s => s.name === item.name);
+                    return sObj?.image ? (
+                      <img src={sObj.image} alt="" style={{ width: '20px', height: '20px', objectFit: 'contain', borderRadius: '4px' }} />
+                    ) : getIcon(sObj?.icon);
+                  })()}
+                </div>
                 <div className={styles.cartItemDetails}>
                   <span className={styles.cartItemName}>{item.name}</span>
                   <span className={styles.cartItemMeta}>
@@ -2317,30 +2363,6 @@ export default function POS() {
                     value={cardAmount} 
                     onChange={(e) => setCardAmount(e.target.value)} 
                     onFocus={() => setActivePaymentField('card')}
-                    style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
-                  />
-                </div>
-              </div>
-
-              <div 
-                onClick={() => setActivePaymentField('upi')}
-                style={{
-                  background: activePaymentField === 'upi' ? '#EFF6FF' : 'white',
-                  border: activePaymentField === 'upi' ? '2px solid #2563EB' : '1px solid #E2E8F0',
-                  borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                  <QrCode size={14} /> UPI Amount
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                  <CurrencySymbol size={12} />
-                  <input 
-                    type="number" 
-                    placeholder="0.00" 
-                    value={upiAmount} 
-                    onChange={(e) => setUpiAmount(e.target.value)} 
-                    onFocus={() => setActivePaymentField('upi')}
                     style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
                   />
                 </div>
@@ -2829,7 +2851,12 @@ export default function POS() {
           {cart.map((item, idx) => (
             <div key={idx} className={styles.cartItem}>
               <div className={styles.cartItemIcon}>
-                {getIcon(services.find(s => s.name === item.name)?.icon, 20)}
+                {(() => {
+                  const sObj = services.find(s => s.name === item.name);
+                  return sObj?.image ? (
+                    <img src={sObj.image} alt="" style={{ width: '20px', height: '20px', objectFit: 'contain', borderRadius: '4px' }} />
+                  ) : getIcon(sObj?.icon, 20);
+                })()}
               </div>
               <div className={styles.cartItemDetails}>
                 <span className={styles.cartItemName}>{item.name}</span>
@@ -2924,7 +2951,7 @@ export default function POS() {
 
       {/* Service Modal */}
       {selectedService && (
-        <div className={styles.modalOverlay} onClick={() => { setSelectedService(null); setEditingCartIdx(null); setShowItemPresets(false); }}>
+        <div className={styles.modalOverlay}>
           <div className={`${styles.modal} ${selectedService.isTemporary ? styles.tempModal : ''}`} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div className={styles.modalTitle}>
@@ -3155,7 +3182,7 @@ export default function POS() {
       )}
       {/* Customer Modal */}
       {showCustomerModal && (
-        <div className={styles.modalOverlay} onClick={() => setShowCustomerModal(false)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} style={{ width: '450px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div className={styles.modalTitle}>
@@ -3180,13 +3207,13 @@ export default function POS() {
                   </div>
                 </div>
                 <div className={styles.formGroup}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>MOBILE NUMBER</label>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>MOBILE NUMBER <span style={{ color: '#EF4444' }}>*</span></label>
                   <div className={styles.posInputWrapper}>
                     <Phone size={18} />
                     <input
                       type="tel"
-                      required
                       placeholder="Phone number"
+                      required
                       value={customerFormData.phone}
                       onChange={(e) => setCustomerFormData({ ...customerFormData, phone: e.target.value })}
                     />
@@ -3231,7 +3258,7 @@ export default function POS() {
 
       {/* Discount Modal */}
       {showDiscountModal && (
-        <div className={styles.modalOverlay} onClick={() => setShowDiscountModal(false)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} style={{ width: '400px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div className={styles.modalTitle}>
@@ -3372,7 +3399,7 @@ export default function POS() {
 
       {/* Success Modal */}
       {showSuccessModal && lastOrderInfo && (
-        <div className={styles.modalOverlay} onClick={() => { setShowSuccessModal(false); setSelectedCustomer(null); }}>
+        <div className={styles.modalOverlay}>
           {settings.autoPrint && (
             <iframe 
               src={`#/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=true`} 
@@ -3471,7 +3498,7 @@ export default function POS() {
         </div>
       )}
       {showCreditWarning && creditWarningDetails && (
-        <div className={styles.modalOverlay} onClick={handleCancelOverride}>
+        <div className={styles.modalOverlay}>
           <div className={styles.statusModal} style={{ maxWidth: '450px', borderRadius: '24px', background: 'white', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)', padding: '2rem' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '1.5rem' }}>
               <AlertTriangle size={24} color="#EF4444" style={{ marginTop: '2px' }} />
@@ -3560,7 +3587,7 @@ export default function POS() {
 
       {/* Nomod Link Modal Overlay (when triggered in POS page instead of Checkout screen) */}
       {nomodLinkModal.show && step !== 'checkout' && (
-        <div className={styles.modalOverlay} onClick={() => setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 })}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} style={{ maxWidth: '480px', padding: '1.5rem' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div className={styles.modalTitle}>

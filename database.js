@@ -89,6 +89,7 @@ function initDB(appPath) {
       address TEXT,
       creditLimit REAL DEFAULT 0,
       balance REAL DEFAULT 0,
+      openingBalance REAL DEFAULT 0,
       isSynced INTEGER DEFAULT 0,
       updatedAt TEXT
     );
@@ -445,6 +446,18 @@ function initDB(appPath) {
   } catch (e) { /* already exists */ }
   try {
     db.exec(`ALTER TABLE deleted_orders ADD COLUMN createdAt TEXT;`);
+  } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE customers ADD COLUMN openingBalance REAL DEFAULT 0;`);
+  } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE orders ADD COLUMN paymentBreakdown TEXT;`);
+  } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE orders ADD COLUMN nomodCheckoutId TEXT;`);
+  } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE orders ADD COLUMN nomodPaymentLink TEXT;`);
   } catch (e) { /* already exists */ }
 
   // Migrations for audit_logs table self-healing
@@ -897,31 +910,33 @@ function runDataHealer(db) {
     //   available_advance = unlinked_payments - allocations_already_used
     //   deleted_orders pending refund: only those WITH paidAmount > 0 (i.e. customer actually paid for them)
     //   When refundStatus changes from 'Refund Pending' to 'Returned', that subtraction goes away — no manual update needed.
-    console.log("Recalculating customer balances from actual orders and payments...");
     db.exec(`UPDATE customers SET balance = (
-              SELECT IFNULL(SUM(dueAmount), 0) 
-              FROM orders 
-              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-            ) - MAX(0, (
-              IFNULL((
-                SELECT SUM(amount) 
-                FROM payments 
-                WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
-              ), 0) - IFNULL((
-                SELECT SUM(a.amountUsed)
-                FROM advance_allocations a
-                JOIN orders o ON a.orderId = o.id
-                JOIN payments p ON a.paymentId = p.id
-                WHERE p.customerId = customers.id AND o.status != 'Cancelled'
-              ), 0)
-            )) - IFNULL((
-              SELECT SUM(paidAmount)
-              FROM deleted_orders
-              WHERE deleted_orders.customerId = customers.id
-                AND deleted_orders.refundStatus = 'Refund Pending'
-                AND deleted_orders.paidAmount > 0
-            ), 0), isSynced = 0, updatedAt = '${timestamp}'
+              IFNULL(CASE WHEN openingBalance > 0 THEN openingBalance ELSE 0 END, 0) +
+              (
+                SELECT IFNULL(SUM(dueAmount), 0) 
+                FROM orders 
+                WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+              ) - MAX(0, (
+                IFNULL((
+                  SELECT SUM(amount) 
+                  FROM payments 
+                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+                ), 0) - IFNULL((
+                  SELECT SUM(a.amountUsed)
+                  FROM advance_allocations a
+                  JOIN orders o ON a.orderId = o.id
+                  JOIN payments p ON a.paymentId = p.id
+                  WHERE p.customerId = customers.id AND o.status != 'Cancelled'
+                ), 0)
+              )) - IFNULL((
+                SELECT SUM(paidAmount)
+                FROM deleted_orders
+                WHERE deleted_orders.customerId = customers.id
+                  AND deleted_orders.refundStatus = 'Refund Pending'
+                  AND deleted_orders.paidAmount > 0
+              ), 0) ), isSynced = 0, updatedAt = '${timestamp}'
             WHERE ABS(balance - (
+              IFNULL(CASE WHEN openingBalance > 0 THEN openingBalance ELSE 0 END, 0) +
               (
                 SELECT IFNULL(SUM(dueAmount), 0) 
                 FROM orders 
@@ -962,12 +977,59 @@ function runDataHealer(db) {
       return `RV-${String(nextId).padStart(6, '0')}`;
     };
 
+    // Auto-application of customer advances to positive openingBalance (dues)
+    console.log("Auto-applying customer advances to positive opening balances...");
+    const customersWithAdvAndOpeningDue = db.prepare(`
+      SELECT id, openingBalance, 
+             (SELECT IFNULL(SUM(amount), 0) FROM payments WHERE customerId = customers.id AND (orderId IS NULL OR orderId = '')) as unapplied
+      FROM customers
+      WHERE openingBalance > 0
+    `).all();
+
+    for (const cust of customersWithAdvAndOpeningDue) {
+      const unappliedAdv = cust.unapplied;
+      if (unappliedAdv <= 0.01) continue;
+
+      const offset = Math.min(cust.openingBalance, unappliedAdv);
+      if (offset > 0.01) {
+        console.log(`Auto-applying advance of ${offset} to opening balance due of ${cust.openingBalance} for customer ${cust.id}`);
+        
+        // 1. Deduct offset from opening balance and total balance
+        db.prepare("UPDATE customers SET openingBalance = openingBalance - ?, balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?")
+          .run(offset, offset, timestamp, cust.id);
+
+        // 2. Deduct from advance pool by creating a negative unlinked payment
+        const payIdAdv = getNextRvNumberSync();
+        const payRefAdv = getNextPaymentReference(db, 'SYS');
+        db.prepare(`INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference)
+                    VALUES (?, ?, NULL, 'SHOP_01', ?, 'System Auto', 'SUCCESS', ?, 0, ?, ?)`).run(
+          payIdAdv,
+          cust.id,
+          -offset,
+          timestamp,
+          timestamp,
+          payRefAdv
+        );
+      }
+    }
+
+    // Clean up orphaned payments for deleted customers
+    db.exec("DELETE FROM payments WHERE customerId NOT IN (SELECT id FROM customers) AND (orderId IS NULL OR orderId = '')");
+
     // Auto-application of customer advances and unapplied payments
     console.log("Auto-applying customer advances to oldest unpaid invoices...");
     const customersWithAdvance = db.prepare(`
-      SELECT customerId, SUM(amount) as unapplied
+      SELECT customerId, (
+        IFNULL(SUM(amount), 0) - IFNULL((
+          SELECT SUM(a.amountUsed)
+          FROM advance_allocations a
+          JOIN orders o ON a.orderId = o.id
+          JOIN payments p ON a.paymentId = p.id
+          WHERE p.customerId = payments.customerId AND o.status != 'Cancelled'
+        ), 0)
+      ) as unapplied
       FROM payments
-      WHERE (orderId IS NULL OR orderId = '')
+      WHERE (orderId IS NULL OR orderId = '') AND method NOT IN ('Refund Advance')
       GROUP BY customerId
       HAVING unapplied > 0.01
     `).all();
@@ -1037,29 +1099,32 @@ function runDataHealer(db) {
 
     // Final Recalculate customer balances after advance auto-application above may have changed dueAmount on orders
     db.exec(`UPDATE customers SET balance = (
-              SELECT IFNULL(SUM(dueAmount), 0) 
-              FROM orders 
-              WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-            ) - MAX(0, (
-              IFNULL((
-                SELECT SUM(amount) 
-                FROM payments 
-                WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
-              ), 0) - IFNULL((
-                SELECT SUM(a.amountUsed)
-                FROM advance_allocations a
-                JOIN orders o ON a.orderId = o.id
-                JOIN payments p ON a.paymentId = p.id
-                WHERE p.customerId = customers.id AND o.status != 'Cancelled'
-              ), 0)
-            )) - IFNULL((
-              SELECT SUM(paidAmount)
-              FROM deleted_orders
-              WHERE deleted_orders.customerId = customers.id
-                AND deleted_orders.refundStatus = 'Refund Pending'
-                AND deleted_orders.paidAmount > 0
-            ), 0), isSynced = 0, updatedAt = '${timestamp}'
+              IFNULL(CASE WHEN openingBalance > 0 THEN openingBalance ELSE 0 END, 0) +
+              (
+                SELECT IFNULL(SUM(dueAmount), 0) 
+                FROM orders 
+                WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
+              ) - MAX(0, (
+                IFNULL((
+                  SELECT SUM(amount) 
+                  FROM payments 
+                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+                ), 0) - IFNULL((
+                  SELECT SUM(a.amountUsed)
+                  FROM advance_allocations a
+                  JOIN orders o ON a.orderId = o.id
+                  JOIN payments p ON a.paymentId = p.id
+                  WHERE p.customerId = customers.id AND o.status != 'Cancelled'
+                ), 0)
+              )) - IFNULL((
+                SELECT SUM(paidAmount)
+                FROM deleted_orders
+                WHERE deleted_orders.customerId = customers.id
+                  AND deleted_orders.refundStatus = 'Refund Pending'
+                  AND deleted_orders.paidAmount > 0
+              ), 0) ), isSynced = 0, updatedAt = '${timestamp}'
             WHERE ABS(balance - (
+              IFNULL(CASE WHEN openingBalance > 0 THEN openingBalance ELSE 0 END, 0) +
               (
                 SELECT IFNULL(SUM(dueAmount), 0) 
                 FROM orders 

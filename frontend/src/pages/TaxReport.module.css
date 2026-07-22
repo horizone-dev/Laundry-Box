@@ -183,6 +183,7 @@
 .tableToolbar {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 0.75rem;
   gap: 1rem;
   flex-wrap: wrap;
@@ -190,6 +191,8 @@
 
 .searchBox {
   position: relative;
+  display: flex;
+  align-items: center;
   flex: 1;
   max-width: 400px;
 }
@@ -197,9 +200,8 @@
 .searchIcon {
   position: absolute;
   left: 1rem;
-  top: 50%;
-  transform: translateY(-50%);
   color: #94A3B8;
+  pointer-events: none;
 }
 
 .searchInput {
@@ -216,11 +218,12 @@
 .searchInput:focus {
   border-color: var(--primary);
   background: white;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
 .filterControls {
   display: flex;
+  align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
 }
@@ -256,15 +259,29 @@
 }
 
 .dateInput {
-  padding: 0.7rem;
+  padding: 0.5rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-size: 0.85rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #475569;
+  background: #F8FAFC;
   outline: none;
+  transition: all 0.2s ease;
 }
 
 .dateInput:focus {
   border-color: var(--primary);
+  background: white;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.dateDivider {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 0 0.15rem;
 }
 
 /* Table styling */

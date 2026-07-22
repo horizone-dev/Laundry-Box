@@ -452,22 +452,21 @@ export default function DailyTaxReport() {
               />
 
               {dateRange === 'Custom' && (
-                <>
-                  <span className={styles.dateInputLabel}>From:</span>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   <input 
                     type="date" 
                     value={customStartDate} 
                     onChange={(e) => setCustomStartDate(e.target.value)}
-                    className={styles.dateInput}
+                    className="premium-date-input"
                   />
-                  <span className={styles.dateInputLabel}>To:</span>
+                  <span className="premium-range-divider">to</span>
                   <input 
                     type="date" 
                     value={customEndDate} 
                     onChange={(e) => setCustomEndDate(e.target.value)}
-                    className={styles.dateInput}
+                    className="premium-date-input"
                   />
-                </>
+                </div>
               )}
             </div>
           </div>

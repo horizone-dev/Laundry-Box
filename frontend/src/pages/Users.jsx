@@ -339,7 +339,7 @@ const Users = () => {
       </div>
 
       {showPermissionModal && editingRole && (
-        <div className={styles.modalOverlay} onClick={() => setShowPermissionModal(false)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>Edit Permissions: {editingRole.name}</h2>
@@ -368,7 +368,7 @@ const Users = () => {
       )}
 
       {showModal && (
-        <div className={styles.modalOverlay} onClick={() => setShowModal(false)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>{editingUser ? 'Edit User' : 'Add New User'}</h2>

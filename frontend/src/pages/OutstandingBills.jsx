@@ -207,22 +207,22 @@ export default function OutstandingBills() {
           </select>
 
           {dateRange === 'Custom' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-              <input 
-                type="date" 
-                value={customStart} 
-                onChange={(e) => setCustomStart(e.target.value)}
-                style={{ border: '1px solid #E2E8F0', padding: '0.35rem 0.5rem', borderRadius: '8px', fontSize: '0.8rem', outline: 'none', background: 'white' }}
-              />
-              <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>to</span>
-              <input 
-                type="date" 
-                value={customEnd} 
-                onChange={(e) => setCustomEnd(e.target.value)}
-                style={{ border: '1px solid #E2E8F0', padding: '0.35rem 0.5rem', borderRadius: '8px', fontSize: '0.8rem', outline: 'none', background: 'white' }}
-              />
-            </div>
-          )}
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input 
+                  type="date" 
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="premium-date-input"
+                />
+                <span className="premium-range-divider">to</span>
+                <input 
+                  type="date" 
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="premium-date-input"
+                />
+              </div>
+            )}
         </div>
       </div>
 

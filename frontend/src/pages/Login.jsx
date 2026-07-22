@@ -453,7 +453,7 @@ export default function Login({ onLogin }) {
       </div>
       {/* Forgot PIN Modal */}
       {showForgotModal && (
-        <div className={styles.modalOverlay} onClick={() => setShowForgotModal(false)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h3><Lock size={20} /> Forgot Access PIN</h3>
@@ -498,9 +498,17 @@ export default function Login({ onLogin }) {
                     Enter the 6-digit verification code sent to the configured email:
                   </p>
                   <div className={styles.otpPreviewBox}>
-                    <Mail size={18} />
-                    <span>
-                      Sent to: {forgotEmailTarget.replace(/^(..)(.*)(@.*)$/, (_, p1, p2, p3) => p1 + '*'.repeat(p2.length) + p3)}
+                    <Mail size={18} style={{ flexShrink: 0 }} />
+                    <span style={{ wordBreak: 'break-word' }}>
+                      Sent to: {forgotEmailTarget.split(/[;,]/).map(email => {
+                        const trimmed = email.trim();
+                        if (!trimmed) return '';
+                        const parts = trimmed.split('@');
+                        if (parts.length !== 2) return trimmed;
+                        const [local, domain] = parts;
+                        if (local.length <= 2) return local + '***@' + domain;
+                        return local.slice(0, 2) + '*'.repeat(Math.min(local.length - 2, 8)) + '@' + domain;
+                      }).filter(Boolean).join(', ')}
                     </span>
                   </div>
                   <div className={styles.otpInputWrapper}>

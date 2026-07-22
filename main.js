@@ -1700,63 +1700,94 @@ ipcMain.handle('import-database', async () => {
   try {
     const { filePaths, canceled } = await dialog.showOpenDialog(mainWindow, {
       title: 'Select Backup Database to Import',
-      filters: [{ name: 'SQLite Database', extensions: ['sqlite', 'db'] }],
+      filters: [
+        { name: 'SQLite Database (*.sqlite, *.db, *.bak)', extensions: ['sqlite', 'db', 'bak'] },
+        { name: 'All Files (*.*)', extensions: ['*'] }
+      ],
       properties: ['openFile']
     });
 
-    if (canceled || filePaths.length === 0) {
+    if (canceled || !filePaths || filePaths.length === 0) {
       return { success: false, error: 'Cancelled' };
     }
 
     const backupSrcPath = filePaths[0];
     const targetDbPath = path.join(app.getPath('userData'), 'laundry_pos.sqlite');
 
-    // 1. Close active DB connection
+    // 1. Validate that the selected file is a valid SQLite database
+    const Database = require('better-sqlite3');
+    try {
+      const testDb = new Database(backupSrcPath, { readonly: true });
+      testDb.prepare('SELECT count(*) FROM sqlite_master').get();
+      testDb.close();
+    } catch (validErr) {
+      return { success: false, error: 'Selected file is not a valid SQLite database backup file.' };
+    }
+
+    // 2. Checkpoint and truncate WAL file on active DB to flush pending frames
+    try {
+      const activeDb = getDB();
+      if (activeDb) {
+        activeDb.pragma('wal_checkpoint(TRUNCATE)');
+        activeDb.pragma('journal_mode = DELETE');
+      }
+    } catch (walErr) {
+      console.error('Error truncating WAL during import prepare:', walErr);
+    }
+
+    // 3. Close active DB connection
     closeDB();
 
-    // Pause briefly to allow SQLite to release OS file locks on Windows
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // Pause briefly to allow OS file handles to release on Windows
+    await new Promise(resolve => setTimeout(resolve, 300));
 
-    // Remove SQLite temporary/WAL files if they exist to prevent recovery log replay from corrupting new database state
+    // Remove SQLite temporary/WAL files if they exist to prevent recovery log replay
     const walPath = targetDbPath + '-wal';
     const shmPath = targetDbPath + '-shm';
     const journalPath = targetDbPath + '-journal';
-    if (fs.existsSync(walPath)) {
-      try { fs.unlinkSync(walPath); } catch (e) { console.error('Failed to delete WAL file:', e); }
-    }
-    if (fs.existsSync(shmPath)) {
-      try { fs.unlinkSync(shmPath); } catch (e) { console.error('Failed to delete SHM file:', e); }
-    }
-    if (fs.existsSync(journalPath)) {
-      try { fs.unlinkSync(journalPath); } catch (e) { console.error('Failed to delete journal file:', e); }
-    }
+    [walPath, shmPath, journalPath].forEach(fp => {
+      if (fs.existsSync(fp)) {
+        try { fs.unlinkSync(fp); } catch (e) { console.error(`Failed to delete ${fp}:`, e); }
+      }
+    });
 
-    // 2. Overwrite the active database file with the backup (with retry loop)
+    // 4. Overwrite active database file with backup (with retry and fallback)
     let copied = false;
-    let attempts = 5;
+    let attempts = 10;
     while (!copied && attempts > 0) {
       try {
         fs.copyFileSync(backupSrcPath, targetDbPath);
         copied = true;
       } catch (copyErr) {
         attempts--;
-        if (attempts === 0) throw copyErr;
-        await new Promise(resolve => setTimeout(resolve, 100));
+        if (attempts === 0) {
+          // Fallback: try SQLite online backup from source to target
+          try {
+            const srcDb = new Database(backupSrcPath, { readonly: true });
+            await srcDb.backup(targetDbPath);
+            srcDb.close();
+            copied = true;
+          } catch (backupFallbackErr) {
+            throw copyErr;
+          }
+        }
+        await new Promise(resolve => setTimeout(resolve, 150));
       }
     }
 
-    // 3. Re-initialize DB
-    initDB(app.getPath('userData'));
+    // Remove any WAL/shm files left after copy
+    [walPath, shmPath, journalPath].forEach(fp => {
+      if (fs.existsSync(fp)) {
+        try { fs.unlinkSync(fp); } catch (_) {}
+      }
+    });
 
-    // 4. Force frontend reload to fetch new data state
-    if (mainWindow) {
-      mainWindow.reload();
-    }
+    // 5. Re-initialize active DB
+    initDB(app.getPath('userData'));
 
     return { success: true };
   } catch (err) {
     console.error('Database import error:', err);
-    // Attempt to re-initialize if closed but failed
     try {
       initDB(app.getPath('userData'));
     } catch (_) { }

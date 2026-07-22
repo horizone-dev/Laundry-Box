@@ -173,6 +173,16 @@ export default function Settings() {
   const [showSuccessSummary, setShowSuccessSummary] = useState(false);
   const [resetSummary, setResetSummary] = useState([]);
   const [backupError, setBackupError] = useState('');
+  const [toastNotification, setToastNotification] = useState(null);
+
+  useEffect(() => {
+    if (toastNotification) {
+      const timer = setTimeout(() => {
+        setToastNotification(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastNotification]);
 
 
   // Cropper States
@@ -1143,8 +1153,21 @@ export default function Settings() {
                             if (confirm('WARNING: Importing a backup will completely replace your current database and restart the application view. Are you sure you want to proceed?')) {
                               const result = await window.electronAPI.importDatabase();
                               if (result.success) {
+                                setToastNotification({
+                                  type: 'success',
+                                  title: 'Import Successful',
+                                  message: 'Database imported & restored successfully. System is reloading...'
+                                });
                                 alert('Database imported and restored successfully!');
+                                setTimeout(() => {
+                                  window.location.reload();
+                                }, 3500);
                               } else if (result.error !== 'Cancelled') {
+                                setToastNotification({
+                                  type: 'error',
+                                  title: 'Restore Failed',
+                                  message: result.error
+                                });
                                 alert('Restore failed: ' + result.error);
                               }
                             }
@@ -1239,6 +1262,18 @@ export default function Settings() {
                     </div>
                   </div>
                   <div className={styles.formGroup}>
+                    <label>Laundry Workflow Module</label>
+                    <div className={styles.toggleRow}>
+                      <span className={styles.toggleLabel}>Enable status tracking workflow menu in sidebar (Washing, Drying, Ironing, Ready, etc.)</span>
+                      <div
+                        className={`${styles.switch} ${(settings.workflowEnabled ?? true) ? styles.switchOn : ''}`}
+                        onClick={() => updateSettings({ workflowEnabled: !(settings.workflowEnabled ?? true) })}
+                      >
+                        <div className={styles.switchHandle}></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={styles.formGroup}>
                     <label>Default Payment Method</label>
                     <CustomSelect
                       value={settings.defaultPaymentMethod || 'Cash'}
@@ -1246,7 +1281,6 @@ export default function Settings() {
                       options={[
                         { value: 'Cash', label: 'Cash' },
                         { value: 'Card', label: 'Card' },
-                        { value: 'UPI', label: 'UPI' },
                         { value: 'Not Paid', label: 'Not Paid' }
                       ]}
                     />
@@ -1291,6 +1325,8 @@ export default function Settings() {
                   </div>
                 </div>
               </div>
+
+
 
               <div className={styles.card}>
                 <h2 className={styles.cardTitle}>Operational Rules</h2>
@@ -2783,8 +2819,18 @@ export default function Settings() {
                           if (window.electronAPI?.backupDatabase) {
                             const result = await window.electronAPI.backupDatabase();
                             if (result.success) {
+                              setToastNotification({
+                                type: 'success',
+                                title: 'Backup Created',
+                                message: 'Database backup saved successfully to: ' + result.path
+                              });
                               alert('Backup saved successfully to: ' + result.path);
                             } else if (result.error !== 'Cancelled') {
+                              setToastNotification({
+                                type: 'error',
+                                title: 'Backup Failed',
+                                message: result.error
+                              });
                               alert('Backup failed: ' + result.error);
                             }
                           }
@@ -2872,8 +2918,21 @@ export default function Settings() {
                               if (confirm('WARNING: Importing a backup will completely replace your current database and restart the application view. Are you sure you want to proceed?')) {
                                 const result = await window.electronAPI.importDatabase();
                                 if (result.success) {
+                                  setToastNotification({
+                                    type: 'success',
+                                    title: 'Import Successful',
+                                    message: 'Database imported & restored successfully. System is reloading...'
+                                  });
                                   alert('Database imported and restored successfully!');
+                                  setTimeout(() => {
+                                    window.location.reload();
+                                  }, 3500);
                                 } else if (result.error !== 'Cancelled') {
+                                  setToastNotification({
+                                    type: 'error',
+                                    title: 'Restore Failed',
+                                    message: result.error
+                                  });
                                   alert('Restore failed: ' + result.error);
                                 }
                               }
@@ -3389,7 +3448,7 @@ export default function Settings() {
       </div>
       {/* Cropper Modal */}
       {isCropping && (
-        <div className={styles.cropperModalOverlay} onClick={() => setIsCropping(false)}>
+        <div className={styles.cropperModalOverlay}>
           <div className={styles.cropperModal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.cropperHeader}>
               <div className={styles.modalTitle}>
@@ -3436,7 +3495,7 @@ export default function Settings() {
 
       {/* PIN Verification Modal */}
       {showPinModal && (
-        <div className={styles.cropperModalOverlay} onClick={() => { setShowPinModal(false); setEnteredPin(''); setPinError(''); }}>
+        <div className={styles.cropperModalOverlay}>
           <div className={styles.cropperModal} style={{ width: '380px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.cropperHeader}>
               <div className={styles.modalTitle}>
@@ -3514,7 +3573,7 @@ export default function Settings() {
 
       {/* System Reset PIN Verification Modal */}
       {showResetPinModal && (
-        <div className={styles.cropperModalOverlay} onClick={() => { setShowResetPinModal(false); setEnteredResetPin(''); setResetPinError(''); }}>
+        <div className={styles.cropperModalOverlay}>
           <div className={styles.cropperModal} style={{ width: '380px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.cropperHeader}>
               <div className={styles.modalTitle}>
@@ -3603,7 +3662,7 @@ export default function Settings() {
 
       {/* Backup Prompt Modal */}
       {showBackupPrompt && (
-        <div className={styles.cropperModalOverlay} onClick={() => { setShowBackupPrompt(false); setBackupError(''); }}>
+        <div className={styles.cropperModalOverlay}>
           <div className={styles.cropperModal} style={{ width: '420px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.cropperHeader}>
               <div className={styles.modalTitle}>
@@ -3677,7 +3736,7 @@ export default function Settings() {
 
       {/* Reset Confirmation Modal (typing RESET) */}
       {showResetConfirmModal && (
-        <div className={styles.cropperModalOverlay} onClick={() => { setShowResetConfirmModal(false); setResetTextConfirmation(''); setResetConfirmError(''); }}>
+        <div className={styles.cropperModalOverlay}>
           <div className={styles.cropperModal} style={{ width: '400px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.cropperHeader}>
               <div className={styles.modalTitle}>
@@ -3751,7 +3810,7 @@ export default function Settings() {
 
       {/* Final Execution Confirmation Modal */}
       {showFinalConfirmModal && (
-        <div className={styles.cropperModalOverlay} onClick={() => setShowFinalConfirmModal(false)}>
+        <div className={styles.cropperModalOverlay}>
           <div className={styles.cropperModal} style={{ width: '380px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.cropperHeader}>
               <div className={styles.modalTitle}>
@@ -3794,7 +3853,7 @@ export default function Settings() {
 
       {/* Success Summary Modal */}
       {showSuccessSummary && (
-        <div className={styles.cropperModalOverlay} onClick={() => setShowSuccessSummary(false)}>
+        <div className={styles.cropperModalOverlay}>
           <div className={styles.cropperModal} style={{ width: '460px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.cropperHeader}>
               <div className={styles.modalTitle}>
@@ -3836,7 +3895,7 @@ export default function Settings() {
 
       {/* Manager PIN Modal for API Key */}
       {showApiKeyPinModal && (
-        <div className={styles.cropperModalOverlay} onClick={() => setShowApiKeyPinModal(false)}>
+        <div className={styles.cropperModalOverlay}>
           <div className={styles.cropperModal} style={{ width: '360px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.cropperHeader}>
               <div className={styles.modalTitle}>
@@ -3895,6 +3954,45 @@ export default function Settings() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+      {/* Dedicated Top-Right Floating Toast Notification */}
+      {toastNotification && (
+        <div style={{
+          position: 'fixed',
+          top: '24px',
+          right: '24px',
+          zIndex: 9999999,
+          background: toastNotification.type === 'success' ? '#ECFDF5' : '#FEF2F2',
+          borderLeft: `5px solid ${toastNotification.type === 'success' ? '#10B981' : '#EF4444'}`,
+          boxShadow: '0 12px 28px -4px rgba(0, 0, 0, 0.18), 0 8px 12px -6px rgba(0, 0, 0, 0.12)',
+          borderRadius: '12px',
+          padding: '1rem 1.25rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem',
+          minWidth: '340px',
+          maxWidth: '480px'
+        }}>
+          {toastNotification.type === 'success' ? (
+            <CheckCircle size={24} color="#10B981" style={{ flexShrink: 0 }} />
+          ) : (
+            <AlertCircle size={24} color="#EF4444" style={{ flexShrink: 0 }} />
+          )}
+          <div style={{ flex: 1 }}>
+            <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: toastNotification.type === 'success' ? '#065F46' : '#991B1B' }}>
+              {toastNotification.title || (toastNotification.type === 'success' ? 'Success' : 'Error')}
+            </h4>
+            <p style={{ margin: '3px 0 0 0', fontSize: '0.85rem', color: toastNotification.type === 'success' ? '#047857' : '#B91C1C', fontWeight: 500, lineHeight: 1.4 }}>
+              {toastNotification.message}
+            </p>
+          </div>
+          <button
+            onClick={() => setToastNotification(null)}
+            style={{ background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+          >
+            <X size={18} />
+          </button>
         </div>
       )}
     </div>

@@ -354,10 +354,20 @@ export default function CreditOverridesReport() {
               style={{ width: '185px' }}
             />
             {dateRange === 'Custom' && (
-              <div className={styles.customDates}>
-                <input type="date" className={styles.dateInput} value={customStart} onChange={e => setCustomStart(e.target.value)} />
-                <span className={styles.dateSep}>to</span>
-                <input type="date" className={styles.dateInput} value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input 
+                  type="date" 
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="premium-date-input"
+                />
+                <span className="premium-range-divider">to</span>
+                <input 
+                  type="date" 
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="premium-date-input"
+                />
               </div>
             )}
 

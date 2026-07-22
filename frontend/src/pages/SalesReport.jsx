@@ -882,14 +882,14 @@ export default function SalesReport() {
                   type="date" 
                   value={customStart}
                   onChange={(e) => setCustomStart(e.target.value)}
-                  style={{ padding: '0.4rem 0.5rem', border: '1px solid #E2E8F0', borderRadius: '8px' }}
+                  className="premium-date-input"
                 />
-                <span style={{ fontSize: '0.8rem', color: '#94A3B8', fontWeight: 700 }}>to</span>
+                <span className="premium-range-divider">to</span>
                 <input 
                   type="date" 
                   value={customEnd}
                   onChange={(e) => setCustomEnd(e.target.value)}
-                  style={{ padding: '0.4rem 0.5rem', border: '1px solid #E2E8F0', borderRadius: '8px' }}
+                  className="premium-date-input"
                 />
               </div>
             )}

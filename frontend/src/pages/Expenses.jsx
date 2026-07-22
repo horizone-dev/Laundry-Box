@@ -442,19 +442,19 @@ export default function Expenses() {
             </div>
 
             {selectedDateRange === 'Custom' && (
-              <div className={styles.filterWrapper} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.4rem 0.6rem', border: '1px solid #E2E8F0', borderRadius: '10px' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <input 
                   type="date" 
                   value={customStart} 
                   onChange={(e) => setCustomStart(e.target.value)}
-                  style={{ border: 'none', outline: 'none', fontSize: '0.85rem', background: 'transparent' }}
+                  className="premium-date-input"
                 />
-                <span style={{ fontSize: '0.8rem', color: '#64748B', fontWeight: 600 }}>to</span>
+                <span className="premium-range-divider">to</span>
                 <input 
                   type="date" 
                   value={customEnd} 
                   onChange={(e) => setCustomEnd(e.target.value)}
-                  style={{ border: 'none', outline: 'none', fontSize: '0.85rem', background: 'transparent' }}
+                  className="premium-date-input"
                 />
               </div>
             )}

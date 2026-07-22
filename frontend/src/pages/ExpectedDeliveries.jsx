@@ -613,19 +613,19 @@ export default function ExpectedDeliveries() {
           )}
 
           {dateFilter === 'Custom' && (
-            <div className={styles.customDateWrapper}>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               <input
                 type="date"
                 value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className={styles.dateInput}
+                className="premium-date-input"
               />
-              <span className={styles.dateSeparator}>to</span>
+              <span className="premium-range-divider">to</span>
               <input
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className={styles.dateInput}
+                className="premium-date-input"
               />
             </div>
           )}
@@ -828,10 +828,6 @@ export default function ExpectedDeliveries() {
                 <label className={`${styles.methodLabel} ${payMethod === 'Card' ? styles.activeMethod : ''}`}>
                   <input type="radio" name="payMethod" value="Card" checked={payMethod === 'Card'} onChange={() => setPayMethod('Card')} />
                   <span>Card Account</span>
-                </label>
-                <label className={`${styles.methodLabel} ${payMethod === 'UPI' ? styles.activeMethod : ''}`}>
-                  <input type="radio" name="payMethod" value="UPI" checked={payMethod === 'UPI'} onChange={() => setPayMethod('UPI')} />
-                  <span>UPI Account</span>
                 </label>
               </div>
 

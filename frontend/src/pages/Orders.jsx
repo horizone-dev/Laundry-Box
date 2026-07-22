@@ -76,6 +76,24 @@ export default function Orders() {
   const [searchTerm, setSearchTerm] = useState(querySearch);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [orderPayments, setOrderPayments] = useState([]);
+
+  useEffect(() => {
+    if (selectedOrder && window.electronAPI?.dbQuery) {
+      window.electronAPI.dbQuery(
+        "SELECT * FROM payments WHERE orderId = ? ORDER BY createdAt DESC",
+        [selectedOrder.id]
+      ).then(res => {
+        if (res.success) {
+          setOrderPayments(res.data || []);
+        }
+      }).catch(err => {
+        console.error("Failed to load order payments:", err);
+      });
+    } else {
+      setOrderPayments([]);
+    }
+  }, [selectedOrder]);
 
   // Filtering logic
   const [showPayModal, setShowPayModal] = useState(false);
@@ -489,11 +507,17 @@ export default function Orders() {
               orders.id, orders.shopId, orders.billNumber, orders.customerId, 
               customers.name AS customerName, customers.phone AS customerPhone, 
               orders.totalAmount, orders.paidAmount, orders.dueAmount, 
-              orders.paymentStatus, orders.status, orders.paymentMethod, 
+              orders.paymentStatus, orders.status, 
+              (SELECT CASE 
+                 WHEN COUNT(DISTINCT method) > 1 THEN 'Multipayment' 
+                 WHEN COUNT(DISTINCT method) = 1 THEN MIN(method) 
+                 ELSE orders.paymentMethod 
+               END FROM payments WHERE payments.orderId = orders.id) AS paymentMethod,
               orders.items, orders.statusHistory, orders.expectedDeliveryDate, orders.specialInstructions, orders.branchId,
               orders.createdAt, orders.updatedAt, orders.isSynced,
               orders.nomodPaymentStatus, orders.nomodCheckoutId,
               payment_links.date AS nomodLinkDate, payment_links.url AS nomodLinkUrl,
+              orders.paymentBreakdown,
               0 AS isDeleted, NULL AS refundStatus, NULL AS refundMethod, NULL AS returnedAt, NULL AS payments
             FROM orders 
             LEFT JOIN customers ON orders.customerId = customers.id
@@ -510,6 +534,7 @@ export default function Orders() {
               deleted_orders.deletedAt AS createdAt, deleted_orders.deletedAt AS updatedAt, 1 AS isSynced,
               NULL AS nomodPaymentStatus, NULL AS nomodCheckoutId,
               NULL AS nomodLinkDate, NULL AS nomodLinkUrl,
+              NULL AS paymentBreakdown,
               1 AS isDeleted, deleted_orders.refundStatus, deleted_orders.refundMethod, deleted_orders.returnedAt, deleted_orders.payments
             FROM deleted_orders
           ) AS all_orders
@@ -636,23 +661,36 @@ export default function Orders() {
       if (pinValue === configuredPin) {
         pinOwner = 'Shop Settings PIN';
       } else {
-        // Fallback to checking active manager PINs on the backend
-        try {
-          const verifyRes = await axios.post(`${API_BASE}/auth/verify-manager-pin`, { pin: pinValue });
-          if (verifyRes.data.valid) {
-            pinOwner = `Manager ${verifyRes.data.managerName}`;
+        // 2. Check local SQLite users table for Admin/Manager PIN
+        if (window.electronAPI?.dbQuery) {
+          try {
+            const userCheck = await window.electronAPI.dbQuery(
+              `SELECT name, role FROM users WHERE (role IN ('admin', 'manager', 'super_admin')) AND (passcode = ? OR pin = ?)`,
+              [pinValue, pinValue]
+            );
+            if (userCheck.success && userCheck.data && userCheck.data.length > 0) {
+              pinOwner = `${userCheck.data[0].role}: ${userCheck.data[0].name}`;
+            }
+          } catch (dbErr) {
+            console.warn('Local users table PIN check failed:', dbErr);
           }
-        } catch (apiErr) {
-          console.warn('Backend PIN check failed or offline:', apiErr.message);
-          // If offline and check fails, and it didn't match the local settings PIN, reject
-          setPinError('Invalid Manager PIN / Offline');
-          setIsDeleting(false);
-          return;
+        }
+
+        // 3. Fallback to checking active manager PINs on the backend
+        if (!pinOwner) {
+          try {
+            const verifyRes = await axios.post(`${API_BASE}/auth/verify-manager-pin`, { pin: pinValue });
+            if (verifyRes.data && verifyRes.data.valid) {
+              pinOwner = `Manager ${verifyRes.data.managerName}`;
+            }
+          } catch (apiErr) {
+            console.warn('Backend PIN check failed or offline:', apiErr.message);
+          }
         }
       }
 
       if (!pinOwner) {
-        setPinError('Invalid Manager PIN');
+        setPinError('Invalid Manager PIN. Please enter the Order Delete PIN configured in Settings.');
         setIsDeleting(false);
         return;
       }
@@ -681,8 +719,15 @@ export default function Orders() {
         );
         const allocationsUsed = allocationsRes.success ? allocationsRes.data : [];
 
+        const totalPaidFromPayments = linkedPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+        const actualPaidAmt = Math.max(
+          parseFloat(orderToDelete.paidAmount) || 0,
+          (parseFloat(orderToDelete.totalAmount) || 0) - (parseFloat(orderToDelete.dueAmount) ?? parseFloat(orderToDelete.totalAmount)),
+          totalPaidFromPayments
+        );
+
         // 2. Insert into deleted_orders audit log
-        const isPaid = orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus);
+        const isPaid = actualPaidAmt > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus);
         const initialReturnStatus = isPaid
           ? (refundImmediately ? 'Returned' : 'Converted to Advance')
           : 'N/A';
@@ -708,7 +753,7 @@ export default function Orders() {
             getLocalISOString(),
             currentLoggedInUser,
             orderToDelete.paymentStatus || 'Pending',
-            orderToDelete.paidAmount || 0,
+            actualPaidAmt,
             initialReturnStatus,
             pinOwner,
             orderToDelete.paymentMethod || 'CASH',
@@ -745,11 +790,9 @@ export default function Orders() {
         await window.electronAPI.dbQuery('DELETE FROM advance_allocations WHERE orderId = ?', [orderToDelete.id]);
 
         // 5. Process refund or convert to advance
-        const paidAmt = orderToDelete.paidAmount || 0;
-
-        if (isPaid && paidAmt > 0) {
-          const allocSum = allocationsUsed.reduce((sum, a) => sum + (a.amountUsed || 0), 0);
-          const cashPaidAmt = Math.max(0, paidAmt - allocSum);
+        if (isPaid && actualPaidAmt > 0) {
+          const allocSum = allocationsUsed.reduce((sum, a) => sum + (parseFloat(a.amountUsed) || 0), 0);
+          const cashPaidAmt = Math.max(0, actualPaidAmt - allocSum);
 
           if (refundImmediately) {
             if (cashPaidAmt > 0) {
@@ -1533,22 +1576,22 @@ export default function Orders() {
               />
 
               {dateRange === 'Custom' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                  <input
-                    type="date"
-                    value={customStart}
-                    onChange={(e) => setCustomStart(e.target.value)}
-                    style={{ border: '1px solid #E2E8F0', padding: '0.35rem 0.5rem', borderRadius: '8px', fontSize: '0.8rem', outline: 'none' }}
-                  />
-                  <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>to</span>
-                  <input
-                    type="date"
-                    value={customEnd}
-                    onChange={(e) => setCustomEnd(e.target.value)}
-                    style={{ border: '1px solid #E2E8F0', padding: '0.35rem 0.5rem', borderRadius: '8px', fontSize: '0.8rem', outline: 'none' }}
-                  />
-                </div>
-              )}
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input 
+                  type="date" 
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="premium-date-input"
+                />
+                <span className="premium-range-divider">to</span>
+                <input 
+                  type="date" 
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="premium-date-input"
+                />
+              </div>
+            )}
             </div>
         </div>
       )}
@@ -1827,29 +1870,58 @@ export default function Orders() {
                     </div>
                   </div>
 
-                  <div className={styles.section}>
-                    <h3>{t('statusHistory', settings.language)}</h3>
-                    <div className={styles.timeline}>
-                      {(() => {
-                        let history = [];
-                        try {
-                          history = typeof selectedOrder.statusHistory === 'string'
-                            ? JSON.parse(selectedOrder.statusHistory || '[]')
-                            : (selectedOrder.statusHistory || []);
-                        } catch (e) { console.error("Failed to parse history", e); }
-
-                        return (Array.isArray(history) ? history : []).map((h, i) => (
-                          <div key={i} className={styles.timelineItem}>
-                            <div className={styles.timelineDot}></div>
-                            <div className={styles.timelineContent}>
-                              <p className={styles.timelineStatus}>{translateStatus(h.status) || t('unknown', settings.language)}</p>
-                              <p className={styles.timelineMeta}>
-                                {h.updatedBy === 'Admin Staff' ? t('adminStaff', settings.language) : h.updatedBy === 'Staff' ? t('staff', settings.language) : (h.updatedBy || t('staff', settings.language))} • {h.timestamp ? formatDateTime(h.timestamp) : t('unknown', settings.language)}
-                              </p>
+                  <div className={styles.section} style={{ marginTop: '1.5rem' }}>
+                    <h3>Payment Transactions & Breakdown</h3>
+                    <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '1rem' }}>
+                      {orderPayments && orderPayments.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                          {orderPayments.map((p, idx) => (
+                            <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem', background: 'white', borderRadius: '8px', border: '1px solid #ECEFF1' }}>
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1E293B' }}>
+                                  {p.method} Payment
+                                </div>
+                                <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.15rem' }}>
+                                  Ref: {p.paymentReference || 'N/A'} • {formatDateTime(p.createdAt)}
+                                </div>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <span style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0F172A' }}>
+                                  <CurrencySymbol size={11} /> {p.amount?.toFixed(2)}
+                                </span>
+                                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: p.status === 'SUCCESS' ? '#10B981' : '#F59E0B', marginTop: '0.15rem' }}>
+                                  {p.status}
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        ));
-                      })()}
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                          <span style={{ color: '#64748B' }}>Primary Payment Method:</span>
+                          <strong style={{ color: '#0F172A' }}>
+                            {selectedOrder.paymentMethod || 'Cash'} (Default)
+                          </strong>
+                        </div>
+                      )}
+
+                      {/* Summary calculations block */}
+                      <div style={{ marginTop: '1rem', paddingTop: '0.85rem', borderTop: '1px dashed #CBD5E1', display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.82rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
+                          <span>Total Order Amount:</span>
+                          <span><CurrencySymbol size={10} /> {(selectedOrder.totalAmount || 0).toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
+                          <span>Total Paid to Date:</span>
+                          <span style={{ fontWeight: 700, color: '#10B981' }}><CurrencySymbol size={10} /> {(selectedOrder.paidAmount || 0).toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B', fontWeight: 700 }}>
+                          <span>Remaining Balance:</span>
+                          <span style={{ color: selectedOrder.dueAmount > 0 ? '#EF4444' : '#10B981' }}>
+                            <CurrencySymbol size={10} /> {(selectedOrder.dueAmount || 0).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2040,6 +2112,32 @@ export default function Orders() {
                       )}
                     </>
                   )}
+
+                  <div className={styles.section} style={{ marginTop: '1.5rem' }}>
+                    <h3>{t('statusHistory', settings.language)}</h3>
+                    <div className={styles.timeline}>
+                      {(() => {
+                        let history = [];
+                        try {
+                          history = typeof selectedOrder.statusHistory === 'string'
+                            ? JSON.parse(selectedOrder.statusHistory || '[]')
+                            : (selectedOrder.statusHistory || []);
+                        } catch (e) { console.error("Failed to parse history", e); }
+
+                        return (Array.isArray(history) ? history : []).map((h, i) => (
+                          <div key={i} className={styles.timelineItem}>
+                            <div className={styles.timelineDot}></div>
+                            <div className={styles.timelineContent}>
+                              <p className={styles.timelineStatus}>{translateStatus(h.status) || t('unknown', settings.language)}</p>
+                              <p className={styles.timelineMeta}>
+                                {h.updatedBy === 'Admin Staff' ? t('adminStaff', settings.language) : h.updatedBy === 'Staff' ? t('staff', settings.language) : (h.updatedBy || t('staff', settings.language))} • {h.timestamp ? formatDateTime(h.timestamp) : t('unknown', settings.language)}
+                              </p>
+                            </div>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2089,12 +2187,7 @@ export default function Orders() {
 
       {/* Payment Selection Modal */}
       {showPayModal && (
-        <div className={styles.modalOverlay} onClick={() => {
-          setShowPayModal(false);
-          if (originalPayStatus) {
-            setSelectedOrder(prev => ({ ...prev, paymentStatus: originalPayStatus }));
-          }
-        }}>
+        <div className={styles.modalOverlay}>
           <div className={styles.statusModal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>{t('confirmPayment', settings.language)}</h2>
@@ -2132,13 +2225,6 @@ export default function Orders() {
                 >
                   <CreditCard size={24} />
                   <span>{t('card', settings.language)}</span>
-                </div>
-                <div
-                  className={`${styles.payOption} ${payMethod === 'UPI' ? styles.payOptionActive : ''}`}
-                  onClick={() => setPayMethod('UPI')}
-                >
-                  <QrCode size={24} />
-                  <span>{t('upi', settings.language)}</span>
                 </div>
                 <div
                   className={`${styles.payOption} ${payMethod === 'Multipayment' ? styles.payOptionActive : ''}`}
@@ -2197,7 +2283,7 @@ export default function Orders() {
       )}
       {/* PIN Verification Modal */}
       {showPinModal && (
-        <div className={styles.modalOverlay} onClick={() => { setShowPinModal(false); setPinValue(''); setPinError(''); }}>
+        <div className={styles.modalOverlay}>
           <div className={styles.statusModal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ backgroundColor: '#EF4444' }}>
               <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'white', margin: 0 }}>

@@ -150,6 +150,7 @@ export default function CustomerStatement() {
           SELECT 
             id, shopId, billNumber, customerId, totalAmount, paidAmount, dueAmount, 
             paymentStatus, status, paymentMethod, items, createdAt, updatedAt, 
+            paymentBreakdown,
             0 AS isDeleted, NULL AS refundStatus, NULL AS refundMethod, NULL AS returnedAt, NULL AS payments 
           FROM orders 
 
@@ -158,6 +159,7 @@ export default function CustomerStatement() {
           SELECT 
             id, shopId, billNumber, customerId, totalAmount, paidAmount, 0 AS dueAmount, 
             originalPaymentStatus AS paymentStatus, 'Deleted' AS status, originalPaymentMethod AS paymentMethod, items, IFNULL(createdAt, deletedAt) AS createdAt, deletedAt AS updatedAt, 
+            NULL AS paymentBreakdown,
             1 AS isDeleted, refundStatus, refundMethod, returnedAt, payments 
           FROM deleted_orders 
         ) AS u
@@ -193,6 +195,27 @@ export default function CustomerStatement() {
   /* ─── Build unified ledger rows ───────────────────── */
   const ledgerRows = React.useMemo(() => {
     const rows = [];
+
+    const systemAutoOffsetSum = payments
+      .filter(p => p.method === 'System Auto' && !p.orderId)
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+    const originalOpeningBalance = selectedCustomer
+      ? (selectedCustomer.openingBalance || 0) + Math.abs(systemAutoOffsetSum)
+      : 0;
+
+    if (selectedCustomer && originalOpeningBalance > 0) {
+      rows.push({
+        date: selectedCustomer.createdAt || new Date(0).toISOString(),
+        type: 'opening_balance',
+        ref: 'OPENING',
+        description: 'Opening Balance (Outstanding Due)',
+        itemsSummary: '',
+        debit: originalOpeningBalance,
+        credit: 0,
+        status: 'SUCCESS',
+        dueAmount: 0
+      });
+    }
 
     // Robust date normalizer to handle space and timezone offsets safely
     const normalizeDate = (dStr) => {
@@ -340,11 +363,22 @@ export default function CustomerStatement() {
             console.error("Failed to parse items for ledger row", e);
           }
 
+          let discount = 0;
+          try {
+            if (o.paymentBreakdown) {
+              const breakdown = typeof o.paymentBreakdown === 'string'
+                ? JSON.parse(o.paymentBreakdown)
+                : o.paymentBreakdown;
+              discount = parseFloat(breakdown.discount || breakdown.discountAmount || 0) || 0;
+            }
+          } catch (e) {}
+
           rows.push({
             date: o.createdAt,
             type: 'order',
             ref: cleanRef,
             description: displayDesc,
+            discountAmount: discount,
             itemsSummary: itemSummary,
             debit: o.totalAmount,
             credit: 0,
@@ -356,20 +390,71 @@ export default function CustomerStatement() {
       }
     });
 
-    // Map table payments and group by order ID to prevent double counting
-    const paymentsFromTable = payments.filter(p => p.method !== 'Refund Advance').map(p => {
+    // Group database payments by exact timestamp to prevent visual splits (even for different methods in a multipayment)
+    const groupedPaymentsMap = {};
+    payments.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto').forEach(p => {
+      const key = p.createdAt;
+      if (!groupedPaymentsMap[key]) {
+        groupedPaymentsMap[key] = {
+          date: p.createdAt,
+          type: 'payment',
+          ref: p.paymentReference || p.id,
+          description: `Payment – ${p.method || 'Cash'}`,
+          debit: 0,
+          credit: p.method === 'Discount' ? 0 : (p.amount || 0),
+          discountAmount: p.method === 'Discount' ? (p.amount || 0) : 0,
+          status: 'SUCCESS',
+          dueAmount: 0,
+          orderId: p.orderId,
+          paymentMethod: p.method,
+          orderIds: p.orderId ? [p.orderId] : [],
+          methods: [p.method]
+        };
+      } else {
+        if (p.method === 'Discount') {
+          groupedPaymentsMap[key].discountAmount += p.amount || 0;
+        } else {
+          groupedPaymentsMap[key].credit += p.amount || 0;
+        }
+        if (p.orderId && !groupedPaymentsMap[key].orderIds.includes(p.orderId)) {
+          groupedPaymentsMap[key].orderIds.push(p.orderId);
+        }
+        if (!groupedPaymentsMap[key].methods.includes(p.method)) {
+          groupedPaymentsMap[key].methods.push(p.method);
+        }
+      }
+    });
+
+    const paymentsFromTable = Object.values(groupedPaymentsMap).map(p => {
       const cleanOrderRef = p.orderId ? `${settings.invoicePrefix || '#'}${p.orderId}` : '';
+      let itemsSummary = '';
+      
+      let description = p.description;
+      let finalPaymentMethod = p.paymentMethod;
+      if (p.methods.length > 1) {
+        description = 'Payment – Multipayment';
+        finalPaymentMethod = 'Multipayment';
+      }
+
+      if (p.paymentMethod === 'Advance') {
+        itemsSummary = `Advance Consumed for Order ${cleanOrderRef}`;
+      } else if (p.orderIds.length > 1) {
+        itemsSummary = 'Quick Pay Settlement';
+      } else if (p.orderId) {
+        itemsSummary = `Linked to Order ${cleanOrderRef}`;
+      } else {
+        const refStr = p.ref || '';
+        if (refStr.startsWith('QPY-')) itemsSummary = 'Quick Pay Settlement';
+        else if (refStr.startsWith('ADV-')) itemsSummary = 'Advance Deposit';
+        else if (refStr.startsWith('SYS-')) itemsSummary = 'System Auto Offset';
+        else itemsSummary = 'Account Payment';
+      }
+
       return {
-        date: p.createdAt,
-        type: 'payment',
-        ref: p.paymentReference || p.id,
-        description: `Payment – ${p.method || 'Cash'}`,
-        itemsSummary: p.method === 'Advance' ? `Advance Consumed for Order ${cleanOrderRef}` : (p.orderId ? `Linked to Order ${cleanOrderRef}` : 'Advance Deposit'),
-        debit: 0,
-        credit: p.method === 'Advance' ? 0 : p.amount,
-        status: 'SUCCESS',
-        dueAmount: 0,
-        orderId: p.orderId
+        ...p,
+        description,
+        paymentMethod: finalPaymentMethod,
+        itemsSummary
       };
     });
 
@@ -382,7 +467,7 @@ export default function CustomerStatement() {
 
     // Capture initial payments made at order creation time that aren't in the payments table, subtracting allocations
     const initialPaymentsFromOrders = [];
-    if (filterType !== 'Orders') {
+    if (filterType !== 'Orders' && payments.length === 0) {
       orders.forEach(o => {
         if (o.isDeleted) return; // Skip deleted orders here, we already extracted their payments!
         
@@ -404,7 +489,8 @@ export default function CustomerStatement() {
             debit: 0,
             credit: initialPay,
             status: 'SUCCESS',
-            dueAmount: 0
+            dueAmount: 0,
+            paymentMethod: o.paymentMethod
           });
         }
       });
@@ -433,8 +519,16 @@ export default function CustomerStatement() {
     /* Positive = Due, Negative = Advance */
     let balance = 0;
     rows.forEach(row => {
-      balance += row.debit - row.credit;
+      const priorBalance = balance;
+      const creditToSubtract = row.type === 'payment' ? (row.credit + (row.discountAmount || 0)) : row.credit;
+      balance += row.debit - creditToSubtract;
       row.runningBalance = balance;
+
+      if (row.type === 'payment' && !row.orderId && row.itemsSummary === 'Advance Deposit') {
+        if (priorBalance > 0) {
+          row.itemsSummary = 'Account Payment';
+        }
+      }
     });
 
     let finalRows = rows;
@@ -454,7 +548,8 @@ export default function CustomerStatement() {
       finalRows.reverse();
     }
 
-    return { filteredRows: finalRows, totalBalance: balance };
+    const computedPaid = allPayments.reduce((s, p) => s + (p.credit || 0), 0);
+    return { filteredRows: finalRows, totalBalance: balance, totalPaid: computedPaid };
   }, [orders, payments, allocations, filterType, sortOrder, dateFrom, dateTo, dateRange]);
 
   const paginatedLedgerRows = React.useMemo(() => {
@@ -464,7 +559,7 @@ export default function CustomerStatement() {
 
   /* ─── KPIs ────────────────────────────────────────── */
   const totalBilled    = orders.filter(o => !o.isDeleted).reduce((s, o) => s + (o.totalAmount || 0), 0);
-  const totalPaid      = payments.reduce((s, p) => s + (p.amount || 0), 0);
+  const totalPaid      = ledgerRows.totalPaid || 0;
   const outstanding    = Math.max(0, ledgerRows.totalBalance || 0);
   const advanceCredit  = ledgerRows.totalBalance < 0 ? Math.abs(ledgerRows.totalBalance) : 0;
   const orderCount     = orders.filter(o => !o.isDeleted).length;
@@ -744,6 +839,7 @@ export default function CustomerStatement() {
                     <th>REFERENCE</th>
                     <th>DESCRIPTION</th>
                     <th className={styles.numCol}>CHARGED</th>
+                    <th className={styles.numCol}>DISCOUNT</th>
                     <th className={styles.numCol}>PAID</th>
                     <th className={styles.numCol}>BALANCE</th>
                   </tr>
@@ -781,7 +877,9 @@ export default function CustomerStatement() {
                         </div>
                       </td>
                       <td className={styles.descCell}>
-                        <div className={styles.descMain}>{row.description}</div>
+                        <div className={styles.descMain}>
+                          {row.description}
+                        </div>
                         {row.itemsSummary && (
                           <div className={styles.descSub}>{row.itemsSummary}</div>
                         )}
@@ -789,8 +887,17 @@ export default function CustomerStatement() {
                       <td className={`${styles.numCol} ${styles.debitCell}`}>
                         {row.debit > 0 ? <><CurrencySymbol size={11} /> {row.debit.toFixed(2)}</> : <span className={styles.dash}>—</span>}
                       </td>
+                      <td className={`${styles.numCol} ${styles.discountCell}`} style={{ color: 'var(--danger)' }}>
+                        {row.paymentMethod === 'Discount' ? (
+                          <><CurrencySymbol size={11} /> {row.credit.toFixed(2)}</>
+                        ) : (row.discountAmount && row.discountAmount > 0) ? (
+                          <><CurrencySymbol size={11} /> {row.discountAmount.toFixed(2)}</>
+                        ) : (
+                          <span className={styles.dash}>—</span>
+                        )}
+                      </td>
                       <td className={`${styles.numCol} ${styles.creditCell}`}>
-                        {row.credit > 0 ? <><CurrencySymbol size={11} /> {row.credit.toFixed(2)}</> : <span className={styles.dash}>—</span>}
+                        {row.paymentMethod !== 'Discount' && row.credit > 0 ? <><CurrencySymbol size={11} /> {row.credit.toFixed(2)}</> : <span className={styles.dash}>—</span>}
                       </td>
                       <td className={`${styles.numCol} ${row.runningBalance < 0 ? styles.balanceAdvNum : row.runningBalance > 0 ? styles.balanceDueNum : styles.balanceZero}`}>
                         <CurrencySymbol size={11} /> {Math.abs(row.runningBalance).toFixed(2)}
@@ -806,8 +913,11 @@ export default function CustomerStatement() {
                     <td className={`${styles.numCol} ${styles.debitCell} ${styles.totalsNum}`}>
                       <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + r.debit, 0).toFixed(2)}
                     </td>
+                    <td className={`${styles.numCol} ${styles.discountCell} ${styles.totalsNum}`} style={{ color: 'var(--danger)' }}>
+                      <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + (r.paymentMethod === 'Discount' ? r.credit : (r.discountAmount || 0)), 0).toFixed(2)}
+                    </td>
                     <td className={`${styles.numCol} ${styles.creditCell} ${styles.totalsNum}`}>
-                      <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + r.credit, 0).toFixed(2)}
+                      <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + (r.paymentMethod === 'Discount' ? 0 : r.credit), 0).toFixed(2)}
                     </td>
                     <td className={`${styles.numCol} ${styles.totalsNum} ${
                       ledgerRows.totalBalance > 0 

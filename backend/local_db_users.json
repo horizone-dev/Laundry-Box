@@ -4,8 +4,8 @@
     "name": "Horizon inc",
     "phone": "+9710588851680",
     "userId": "super admin",
-    "password": "$2b$10$1VPqov.NAz4SFhRzOtURk.DiJ9O5V2UWg.R6p2Fyfd3cEpq5wEsyK",
-    "pin": "$2b$10$pTJihnzvYiNYu9b43vJ2x.jt//wb6ZAg5vkNzS35GAYAFIofew5hK",
+    "password": "$2b$10$7BnktCXPIJwYrLsAvgka/Ota.NxX03vYvAOIbgDhxABNeMEjOt1Zm",
+    "pin": "$2b$10$JyP5GH5a9qHkEOA/Bp/IQOA/6UqsX8a4jau84MczQsR0EWJfi4aYC",
     "role": "super_admin",
     "shopId": "SHOP_01",
     "createdAt": "2026-06-20T07:43:00.000Z"
@@ -15,8 +15,8 @@
     "name": "Cashier Test",
     "phone": "+971000000000",
     "userId": "cashier",
-    "password": "$2b$10$PqXZKr.nzJdCwIV96G1seuCOEWig.FwkB0oTpgaaeYxADFqJqSL/y",
-    "pin": "$2b$10$982cYaoVw/ooYdLZN1GkIuljuwmkHDk5TkVXP64CFUVznc8/gBCFK",
+    "password": "$2b$10$ZZdRGx4o2r9dbsmptINEauzAlOU1YWCgbfsXE6633mZPIhVDqgVLC",
+    "pin": "$2b$10$j9bLHRKgJRh7STquvqj9nutDp3/AykiybpFjkU1VUL0/b.q7ZOymO",
     "role": "cashier",
     "shopId": "SHOP_01",
     "createdAt": "2026-06-20T07:43:00.000Z"
@@ -26,11 +26,21 @@
     "name": "Manager Test",
     "phone": "+9710599999999",
     "userId": "manager",
-    "password": "$2b$10$hroPO5DnkgYDGOVxwdBdUu0Jzmasy7.JeP9mMP/fr4xAz8vwWotzO",
-    "pin": "$2b$10$eQ.X8.Cc2CP3ZHK1s65r1erF2WNgC1WbME6W.XSnBokPiKNd1EAj.",
+    "password": "$2b$10$N1O775dd8hmZLJR2i6Fwjubab0HUs3W7USEHribaB8qa2KvPxAGhe",
+    "pin": "$2b$10$gkMqD/woff4grJjhZ1qvJOW80UGMNAc5jBcgEi6QeN.RcJ1MlR1FK",
     "role": "manager",
     "shopId": "SHOP_01",
-    "createdAt": "2026-06-25T11:40:00.000Z",
-    "updatedAt": "2026-07-20T05:24:19.175Z"
+    "createdAt": "2026-06-25T11:40:00.000Z"
+  },
+  {
+    "_id": "local_user_1784581154921",
+    "shopId": "SHOP_01",
+    "name": "dfafhjhfd",
+    "phone": "",
+    "userId": "USER_1784581154444",
+    "password": "$2b$10$BIEtna0JuvIubGKHhFQIVe/SCzhoJ8EDJnREVvpwEBeewRNY4RQgC",
+    "pin": "$2b$10$W82rV6t7Bk0/BzNAdwmxFeut6eAXORfqc.XvOZLbWG6D.zblGpk/a",
+    "role": "manager",
+    "createdAt": "2026-07-20T20:59:14.921Z"
   }
 ]
