@@ -251,6 +251,16 @@ function initDB(appPath) {
       timestamp TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS advance_allocations (
+      id TEXT PRIMARY KEY,
+      paymentId TEXT,
+      orderId TEXT,
+      amountUsed REAL DEFAULT 0,
+      createdAt TEXT,
+      isSynced INTEGER DEFAULT 0,
+      updatedAt TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS deleted_orders (
       id TEXT PRIMARY KEY,
       shopId TEXT,
@@ -920,7 +930,7 @@ function runDataHealer(db) {
                 IFNULL((
                   SELECT SUM(amount) 
                   FROM payments 
-                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '') AND method NOT IN ('System Auto', 'Discount')
                 ), 0) - IFNULL((
                   SELECT SUM(a.amountUsed)
                   FROM advance_allocations a
@@ -945,7 +955,7 @@ function runDataHealer(db) {
                 IFNULL((
                   SELECT SUM(amount) 
                   FROM payments 
-                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '') AND method NOT IN ('System Auto', 'Discount')
                 ), 0) - IFNULL((
                   SELECT SUM(a.amountUsed)
                   FROM advance_allocations a
@@ -981,7 +991,7 @@ function runDataHealer(db) {
     console.log("Auto-applying customer advances to positive opening balances...");
     const customersWithAdvAndOpeningDue = db.prepare(`
       SELECT id, openingBalance, 
-             (SELECT IFNULL(SUM(amount), 0) FROM payments WHERE customerId = customers.id AND (orderId IS NULL OR orderId = '')) as unapplied
+             (SELECT IFNULL(SUM(amount), 0) FROM payments WHERE customerId = customers.id AND (orderId IS NULL OR orderId = '') AND method NOT IN ('System Auto', 'Discount')) as unapplied
       FROM customers
       WHERE openingBalance > 0
     `).all();
@@ -1108,7 +1118,7 @@ function runDataHealer(db) {
                 IFNULL((
                   SELECT SUM(amount) 
                   FROM payments 
-                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '') AND method NOT IN ('System Auto', 'Discount')
                 ), 0) - IFNULL((
                   SELECT SUM(a.amountUsed)
                   FROM advance_allocations a
@@ -1133,7 +1143,7 @@ function runDataHealer(db) {
                 IFNULL((
                   SELECT SUM(amount) 
                   FROM payments 
-                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '')
+                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '') AND method NOT IN ('System Auto', 'Discount')
                 ), 0) - IFNULL((
                   SELECT SUM(a.amountUsed)
                   FROM advance_allocations a

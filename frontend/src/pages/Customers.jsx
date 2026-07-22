@@ -1498,7 +1498,7 @@ export default function Customers() {
 
         const advStatsRes = await window.electronAPI.dbQuery(
           `SELECT 
-             (SELECT IFNULL(SUM(amount), 0) FROM payments WHERE customerId = ? AND (orderId IS NULL OR orderId = '')) as totalRecv,
+             (SELECT IFNULL(SUM(amount), 0) FROM payments WHERE customerId = ? AND (orderId IS NULL OR orderId = '') AND method NOT IN ('System Auto', 'Discount')) as totalRecv,
              (SELECT IFNULL(SUM(a.amountUsed), 0) 
               FROM advance_allocations a
               JOIN orders o ON a.orderId = o.id

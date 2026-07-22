@@ -1478,7 +1478,7 @@ export default function POS() {
               `SELECT p.*, 
                IFNULL((SELECT SUM(a.amountUsed) FROM advance_allocations a WHERE a.paymentId = p.id), 0) as usedAmount
                FROM payments p
-               WHERE p.customerId = ? AND (p.orderId IS NULL OR p.orderId = '')
+               WHERE p.customerId = ? AND (p.orderId IS NULL OR p.orderId = '') AND p.method NOT IN ('System Auto', 'Discount')
                ORDER BY p.createdAt ASC`,
               [selectedCustomer.id]
             );
@@ -1905,7 +1905,7 @@ export default function POS() {
               `SELECT p.*, 
                IFNULL((SELECT SUM(a.amountUsed) FROM advance_allocations a WHERE a.paymentId = p.id), 0) as usedAmount
                FROM payments p
-               WHERE p.customerId = ? AND (p.orderId IS NULL OR p.orderId = '')
+               WHERE p.customerId = ? AND (p.orderId IS NULL OR p.orderId = '') AND p.method NOT IN ('System Auto', 'Discount')
                ORDER BY p.createdAt ASC`,
               [selectedCustomer.id]
             );
