@@ -1061,12 +1061,37 @@ export default function Customers() {
     try {
       await window.electronAPI.dbQuery("BEGIN TRANSACTION");
 
-      if (payment.orderId) {
-        const orderRes = await window.electronAPI.dbQuery("SELECT * FROM orders WHERE id = ?", [payment.orderId]);
+      // 1. Fetch individual payment records to group updates by orderId
+      const pToDelRes = await window.electronAPI.dbQuery(
+        `SELECT id, amount, method, orderId FROM payments WHERE id IN (${idsToDelete.map(() => '?').join(',')})`,
+        idsToDelete
+      );
+      const paymentsToDelete = pToDelRes.success ? pToDelRes.data : [];
+
+      const orderUpdates = {};
+      paymentsToDelete.forEach(pDel => {
+        if (pDel.orderId) {
+          if (!orderUpdates[pDel.orderId]) {
+            orderUpdates[pDel.orderId] = {
+              amountDeducted: 0,
+              methodsDeducted: []
+            };
+          }
+          orderUpdates[pDel.orderId].amountDeducted += pDel.amount || 0;
+          orderUpdates[pDel.orderId].methodsDeducted.push({
+            method: pDel.method,
+            amount: pDel.amount || 0
+          });
+        }
+      });
+
+      // 2. Loop and update each affected order in the database
+      for (const [orderId, update] of Object.entries(orderUpdates)) {
+        const orderRes = await window.electronAPI.dbQuery("SELECT * FROM orders WHERE id = ?", [orderId]);
         if (orderRes.success && orderRes.data.length > 0) {
           const bill = orderRes.data[0];
-          const newPaidAmount = Math.max(0, (bill.paidAmount || 0) - totalAmount);
-          const newDueAmount = (bill.dueAmount || 0) + totalAmount;
+          const newPaidAmount = Math.max(0, (bill.paidAmount || 0) - update.amountDeducted);
+          const newDueAmount = (bill.dueAmount || 0) + update.amountDeducted;
           const newStatus = newPaidAmount <= 0 ? 'Credit' : 'Partial';
 
           let paymentBreakdown = {};
@@ -1076,17 +1101,10 @@ export default function Customers() {
             }
           } catch (e) { }
 
-          // Fetch methods and amounts of individual payments we are deleting to subtract correctly from paymentBreakdown
-          const pToDelRes = await window.electronAPI.dbQuery(
-            `SELECT amount, method FROM payments WHERE id IN (${idsToDelete.map(() => '?').join(',')})`,
-            idsToDelete
-          );
-          const paymentsToDelete = pToDelRes.success ? pToDelRes.data : [];
-
-          paymentsToDelete.forEach(pDel => {
-            const methodKey = pDel.method.toLowerCase();
+          update.methodsDeducted.forEach(md => {
+            const methodKey = md.method.toLowerCase();
             if (paymentBreakdown[methodKey] !== undefined) {
-              paymentBreakdown[methodKey] = Math.max(0, (paymentBreakdown[methodKey] || 0) - pDel.amount);
+              paymentBreakdown[methodKey] = Math.max(0, (paymentBreakdown[methodKey] || 0) - md.amount);
             }
           });
 
@@ -1101,30 +1119,24 @@ export default function Customers() {
 
           await window.electronAPI.dbQuery(
             "UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
-            [newPaidAmount, newDueAmount, newStatus, finalMethodName, JSON.stringify(paymentBreakdown), timestamp, payment.orderId]
+            [newPaidAmount, newDueAmount, newStatus, finalMethodName, JSON.stringify(paymentBreakdown), timestamp, orderId]
           );
         }
       }
 
+      // 3. Update customer balance
       await window.electronAPI.dbQuery(
         "UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?",
         [totalAmount, timestamp, selectedCustomer.id]
       );
 
-      // Fetch the individual payments to delete their matching transactions
-      const pToDelRes = await window.electronAPI.dbQuery(
-        `SELECT amount, method FROM payments WHERE id IN (${idsToDelete.map(() => '?').join(',')})`,
-        idsToDelete
-      );
-      const paymentsToDelete = pToDelRes.success ? pToDelRes.data : [];
-
-      // Delete all the advance allocations and payment records
+      // 4. Delete advance allocations and payment records
       for (const id of idsToDelete) {
         await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE paymentId = ?", [id]);
         await window.electronAPI.dbQuery("DELETE FROM payments WHERE id = ?", [id]);
       }
 
-      // Delete matching account transactions for each deleted payment amount
+      // 5. Delete matching account transactions for each deleted payment amount
       const payDate = new Date(payment.createdAt);
       const datePrefix = `${payDate.getFullYear()}-${String(payDate.getMonth() + 1).padStart(2, '0')}-${String(payDate.getDate()).padStart(2, '0')} ${String(payDate.getHours()).padStart(2, '0')}:${String(payDate.getMinutes()).padStart(2, '0')}`;
 
