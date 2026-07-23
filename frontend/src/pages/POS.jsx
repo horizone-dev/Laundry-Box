@@ -555,8 +555,8 @@ export default function POS() {
         const openBal = parseFloat(customerFormData.openingBalance) || 0;
 
         await window.electronAPI.dbQuery(
-          'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, balance, openingBalance, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, DEFAULT_SHOP_ID, customerFormData.name, customerFormData.phone, '', customerFormData.address, 0, openBal, openBal, 0, timestamp]
+          'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, balance, openingBalance, isSynced, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [id, DEFAULT_SHOP_ID, customerFormData.name, customerFormData.phone, '', customerFormData.address, 0, openBal, openBal, 0, timestamp, timestamp]
         );
 
         if (openBal < 0) {

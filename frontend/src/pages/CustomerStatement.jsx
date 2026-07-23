@@ -7,6 +7,7 @@ import {
   X, Filter, Package, TrendingUp, RotateCcw
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
+import { getLocalISOString } from '../utils/dateUtils';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
 import CustomSelect from '../components/CustomSelect';
@@ -207,7 +208,7 @@ export default function CustomerStatement() {
 
     if (selectedCustomer && originalOpeningBalance > 0) {
       rows.push({
-        date: selectedCustomer.createdAt || new Date(0).toISOString(),
+        date: selectedCustomer.createdAt || selectedCustomer.updatedAt || new Date(0).toISOString(),
         type: 'opening_balance',
         ref: 'OPENING',
         description: 'Opening Balance (Outstanding Due)',
@@ -556,7 +557,7 @@ export default function CustomerStatement() {
     /* If date filter is active and there's a carried-forward opening balance, prepend it as a row */
     if (hasDateFilter && openingBalanceForRange !== 0) {
       const openingRow = {
-        date: dateFrom || finalRows[0]?.date || new Date().toISOString(),
+        date: dateFrom || finalRows[0]?.date || getLocalISOString(),
         type: 'opening_balance',
         ref: 'B/F',
         description: openingBalanceForRange > 0

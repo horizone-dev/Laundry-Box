@@ -493,8 +493,8 @@ export default function Customers() {
           );
 
           await window.electronAPI.dbQuery(
-            'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, balance, openingBalance, isSynced, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [targetCustId, DEFAULT_SHOP_ID, formData.name, formData.phone, '', formData.address, 0, openBal, openBal, 0, timestamp]
+            'INSERT INTO customers (id, shopId, name, phone, email, address, creditLimit, balance, openingBalance, isSynced, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [targetCustId, DEFAULT_SHOP_ID, formData.name, formData.phone, '', formData.address, 0, openBal, openBal, 0, timestamp, timestamp]
           );
           alert('Customer created successfully!');
         }
@@ -1507,10 +1507,8 @@ export default function Customers() {
         });
 
         // All payments: subtract as credits (money received from customer)
-        // Skip: Advance allocations, System Auto offsets, and Opening Advance
-        // (Opening Advance is already counted via customer.openingBalance above)
         allPaymentsRaw.forEach(p => {
-          if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto' || p.method === 'Opening Advance') return;
+          if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
           runningBalance -= (p.amount || 0); // payment credit (reduces balance)
         });
 

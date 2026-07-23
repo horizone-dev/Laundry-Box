@@ -91,6 +91,7 @@ function initDB(appPath) {
       balance REAL DEFAULT 0,
       openingBalance REAL DEFAULT 0,
       isSynced INTEGER DEFAULT 0,
+      createdAt TEXT,
       updatedAt TEXT
     );
 
@@ -620,6 +621,10 @@ function initDB(appPath) {
     if (!custCols.some(col => col.name === 'balance')) {
       db.exec("ALTER TABLE customers ADD COLUMN balance REAL DEFAULT 0;");
     }
+    if (!custCols.some(col => col.name === 'createdAt')) {
+      db.exec("ALTER TABLE customers ADD COLUMN createdAt TEXT;");
+      db.exec("UPDATE customers SET createdAt = updatedAt WHERE createdAt IS NULL OR createdAt = '';");
+    }
 
     const orderCols = db.prepare("PRAGMA table_info(orders)").all();
     if (!orderCols.some(col => col.name === 'paidAmount')) {
@@ -1057,10 +1062,8 @@ function runDataHealer(db) {
       });
 
       // 5. Process payments
-      // Skip: Advance allocations, System Auto offsets, and Opening Advance
-      // (Opening Advance is already counted via customer.openingBalance above)
       payments.forEach(p => {
-        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto' || p.method === 'Opening Advance') return;
+        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
         balance -= parseFloat(p.amount || 0); // payment credit
       });
 
@@ -1307,10 +1310,8 @@ function runDataHealer(db) {
       });
 
       // 5. Process payments
-      // Skip: Advance allocations, System Auto offsets, and Opening Advance
-      // (Opening Advance is already counted via customer.openingBalance above)
       payments.forEach(p => {
-        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto' || p.method === 'Opening Advance') return;
+        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
         balance -= parseFloat(p.amount || 0); // payment credit
       });
 
@@ -1585,6 +1586,17 @@ function getNextPaymentReference(db, paymentType) {
   }
 }
 
+function getLocalISOString() {
+  const now = new Date();
+  const offsetMs = -now.getTimezoneOffset() * 60000;
+  const offsetSign = offsetMs >= 0 ? '+' : '-';
+  const absOffset = Math.abs(now.getTimezoneOffset());
+  const offsetH = String(Math.floor(absOffset / 60)).padStart(2, '0');
+  const offsetM = String(absOffset % 60).padStart(2, '0');
+  const local = new Date(now.getTime() + offsetMs);
+  return local.toISOString().replace('Z', `${offsetSign}${offsetH}:${offsetM}`);
+}
+
 function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'refund', refundMethod = 'CASH' }) {
   if (!db) throw new Error('Database not initialized');
 
@@ -1594,7 +1606,7 @@ function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'ref
     if (!order) throw new Error(`Order ${orderId} not found`);
     if (order.status === 'Deleted') throw new Error(`Order ${orderId} is already deleted`);
 
-    const now = new Date().toISOString();
+    const now = getLocalISOString();
     const shopId = order.shopId || 'SHOP_01';
     const customerId = order.customerId || '';
     const billNumber = order.billNumber || '';
