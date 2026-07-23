@@ -336,17 +336,21 @@ export default function CustomerStatement() {
             });
           }
           if (o.refundStatus === 'Converted to Advance' && (o.paidAmount || 0) > 0) {
-            rows.push({
-              date: o.updatedAt || o.createdAt,
-              type: 'payment',
-              ref: `ADV-CONV-${o.id}`,
-              description: 'Converted to Advance',
-              itemsSummary: `Advance from Deleted Order ${cleanRef}`,
-              debit: 0,
-              credit: o.paidAmount,
-              status: 'SUCCESS',
-              dueAmount: 0
-            });
+            // Check if this advance conversion is already recorded in the payments table to prevent duplicate display
+            const existsInPayments = payments.some(p => p.method === 'Refund Advance' && (p.id === `ADV-CONV-${o.id}` || p.paymentReference === `ADV-CONV-${o.id}` || Math.abs((p.amount || 0) - o.paidAmount) < 0.01));
+            if (!existsInPayments) {
+              rows.push({
+                date: o.updatedAt || o.createdAt,
+                type: 'payment',
+                ref: `ADV-CONV-${o.id}`,
+                description: 'Converted to Advance',
+                itemsSummary: `Advance from Deleted Order ${cleanRef}`,
+                debit: 0,
+                credit: o.paidAmount,
+                status: 'SUCCESS',
+                dueAmount: 0
+              });
+            }
           }
         }
       } else {
