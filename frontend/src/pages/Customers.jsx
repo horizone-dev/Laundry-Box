@@ -1511,10 +1511,10 @@ export default function Customers() {
         const advanceUsed = advStats.totalUsed;
         
         const availableAdvance = Math.max(0, totalAdvanceReceived - advanceUsed);
-        const dynamicBalance = (activeCustomer.openingBalance > 0 ? activeCustomer.openingBalance : 0) +
-          bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.dueAmount || 0), 0) -
-          availableAdvance;
-        const pendingDue = dynamicBalance > 0 ? dynamicBalance : 0;
+        const totalGrossDue = (activeCustomer.openingBalance > 0 ? activeCustomer.openingBalance : 0) +
+          bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.dueAmount || 0), 0);
+        const dynamicBalance = totalGrossDue - availableAdvance;
+        const pendingDue = Math.max(0, dynamicBalance);
 
         setSelectedCustomerStats({
           totalSales,
