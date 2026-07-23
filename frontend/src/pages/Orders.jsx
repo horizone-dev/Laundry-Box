@@ -240,6 +240,7 @@ export default function Orders() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteOption, setDeleteOption] = useState('refund'); // 'refund' or 'advance'
   const [refundMethod, setRefundMethod] = useState('Cash');
+  const [deleteReason, setDeleteReason] = useState('');
 
   // Credit Limit Protection states
   const [showCreditWarning, setShowCreditWarning] = useState(false);
@@ -522,6 +523,7 @@ export default function Orders() {
             FROM orders 
             LEFT JOIN customers ON orders.customerId = customers.id
             LEFT JOIN payment_links ON orders.nomodCheckoutId = payment_links.checkoutId
+            WHERE orders.status != 'Deleted'
 
             UNION ALL
 
@@ -703,146 +705,26 @@ export default function Orders() {
       const refundImmediately = deleteOption === 'refund';
       let linkedPayments = [];
 
-      // A. Delete locally from SQLite (if electron app)
-      if (window.electronAPI?.dbQuery) {
-        // 1. Before deleting payments, query linked payment details so we can save them in audit log
-        //    and use them to remove corresponding account_transactions
-        const linkedPaymentsRes = await window.electronAPI.dbQuery(
-          'SELECT id, amount, createdAt, method FROM payments WHERE orderId = ?',
-          [orderToDelete.id]
-        );
-        linkedPayments = linkedPaymentsRes.success ? linkedPaymentsRes.data : [];
+      // A. Perform ERP Soft Delete Transaction in SQLite
+      if (window.electronAPI?.softDeleteOrder) {
+        const softRes = await window.electronAPI.softDeleteOrder({
+          orderId: orderToDelete.id,
+          deletedBy: currentLoggedInUser,
+          deleteReason: deleteReason || `Deleted by ${pinOwner}`,
+          deleteAction: deleteOption, // 'refund' or 'advance'
+          refundMethod: refundMethod
+        });
 
-        const allocationsRes = await window.electronAPI.dbQuery(
-          'SELECT paymentId, amountUsed FROM advance_allocations WHERE orderId = ?',
-          [orderToDelete.id]
-        );
-        const allocationsUsed = allocationsRes.success ? allocationsRes.data : [];
-
-        const totalPaidFromPayments = linkedPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-        const actualPaidAmt = Math.max(
-          parseFloat(orderToDelete.paidAmount) || 0,
-          (parseFloat(orderToDelete.totalAmount) || 0) - (parseFloat(orderToDelete.dueAmount) ?? parseFloat(orderToDelete.totalAmount)),
-          totalPaidFromPayments
-        );
-
-        // 2. Insert into deleted_orders audit log
-        const isPaid = actualPaidAmt > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus);
-        const initialReturnStatus = isPaid
-          ? (refundImmediately ? 'Returned' : 'Converted to Advance')
-          : 'N/A';
-        const initialRefundStatus = isPaid
-          ? (refundImmediately ? 'Returned' : 'Converted to Advance')
-          : 'Deleted';
-        const refundMethodVal = isPaid && refundImmediately ? refundMethod : null;
-        const returnedAtVal = isPaid && refundImmediately ? getLocalISOString() : null;
-
-        await window.electronAPI.dbQuery(
-          `INSERT OR REPLACE INTO deleted_orders (id, shopId, billNumber, customerId, customerName, customerPhone, totalAmount, items, createdAt, deletedAt, deletedBy, originalPaymentStatus, paidAmount, returnStatus, approvedBy, originalPaymentMethod, payments, refundMethod, returnedAt, refundStatus) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            orderToDelete.id,
-            orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
-            orderToDelete.billNumber || '',
-            orderToDelete.customerId || '',
-            orderToDelete.customerName || '',
-            orderToDelete.customerPhone || orderToDelete.phone || '',
-            orderToDelete.totalAmount || 0,
-            typeof orderToDelete.items === 'string' ? orderToDelete.items : JSON.stringify(orderToDelete.items || []),
-            orderToDelete.createdAt || getLocalISOString(),
-            getLocalISOString(),
-            currentLoggedInUser,
-            orderToDelete.paymentStatus || 'Pending',
-            actualPaidAmt,
-            initialReturnStatus,
-            pinOwner,
-            orderToDelete.paymentMethod || 'CASH',
-            JSON.stringify(linkedPayments),
-            refundMethodVal,
-            returnedAtVal,
-            initialRefundStatus
-          ]
-        );
-
-        // 3. Delete associated payments
-        await window.electronAPI.dbQuery('DELETE FROM payments WHERE orderId = ?', [orderToDelete.id]);
-
-        // 4. Delete the order itself
-        await window.electronAPI.dbQuery('DELETE FROM orders WHERE id = ?', [orderToDelete.id]);
-
-        // 4b. If refunding immediately, delete or reduce allocated payments so they don't become available advance
-        if (refundImmediately) {
-          for (const alloc of allocationsUsed) {
-            const payRes = await window.electronAPI.dbQuery('SELECT amount FROM payments WHERE id = ?', [alloc.paymentId]);
-            if (payRes.success && payRes.data.length > 0) {
-              const currentAmt = payRes.data[0].amount || 0;
-              const newAmt = Math.max(0, currentAmt - alloc.amountUsed);
-              if (newAmt <= 0.01) {
-                await window.electronAPI.dbQuery('DELETE FROM payments WHERE id = ?', [alloc.paymentId]);
-              } else {
-                await window.electronAPI.dbQuery('UPDATE payments SET amount = ?, isSynced = 0, updatedAt = ? WHERE id = ?', [newAmt, getLocalISOString(), alloc.paymentId]);
-              }
-            }
-          }
+        if (!softRes.success) {
+          throw new Error(softRes.error || 'Failed to soft delete order');
         }
 
-        // 4c. Delete advance allocations associated with this order
-        await window.electronAPI.dbQuery('DELETE FROM advance_allocations WHERE orderId = ?', [orderToDelete.id]);
-
-        // 5. Process refund or convert to advance
-        if (isPaid && actualPaidAmt > 0) {
-          const allocSum = allocationsUsed.reduce((sum, a) => sum + (parseFloat(a.amountUsed) || 0), 0);
-          const cashPaidAmt = Math.max(0, actualPaidAmt - allocSum);
-
-          if (refundImmediately) {
-            if (cashPaidAmt > 0) {
-              const refundTxnId = `TXN-RETURN-${Date.now()}`;
-              const _now1 = new Date();
-              const txnTimestamp = `${_now1.getFullYear()}-${String(_now1.getMonth() + 1).padStart(2, '0')}-${String(_now1.getDate()).padStart(2, '0')} ${String(_now1.getHours()).padStart(2, '0')}:${String(_now1.getMinutes()).padStart(2, '0')}`;
-              
-              const creatorName = userSession.name || userSession.username || 'System';
-              const creatorId = userSession.id || 'SYSTEM';
-              const creatorRole = userSession.role || 'system';
-
-              await window.electronAPI.dbQuery(
-                `INSERT INTO account_transactions 
-                 (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [
-                  refundTxnId,
-                  orderToDelete.shopId || DEFAULT_SHOP_ID || 'SHOP_01',
-                  refundMethod === 'Bank' ? 'BANK' : 'CASH',
-                  'EXPENSE',
-                  'Return',
-                  cashPaidAmt,
-                  `Return - Order ${orderToDelete.id.startsWith('#') ? '' : '#'}${orderToDelete.id}`,
-                  txnTimestamp,
-                  0,
-                  getLocalISOString(),
-                  'Zap',
-                  refundMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null,
-                  creatorName || null,
-                  creatorId || null,
-                  creatorRole || null
-                ]
-              );
-            }
-          } else if (orderToDelete.customerId && orderToDelete.customerId !== 'Walk-in') {
-            // No refund immediately: Convert ONLY the cash portion to unlinked Available Advance.
-            if (cashPaidAmt > 0) {
-              const newAdvRef = await window.electronAPI.getNextPaymentReference('ADV');
-              const newAdvId = `ADV-CONV-${Date.now()}`;
-              await window.electronAPI.dbQuery(
-                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
-                 VALUES (?, ?, NULL, ?, ?, 'Refund Advance', 'SUCCESS', ?, 0, ?, ?)`,
-                [newAdvId, orderToDelete.customerId || null, orderToDelete.shopId || DEFAULT_SHOP_ID || null, cashPaidAmt, getLocalISOString(), getLocalISOString(), newAdvRef || null]
-              );
-            }
-          }
-        }
-
-        // 6. Run data healer to reconcile any remaining inconsistencies
         await window.electronAPI.runDataHealer();
+      } else if (window.electronAPI?.dbQuery) {
+        // Fallback for dbQuery
+        await window.electronAPI.dbQuery('UPDATE orders SET status = "Deleted", deletedAt = ?, deletedBy = ?, deleteReason = ? WHERE id = ?', [
+          getLocalISOString(), currentLoggedInUser, deleteReason || `Deleted by ${pinOwner}`, orderToDelete.id
+        ]);
       }
 
       // B. Delete remotely from Cloud (Background invocation - non-blocking)
@@ -864,11 +746,11 @@ export default function Orders() {
       setSelectedOrder(null);
       setShowPinModal(false);
       setPinValue('');
-      alert(`Order ${orderToDelete.id} and all its associated payments/transactions deleted successfully (authorized by ${pinOwner}).`);
+      alert(`Order ${orderToDelete.id} soft deleted and ERP ledgers updated successfully (authorized by ${pinOwner}).`);
       window.location.reload();
     } catch (err) {
       console.error('Failed to delete order:', err);
-      setPinError('An error occurred during deletion');
+      setPinError('An error occurred during deletion: ' + (err.message || ''));
     } finally {
       setIsDeleting(false);
     }
@@ -962,7 +844,7 @@ export default function Orders() {
     iframe.style.width = '100px';
     iframe.style.height = '100px';
     iframe.style.border = 'none';
-    
+
     const targetSrc = `${window.location.origin}${window.location.pathname}#/invoice/${cleanId}?download=force&t=${Date.now()}`;
     console.log("Appending iframe with src:", targetSrc);
     iframe.src = targetSrc;
@@ -1011,7 +893,7 @@ export default function Orders() {
       if (payMethod === 'Nomod' && !isOverridden) {
         let linkId = `LNK-${Date.now().toString().slice(-4)}`;
         let checkoutUrl = '';
-        
+
         // 1. Duplicate protection check: reuse active link if exists
         if (window.electronAPI?.dbQuery) {
           try {
@@ -1166,15 +1048,15 @@ export default function Orders() {
                (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
               [
-                splitTxnId, 
-                DEFAULT_SHOP_ID, 
-                'CASH', 
-                'EXPENSE', 
-                'Discount Given', 
-                split.amount, 
-                `Discount for Order ${selectedOrder.id}`, 
-                txnTimestamp, 
-                getLocalISOString(), 
+                splitTxnId,
+                DEFAULT_SHOP_ID,
+                'CASH',
+                'EXPENSE',
+                'Discount Given',
+                split.amount,
+                `Discount for Order ${selectedOrder.id}`,
+                txnTimestamp,
+                getLocalISOString(),
                 'DollarSign',
                 null,
                 creatorName,
@@ -1192,16 +1074,16 @@ export default function Orders() {
                (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
               [
-                splitTxnId, 
-                DEFAULT_SHOP_ID, 
-                accountType, 
-                'INCOME', 
-                'Sales Settlement', 
-                split.amount, 
-                `Payment for Order ${selectedOrder.id}${split.method === 'Card' ? ' (Card)' : (split.method === 'UPI' ? ' (UPI)' : '')}`, 
-                txnTimestamp, 
-                getLocalISOString(), 
-                'DollarSign', 
+                splitTxnId,
+                DEFAULT_SHOP_ID,
+                accountType,
+                'INCOME',
+                'Sales Settlement',
+                split.amount,
+                `Payment for Order ${selectedOrder.id}${split.method === 'Card' ? ' (Card)' : (split.method === 'UPI' ? ' (UPI)' : '')}`,
+                txnTimestamp,
+                getLocalISOString(),
+                'DollarSign',
                 mappedBankId,
                 creatorName,
                 creatorId,
@@ -1218,16 +1100,16 @@ export default function Orders() {
                  (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
                 [
-                  commTxnId, 
-                  DEFAULT_SHOP_ID, 
-                  'BANK', 
-                  'EXPENSE', 
-                  'Card Commission', 
-                  commissionAmount, 
-                  `Card Commission for Order ${selectedOrder.id}`, 
-                  txnTimestamp, 
-                  getLocalISOString(), 
-                  'Percent', 
+                  commTxnId,
+                  DEFAULT_SHOP_ID,
+                  'BANK',
+                  'EXPENSE',
+                  'Card Commission',
+                  commissionAmount,
+                  `Card Commission for Order ${selectedOrder.id}`,
+                  txnTimestamp,
+                  getLocalISOString(),
+                  'Percent',
                   mappedBankId,
                   creatorName,
                   creatorId,
@@ -1524,75 +1406,75 @@ export default function Orders() {
 
       {showFilters && (
         <div className={styles.subFilterRow}>
-            {settings.workflowEnabled && (
-              <>
-                <Filter size={16} color="#64748B" />
-                <button
-                  className={`${styles.filterTab} ${workflowFilter === 'All' ? styles.filterTabActive : ''}`}
-                  onClick={() => setWorkflowFilter('All')}
-                >
-                  {t('all', settings.language)} ({workflowCounts.All})
-                </button>
-                <button
-                  className={`${styles.filterTab} ${workflowFilter === 'Confirmed' ? styles.filterTabActive : ''}`}
-                  onClick={() => setWorkflowFilter('Confirmed')}
-                >
-                  {t('confirmed', settings.language)} ({workflowCounts.Confirmed})
-                </button>
-                <button
-                  className={`${styles.filterTab} ${workflowFilter === 'Processing' ? styles.filterTabActive : ''}`}
-                  onClick={() => setWorkflowFilter('Processing')}
-                >
-                  {t('processing', settings.language)} ({workflowCounts.Processing})
-                </button>
-                <button
-                  className={`${styles.filterTab} ${workflowFilter === 'Ready' ? styles.filterTabActive : ''}`}
-                  onClick={() => setWorkflowFilter('Ready')}
-                >
-                  {t('ready', settings.language)} ({workflowCounts.Ready})
-                </button>
-                <button
-                  className={`${styles.filterTab} ${workflowFilter === 'Delivered' ? styles.filterTabActive : ''}`}
-                  onClick={() => setWorkflowFilter('Delivered')}
-                >
-                  {t('delivered', settings.language)} ({workflowCounts.Delivered})
-                </button>
-              </>
-            )}
+          {settings.workflowEnabled && (
+            <>
+              <Filter size={16} color="#64748B" />
+              <button
+                className={`${styles.filterTab} ${workflowFilter === 'All' ? styles.filterTabActive : ''}`}
+                onClick={() => setWorkflowFilter('All')}
+              >
+                {t('all', settings.language)} ({workflowCounts.All})
+              </button>
+              <button
+                className={`${styles.filterTab} ${workflowFilter === 'Confirmed' ? styles.filterTabActive : ''}`}
+                onClick={() => setWorkflowFilter('Confirmed')}
+              >
+                {t('confirmed', settings.language)} ({workflowCounts.Confirmed})
+              </button>
+              <button
+                className={`${styles.filterTab} ${workflowFilter === 'Processing' ? styles.filterTabActive : ''}`}
+                onClick={() => setWorkflowFilter('Processing')}
+              >
+                {t('processing', settings.language)} ({workflowCounts.Processing})
+              </button>
+              <button
+                className={`${styles.filterTab} ${workflowFilter === 'Ready' ? styles.filterTabActive : ''}`}
+                onClick={() => setWorkflowFilter('Ready')}
+              >
+                {t('ready', settings.language)} ({workflowCounts.Ready})
+              </button>
+              <button
+                className={`${styles.filterTab} ${workflowFilter === 'Delivered' ? styles.filterTabActive : ''}`}
+                onClick={() => setWorkflowFilter('Delivered')}
+              >
+                {t('delivered', settings.language)} ({workflowCounts.Delivered})
+              </button>
+            </>
+          )}
 
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Calendar size={16} color="#64748B" />
-              <CustomSelect
-                value={dateRange}
-                onChange={(e) => setDateRange(e.target.value)}
-                options={[
-                  { value: 'All', label: 'All Time' },
-                  { value: 'Today', label: 'Today' },
-                  { value: 'This Month', label: 'This Month' },
-                  { value: 'This Year', label: 'This Year' },
-                  { value: 'Custom', label: 'Custom Range' }
-                ]}
-                style={{ width: '150px' }}
-              />
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Calendar size={16} color="#64748B" />
+            <CustomSelect
+              value={dateRange}
+              onChange={(e) => setDateRange(e.target.value)}
+              options={[
+                { value: 'All', label: 'All Time' },
+                { value: 'Today', label: 'Today' },
+                { value: 'This Month', label: 'This Month' },
+                { value: 'This Year', label: 'This Year' },
+                { value: 'Custom', label: 'Custom Range' }
+              ]}
+              style={{ width: '150px' }}
+            />
 
-              {dateRange === 'Custom' && (
+            {dateRange === 'Custom' && (
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <input 
-                  type="date" 
+                <input
+                  type="date"
                   value={customStart}
                   onChange={(e) => setCustomStart(e.target.value)}
                   className="premium-date-input"
                 />
                 <span className="premium-range-divider">to</span>
-                <input 
-                  type="date" 
+                <input
+                  type="date"
                   value={customEnd}
                   onChange={(e) => setCustomEnd(e.target.value)}
                   className="premium-date-input"
                 />
               </div>
             )}
-            </div>
+          </div>
         </div>
       )}
 
@@ -1601,129 +1483,129 @@ export default function Orders() {
       <div className={styles.tableCard}>
         <table className={styles.ordersTable}>
 
-            <thead>
+          <thead>
+            <tr>
+              <th>{t('orderId', settings.language)}</th>
+              <th>{settings.language === 'Arabic' ? 'التاريخ والوقت' : 'DATE & TIME'}</th>
+              <th>{t('customer', settings.language)}</th>
+              <th>{t('whatsapp', settings.language)}</th>
+              <th>{t('totalAmount', settings.language)}</th>
+              <th>{t('paymentMethodLabel', settings.language)}</th>
+              <th>{t('actions', settings.language) || 'Actions'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
               <tr>
-                <th>{t('orderId', settings.language)}</th>
-                <th>{settings.language === 'Arabic' ? 'التاريخ والوقت' : 'DATE & TIME'}</th>
-                <th>{t('customer', settings.language)}</th>
-                <th>{t('whatsapp', settings.language)}</th>
-                <th>{t('totalAmount', settings.language)}</th>
-                <th>{t('paymentMethodLabel', settings.language)}</th>
-                <th>{t('actions', settings.language) || 'Actions'}</th>
+                <td colSpan="8" style={{ textAlign: 'center', padding: '2rem' }}>
+                  {t('loading', settings.language)}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="8" style={{ textAlign: 'center', padding: '2rem' }}>
-                    {t('loading', settings.language)}
+            ) : paginatedOrders.length > 0 ? (
+              paginatedOrders.map((order) => (
+                <tr key={order.id || order._id} className={styles.orderRow} onClick={() => {
+                  setSelectedOrder(order);
+                  setShowStatusModal(true);
+                }}>
+                  <td style={{ verticalAlign: 'middle' }}>
+                    <span className={styles.idText}>{settings.invoicePrefix || ''}{order.id}</span>
                   </td>
-                </tr>
-              ) : paginatedOrders.length > 0 ? (
-                paginatedOrders.map((order) => (
-                  <tr key={order.id || order._id} className={styles.orderRow} onClick={() => {
-                    setSelectedOrder(order);
-                    setShowStatusModal(true);
-                  }}>
-                    <td style={{ verticalAlign: 'middle' }}>
-                      <span className={styles.idText}>{settings.invoicePrefix || ''}{order.id}</span>
-                    </td>
-                    <td className={styles.dateText}>{formatDateTime(order.createdAt)}</td>
-                    <td>
-                      <div className={styles.custCell}>
-                        <span className={styles.custName}>
-                          {order.customerName || (order.customerId === 'Walk-in' ? t('walkInCustomer', settings.language) : order.customerId)}
+                  <td className={styles.dateText}>{formatDateTime(order.createdAt)}</td>
+                  <td>
+                    <div className={styles.custCell}>
+                      <span className={styles.custName}>
+                        {order.customerName || (order.customerId === 'Walk-in' ? t('walkInCustomer', settings.language) : order.customerId)}
+                      </span>
+                      <div className={styles.custPhoneRow}>
+                        <span className={styles.custPhone}>
+                          {order.customerPhone || order.phone || t('noPhone', settings.language)}
                         </span>
-                        <div className={styles.custPhoneRow}>
-                          <span className={styles.custPhone}>
-                            {order.customerPhone || order.phone || t('noPhone', settings.language)}
-                          </span>
-                        </div>
                       </div>
-                    </td>
-                    <td>
-                      {(order.customerPhone || order.phone) ? (
-                        <button
-                          className={styles.tableWaBtn}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleWhatsApp(order.customerPhone || order.phone, order.id);
-                          }}
-                          title={t('whatsapp', settings.language)}
-                        >
-                          <WhatsAppIcon size={16} />
-                        </button>
-                      ) : (
-                        <span className={styles.noWaText}>-</span>
-                      )}
-                    </td>
-                    <td className={styles.amountText}>{order.totalAmount?.toFixed(2)}</td>
-                    <td>
-                      {order.paymentStatus === 'Paid' || order.paymentStatus === 'Partial' ? (
-                        order.paymentMethod ? (
-                          <span className={
-                            order.paymentMethod === 'Cash' ? styles.methodCash :
-                              order.paymentMethod === 'Bank' ? styles.methodOther :
-                                order.paymentMethod === 'Multipayment' ? styles.methodOther :
-                                  order.paymentMethod === 'Advance' ? styles.methodAdvance || styles.methodOther :
-                                    styles.methodOther
-                          } style={order.paymentMethod === 'Advance' && !styles.methodAdvance ? { background: '#E0E7FF', color: '#4338CA', padding: '0.25rem 0.6rem', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '600' } : {}}>
-                            {getPaymentMethodTranslation(order.paymentMethod)}
-                          </span>
-                        ) : (
-                          <span style={{ color: '#94A3B8' }}>-</span>
-                        )
-                      ) : (
-                        <span className={styles.methodCredit}>
-                          {t('notPaid', settings.language)}
+                    </div>
+                  </td>
+                  <td>
+                    {(order.customerPhone || order.phone) ? (
+                      <button
+                        className={styles.tableWaBtn}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleWhatsApp(order.customerPhone || order.phone, order.id);
+                        }}
+                        title={t('whatsapp', settings.language)}
+                      >
+                        <WhatsAppIcon size={16} />
+                      </button>
+                    ) : (
+                      <span className={styles.noWaText}>-</span>
+                    )}
+                  </td>
+                  <td className={styles.amountText}>{order.totalAmount?.toFixed(2)}</td>
+                  <td>
+                    {order.paymentStatus === 'Paid' || order.paymentStatus === 'Partial' ? (
+                      order.paymentMethod ? (
+                        <span className={
+                          order.paymentMethod === 'Cash' ? styles.methodCash :
+                            order.paymentMethod === 'Bank' ? styles.methodOther :
+                              order.paymentMethod === 'Multipayment' ? styles.methodOther :
+                                order.paymentMethod === 'Advance' ? styles.methodAdvance || styles.methodOther :
+                                  styles.methodOther
+                        } style={order.paymentMethod === 'Advance' && !styles.methodAdvance ? { background: '#E0E7FF', color: '#4338CA', padding: '0.25rem 0.6rem', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '600' } : {}}>
+                          {getPaymentMethodTranslation(order.paymentMethod)}
                         </span>
-                      )}
-                    </td>
-                    <td>
-                      {order.isDeleted ? (
-                        <span className={styles.statusBadge} style={{ background: '#F1F5F9', color: '#475569', border: '1px solid #CBD5E1', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 600, fontSize: '0.75rem' }}>
-                          Deleted
-                        </span>
-                      ) : order.status === 'Delivered' ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                          <span style={{ fontSize: '0.75rem', color: '#10B981', fontWeight: 700 }}>DELIVERED</span>
-                          <span style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 500 }}>
-                            {(() => {
-                              try {
-                                const history = typeof order.statusHistory === 'string'
-                                  ? JSON.parse(order.statusHistory || '[]')
-                                  : (order.statusHistory || []);
-                                const delEntry = history.find(h => h.status === 'Delivered');
-                                if (delEntry && delEntry.timestamp) return formatDateTime(delEntry.timestamp);
-                              } catch (e) {}
-                              return formatDateTime(order.updatedAt);
-                            })()}
-                          </span>
-                        </div>
                       ) : (
-                        <button
-                          className={styles.deliverBtn}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleUpdateStatus('Delivered', order);
-                          }}
-                          style={{ margin: 0 }}
-                        >
-                          <Truck size={12} /> {t('deliver', settings.language)}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="8" style={{ textAlign: 'center', padding: '2rem' }}>
-                    {t('noOrdersFound', settings.language)}
+                        <span style={{ color: '#94A3B8' }}>-</span>
+                      )
+                    ) : (
+                      <span className={styles.methodCredit}>
+                        {t('notPaid', settings.language)}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {order.isDeleted ? (
+                      <span className={styles.statusBadge} style={{ background: '#F1F5F9', color: '#475569', border: '1px solid #CBD5E1', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 600, fontSize: '0.75rem' }}>
+                        Deleted
+                      </span>
+                    ) : order.status === 'Delivered' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#10B981', fontWeight: 700 }}>DELIVERED</span>
+                        <span style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 500 }}>
+                          {(() => {
+                            try {
+                              const history = typeof order.statusHistory === 'string'
+                                ? JSON.parse(order.statusHistory || '[]')
+                                : (order.statusHistory || []);
+                              const delEntry = history.find(h => h.status === 'Delivered');
+                              if (delEntry && delEntry.timestamp) return formatDateTime(delEntry.timestamp);
+                            } catch (e) { }
+                            return formatDateTime(order.updatedAt);
+                          })()}
+                        </span>
+                      </div>
+                    ) : (
+                      <button
+                        className={styles.deliverBtn}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUpdateStatus('Delivered', order);
+                        }}
+                        style={{ margin: 0 }}
+                      >
+                        <Truck size={12} /> {t('deliver', settings.language)}
+                      </button>
+                    )}
                   </td>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              ))
+            ) : (
+              <tr>
+                <td colSpan="8" style={{ textAlign: 'center', padding: '2rem' }}>
+                  {t('noOrdersFound', settings.language)}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
 
         {!loading && (
           <Pagination
@@ -1943,7 +1825,7 @@ export default function Orders() {
 
                       const itemsTotal = items.reduce((sum, item) => sum + ((parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0)), 0);
                       const taxRate = settings.isTaxEnabled ? (parseFloat(settings.taxRate || 0) / 100) : 0;
-                      
+
                       let computedSubtotal = 0;
                       let computedTax = 0;
                       let computedTotal = selectedOrder.totalAmount || 0;
@@ -1962,7 +1844,7 @@ export default function Orders() {
                         computedTax = 0;
                         computedDiscount = itemsTotal - computedTotal;
                       }
-                      
+
                       if (computedDiscount < 0.01) computedDiscount = 0;
 
                       return (
@@ -2067,10 +1949,10 @@ export default function Orders() {
                             {selectedOrder.nomodPaymentLink && selectedOrder.nomodPaymentStatus === 'Pending' && (
                               <div className={styles.nomodRow}>
                                 <span className={styles.nomodLabel}>Checkout:</span>
-                                <a 
-                                  href={selectedOrder.nomodPaymentLink} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer" 
+                                <a
+                                  href={selectedOrder.nomodPaymentLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
                                   className={styles.nomodLink}
                                 >
                                   Open Checkout <ExternalLink size={12} />
@@ -2166,6 +2048,7 @@ export default function Orders() {
                     onClick={() => {
                       setOrderToDelete(selectedOrder);
                       setDeleteOption('refund');
+                      setDeleteReason('');
                       setShowPinModal(true);
                     }}
                   >
@@ -2315,7 +2198,7 @@ export default function Orders() {
               {orderToDelete && (orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus)) ? (
                 <div style={{ margin: '1rem 0', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: '#F8FAFC', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
                   <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Choose Action for Payment (<CurrencySymbol size={11} />{(orderToDelete.paidAmount || 0).toFixed(2)}):</span>
-                  
+
                   {/* Option 1: Refund */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
@@ -2516,7 +2399,7 @@ export default function Orders() {
               <h2>Nomod Payment Link</h2>
               <X size={24} className={styles.closeBtn} onClick={() => setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 })} />
             </div>
-            
+
             <div className={styles.modalBody} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ background: '#F8FAFC', padding: '1rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
                 <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>PAYMENT AMOUNT</span>
@@ -2527,7 +2410,7 @@ export default function Orders() {
 
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
                 <div style={{ padding: '10px', background: 'white', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-                  <QRCodeCanvas 
+                  <QRCodeCanvas
                     id="nomod-order-qr-canvas"
                     value={nomodLinkModal.url}
                     size={160}
@@ -2710,17 +2593,17 @@ export default function Orders() {
                         nomodLinkModal.linkId
                       ]
                     );
-                    
+
                     await window.electronAPI.dbQuery(
                       `UPDATE orders SET nomodCheckoutId = ?, nomodPaymentLink = ?, nomodPaymentStatus = 'Pending', isSynced = 0, updatedAt = ? 
                        WHERE id = ?`,
                       [nomodLinkModal.linkId, nomodLinkModal.url, getLocalISOString(), selectedOrder.id]
                     );
                   }
-                  
+
                   setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 });
                   alert("Nomod payment link saved successfully. The system will verify status automatically in the background.");
-                  
+
                   paymentService.startTracking(selectedOrder.id, nomodLinkModal.linkId);
                   fetchOrders();
                 }}

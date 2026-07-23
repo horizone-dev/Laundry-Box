@@ -493,8 +493,9 @@
 .ledgerRow:hover { background: #F8FAFC; }
 .ledgerRow:last-child { border-bottom: none; }
 
-.paymentRow { background: rgba(16, 185, 129, 0.02); }
-.orderRow   { background: white; }
+.paymentRow  { background: rgba(16, 185, 129, 0.02); }
+.orderRow    { background: white; }
+.openingRow  { background: rgba(124, 58, 237, 0.05); border-left: 3px solid #7C3AED; font-style: italic; }
 
 .ledgerTable td {
   padding: 1rem;

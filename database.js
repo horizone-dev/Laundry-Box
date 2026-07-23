@@ -400,6 +400,56 @@ function initDB(appPath) {
       reason TEXT,
       retryCount INTEGER DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS customer_ledger (
+      id TEXT PRIMARY KEY,
+      shopId TEXT,
+      customerId TEXT,
+      orderId TEXT,
+      transactionType TEXT, -- INVOICE, PAYMENT, SALES_RETURN, ADVANCE_CREDIT, REFUND
+      debit REAL DEFAULT 0,
+      credit REAL DEFAULT 0,
+      balance REAL DEFAULT 0,
+      description TEXT,
+      createdAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS cash_ledger (
+      id TEXT PRIMARY KEY,
+      shopId TEXT,
+      branchId TEXT,
+      orderId TEXT,
+      paymentId TEXT,
+      refundId TEXT,
+      type TEXT, -- IN / OUT
+      paymentMethod TEXT, -- CASH, CARD, BANK_TRANSFER
+      amount REAL DEFAULT 0,
+      description TEXT,
+      createdAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS refunds (
+      id TEXT PRIMARY KEY,
+      shopId TEXT,
+      orderId TEXT,
+      customerId TEXT,
+      amount REAL DEFAULT 0,
+      refundMethod TEXT, -- CASH, CARD, BANK, WALLET
+      reason TEXT,
+      createdBy TEXT,
+      createdAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS sales_returns (
+      id TEXT PRIMARY KEY,
+      shopId TEXT,
+      orderId TEXT,
+      customerId TEXT,
+      returnAmount REAL DEFAULT 0,
+      reason TEXT,
+      createdBy TEXT,
+      createdAt TEXT
+    );
   `);
 
 
@@ -459,6 +509,21 @@ function initDB(appPath) {
   } catch (e) { /* already exists */ }
   try {
     db.exec(`ALTER TABLE customers ADD COLUMN openingBalance REAL DEFAULT 0;`);
+  } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE customers ADD COLUMN advanceBalance REAL DEFAULT 0;`);
+  } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE orders ADD COLUMN deletedAt TEXT;`);
+  } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE orders ADD COLUMN deletedBy TEXT;`);
+  } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE orders ADD COLUMN deleteReason TEXT;`);
+  } catch (e) { /* already exists */ }
+  try {
+    db.exec(`ALTER TABLE orders ADD COLUMN deletedAction TEXT;`);
   } catch (e) { /* already exists */ }
   try {
     db.exec(`ALTER TABLE orders ADD COLUMN paymentBreakdown TEXT;`);
@@ -547,9 +612,6 @@ function initDB(appPath) {
     
     db.prepare("INSERT OR IGNORE INTO shops (shopId, name, isActivated, settings) VALUES (?, ?, ?, ?)").run('SHOP_01', 'Laundry Box', 1, defaultSettings);
     db.exec("UPDATE shops SET name = 'Laundry Box' WHERE name = 'ABC Laundry' OR name = 'Laundry Management System';");
-
-    // Force activation for now as requested "manualy set"
-    db.exec("UPDATE shops SET isActivated = 1 WHERE isActivated = 0;");
 
     const custCols = db.prepare("PRAGMA table_info(customers)").all();
     if (!custCols.some(col => col.name === 'creditLimit')) {
@@ -915,62 +977,96 @@ function runDataHealer(db) {
       }
     }
 
-    // Recalculate customer balances from actual orders and payments before smart advance/unapplied payments logic
-    // Formula: balance = active_orders_due - available_advance - (deleted_orders pending refund)
-    //   available_advance = unlinked_payments - allocations_already_used
-    //   deleted_orders pending refund: only those WITH paidAmount > 0 (i.e. customer actually paid for them)
-    //   When refundStatus changes from 'Refund Pending' to 'Returned', that subtraction goes away — no manual update needed.
-    db.exec(`UPDATE customers SET balance = (
-              IFNULL(CASE WHEN openingBalance > 0 THEN openingBalance ELSE 0 END, 0) +
-              (
-                SELECT IFNULL(SUM(dueAmount), 0) 
-                FROM orders 
-                WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-              ) - MAX(0, (
-                IFNULL((
-                  SELECT SUM(amount) 
-                  FROM payments 
-                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '') AND method NOT IN ('System Auto', 'Discount')
-                ), 0) - IFNULL((
-                  SELECT SUM(a.amountUsed)
-                  FROM advance_allocations a
-                  JOIN orders o ON a.orderId = o.id
-                  JOIN payments p ON a.paymentId = p.id
-                  WHERE p.customerId = customers.id AND o.status != 'Cancelled'
-                ), 0)
-              )) - IFNULL((
-                SELECT SUM(paidAmount)
-                FROM deleted_orders
-                WHERE deleted_orders.customerId = customers.id
-                  AND deleted_orders.refundStatus = 'Refund Pending'
-                  AND deleted_orders.paidAmount > 0
-              ), 0) ), isSynced = 0, updatedAt = '${timestamp}'
-            WHERE ABS(balance - (
-              IFNULL(CASE WHEN openingBalance > 0 THEN openingBalance ELSE 0 END, 0) +
-              (
-                SELECT IFNULL(SUM(dueAmount), 0) 
-                FROM orders 
-                WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-              ) - MAX(0, (
-                IFNULL((
-                  SELECT SUM(amount) 
-                  FROM payments 
-                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '') AND method NOT IN ('System Auto', 'Discount')
-                ), 0) - IFNULL((
-                  SELECT SUM(a.amountUsed)
-                  FROM advance_allocations a
-                  JOIN orders o ON a.orderId = o.id
-                  JOIN payments p ON a.paymentId = p.id
-                  WHERE p.customerId = customers.id AND o.status != 'Cancelled'
-                ), 0)
-              )) - IFNULL((
-                SELECT SUM(paidAmount)
-                FROM deleted_orders
-                WHERE deleted_orders.customerId = customers.id
-                  AND deleted_orders.refundStatus = 'Refund Pending'
-                  AND deleted_orders.paidAmount > 0
-              ), 0)
-            )) > 0.005;`);
+    // Recalculate customer balances from actual orders and payments using the SAME chronological ledger balance
+    // calculation logic as CustomerStatement and CustomerInsight. This guarantees 100% agreement everywhere.
+    const allCustomers = db.prepare('SELECT id, balance, openingBalance FROM customers').all();
+    const updateBalStmt = db.prepare('UPDATE customers SET balance = ?, isSynced = 0, updatedAt = ? WHERE id = ?');
+
+    const ordersStmt = db.prepare(`
+      SELECT totalAmount, paidAmount, status, deletedAction, paymentMethod, NULL as payments
+      FROM orders 
+      WHERE customerId = ?
+      
+      UNION ALL
+      
+      SELECT totalAmount, paidAmount, 'Deleted' as status, refundStatus as deletedAction, originalPaymentMethod as paymentMethod, payments
+      FROM deleted_orders 
+      WHERE customerId = ? AND id NOT IN (SELECT id FROM orders)
+    `);
+
+    const paymentsStmt = db.prepare('SELECT amount, method, orderId FROM payments WHERE customerId = ?');
+
+    for (const cust of allCustomers) {
+      const custId = cust.id;
+      const openingBalance = parseFloat(cust.openingBalance || 0);
+
+      // 1. Fetch orders (both active and deleted)
+      const orders = ordersStmt.all(custId, custId);
+
+      // 2. Fetch payments
+      const payments = paymentsStmt.all(custId);
+
+      // 3. System Auto offset
+      const systemAutoOffsetSum = payments
+        .filter(p => p.method === 'System Auto' && !p.orderId)
+        .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+
+      let balance = openingBalance + Math.abs(systemAutoOffsetSum);
+
+      // 4. Process orders
+      orders.forEach(o => {
+        const totalAmount = parseFloat(o.totalAmount || 0);
+        const paidAmount = parseFloat(o.paidAmount || 0);
+        const isDeleted = o.status === 'Deleted';
+
+        if (o.status !== 'Cancelled') {
+          balance += totalAmount; // charge debit
+          
+          if (isDeleted) {
+            balance -= totalAmount; // deletion reversal credit
+
+            // Parse payments associated with deleted order
+            let parsedPays = [];
+            try {
+              parsedPays = typeof o.payments === 'string' ? JSON.parse(o.payments || '[]') : (o.payments || []);
+            } catch (e) {
+              parsedPays = [];
+            }
+
+            const validPays = parsedPays.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto');
+            const deletedPaySum = validPays.reduce((sum, p) => sum + (p.method === 'Discount' ? 0 : (parseFloat(p.amount) || 0)), 0);
+            const initialDeletedPay = paidAmount - deletedPaySum;
+
+            validPays.forEach(p => {
+              if (p.method !== 'Discount') {
+                balance -= parseFloat(p.amount || 0); // payment credit
+              }
+            });
+
+            if (initialDeletedPay > 0.01 && validPays.length === 0) {
+              if (o.paymentMethod !== 'Advance' && o.paymentMethod !== 'Refund Advance' && o.paymentMethod !== 'System Auto') {
+                balance -= initialDeletedPay; // payment fallback credit
+              }
+            }
+
+            if (o.deletedAction === 'Returned' && paidAmount > 0) {
+              balance += paidAmount; // refund debit (money went back to customer)
+            }
+          }
+        }
+      });
+
+      // 5. Process payments
+      payments.forEach(p => {
+        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
+        balance -= parseFloat(p.amount || 0); // payment credit
+      });
+
+      // 6. Update customer balance in DB if changed
+      if (Math.abs((parseFloat(cust.balance) || 0) - balance) > 0.005) {
+        updateBalStmt.run(balance, new Date().toISOString(), custId);
+      }
+    }
 
     const getNextRvNumberSync = () => {
       const rows = db.prepare("SELECT id FROM payments WHERE id LIKE 'RV-%'").all();
@@ -991,7 +1087,7 @@ function runDataHealer(db) {
     console.log("Auto-applying customer advances to positive opening balances...");
     const customersWithAdvAndOpeningDue = db.prepare(`
       SELECT id, openingBalance, 
-             (SELECT IFNULL(SUM(amount), 0) FROM payments WHERE customerId = customers.id AND (orderId IS NULL OR orderId = '') AND method NOT IN ('System Auto', 'Discount')) as unapplied
+             (SELECT IFNULL(SUM(amount), 0) FROM payments WHERE customerId = customers.id AND (orderId IS NULL OR orderId = '') AND method NOT IN ('Discount', 'Refund Advance')) as unapplied
       FROM customers
       WHERE openingBalance > 0
     `).all();
@@ -1035,7 +1131,7 @@ function runDataHealer(db) {
           FROM advance_allocations a
           JOIN orders o ON a.orderId = o.id
           JOIN payments p ON a.paymentId = p.id
-          WHERE p.customerId = payments.customerId AND o.status != 'Cancelled'
+          WHERE p.customerId = payments.customerId AND o.status NOT IN ('Cancelled', 'Deleted')
         ), 0)
       ) as unapplied
       FROM payments
@@ -1050,7 +1146,7 @@ function runDataHealer(db) {
       const unpaidOrders = db.prepare(`
         SELECT id, totalAmount, paidAmount, dueAmount, paymentStatus
         FROM orders
-        WHERE customerId = ? AND paymentStatus IN ('Credit', 'Partial') AND dueAmount > 0
+        WHERE customerId = ? AND paymentStatus IN ('Credit', 'Partial') AND dueAmount > 0 AND status NOT IN ('Cancelled', 'Deleted')
         ORDER BY createdAt ASC
       `).all(cust.customerId);
 
@@ -1068,23 +1164,6 @@ function runDataHealer(db) {
         // Update the order
         db.prepare(`UPDATE orders SET paidAmount = ?, dueAmount = ?, paymentStatus = ?, isSynced = 0, updatedAt = ? WHERE id = ?`)
           .run(newPaid, newDue, newStatus, timestamp, order.id);
-
-        // Deduct from advance pool by creating a negative unlinked payment (so customer balance remains perfectly accurate)
-        const payIdAdv = getNextRvNumberSync();
-        const payRefAdv = getNextPaymentReference(db, 'SYS');
-        db.prepare(`INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`).run(
-          payIdAdv,
-          cust.customerId,
-          null,
-          'SHOP_01',
-          -paymentToApply,
-          'System Auto',
-          'SUCCESS',
-          timestamp,
-          timestamp,
-          payRefAdv
-        );
 
         // Add a positive payment linked to the specific order (so the invoice has a proper payment history matching actualPaid)
         const payIdAuto = getNextRvNumberSync();
@@ -1107,58 +1186,135 @@ function runDataHealer(db) {
       }
     }
 
-    // Final Recalculate customer balances after advance auto-application above may have changed dueAmount on orders
-    db.exec(`UPDATE customers SET balance = (
-              IFNULL(CASE WHEN openingBalance > 0 THEN openingBalance ELSE 0 END, 0) +
-              (
-                SELECT IFNULL(SUM(dueAmount), 0) 
-                FROM orders 
-                WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-              ) - MAX(0, (
-                IFNULL((
-                  SELECT SUM(amount) 
-                  FROM payments 
-                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '') AND method NOT IN ('System Auto', 'Discount')
-                ), 0) - IFNULL((
-                  SELECT SUM(a.amountUsed)
-                  FROM advance_allocations a
-                  JOIN orders o ON a.orderId = o.id
-                  JOIN payments p ON a.paymentId = p.id
-                  WHERE p.customerId = customers.id AND o.status != 'Cancelled'
-                ), 0)
-              )) - IFNULL((
-                SELECT SUM(paidAmount)
-                FROM deleted_orders
-                WHERE deleted_orders.customerId = customers.id
-                  AND deleted_orders.refundStatus = 'Refund Pending'
-                  AND deleted_orders.paidAmount > 0
-              ), 0) ), isSynced = 0, updatedAt = '${timestamp}'
-            WHERE ABS(balance - (
-              IFNULL(CASE WHEN openingBalance > 0 THEN openingBalance ELSE 0 END, 0) +
-              (
-                SELECT IFNULL(SUM(dueAmount), 0) 
-                FROM orders 
-                WHERE orders.customerId = customers.id AND orders.id IS NOT NULL AND orders.id != '' AND orders.status != 'Cancelled'
-              ) - MAX(0, (
-                IFNULL((
-                  SELECT SUM(amount) 
-                  FROM payments 
-                  WHERE payments.customerId = customers.id AND (payments.orderId IS NULL OR payments.orderId = '') AND method NOT IN ('System Auto', 'Discount')
-                ), 0) - IFNULL((
-                  SELECT SUM(a.amountUsed)
-                  FROM advance_allocations a
-                  JOIN orders o ON a.orderId = o.id
-                  JOIN payments p ON a.paymentId = p.id
-                  WHERE p.customerId = customers.id AND o.status != 'Cancelled'
-                ), 0)
-              )) - IFNULL((
-                SELECT SUM(paidAmount)
-                FROM deleted_orders
-                WHERE deleted_orders.customerId = customers.id
-                  AND deleted_orders.refundStatus = 'Refund Pending'
-                  AND deleted_orders.paidAmount > 0
-              ), 0)
-            )) > 0.005;`);
+    // Fix legacy duplicate status records in deleted_orders for live client databases
+    db.exec(`UPDATE deleted_orders 
+             SET refundStatus = 'Converted to Advance' 
+             WHERE returnStatus = 'Converted to Advance' AND refundStatus = 'Refund Pending'`);
+
+    // Fix legacy inflated Refund Advance payments created from deleted partial orders
+    db.exec(`UPDATE payments 
+             SET amount = (SELECT paidAmount FROM deleted_orders WHERE deleted_orders.id = payments.orderId OR deleted_orders.payments LIKE '%' || payments.id || '%')
+             WHERE method = 'Refund Advance' 
+               AND EXISTS (
+                 SELECT 1 FROM deleted_orders 
+                 WHERE (deleted_orders.id = payments.orderId OR deleted_orders.payments LIKE '%' || payments.id || '%')
+                   AND payments.amount > deleted_orders.paidAmount
+               )`);
+
+    // Backfill legacy deleted orders into normalized sales_returns if missing
+    try {
+      db.exec(`
+        INSERT INTO sales_returns (id, shopId, orderId, customerId, returnAmount, reason, createdBy, createdAt)
+        SELECT 
+          'SR-LEGACY-' || id,
+          IFNULL(shopId, 'SHOP_01'),
+          id,
+          customerId,
+          totalAmount,
+          'Legacy Deleted Order Migration',
+          IFNULL(deletedBy, 'System'),
+          IFNULL(deletedAt, datetime('now'))
+        FROM deleted_orders
+        WHERE id NOT IN (SELECT orderId FROM sales_returns);
+      `);
+    } catch (err) {
+      console.error("Backfill sales_returns failed:", err);
+    }
+
+    // Backfill customer ledger entries for legacy deleted orders
+    try {
+      db.exec(`
+        INSERT INTO customer_ledger (id, shopId, customerId, orderId, transactionType, debit, credit, balance, description, createdAt)
+        SELECT 
+          'CUST-LEDG-LEGACY-' || id,
+          IFNULL(shopId, 'SHOP_01'),
+          customerId,
+          id,
+          'SALES_RETURN',
+          0,
+          totalAmount,
+          0,
+          'Sales Return (Legacy Deleted Order)',
+          IFNULL(deletedAt, datetime('now'))
+        FROM deleted_orders
+        WHERE customerId IS NOT NULL AND customerId != '' AND id NOT IN (SELECT orderId FROM customer_ledger WHERE transactionType = 'SALES_RETURN');
+      `);
+    } catch (err) {
+      console.error("Backfill customer_ledger failed:", err);
+    }
+
+    // Final Recalculate customer balances using the correct chronological ledger balance loop
+    for (const cust of allCustomers) {
+      const custId = cust.id;
+      const openingBalance = parseFloat(cust.openingBalance || 0);
+
+      // 1. Fetch orders (both active and deleted)
+      const orders = ordersStmt.all(custId, custId);
+
+      // 2. Fetch payments
+      const payments = paymentsStmt.all(custId);
+
+      // 3. System Auto offset
+      const systemAutoOffsetSum = payments
+        .filter(p => p.method === 'System Auto' && !p.orderId)
+        .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+
+      let balance = openingBalance + Math.abs(systemAutoOffsetSum);
+
+      // 4. Process orders
+      orders.forEach(o => {
+        const totalAmount = parseFloat(o.totalAmount || 0);
+        const paidAmount = parseFloat(o.paidAmount || 0);
+        const isDeleted = o.status === 'Deleted';
+
+        if (o.status !== 'Cancelled') {
+          balance += totalAmount; // charge debit
+          
+          if (isDeleted) {
+            balance -= totalAmount; // deletion reversal credit
+
+            // Parse payments associated with deleted order
+            let parsedPays = [];
+            try {
+              parsedPays = typeof o.payments === 'string' ? JSON.parse(o.payments || '[]') : (o.payments || []);
+            } catch (e) {
+              parsedPays = [];
+            }
+
+            const validPays = parsedPays.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto');
+            const deletedPaySum = validPays.reduce((sum, p) => sum + (p.method === 'Discount' ? 0 : (parseFloat(p.amount) || 0)), 0);
+            const initialDeletedPay = paidAmount - deletedPaySum;
+
+            validPays.forEach(p => {
+              if (p.method !== 'Discount') {
+                balance -= parseFloat(p.amount || 0); // payment credit
+              }
+            });
+
+            if (initialDeletedPay > 0.01 && validPays.length === 0) {
+              if (o.paymentMethod !== 'Advance' && o.paymentMethod !== 'Refund Advance' && o.paymentMethod !== 'System Auto') {
+                balance -= initialDeletedPay; // payment fallback credit
+              }
+            }
+
+            if (o.deletedAction === 'Returned' && paidAmount > 0) {
+              balance += paidAmount; // refund debit
+            }
+          }
+        }
+      });
+
+      // 5. Process payments
+      payments.forEach(p => {
+        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
+        balance -= parseFloat(p.amount || 0); // payment credit
+      });
+
+      // 6. Update customer balance in DB if changed
+      if (Math.abs((parseFloat(cust.balance) || 0) - balance) > 0.005) {
+        updateBalStmt.run(balance, new Date().toISOString(), custId);
+      }
+    }
 
 
 
@@ -1425,6 +1581,189 @@ function getNextPaymentReference(db, paymentType) {
   }
 }
 
+function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'refund', refundMethod = 'CASH' }) {
+  if (!db) throw new Error('Database not initialized');
+
+  const executeTransaction = db.transaction(() => {
+    // 1. Fetch order details
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+    if (!order) throw new Error(`Order ${orderId} not found`);
+    if (order.status === 'Deleted') throw new Error(`Order ${orderId} is already deleted`);
+
+    const now = new Date().toISOString();
+    const shopId = order.shopId || 'SHOP_01';
+    const customerId = order.customerId || '';
+    const billNumber = order.billNumber || '';
+    const totalAmount = parseFloat(order.totalAmount || 0);
+
+    // Get payments associated with order
+    const payments = db.prepare('SELECT * FROM payments WHERE orderId = ?').all(orderId);
+    const totalPaidFromPayments = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+    const actualPaidAmt = Math.min(totalAmount, Math.max(parseFloat(order.paidAmount || 0), totalPaidFromPayments));
+    const outstandingAmt = Math.max(0, totalAmount - actualPaidAmt);
+
+    const isPaid = actualPaidAmt > 0 || ['Paid', 'Partial'].includes(order.paymentStatus);
+    const refundImmediately = deleteAction === 'refund';
+
+    const returnStatusVal = isPaid ? (refundImmediately ? 'Returned' : 'Converted to Advance') : 'N/A';
+    const refundStatusVal = isPaid ? (refundImmediately ? 'Returned' : 'Converted to Advance') : 'Deleted';
+    const refundMethodVal = isPaid && refundImmediately ? refundMethod : null;
+
+    // 2. Soft update order record
+    db.prepare(`
+      UPDATE orders 
+      SET status = 'Deleted', 
+          deletedAt = ?, 
+          deletedBy = ?, 
+          deleteReason = ?, 
+          deletedAction = ?, 
+          updatedAt = ?, 
+          isSynced = 0 
+      WHERE id = ?
+    `).run(now, deletedBy, deleteReason, deleteAction, now, orderId);
+
+    // 3. Insert record into deleted_orders audit table
+    let customerName = '';
+    let customerPhone = '';
+    if (customerId) {
+      const cust = db.prepare('SELECT name, phone FROM customers WHERE id = ?').get(customerId);
+      if (cust) {
+        customerName = cust.name || '';
+        customerPhone = cust.phone || '';
+      }
+    }
+
+    db.prepare(`
+      INSERT OR REPLACE INTO deleted_orders (
+        id, shopId, billNumber, customerId, customerName, customerPhone,
+        totalAmount, items, createdAt, deletedAt, deletedBy,
+        originalPaymentStatus, paidAmount, returnStatus, approvedBy,
+        originalPaymentMethod, payments, refundMethod, returnedAt, refundStatus
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      order.id, shopId, billNumber, customerId, customerName, customerPhone,
+      totalAmount, typeof order.items === 'string' ? order.items : JSON.stringify(order.items || []),
+      order.createdAt || now, now, deletedBy,
+      order.paymentStatus || 'Pending', actualPaidAmt, returnStatusVal, deletedBy,
+      order.paymentMethod || 'CASH', JSON.stringify(payments), refundMethodVal,
+      refundImmediately ? now : null, refundStatusVal
+    );
+
+    // 4. Record Sales Return
+    const salesReturnId = `SR-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    db.prepare(`
+      INSERT INTO sales_returns (id, shopId, orderId, customerId, returnAmount, reason, createdBy, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(salesReturnId, shopId, orderId, customerId, totalAmount, deleteReason, deletedBy, now);
+
+    // 5. Update Customer Ledger & Outstanding Balance
+    if (customerId && customerId !== 'Walk-in') {
+      let cust = db.prepare('SELECT balance, advanceBalance FROM customers WHERE id = ?').get(customerId);
+      let currentBal = cust ? parseFloat(cust.balance || 0) : 0;
+      let currentAdv = cust ? parseFloat(cust.advanceBalance || 0) : 0;
+
+      // FIXED: Only subtract the outstanding (due) amount from balance, not the full order total.
+      // The customer's balance represents their outstanding due. Paid amounts were never added
+      // to the balance, so subtracting totalAmount was double-subtracting already-paid portions.
+      // outstandingAmt = totalAmount - actualPaidAmt (the unpaid portion)
+      const newBal = currentBal - outstandingAmt; // reduce outstanding by the due portion only
+      db.prepare(`
+        INSERT INTO customer_ledger (id, shopId, customerId, orderId, transactionType, debit, credit, balance, description, createdAt)
+        VALUES (?, ?, ?, ?, 'SALES_RETURN', 0, ?, ?, ?, ?)
+      `).run(
+        `CUST-LEDG-${Date.now()}-1`, shopId, customerId, orderId, outstandingAmt, newBal,
+        `Sales Return for Deleted Order ${billNumber || '#' + orderId}`, now
+      );
+
+      // Handle paid portion
+      if (actualPaidAmt > 0) {
+        if (!refundImmediately) {
+          // Convert paid amount to Customer Advance Wallet balance
+          const updatedAdv = currentAdv + actualPaidAmt;
+          db.prepare('UPDATE customers SET balance = ?, advanceBalance = ?, isSynced = 0, updatedAt = ? WHERE id = ?')
+            .run(newBal, updatedAdv, now, customerId);
+
+          db.prepare(`
+            INSERT INTO customer_ledger (id, shopId, customerId, orderId, transactionType, debit, credit, balance, description, createdAt)
+            VALUES (?, ?, ?, ?, 'ADVANCE_CREDIT', 0, ?, ?, ?, ?)
+          `).run(
+            `CUST-LEDG-${Date.now()}-2`, shopId, customerId, orderId, actualPaidAmt, newBal,
+            `Converted Paid Amount to Advance Wallet for Order ${billNumber || '#' + orderId}`, now
+          );
+        } else {
+          db.prepare('UPDATE customers SET balance = ?, isSynced = 0, updatedAt = ? WHERE id = ?')
+            .run(newBal, now, customerId);
+        }
+      } else {
+        db.prepare('UPDATE customers SET balance = ?, isSynced = 0, updatedAt = ? WHERE id = ?')
+          .run(newBal, now, customerId);
+      }
+    }
+
+    // 6. Cash Ledger & Refund recording
+    if (actualPaidAmt > 0 && refundImmediately) {
+      const refundId = `REF-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      db.prepare(`
+        INSERT INTO refunds (id, shopId, orderId, customerId, amount, refundMethod, reason, createdBy, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(refundId, shopId, orderId, customerId, actualPaidAmt, refundMethod, deleteReason, deletedBy, now);
+
+      const cashLedgerId = `CASH-LEDG-${Date.now()}`;
+      db.prepare(`
+        INSERT INTO cash_ledger (id, shopId, branchId, orderId, paymentId, refundId, type, paymentMethod, amount, description, createdAt)
+        VALUES (?, ?, ?, ?, NULL, ?, 'OUT', ?, ?, ?, ?)
+      `).run(
+        cashLedgerId, shopId, order.branchId || null, orderId, refundId, refundMethod, actualPaidAmt,
+        `Refund for Deleted Order ${billNumber || '#' + orderId}`, now
+      );
+
+      // Record in account_transactions so Expense/Return reflects in cashbook
+      const txnId = `TXN-REF-${Date.now()}`;
+      db.prepare(`
+        INSERT INTO account_transactions 
+        (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, createdBy) 
+        VALUES (?, ?, ?, 'EXPENSE', 'Return', ?, ?, ?, 0, ?, 'Zap', ?)
+      `).run(
+        txnId, shopId, refundMethod === 'Bank' ? 'BANK' : 'CASH', actualPaidAmt,
+        `Refund - Deleted Order ${billNumber || '#' + orderId}`, now.replace('T', ' ').substring(0, 16),
+        now, deletedBy
+      );
+    }
+
+    // 7. Write Audit Log
+    const auditId = `AUDIT-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const auditDetails = JSON.stringify({
+      orderId,
+      billNumber,
+      totalAmount,
+      actualPaidAmt,
+      outstandingAmt,
+      deleteAction,
+      refundMethod: refundImmediately ? refundMethod : 'N/A',
+      reason: deleteReason,
+      deletedBy
+    });
+
+    db.prepare(`
+      INSERT INTO audit_logs (id, event, details, userId, userRole, timestamp, device)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(auditId, 'ORDER_DELETED', auditDetails, deletedBy, 'Manager', now, process.platform || 'Desktop');
+
+    return {
+      success: true,
+      orderId,
+      billNumber,
+      totalAmount,
+      actualPaidAmt,
+      outstandingAmt,
+      deleteAction,
+      refundMethod
+    };
+  });
+
+  return executeTransaction();
+}
+
 function getDB() {
   if (!db) {
     throw new Error('Database not initialized');
@@ -1440,4 +1779,4 @@ function closeDB() {
   }
 }
 
-module.exports = { initDB, getDB, runDataHealer, closeDB, generateServiceSVG, getNextPaymentReference };
+module.exports = { initDB, getDB, runDataHealer, closeDB, generateServiceSVG, getNextPaymentReference, softDeleteOrder };

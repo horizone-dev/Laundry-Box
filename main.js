@@ -102,7 +102,7 @@ process.on('unhandledRejection', (reason) => {
 
 const { spawn } = require('child_process');
 logStartup('Importing database module...');
-const { initDB, getDB, closeDB, generateServiceSVG } = require('./database');
+const { initDB, getDB, closeDB, generateServiceSVG, softDeleteOrder } = require('./database');
 logStartup('Importing email service module...');
 const emailService = require('./emailService');
 logStartup('Importing payment checkout service module...');
@@ -701,6 +701,16 @@ ipcMain.handle('log-override-rejection', (event, { customerId, customerName, ord
     return { success: true };
   } catch (err) {
     console.error('log-override-rejection error:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('soft-delete-order', async (event, options) => {
+  try {
+    const result = softDeleteOrder(options);
+    return { success: true, data: result };
+  } catch (err) {
+    console.error('soft-delete-order IPC error:', err);
     return { success: false, error: err.message };
   }
 });

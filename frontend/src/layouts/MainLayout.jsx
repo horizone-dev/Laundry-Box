@@ -1641,16 +1641,29 @@ const timestamp = getLocalISOString();
         </header>
 
         <div className={styles.content}>
-          {settings && !settings.isActivated && role !== 'super_admin' ? (
-            <div className={styles.licenseLock}>
-              <AlertTriangle size={64} color="#EF4444" />
-              <h2>System Activation Required</h2>
-              <p>Your software license has expired or is not activated. Please contact your administrator to activate the system.</p>
-              <div className={styles.deviceInfo}>Device ID: LAUN-POS-ADMIN</div>
-            </div>
-          ) : (
-            <Outlet />
-          )}
+          {(() => {
+            const isActivated = settings?.isActivated;
+            let isTrialExpired = true;
+            if (settings?.expiryDate) {
+              const expiry = new Date(settings.expiryDate);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0); // compare local start of today
+              isTrialExpired = expiry < today;
+            }
+            const isLocked = settings && !isActivated && isTrialExpired && role !== 'super_admin';
+
+            if (isLocked) {
+              return (
+                <div className={styles.licenseLock}>
+                  <AlertTriangle size={64} color="#EF4444" />
+                  <h2>System Activation Required</h2>
+                  <p>Your software license has expired or is not activated. Please contact your administrator to activate the system.</p>
+                  <div className={styles.deviceInfo}>Device ID: LAUN-POS-ADMIN</div>
+                </div>
+              );
+            }
+            return <Outlet />;
+          })()}
         </div>
 
         {/* Floating Sync Status */}

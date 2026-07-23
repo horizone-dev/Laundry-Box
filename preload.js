@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer, webFrame } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   checkConnection: () => ipcRenderer.invoke('check-connection'),
   dbQuery: (query, params) => ipcRenderer.invoke('db-query', { query, params }),
+  softDeleteOrder: (options) => ipcRenderer.invoke('soft-delete-order', options),
   getNextRvNumber: () => ipcRenderer.invoke('get-next-rv-number'),
   getNextPaymentReference: (paymentType) => ipcRenderer.invoke('get-next-payment-reference', paymentType),
   runDataHealer: () => ipcRenderer.invoke('run-data-healer'),
