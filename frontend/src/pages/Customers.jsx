@@ -1397,18 +1397,11 @@ export default function Customers() {
         // Filter out automatic system transactions and discounts
         payments = payments.filter(p => p.method !== 'System Auto' && p.method !== 'Discount');
 
-        // Group payments that are part of the same transaction event
+        // Group payments that are part of the same transaction event (using second-level timestamp)
         const groupedMap = {};
         payments.forEach(p => {
-          let key;
-          if (p.orderId) {
-            // Group by orderId and the timestamp normalized to the minute to handle minor loop differences
-            const timePart = p.createdAt ? p.createdAt.substring(0, 16) : '';
-            key = `order_${p.orderId}_${timePart}`;
-          } else {
-            // Group by exact timestamp for manual/advance payments
-            key = `manual_${p.createdAt}`;
-          }
+          // Group by second-level timestamp (yyyy-MM-ddTHH:mm:ss) to group split checkouts and settlements together
+          const key = p.createdAt ? p.createdAt.substring(0, 19) : p.id;
 
           if (!groupedMap[key]) {
             groupedMap[key] = {
