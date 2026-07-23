@@ -1057,8 +1057,10 @@ function runDataHealer(db) {
       });
 
       // 5. Process payments
+      // Skip: Advance allocations, System Auto offsets, and Opening Advance
+      // (Opening Advance is already counted via customer.openingBalance above)
       payments.forEach(p => {
-        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
+        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto' || p.method === 'Opening Advance') return;
         balance -= parseFloat(p.amount || 0); // payment credit
       });
 
@@ -1305,8 +1307,10 @@ function runDataHealer(db) {
       });
 
       // 5. Process payments
+      // Skip: Advance allocations, System Auto offsets, and Opening Advance
+      // (Opening Advance is already counted via customer.openingBalance above)
       payments.forEach(p => {
-        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
+        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto' || p.method === 'Opening Advance') return;
         balance -= parseFloat(p.amount || 0); // payment credit
       });
 
