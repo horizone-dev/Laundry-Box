@@ -1055,6 +1055,8 @@ export default function Customers() {
 
     setLoading(true);
     const timestamp = getLocalISOString();
+    const idsToDelete = payment.paymentIds && payment.paymentIds.length > 0 ? payment.paymentIds : [payment.id];
+    const totalAmount = payment.amount || 0;
 
     try {
       await window.electronAPI.dbQuery("BEGIN TRANSACTION");
@@ -1063,8 +1065,8 @@ export default function Customers() {
         const orderRes = await window.electronAPI.dbQuery("SELECT * FROM orders WHERE id = ?", [payment.orderId]);
         if (orderRes.success && orderRes.data.length > 0) {
           const bill = orderRes.data[0];
-          const newPaidAmount = Math.max(0, (bill.paidAmount || 0) - payment.amount);
-          const newDueAmount = (bill.dueAmount || 0) + payment.amount;
+          const newPaidAmount = Math.max(0, (bill.paidAmount || 0) - totalAmount);
+          const newDueAmount = (bill.dueAmount || 0) + totalAmount;
           const newStatus = newPaidAmount <= 0 ? 'Credit' : 'Partial';
 
           let paymentBreakdown = {};
@@ -1074,10 +1076,19 @@ export default function Customers() {
             }
           } catch (e) { }
 
-          const methodKey = payment.method.toLowerCase();
-          if (paymentBreakdown[methodKey] !== undefined) {
-            paymentBreakdown[methodKey] = Math.max(0, (paymentBreakdown[methodKey] || 0) - payment.amount);
-          }
+          // Fetch methods and amounts of individual payments we are deleting to subtract correctly from paymentBreakdown
+          const pToDelRes = await window.electronAPI.dbQuery(
+            `SELECT amount, method FROM payments WHERE id IN (${idsToDelete.map(() => '?').join(',')})`,
+            idsToDelete
+          );
+          const paymentsToDelete = pToDelRes.success ? pToDelRes.data : [];
+
+          paymentsToDelete.forEach(pDel => {
+            const methodKey = pDel.method.toLowerCase();
+            if (paymentBreakdown[methodKey] !== undefined) {
+              paymentBreakdown[methodKey] = Math.max(0, (paymentBreakdown[methodKey] || 0) - pDel.amount);
+            }
+          });
 
           let activeMethods = Object.keys(paymentBreakdown).filter(k => k !== 'discount' && k !== 'advance' && paymentBreakdown[k] > 0);
           const keyMap = { cash: 'Cash', card: 'Card', upi: 'UPI', bank: 'Bank Transfer' };
@@ -1097,22 +1108,34 @@ export default function Customers() {
 
       await window.electronAPI.dbQuery(
         "UPDATE customers SET balance = balance + ?, isSynced = 0, updatedAt = ? WHERE id = ?",
-        [payment.amount, timestamp, selectedCustomer.id]
+        [totalAmount, timestamp, selectedCustomer.id]
       );
 
-      await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE paymentId = ?", [payment.id]);
-      await window.electronAPI.dbQuery("DELETE FROM payments WHERE id = ?", [payment.id]);
+      // Fetch the individual payments to delete their matching transactions
+      const pToDelRes = await window.electronAPI.dbQuery(
+        `SELECT amount, method FROM payments WHERE id IN (${idsToDelete.map(() => '?').join(',')})`,
+        idsToDelete
+      );
+      const paymentsToDelete = pToDelRes.success ? pToDelRes.data : [];
 
+      // Delete all the advance allocations and payment records
+      for (const id of idsToDelete) {
+        await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE paymentId = ?", [id]);
+        await window.electronAPI.dbQuery("DELETE FROM payments WHERE id = ?", [id]);
+      }
+
+      // Delete matching account transactions for each deleted payment amount
       const payDate = new Date(payment.createdAt);
       const datePrefix = `${payDate.getFullYear()}-${String(payDate.getMonth() + 1).padStart(2, '0')}-${String(payDate.getDate()).padStart(2, '0')} ${String(payDate.getHours()).padStart(2, '0')}:${String(payDate.getMinutes()).padStart(2, '0')}`;
 
-      const txnRes = await window.electronAPI.dbQuery(
-        "SELECT id FROM account_transactions WHERE amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
-        [payment.amount, `%${selectedCustomer.name}%`, `${datePrefix.substring(0, 10)}%`]
-      );
-
-      if (txnRes.success && txnRes.data.length > 0) {
-        await window.electronAPI.dbQuery("DELETE FROM account_transactions WHERE id = ?", [txnRes.data[0].id]);
+      for (const pDel of paymentsToDelete) {
+        const txnRes = await window.electronAPI.dbQuery(
+          "SELECT id FROM account_transactions WHERE amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
+          [pDel.amount, `%${selectedCustomer.name}%`, `${datePrefix.substring(0, 10)}%`]
+        );
+        if (txnRes.success && txnRes.data.length > 0) {
+          await window.electronAPI.dbQuery("DELETE FROM account_transactions WHERE id = ?", [txnRes.data[0].id]);
+        }
       }
 
       await window.electronAPI.dbQuery("COMMIT");
@@ -1373,7 +1396,52 @@ export default function Customers() {
         setCustomerDiscounts(discountPayments);
         // Filter out automatic system transactions and discounts
         payments = payments.filter(p => p.method !== 'System Auto' && p.method !== 'Discount');
-        setCustomerPayments(payments);
+
+        // Group payments that are part of the same transaction event
+        const groupedMap = {};
+        payments.forEach(p => {
+          let key;
+          if (p.orderId) {
+            // Group by orderId and the timestamp normalized to the minute to handle minor loop differences
+            const timePart = p.createdAt ? p.createdAt.substring(0, 16) : '';
+            key = `order_${p.orderId}_${timePart}`;
+          } else {
+            // Group by exact timestamp for manual/advance payments
+            key = `manual_${p.createdAt}`;
+          }
+
+          if (!groupedMap[key]) {
+            groupedMap[key] = {
+              ...p,
+              methodsList: [p.method],
+              totalAmount: p.amount || 0,
+              paymentIds: [p.id]
+            };
+          } else {
+            groupedMap[key].totalAmount += p.amount || 0;
+            if (!groupedMap[key].methodsList.includes(p.method)) {
+              groupedMap[key].methodsList.push(p.method);
+            }
+            groupedMap[key].paymentIds.push(p.id);
+          }
+        });
+
+        // Convert back to array and format the method name and amount
+        const processedPayments = Object.values(groupedMap).map(p => {
+          let finalMethod = p.method;
+          if (p.methodsList.length > 1) {
+            finalMethod = 'Multipayment';
+          }
+          return {
+            ...p,
+            method: finalMethod,
+            amount: p.totalAmount
+          };
+        });
+
+        // Sort by createdAt DESC to keep order correct
+        processedPayments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        setCustomerPayments(processedPayments);
 
         const totalSales = bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
         const salesReturn = bills.filter(b => b.status === 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0) +
@@ -2104,20 +2172,22 @@ export default function Customers() {
                             >
                               <Eye size={16} />
                             </button>
-                            <button
-                              style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
-                              onClick={(e) => {
-                                e.preventDefault(); e.stopPropagation();
-                                setSelectedPaymentForAction(pay);
-                                setEditPaymentMethod(pay.method || 'Cash');
-                                setEditPaymentAmount(pay.amount ? pay.amount.toString() : '');
-                                setPinActionTarget('edit_payment');
-                                setShowPinModal(true);
-                              }}
-                              title="Edit Payment"
-                            >
-                              <Edit2 size={16} />
-                            </button>
+                            {pay.method !== 'Multipayment' && (
+                              <button
+                                style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
+                                onClick={(e) => {
+                                  e.preventDefault(); e.stopPropagation();
+                                  setSelectedPaymentForAction(pay);
+                                  setEditPaymentMethod(pay.method || 'Cash');
+                                  setEditPaymentAmount(pay.amount ? pay.amount.toString() : '');
+                                  setPinActionTarget('edit_payment');
+                                  setShowPinModal(true);
+                                }}
+                                title="Edit Payment"
+                              >
+                                <Edit2 size={16} />
+                              </button>
+                            )}
                             <button
                               style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}
                               onClick={(e) => {
