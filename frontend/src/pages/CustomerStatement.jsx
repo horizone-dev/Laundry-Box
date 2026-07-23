@@ -284,13 +284,12 @@ export default function CustomerStatement() {
             parsedPayments = [];
           }
 
-          const deletedPaySum = Array.isArray(parsedPayments)
-            ? parsedPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
-            : 0;
+          const validParsedPayments = parsedPayments.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto');
+          const deletedPaySum = validParsedPayments.reduce((sum, p) => sum + (p.method === 'Discount' ? 0 : (p.amount || 0)), 0);
           const initialDeletedPay = (o.paidAmount || 0) - deletedPaySum;
 
-          if (Array.isArray(parsedPayments)) {
-            parsedPayments.forEach(p => {
+          if (Array.isArray(validParsedPayments)) {
+            validParsedPayments.forEach(p => {
               rows.push({
                 date: p.createdAt || o.createdAt,
                 type: 'payment',
@@ -298,28 +297,29 @@ export default function CustomerStatement() {
                 description: `Payment – ${p.method || 'Cash'}`,
                 itemsSummary: `Linked to Order ${cleanRef}`,
                 debit: 0,
-                credit: p.amount || 0,
+                credit: p.method === 'Discount' ? 0 : (p.amount || 0),
+                discountAmount: p.method === 'Discount' ? (p.amount || 0) : 0,
                 status: 'SUCCESS',
                 dueAmount: 0
               });
             });
           }
 
-          // Fallback: if the order was paid via Advance Allocation (payments JSON is empty)
-          // but paidAmount > 0, emit a single credit row for the full amount.
-          // Without this, the ledger shows a refund debit with no matching credit — producing a wrong Due balance.
-          if (initialDeletedPay > 0.01) {
-            rows.push({
-              date: o.createdAt,
-              type: 'payment',
-              ref: cleanRef,
-              description: `Payment – ${o.paymentMethod || 'Advance'}`,
-              itemsSummary: `Linked to Order ${cleanRef}`,
-              debit: 0,
-              credit: initialDeletedPay,
-              status: 'SUCCESS',
-              dueAmount: 0
-            });
+          // Fallback: if the order was paid via cash/card but payments JSON is empty
+          if (initialDeletedPay > 0.01 && validParsedPayments.length === 0) {
+            if (o.paymentMethod !== 'Advance' && o.paymentMethod !== 'Refund Advance' && o.paymentMethod !== 'System Auto') {
+              rows.push({
+                date: o.createdAt,
+                type: 'payment',
+                ref: cleanRef,
+                description: `Payment – ${o.paymentMethod || 'Cash'}`,
+                itemsSummary: `Linked to Order ${cleanRef}`,
+                debit: 0,
+                credit: initialDeletedPay,
+                status: 'SUCCESS',
+                dueAmount: 0
+              });
+            }
           }
 
           if (o.refundStatus === 'Returned' && (o.paidAmount || 0) > 0) {
@@ -336,21 +336,17 @@ export default function CustomerStatement() {
             });
           }
           if (o.refundStatus === 'Converted to Advance' && (o.paidAmount || 0) > 0) {
-            // Check if this advance conversion is already recorded in the payments table to prevent duplicate display
-            const existsInPayments = payments.some(p => p.method === 'Refund Advance' && (p.id === `ADV-CONV-${o.id}` || p.paymentReference === `ADV-CONV-${o.id}` || Math.abs((p.amount || 0) - o.paidAmount) < 0.01));
-            if (!existsInPayments) {
-              rows.push({
-                date: o.updatedAt || o.createdAt,
-                type: 'payment',
-                ref: `ADV-CONV-${o.id}`,
-                description: 'Converted to Advance',
-                itemsSummary: `Advance from Deleted Order ${cleanRef}`,
-                debit: 0,
-                credit: o.paidAmount,
-                status: 'SUCCESS',
-                dueAmount: 0
-              });
-            }
+            rows.push({
+              date: o.updatedAt || o.createdAt,
+              type: 'payment',
+              ref: `ADV-CONV-${o.id}`,
+              description: 'Converted to Advance',
+              itemsSummary: `Advance of ${(o.paidAmount || 0).toFixed(2)} from Deleted Order ${cleanRef}`,
+              debit: 0,
+              credit: 0, // Set to 0 to prevent double-counting (original cash payment is already credited)
+              status: 'SUCCESS',
+              dueAmount: 0
+            });
           }
         }
       } else {
