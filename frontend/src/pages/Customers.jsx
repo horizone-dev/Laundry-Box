@@ -1510,18 +1510,20 @@ export default function Customers() {
         const totalAdvanceReceived = advStats.totalRecv;
         const advanceUsed = advStats.totalUsed;
         
-        let currentOpening = activeCustomer.openingBalance > 0 ? activeCustomer.openingBalance : 0;
-        let availableAdvance = Math.max(0, totalAdvanceReceived - advanceUsed);
+        const totalGrossDue = (activeCustomer.openingBalance > 0 ? activeCustomer.openingBalance : 0) +
+          bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.dueAmount || 0), 0);
+        const rawAvailableAdvance = Math.max(0, totalAdvanceReceived - advanceUsed);
         
-        if (currentOpening > 0 && availableAdvance > 0) {
-          const autoAppliedToOpening = Math.min(currentOpening, availableAdvance);
-          currentOpening -= autoAppliedToOpening;
-          availableAdvance -= autoAppliedToOpening;
+        let pendingDue = 0;
+        let availableAdvance = 0;
+        
+        if (totalGrossDue >= rawAvailableAdvance) {
+          pendingDue = totalGrossDue - rawAvailableAdvance;
+          availableAdvance = 0;
+        } else {
+          pendingDue = 0;
+          availableAdvance = rawAvailableAdvance - totalGrossDue;
         }
-
-        const totalGrossDue = currentOpening + bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.dueAmount || 0), 0);
-        const dynamicBalance = totalGrossDue - availableAdvance;
-        const pendingDue = Math.max(0, dynamicBalance);
 
         setSelectedCustomerStats({
           totalSales,
