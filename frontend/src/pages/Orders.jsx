@@ -45,6 +45,17 @@ export default function Orders() {
   const querySearch = searchParams.get('search') || '';
   const { settings, formatDate } = useSettings();
 
+  const cleanPaymentRef = (p) => {
+    if (!p) return '';
+    if (p.id && p.id.startsWith('RV-')) return p.id;
+    const ref = p.paymentReference || p.id;
+    if (!ref) return '';
+    if (ref.startsWith('ADV-') || ref.startsWith('SET-') || ref.startsWith('PAY-') || ref.startsWith('APY-') || ref.startsWith('QPY-') || ref.startsWith('SYS-')) {
+      return 'RV-' + ref.substring(4);
+    }
+    return ref;
+  };
+
   const formatDateTime = (dateVal) => {
     if (!dateVal) return 'N/A';
     const formattedDate = formatDate(dateVal);
@@ -77,12 +88,37 @@ export default function Orders() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [orderPayments, setOrderPayments] = useState([]);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalAmount, setTotalAmount] = useState(0);
+  const [totalPaid, setTotalPaid] = useState(0);
+  const [totalPending, setTotalPending] = useState(0);
+  const [overdueAmount, setOverdueAmount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [overdueCount, setOverdueCount] = useState(0);
+  const [activeCount, setActiveCount] = useState(0);
+  const [paidCount, setPaidCount] = useState(0);
+  const [workflowCounts, setWorkflowCounts] = useState({
+    All: 0,
+    Confirmed: 0,
+    Processing: 0,
+    Ready: 0,
+    Delivered: 0,
+    Deleted: 0
+  });
 
   useEffect(() => {
     if (selectedOrder && window.electronAPI?.dbQuery) {
       window.electronAPI.dbQuery(
-        "SELECT * FROM payments WHERE orderId = ? ORDER BY createdAt DESC",
-        [selectedOrder.id]
+        `SELECT p.id, p.customerId, p.orderId, p.shopId, p.amount, p.method, p.status, p.createdAt, p.paymentReference 
+         FROM payments p 
+         WHERE p.orderId = ?
+         UNION ALL
+         SELECT p.id, p.customerId, a.orderId, p.shopId, a.amountUsed as amount, 'Advance' as method, p.status, a.date as createdAt, p.paymentReference 
+         FROM payments p 
+         JOIN advance_allocations a ON a.paymentId = p.id 
+         WHERE a.orderId = ?
+         ORDER BY createdAt DESC`,
+        [selectedOrder.id, selectedOrder.id]
       ).then(res => {
         if (res.success) {
           setOrderPayments(res.data || []);
@@ -430,63 +466,10 @@ export default function Orders() {
     return diffDays > overdueLimit;
   };
 
-  const dateFilteredOrders = React.useMemo(() => {
-    const bounds = getLocalDateBounds(dateRange, customStart, customEnd);
-    if (bounds === false) return []; // Custom selected but dates missing
-    if (bounds === null) return orders; // All time
-    return orders.filter(o => isWithinBounds(o.createdAt, bounds));
-  }, [orders, dateRange, customStart, customEnd]);
-
-  // Filtering logic
-  let filteredOrders = [];
-  if (workflowFilter === 'Deleted') {
-    filteredOrders = dateFilteredOrders.filter(o => o.isDeleted);
-  } else {
-    const activeOnly = dateFilteredOrders.filter(o => !o.isDeleted);
-    if (workflowFilter === 'All') {
-      filteredOrders = activeOnly;
-    } else if (workflowFilter === 'Confirmed') {
-      filteredOrders = activeOnly.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status));
-    } else if (workflowFilter === 'Processing') {
-      filteredOrders = activeOnly.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status));
-    } else if (workflowFilter === 'Ready') {
-      filteredOrders = activeOnly.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status));
-    } else if (workflowFilter === 'Delivered') {
-      filteredOrders = activeOnly.filter(o => o.status === 'Delivered');
-    }
-  }
-
-  const paginatedOrders = React.useMemo(() => {
-    return filteredOrders.slice((currentPage - 1) * 20, currentPage * 20);
-  }, [filteredOrders, currentPage]);
-
-  // Active orders only for financial KPIs and workflowCounts of active states
-  const activeDateFilteredOrders = dateFilteredOrders.filter(o => !o.isDeleted);
-
-  // Financial Calculations for KPIs
-  const totalAmount = activeDateFilteredOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-
-  const totalPaid = activeDateFilteredOrders
-    .filter(o => (o.dueAmount === 0 || o.dueAmount === null) && o.totalAmount > 0)
-    .reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-
-  const totalPending = activeDateFilteredOrders
-    .filter(o => (o.dueAmount > 0))
-    .reduce((sum, o) => sum + (o.dueAmount || 0), 0);
-
-  const overdueOrdersList = activeDateFilteredOrders.filter(o => isOverdue(o));
-  const overdueAmount = overdueOrdersList.reduce((sum, o) => sum + (o.dueAmount || 0), 0);
-
-
-  const workflowCounts = {
-    All: activeDateFilteredOrders.length,
-    Confirmed: activeDateFilteredOrders.filter(o => ['Confirmed', 'Pending', 'Payment Pending', 'Credit'].includes(o.status)).length,
-    Processing: activeDateFilteredOrders.filter(o => !['Confirmed', 'Pending', 'Payment Pending', 'Credit', 'Ready', 'Ready to Pick up', 'Out for Delivery', 'Delivered'].includes(o.status) || ['Picked Up', 'Washing', 'Drying', 'Ironing'].includes(o.status)).length,
-    Ready: activeDateFilteredOrders.filter(o => ['Ready', 'Ready to Pick up', 'Out for Delivery'].includes(o.status)).length,
-    Delivered: activeDateFilteredOrders.filter(o => o.status === 'Delivered').length,
-    Deleted: dateFilteredOrders.filter(o => o.isDeleted).length
-  };
-
+  // Reset page to 1 when filters or search change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, dateRange, customStart, customEnd, workflowFilter]);
 
   useEffect(() => {
     setSearchTerm(querySearch);
@@ -494,70 +477,47 @@ export default function Orders() {
 
   useEffect(() => {
     fetchOrders();
-  }, [searchTerm, sortBy]);
+  }, [searchTerm, sortBy, currentPage, dateRange, customStart, customEnd, workflowFilter]);
 
   const fetchOrders = async () => {
     try {
       setLoading(true);
 
       // Try local DB first if in Electron
-      if (window.electronAPI?.dbQuery) {
-        let query = `
-          SELECT * FROM (
-            SELECT 
-              orders.id, orders.shopId, orders.billNumber, orders.customerId, 
-              customers.name AS customerName, customers.phone AS customerPhone, 
-              orders.totalAmount, orders.paidAmount, orders.dueAmount, 
-              orders.paymentStatus, orders.status, 
-              (SELECT CASE 
-                 WHEN COUNT(DISTINCT method) > 1 THEN 'Multipayment' 
-                 WHEN COUNT(DISTINCT method) = 1 THEN MIN(method) 
-                 ELSE orders.paymentMethod 
-               END FROM payments WHERE payments.orderId = orders.id) AS paymentMethod,
-              orders.items, orders.statusHistory, orders.expectedDeliveryDate, orders.specialInstructions, orders.branchId,
-              orders.createdAt, orders.updatedAt, orders.isSynced,
-              orders.nomodPaymentStatus, orders.nomodCheckoutId,
-              payment_links.date AS nomodLinkDate, payment_links.url AS nomodLinkUrl,
-              orders.paymentBreakdown,
-              0 AS isDeleted, NULL AS refundStatus, NULL AS refundMethod, NULL AS returnedAt, NULL AS payments
-            FROM orders 
-            LEFT JOIN customers ON orders.customerId = customers.id
-            LEFT JOIN payment_links ON orders.nomodCheckoutId = payment_links.checkoutId
-            WHERE orders.status != 'Deleted'
-
-            UNION ALL
-
-            SELECT 
-              deleted_orders.id, deleted_orders.shopId, deleted_orders.billNumber, deleted_orders.customerId, 
-              deleted_orders.customerName AS customerName, deleted_orders.customerPhone AS customerPhone, 
-              deleted_orders.totalAmount, deleted_orders.paidAmount, 0 AS dueAmount, 
-              deleted_orders.originalPaymentStatus AS paymentStatus, 'Deleted' AS status, deleted_orders.originalPaymentMethod AS paymentMethod, 
-              deleted_orders.items, NULL AS statusHistory, NULL AS expectedDeliveryDate, NULL AS specialInstructions, NULL AS branchId,
-              deleted_orders.deletedAt AS createdAt, deleted_orders.deletedAt AS updatedAt, 1 AS isSynced,
-              NULL AS nomodPaymentStatus, NULL AS nomodCheckoutId,
-              NULL AS nomodLinkDate, NULL AS nomodLinkUrl,
-              NULL AS paymentBreakdown,
-              1 AS isDeleted, deleted_orders.refundStatus, deleted_orders.refundMethod, deleted_orders.returnedAt, deleted_orders.payments
-            FROM deleted_orders
-          ) AS all_orders
-        `;
-        let params = [];
-        if (searchTerm) {
-          query += ' WHERE id LIKE ? OR billNumber LIKE ? OR customerName LIKE ? OR customerPhone LIKE ? OR status LIKE ? OR paymentStatus LIKE ?';
-          const term = `%${searchTerm}%`;
-          params = [term, term, term, term, term, term];
-        }
-        if (sortBy === 'payment') {
-          query += " ORDER BY CASE WHEN paymentStatus = 'Paid' THEN 0 ELSE 1 END, updatedAt DESC, createdAt DESC";
-        } else {
-          query += ' ORDER BY createdAt DESC';
-        }
-        const res = await window.electronAPI.dbQuery(query, params);
+      if (window.electronAPI?.getPaginatedOrders) {
+        const res = await window.electronAPI.getPaginatedOrders({
+          currentPage,
+          pageSize: 20,
+          searchTerm,
+          sortBy,
+          dateRange,
+          customStart,
+          customEnd,
+          workflowFilter,
+          settings
+        });
         if (res.success) {
-          setOrders(res.data);
+          setOrders(res.data || []);
+          setTotalItems(res.totalCount || 0);
+          setTotalAmount(res.totalAmount || 0);
+          setTotalPaid(res.totalPaid || 0);
+          setTotalPending(res.totalPending || 0);
+          setOverdueAmount(res.overdueAmount || 0);
+          setPendingCount(res.pendingCount || 0);
+          setOverdueCount(res.overdueCount || 0);
+          setActiveCount(res.activeCount || 0);
+          setPaidCount(res.paidCount || 0);
+          setWorkflowCounts(res.workflowCounts || {
+            All: 0,
+            Confirmed: 0,
+            Processing: 0,
+            Ready: 0,
+            Delivered: 0,
+            Deleted: 0
+          });
 
           // Auto-open if exact match on bill number or ID (robust matching)
-          if (searchTerm && res.data.length === 1) {
+          if (searchTerm && res.data && res.data.length === 1) {
             const found = res.data[0];
             const cleanSearch = searchTerm.replace('#', '').replace('ORDER:', '').trim().toLowerCase();
             const cleanId = (found.id || '').toString().replace('#', '').trim().toLowerCase();
@@ -1369,7 +1329,7 @@ export default function Orders() {
             <span className={styles.kpiValue} style={{ color: '#0F172A' }}>
               {totalAmount.toFixed(2)}
             </span>
-            <span className={styles.kpiSub}>{orders.length} {t('invoices', settings.language)}</span>
+            <span className={styles.kpiSub}>{activeCount} {t('invoices', settings.language)}</span>
           </div>
         </div>
         <div className={`${styles.kpiCard} ${styles.paidCard}`}>
@@ -1379,7 +1339,7 @@ export default function Orders() {
             <span className={styles.kpiValue} style={{ color: '#10B981' }}>
               {totalPaid.toFixed(2)}
             </span>
-            <span className={styles.kpiSub}>{orders.filter(o => (o.dueAmount === 0 || o.dueAmount === null) && o.totalAmount > 0).length} {t('invoices', settings.language)}</span>
+            <span className={styles.kpiSub}>{paidCount} {t('invoices', settings.language)}</span>
           </div>
         </div>
         <div className={`${styles.kpiCard} ${styles.pendingCard}`}>
@@ -1389,7 +1349,7 @@ export default function Orders() {
             <span className={styles.kpiValue} style={{ color: '#F97316' }}>
               {totalPending.toFixed(2)}
             </span>
-            <span className={styles.kpiSub}>{orders.filter(o => o.dueAmount > 0).length} {t('invoices', settings.language)}</span>
+            <span className={styles.kpiSub}>{pendingCount} {t('invoices', settings.language)}</span>
           </div>
         </div>
         <div className={`${styles.kpiCard} ${styles.overdueCard}`}>
@@ -1399,7 +1359,7 @@ export default function Orders() {
             <span className={styles.kpiValue} style={{ color: '#EF4444' }}>
               {overdueAmount.toFixed(2)}
             </span>
-            <span className={styles.kpiSub}>{overdueOrdersList.length} {t('invoices', settings.language)}</span>
+            <span className={styles.kpiSub}>{overdueCount} {t('invoices', settings.language)}</span>
           </div>
         </div>
       </div>
@@ -1501,8 +1461,8 @@ export default function Orders() {
                   {t('loading', settings.language)}
                 </td>
               </tr>
-            ) : paginatedOrders.length > 0 ? (
-              paginatedOrders.map((order) => (
+            ) : orders.length > 0 ? (
+              orders.map((order) => (
                 <tr key={order.id || order._id} className={styles.orderRow} onClick={() => {
                   setSelectedOrder(order);
                   setShowStatusModal(true);
@@ -1607,12 +1567,12 @@ export default function Orders() {
           </tbody>
         </table>
 
-        {!loading && (
+        {!loading && totalItems > 0 && (
           <Pagination
             currentPage={currentPage}
-            totalPages={Math.ceil(filteredOrders.length / 20)}
+            totalPages={Math.ceil(totalItems / 20)}
             onPageChange={setCurrentPage}
-            totalItems={filteredOrders.length}
+            totalItems={totalItems}
             pageSize={20}
             itemLabel="orders"
           />
@@ -1764,7 +1724,7 @@ export default function Orders() {
                                   {p.method} Payment
                                 </div>
                                 <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.15rem' }}>
-                                  Ref: {p.paymentReference || 'N/A'} • {formatDateTime(p.createdAt)}
+                                  Ref: {cleanPaymentRef(p) || 'N/A'} • {formatDateTime(p.createdAt)}
                                 </div>
                               </div>
                               <div style={{ textAlign: 'right' }}>

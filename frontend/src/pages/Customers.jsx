@@ -710,6 +710,15 @@ export default function Customers() {
             }
           }
 
+          // Insert a single payment record for the total split amount first
+          const payId = await getNextRvNumber();
+          const payRef = await window.electronAPI.getNextPaymentReference('PAY');
+          await window.electronAPI.dbQuery(
+            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+             VALUES (?, ?, NULL, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?)`,
+            [payId, selectedCustomer.id, DEFAULT_SHOP_ID, split.amount, split.method, 'SUCCESS', timestamp, timestamp, payRef]
+          );
+
           if (billsToProcess.length > 0) {
             console.log(`Found ${billsToProcess.length} pending bills.`);
             for (const bill of billsToProcess) {
@@ -747,24 +756,14 @@ export default function Customers() {
                 [newPaid, newDue, newStatus, split.method, timestamp, bill.id]
               );
 
-              const payId = await getNextRvNumber();
-              const payRef = await window.electronAPI.getNextPaymentReference('PAY');
+              // Record the allocation in advance_allocations
+              const allocId = `ALLOC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
               await window.electronAPI.dbQuery(
-                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-                [payId, selectedCustomer.id, bill.id, DEFAULT_SHOP_ID, paymentForThisBill, split.method, 'SUCCESS', timestamp, timestamp, payRef]
+                `INSERT INTO advance_allocations (id, paymentId, orderId, amountUsed, date, isSynced, updatedAt) 
+                 VALUES (?, ?, ?, ?, ?, 0, ?)`,
+                [allocId, payId, bill.id, paymentForThisBill, timestamp, timestamp]
               );
             }
-          }
-
-          if (remainingPayment > 0) {
-            const payId = await getNextRvNumber();
-            const payRef = await window.electronAPI.getNextPaymentReference('ADV');
-            await window.electronAPI.dbQuery(
-              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-              [payId, selectedCustomer.id, null, DEFAULT_SHOP_ID, remainingPayment, split.method, 'SUCCESS', timestamp, timestamp, payRef]
-            );
           }
 
           totalRemaining += remainingPayment;
@@ -1499,6 +1498,11 @@ export default function Customers() {
 
         // All payments for this customer (from payments table)
         const allPaymentsRaw = paymentsRes.success ? paymentsRes.data : [];
+        const allocsRes = await window.electronAPI.dbQuery(
+          "SELECT * FROM advance_allocations WHERE paymentId IN (SELECT id FROM payments WHERE customerId = ?)",
+          [activeCustomer.id]
+        );
+        const customerAllocations = allocsRes.success ? allocsRes.data : [];
 
         // Build debits from all orders
         let runningBalance = 0;
@@ -1589,10 +1593,12 @@ export default function Customers() {
         const pendingDue = Math.max(0, runningBalance);
         const availableAdvance = runningBalance < 0 ? Math.abs(runningBalance) : 0;
 
-        // totalAdvanceReceived: unlinked payments (for display in Advance Details section)
-        const totalAdvanceReceived = allPaymentsRaw
+        // totalAdvanceReceived: unlinked payments minus their allocations (for display in Advance Details section)
+        const rawAdvanceReceived = allPaymentsRaw
           .filter(p => (!p.orderId || p.orderId === '') && p.method !== 'System Auto' && p.method !== 'Discount' && p.method !== 'Refund Advance')
           .reduce((s, p) => s + (p.amount || 0), 0);
+        const rawAllocationsSum = customerAllocations.reduce((s, a) => s + (a.amountUsed || 0), 0);
+        const totalAdvanceReceived = Math.max(0, rawAdvanceReceived - rawAllocationsSum);
         const advanceUsed = Math.max(0, totalAdvanceReceived - availableAdvance);
 
         setSelectedCustomerStats({

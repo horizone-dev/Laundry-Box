@@ -501,6 +501,7 @@ export default function Settlement() {
         }
 
         // Process each split payment sequentially
+        // Process each split payment sequentially
         for (const split of splits) {
           let remaining = split.amount;
 
@@ -510,6 +511,15 @@ export default function Settlement() {
             [selectedCustomer.id]
           );
           const bills = billsRes.success ? billsRes.data : [];
+
+          // Insert a single payment record for the total split amount first
+          const payId = await getNextRvNumber();
+          const payRef = await window.electronAPI.getNextPaymentReference('SET');
+          await window.electronAPI.dbQuery(
+            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
+             VALUES (?, ?, NULL, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?)`,
+            [payId, selectedCustomer.id, DEFAULT_SHOP_ID, split.amount, split.method, 'SUCCESS', timestamp, timestamp, payRef]
+          );
 
           if (bills.length > 0) {
             for (const bill of bills) {
@@ -566,25 +576,14 @@ export default function Settlement() {
                 [newPaid, newDue, newStatus, newWorkflowStatus, newOrderPaymentMethod, timestamp, bill.id]
               );
 
-              const payId = await getNextRvNumber();
-              const payRef = await window.electronAPI.getNextPaymentReference('SET');
+              // Record the allocation in advance_allocations
+              const allocId = `ALLOC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
               await window.electronAPI.dbQuery(
-                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-                [payId, selectedCustomer.id, bill.id, DEFAULT_SHOP_ID, allocate, split.method, 'SUCCESS', timestamp, timestamp, payRef]
+                `INSERT INTO advance_allocations (id, paymentId, orderId, amountUsed, date, isSynced, updatedAt) 
+                 VALUES (?, ?, ?, ?, ?, 0, ?)`,
+                [allocId, payId, bill.id, allocate, timestamp, timestamp]
               );
             }
-          }
-
-          // If there's remaining unapplied payment (excess / advance payment)
-          if (remaining > 0) {
-            const payId = await getNextRvNumber();
-            const payRef = await window.electronAPI.getNextPaymentReference('SET');
-            await window.electronAPI.dbQuery(
-              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-              [payId, selectedCustomer.id, null, DEFAULT_SHOP_ID, remaining, split.method, 'SUCCESS', timestamp, timestamp, payRef]
-            );
           }
         }
 

@@ -208,7 +208,7 @@ export default function CustomerStatement() {
 
     if (selectedCustomer && originalOpeningBalance > 0) {
       rows.push({
-        date: selectedCustomer.createdAt || selectedCustomer.updatedAt || new Date(0).toISOString(),
+        date: selectedCustomer.createdAt || selectedCustomer.updatedAt || getLocalISOString(),
         type: 'opening_balance',
         ref: 'OPENING',
         description: 'Opening Balance (Outstanding Due)',
