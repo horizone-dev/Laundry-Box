@@ -1628,7 +1628,7 @@ export default function Customers() {
         const systemAutoOffset = allPaymentsRaw
           .filter(p => p.method === 'System Auto' && !p.orderId)
           .reduce((s, p) => s + (p.amount || 0), 0);
-        const openingBal = (activeCustomer.openingBalance || 0) + Math.abs(systemAutoOffset);
+        const openingBal = Math.max(0, activeCustomer.openingBalance || 0) + Math.abs(systemAutoOffset);
         runningBalance += openingBal;
 
         // Active orders: add totalAmount as debit (charges to customer)

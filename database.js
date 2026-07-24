@@ -1029,7 +1029,7 @@ function runDataHealer(db) {
         .filter(p => p.method === 'System Auto' && !p.orderId)
         .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
 
-      let balance = openingBalance + Math.abs(systemAutoOffsetSum);
+      let balance = Math.max(0, openingBalance) + Math.abs(systemAutoOffsetSum);
 
       // 4. Process orders
       orders.forEach(o => {
@@ -1277,7 +1277,7 @@ function runDataHealer(db) {
         .filter(p => p.method === 'System Auto' && !p.orderId)
         .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
 
-      let balance = openingBalance + Math.abs(systemAutoOffsetSum);
+      let balance = Math.max(0, openingBalance) + Math.abs(systemAutoOffsetSum);
 
       // 4. Process orders
       orders.forEach(o => {
@@ -1315,7 +1315,7 @@ function runDataHealer(db) {
               }
             }
 
-            if (o.deletedAction === 'Returned' && paidAmount > 0) {
+            if ((o.deletedAction === 'refund' || o.deletedAction === 'Refund' || o.deletedAction === 'Returned') && paidAmount > 0) {
               balance += paidAmount; // refund debit
             }
           }
@@ -1324,7 +1324,7 @@ function runDataHealer(db) {
 
       // 5. Process payments
       payments.forEach(p => {
-        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
+        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto' || p.method === 'Discount') return;
         balance -= parseFloat(p.amount || 0); // payment credit
       });
 
