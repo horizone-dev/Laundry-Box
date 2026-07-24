@@ -844,7 +844,7 @@ ipcMain.handle('get-paginated-orders', (event, { currentPage, pageSize, searchTe
     // Workflow counts
     const wfRow = db.prepare(`
       SELECT
-        COUNT(*) as All_count,
+        SUM(CASE WHEN status != 'Deleted' THEN 1 ELSE 0 END) as All_count,
         SUM(CASE WHEN status IN ('Confirmed','Payment Pending','Credit','Picked Up') THEN 1 ELSE 0 END) as Confirmed,
         SUM(CASE WHEN status IN ('Washing','Drying','Ironing') THEN 1 ELSE 0 END) as Processing,
         SUM(CASE WHEN status IN ('Ready','Ready to Pick up','Out for Delivery') THEN 1 ELSE 0 END) as Ready,
