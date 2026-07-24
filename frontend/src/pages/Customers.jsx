@@ -1141,7 +1141,7 @@ export default function Customers() {
 
     setLoading(true);
     const timestamp = getLocalISOString();
-    const idsToDelete = payment.paymentIds && payment.paymentIds.length > 0 ? payment.paymentIds : [payment.id];
+    const idsToDelete = payment.paymentIds && payment.paymentIds.length > 0 ? [...payment.paymentIds] : [payment.id];
     const totalAmount = payment.amount || 0;
 
     try {
@@ -1149,10 +1149,40 @@ export default function Customers() {
 
       // 1. Fetch individual payment records to group updates by orderId
       const pToDelRes = await window.electronAPI.dbQuery(
-        `SELECT id, amount, method, orderId FROM payments WHERE id IN (${idsToDelete.map(() => '?').join(',')})`,
+        `SELECT id, amount, method, orderId, createdAt FROM payments WHERE id IN (${idsToDelete.map(() => '?').join(',')})`,
         idsToDelete
       );
-      const paymentsToDelete = pToDelRes.success ? pToDelRes.data : [];
+      let paymentsToDelete = pToDelRes.success ? pToDelRes.data : [];
+
+      // Find any associated discount payments for the same orderId and same timestamp
+      const discountIds = [];
+      const discountPayments = [];
+      for (const pDel of paymentsToDelete) {
+        if (pDel.orderId) {
+          const timePrefix = pDel.createdAt ? pDel.createdAt.substring(0, 19) : '';
+          let query = "SELECT id, amount, method, orderId, createdAt FROM payments WHERE orderId = ? AND method = 'Discount'";
+          let params = [pDel.orderId];
+          if (timePrefix) {
+            query += " AND createdAt LIKE ?";
+            params.push(`${timePrefix}%`);
+          }
+          const discRes = await window.electronAPI.dbQuery(query, params);
+          if (discRes.success && discRes.data.length > 0) {
+            discRes.data.forEach(dp => {
+              if (!idsToDelete.includes(dp.id) && !discountIds.includes(dp.id)) {
+                discountIds.push(dp.id);
+                discountPayments.push(dp);
+              }
+            });
+          }
+        }
+      }
+
+      // Merge the discount payments into the deletion lists
+      if (discountIds.length > 0) {
+        idsToDelete.push(...discountIds);
+        paymentsToDelete = [...paymentsToDelete, ...discountPayments];
+      }
 
       const orderUpdates = {};
       paymentsToDelete.forEach(pDel => {
@@ -1228,8 +1258,8 @@ export default function Customers() {
 
       for (const pDel of paymentsToDelete) {
         const txnRes = await window.electronAPI.dbQuery(
-          "SELECT id FROM account_transactions WHERE amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
-          [pDel.amount, `%${selectedCustomer.name}%`, `${datePrefix.substring(0, 10)}%`]
+          "SELECT id FROM account_transactions WHERE amount = ? AND (description LIKE ? OR description LIKE ? OR date LIKE ?) LIMIT 1",
+          [pDel.amount, `%${selectedCustomer.name}%`, `%${pDel.orderId}%`, `${datePrefix.substring(0, 10)}%`]
         );
         if (txnRes.success && txnRes.data.length > 0) {
           await window.electronAPI.dbQuery("DELETE FROM account_transactions WHERE id = ?", [txnRes.data[0].id]);
