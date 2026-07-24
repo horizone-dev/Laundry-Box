@@ -1067,7 +1067,7 @@ function runDataHealer(db) {
               }
             }
 
-            if (o.deletedAction === 'Returned' && paidAmount > 0) {
+            if ((o.deletedAction === 'refund' || o.deletedAction === 'Refund' || o.deletedAction === 'Returned') && paidAmount > 0) {
               balance += paidAmount; // refund debit (money went back to customer)
             }
           }
@@ -1076,7 +1076,7 @@ function runDataHealer(db) {
 
       // 5. Process payments
       payments.forEach(p => {
-        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
+        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto' || p.method === 'Discount') return;
         balance -= parseFloat(p.amount || 0); // payment credit
       });
 
