@@ -240,7 +240,7 @@ export default function Orders() {
     }
   };
   const [workflowFilter, setWorkflowFilter] = useState('All'); // 'All', 'Confirmed', 'Processing', 'Ready', 'Delivered'
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [isPrintingTags, setIsPrintingTags] = useState(false);
   const [pdfToast, setPdfToast] = useState(null);
 
