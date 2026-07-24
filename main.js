@@ -799,7 +799,7 @@ ipcMain.handle('get-paginated-orders', (event, { currentPage, pageSize, searchTe
     else if (sortBy === 'date') orderStr = 'ORDER BY o.createdAt DESC';
     else if (sortBy === 'payment') orderStr = 'ORDER BY o.paymentStatus ASC, o.createdAt DESC';
 
-    const baseQuery = `FROM orders o ${whereStr}`;
+    const baseQuery = `FROM orders o LEFT JOIN customers c ON o.customerId = c.id ${whereStr}`;
 
     // Total count for pagination
     const totalRow = db.prepare(`SELECT COUNT(*) as cnt ${baseQuery}`).get(params);
@@ -853,14 +853,13 @@ ipcMain.handle('get-paginated-orders', (event, { currentPage, pageSize, searchTe
       FROM orders
     `).get([]);
 
-    // Paginated data — JOIN customers to get live name and phone
+    // Paginated data
     const data = db.prepare(`
       SELECT o.*,
         COALESCE(c.name, o.customerName) as customerName,
         COALESCE(c.phone, o.customerPhone) as customerPhone
-      FROM orders o
-      LEFT JOIN customers c ON o.customerId = c.id
-      ${whereStr} ${orderStr} LIMIT ? OFFSET ?
+      ${baseQuery}
+      ${orderStr} LIMIT ? OFFSET ?
     `).all([...params, limit, offset]);
 
     return {
