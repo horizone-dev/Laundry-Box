@@ -853,8 +853,15 @@ ipcMain.handle('get-paginated-orders', (event, { currentPage, pageSize, searchTe
       FROM orders
     `).get([]);
 
-    // Paginated data
-    const data = db.prepare(`SELECT o.* ${baseQuery} ${orderStr} LIMIT ? OFFSET ?`).all([...params, limit, offset]);
+    // Paginated data — JOIN customers to get live name and phone
+    const data = db.prepare(`
+      SELECT o.*,
+        COALESCE(c.name, o.customerName) as customerName,
+        COALESCE(c.phone, o.customerPhone) as customerPhone
+      FROM orders o
+      LEFT JOIN customers c ON o.customerId = c.id
+      ${whereStr} ${orderStr} LIMIT ? OFFSET ?
+    `).all([...params, limit, offset]);
 
     return {
       success: true,
