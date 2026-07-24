@@ -883,6 +883,113 @@ ipcMain.handle('get-paginated-orders', (event, { currentPage, pageSize, searchTe
   }
 });
 
+ipcMain.handle('get-paginated-transactions', (event, { currentPage, pageSize, searchTerm, dateRange, customStart, customEnd, accountType, bankAccountId, bankAccounts }) => {
+  try {
+    const db = getDB();
+    const page = parseInt(currentPage) || 1;
+    const limit = parseInt(pageSize) || 20;
+    const offset = (page - 1) * limit;
+    const now = new Date();
+
+    const conditions = [];
+    const params = [];
+
+    // Exclude system auto-allocated transactions (same as frontend)
+    conditions.push("description NOT LIKE '%System Auto%'");
+    conditions.push("category != 'System Auto'");
+
+    // Account type filter
+    if (accountType === 'CASH') {
+      conditions.push("accountType = 'CASH'");
+    } else if (accountType === 'GATEWAY') {
+      conditions.push("accountType = 'GATEWAY'");
+    } else {
+      // BANK
+      conditions.push("accountType = 'BANK'");
+      if (bankAccounts && bankAccounts.length > 0) {
+        const firstBankId = bankAccounts[0].id;
+        if (bankAccountId === firstBankId) {
+          // First bank: include unassigned bank txns too
+          const otherBankIds = bankAccounts.filter(b => b.id !== firstBankId).map(b => b.id);
+          if (otherBankIds.length > 0) {
+            const placeholders = otherBankIds.map(() => '?').join(',');
+            conditions.push(`(bankAccountId = ? OR bankAccountId IS NULL OR bankAccountId NOT IN (${placeholders}))`);
+            params.push(bankAccountId, ...otherBankIds);
+          } else {
+            // Only one bank - include all bank transactions
+            conditions.push("(bankAccountId = ? OR bankAccountId IS NULL OR bankAccountId = '')");
+            params.push(bankAccountId);
+          }
+        } else {
+          conditions.push("bankAccountId = ?");
+          params.push(bankAccountId);
+        }
+      }
+    }
+
+    // Search
+    if (searchTerm && searchTerm.trim()) {
+      const s = `%${searchTerm.trim()}%`;
+      conditions.push("(description LIKE ? OR category LIKE ?)");
+      params.push(s, s);
+    }
+
+    // Date range
+    if (dateRange === 'Today') {
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+      conditions.push("date LIKE ?");
+      params.push(`${todayStr}%`);
+    } else if (dateRange === 'Yesterday') {
+      const d = new Date(now); d.setDate(d.getDate() - 1);
+      const s = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      conditions.push("date LIKE ?");
+      params.push(`${s}%`);
+    } else if (dateRange === 'This Month') {
+      const s = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      conditions.push("date LIKE ?");
+      params.push(`${s}%`);
+    } else if (dateRange === 'This Week') {
+      const d = new Date(now); d.setDate(d.getDate() - 7);
+      const startStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const endStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+      conditions.push("date BETWEEN ? AND ?");
+      params.push(startStr, endStr + ' 23:59:59');
+    } else if (dateRange === 'Custom' && customStart && customEnd) {
+      conditions.push("date BETWEEN ? AND ?");
+      params.push(customStart, customEnd + ' 23:59:59');
+    }
+    // 'All Time' / null = no date filter
+
+    const whereStr = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Total count for pagination
+    const countRow = db.prepare(`SELECT COUNT(*) as cnt FROM account_transactions ${whereStr}`).get(params);
+    const totalCount = countRow ? countRow.cnt : 0;
+
+    // Filtered income/expense totals (for the footer totals row - matches the filter)
+    const totalsRow = db.prepare(`
+      SELECT 
+        IFNULL(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END), 0) as filteredIncome,
+        IFNULL(SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END), 0) as filteredExpense
+      FROM account_transactions ${whereStr}
+    `).get(params);
+
+    // Paginated data
+    const data = db.prepare(`SELECT * FROM account_transactions ${whereStr} ORDER BY date DESC LIMIT ? OFFSET ?`).all([...params, limit, offset]);
+
+    return {
+      success: true,
+      data,
+      totalCount,
+      filteredIncome: totalsRow ? totalsRow.filteredIncome : 0,
+      filteredExpense: totalsRow ? totalsRow.filteredExpense : 0,
+    };
+  } catch (err) {
+    console.error('get-paginated-transactions error:', err);
+    return { success: false, error: err.message, data: [], totalCount: 0, filteredIncome: 0, filteredExpense: 0 };
+  }
+});
+
 ipcMain.handle('get-next-rv-number', async (event) => {
   try {
     const db = getDB();
@@ -915,7 +1022,8 @@ ipcMain.handle('get-next-payment-reference', async (event, paymentType) => {
   }
 });
 
-const DEBUG_NOMOD = true;
+// Enable detailed Nomod debug logs in development only — never in production builds
+const DEBUG_NOMOD = process.env.NODE_ENV !== 'production' && !app.isPackaged;
 
 function logNomodRequest(url, method, apiKey, settings, body = null) {
   if (!DEBUG_NOMOD) return;

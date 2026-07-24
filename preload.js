@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   testEmail: () => ipcRenderer.invoke('test-email'),
   sendOtpEmail: (options) => ipcRenderer.invoke('send-otp-email', options),
   getPaginatedOrders: (options) => ipcRenderer.invoke('get-paginated-orders', options),
+  getPaginatedTransactions: (options) => ipcRenderer.invoke('get-paginated-transactions', options),
 });
 
 // Override native alert to show custom HTML/CSS Toast notifications, confirm to refocus, and print for silent routing

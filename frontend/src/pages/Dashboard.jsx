@@ -52,8 +52,8 @@ export default function Dashboard() {
     if (!window.electronAPI?.dbQuery) return;
     setLoading(true);
     try {
-      // 1. Fetch all orders and payments
-      const ordersRes = await window.electronAPI.dbQuery('SELECT * FROM orders ORDER BY createdAt DESC', []);
+      // 1. Fetch all non-deleted orders and payments (Dashboard operates independently of Orders page pagination)
+      const ordersRes = await window.electronAPI.dbQuery("SELECT * FROM orders WHERE status != 'Deleted' ORDER BY createdAt DESC", []);
       const paymentsRes = await window.electronAPI.dbQuery(
         `SELECT p.*, c.name as customerName 
          FROM payments p 

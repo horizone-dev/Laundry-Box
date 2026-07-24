@@ -56,6 +56,10 @@ export default function Accounts() {
   }, [settings.noModPayEnabled, settings.enablePaymentLinks]);
   const [transactions, setTransactions] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalTransactionCount, setTotalTransactionCount] = useState(0);
+  const [paginatedTransactions, setPaginatedTransactions] = useState([]);
+  const [filteredIncome, setFilteredIncome] = useState(0);
+  const [filteredExpense, setFilteredExpense] = useState(0);
   const [refundsPage, setRefundsPage] = useState(1);
 
   const [dbCustomers, setDbCustomers] = useState([]);
@@ -139,6 +143,37 @@ export default function Accounts() {
     setCurrentPage(1);
     setRefundsPage(1);
   }, [searchTerm, dateRange, customStart, customEnd, activeAccountType, activeBankAccountId, activeTab]);
+
+  // Fetch paginated transactions from DB whenever filters or page changes
+  useEffect(() => {
+    if (activeTab !== 'Payments') return;
+    if (!window.electronAPI?.getPaginatedTransactions) return;
+    const fetchPage = async () => {
+      try {
+        const bankAccts = settings.bankAccounts || [];
+        const res = await window.electronAPI.getPaginatedTransactions({
+          currentPage,
+          pageSize: 20,
+          searchTerm,
+          dateRange,
+          customStart,
+          customEnd,
+          accountType: activeAccountType,
+          bankAccountId: activeBankAccountId,
+          bankAccounts: bankAccts,
+        });
+        if (res && res.success) {
+          setPaginatedTransactions(res.data || []);
+          setTotalTransactionCount(res.totalCount || 0);
+          setFilteredIncome(res.filteredIncome || 0);
+          setFilteredExpense(res.filteredExpense || 0);
+        }
+      } catch (err) {
+        console.error('fetchPage transactions error:', err);
+      }
+    };
+    fetchPage();
+  }, [currentPage, searchTerm, dateRange, customStart, customEnd, activeAccountType, activeBankAccountId, activeTab, settings.bankAccounts]);
 
   useEffect(() => {
     if (activeTab === 'Payment links' && settings.enablePaymentLinks === false) {
@@ -704,6 +739,8 @@ export default function Accounts() {
     });
   }, [transactions, activeAccountType, activeBankAccountId, settings.bankAccounts]);
 
+  // NOTE: paginatedTransactions, filteredIncome, filteredExpense are now server-side (see useEffect above)
+  // filteredTransactions is still used for refund building which uses the full transactions state
   const filteredTransactions = useMemo(() => {
     const bounds = getLocalDateBounds(dateRange, customStart, customEnd);
     return activeTransactions.filter(t => {
@@ -711,26 +748,16 @@ export default function Accounts() {
         t.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         t.category?.toLowerCase().includes(searchTerm.toLowerCase());
       if (!matchesSearch) return false;
-
-      if (bounds === false) return false; // Custom bounds selected but empty
-      if (bounds === null) return true;   // All time
+      if (bounds === false) return false;
+      if (bounds === null) return true;
       return localStrIsWithinBounds(t.date, bounds);
     });
   }, [activeTransactions, searchTerm, dateRange, customStart, customEnd]);
 
-  // Aggregate stats for the active filtered set
-  const filteredIncome = useMemo(() => {
-    return filteredTransactions.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + t.amount, 0);
-  }, [filteredTransactions]);
-
-  const filteredExpense = useMemo(() => {
-    return filteredTransactions.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + t.amount, 0);
-  }, [filteredTransactions]);
-
-  const paginatedTransactions = useMemo(() => {
-    const startIndex = (currentPage - 1) * 20;
-    return filteredTransactions.slice(startIndex, startIndex + 20);
-  }, [filteredTransactions, currentPage]);
+  // Aggregate stats for balance cards — computed from full transactions (unfiltered)
+  // These are kept so cashBalance / bankBalance / gatewayBalance remain correct
+  const _filteredIncomeCalc = useMemo(() => filteredTransactions.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + t.amount, 0), [filteredTransactions]);
+  const _filteredExpenseCalc = useMemo(() => filteredTransactions.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + t.amount, 0), [filteredTransactions]);
 
   const paginatedRefunds = useMemo(() => {
     const startIndex = (refundsPage - 1) * 20;
@@ -1555,9 +1582,9 @@ export default function Accounts() {
               {!loading && (
                 <Pagination
                   currentPage={currentPage}
-                  totalPages={Math.ceil(filteredTransactions.length / 20)}
+                  totalPages={Math.ceil(totalTransactionCount / 20)}
                   onPageChange={setCurrentPage}
-                  totalItems={filteredTransactions.length}
+                  totalItems={totalTransactionCount}
                   pageSize={20}
                   itemLabel="transactions"
                 />
