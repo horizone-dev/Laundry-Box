@@ -901,7 +901,7 @@ export default function MainLayout() {
          LEFT JOIN customers c ON o.customerId = c.id 
          WHERE (o.id LIKE ? OR o.billNumber LIKE ? OR c.name LIKE ? OR c.phone LIKE ?) 
            AND o.dueAmount > 0 
-           AND o.status != 'Cancelled' 
+           AND o.status NOT IN ('Cancelled', 'Deleted') 
          LIMIT 5`,
         [term, term, term, term]
       );
@@ -1088,7 +1088,7 @@ const timestamp = getLocalISOString();
 
           // Re-fetch pending bills sequentially to get updated dues
           const billsRes = await window.electronAPI.dbQuery(
-            "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 AND status != 'Cancelled' ORDER BY createdAt ASC",
+            "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 AND status NOT IN ('Cancelled', 'Deleted') ORDER BY createdAt ASC",
             [customer.id]
           );
           const bills = billsRes.success ? billsRes.data : [];

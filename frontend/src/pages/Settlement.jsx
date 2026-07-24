@@ -270,7 +270,7 @@ export default function Settlement() {
     if (window.electronAPI?.dbQuery) {
       try {
         const pendingRes = await window.electronAPI.dbQuery(
-          "SELECT orders.*, customers.name as customerName, customers.phone as customerPhone, customers.balance as customerBalance FROM orders LEFT JOIN customers ON orders.customerId = customers.id WHERE orders.id IS NOT NULL AND orders.id != '' AND orders.dueAmount > 0 ORDER BY orders.createdAt DESC LIMIT 8",
+          "SELECT orders.*, customers.name as customerName, customers.phone as customerPhone, customers.balance as customerBalance FROM orders LEFT JOIN customers ON orders.customerId = customers.id WHERE orders.id IS NOT NULL AND orders.id != '' AND orders.dueAmount > 0 AND orders.status NOT IN ('Cancelled', 'Deleted') ORDER BY orders.createdAt DESC LIMIT 8",
           []
         );
         const historyRes = await window.electronAPI.dbQuery(
@@ -290,11 +290,11 @@ export default function Settlement() {
 
         const outstandingSum = await window.electronAPI.dbQuery('SELECT SUM(balance) as total FROM customers WHERE balance > 0', []);
         const advanceSum = await window.electronAPI.dbQuery('SELECT SUM(ABS(balance)) as total FROM customers WHERE balance < 0', []);
-        const pendingCount = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE id IS NOT NULL AND id != '' AND dueAmount > 0", []);
+        const pendingCount = await window.electronAPI.dbQuery("SELECT COUNT(*) as count FROM orders WHERE id IS NOT NULL AND id != '' AND dueAmount > 0 AND status NOT IN ('Cancelled', 'Deleted')", []);
         const settlementsRes = await window.electronAPI.dbQuery("SELECT SUM(amount) as total FROM payments WHERE strftime('%m', createdAt) = strftime('%m', 'now')", []);
         const overdueDays = settings?.overdueDays || 7;
         const overdueRes = await window.electronAPI.dbQuery(
-          "SELECT COUNT(*) as count FROM orders WHERE id IS NOT NULL AND id != '' AND dueAmount > 0 AND createdAt < date('now', ?)",
+          "SELECT COUNT(*) as count FROM orders WHERE id IS NOT NULL AND id != '' AND dueAmount > 0 AND status NOT IN ('Cancelled', 'Deleted') AND createdAt < date('now', ?)",
           [`-${overdueDays} days`]
         );
 
@@ -320,7 +320,7 @@ export default function Settlement() {
         const customerId = customer.id;
         
         const pendingRes = await window.electronAPI.dbQuery(
-          "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 ORDER BY createdAt DESC",
+          "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 AND status NOT IN ('Cancelled', 'Deleted') ORDER BY createdAt DESC",
           [customerId]
         );
         const historyRes = await window.electronAPI.dbQuery(
@@ -539,7 +539,7 @@ export default function Settlement() {
 
           // Re-fetch pending bills sequentially to get updated dues
           const billsRes = await window.electronAPI.dbQuery(
-            "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 ORDER BY createdAt ASC",
+            "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 AND status NOT IN ('Cancelled', 'Deleted') ORDER BY createdAt ASC",
             [selectedCustomer.id]
           );
           const bills = billsRes.success ? billsRes.data : [];
