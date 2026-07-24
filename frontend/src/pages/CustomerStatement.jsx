@@ -208,9 +208,8 @@ export default function CustomerStatement() {
 
     if (selectedCustomer && originalOpeningBalance > 0) {
       const baseDate = selectedCustomer.createdAt || selectedCustomer.updatedAt || getLocalISOString();
-      const startOfDayDate = baseDate.includes('T') ? baseDate.substring(0, 10) + 'T00:00:00' : baseDate;
       rows.push({
-        date: startOfDayDate,
+        date: baseDate,
         type: 'opening_balance',
         ref: 'OPENING',
         description: 'Opening Balance (Outstanding Due)',
