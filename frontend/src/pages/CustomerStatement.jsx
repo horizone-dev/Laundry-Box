@@ -384,10 +384,9 @@ export default function CustomerStatement() {
       }
     });
 
-    // Group database payments by exact timestamp to prevent visual splits (even for different methods in a multipayment)
     const groupedPaymentsMap = {};
     payments.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto').forEach(p => {
-      const key = p.createdAt;
+      const key = p.createdAt ? p.createdAt.substring(0, 19) : p.id;
       if (!groupedPaymentsMap[key]) {
         groupedPaymentsMap[key] = {
           date: p.createdAt,
