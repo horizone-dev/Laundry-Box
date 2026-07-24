@@ -1700,9 +1700,8 @@ export default function Customers() {
           }
         });
 
-        // All payments: subtract as credits (money received from customer)
         allPaymentsRaw.forEach(p => {
-          if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
+          if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto' || p.method === 'Discount') return;
           runningBalance -= (p.amount || 0); // payment credit (reduces balance)
         });
 
