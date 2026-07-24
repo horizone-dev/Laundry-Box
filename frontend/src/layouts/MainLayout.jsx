@@ -177,7 +177,13 @@ export default function MainLayout() {
   };
   const location = useLocation();
 
-
+  useEffect(() => {
+    const path = location.pathname;
+    if (!path.includes('/reports/customer-statement') && !path.includes('/invoice')) {
+      sessionStorage.removeItem('customer_statement_filters');
+      sessionStorage.removeItem('customer_statement_scroll');
+    }
+  }, [location.pathname]);
   const [deliveryToast, setDeliveryToast] = useState(null);
   const [showQuickSettle, setShowQuickSettle] = useState(false);
   const [quickSearch, setQuickSearch] = useState('');
