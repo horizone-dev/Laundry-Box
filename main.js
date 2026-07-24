@@ -749,7 +749,7 @@ ipcMain.handle('get-paginated-orders', (event, { currentPage, pageSize, searchTe
     // Search term
     if (searchTerm && searchTerm.trim()) {
       const s = `%${searchTerm.trim()}%`;
-      conditions.push("(o.id LIKE ? OR o.billNumber LIKE ? OR o.customerName LIKE ? OR o.customerPhone LIKE ?)");
+      conditions.push("(o.id LIKE ? OR o.billNumber LIKE ? OR c.name LIKE ? OR c.phone LIKE ?)");
       params.push(s, s, s, s);
     }
 
@@ -856,8 +856,8 @@ ipcMain.handle('get-paginated-orders', (event, { currentPage, pageSize, searchTe
     // Paginated data
     const data = db.prepare(`
       SELECT o.*,
-        COALESCE(c.name, o.customerName) as customerName,
-        COALESCE(c.phone, o.customerPhone) as customerPhone
+        COALESCE(c.name, 'Walk-in') as customerName,
+        COALESCE(c.phone, '') as customerPhone
       ${baseQuery}
       ${orderStr} LIMIT ? OFFSET ?
     `).all([...params, limit, offset]);
