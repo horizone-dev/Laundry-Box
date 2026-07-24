@@ -207,8 +207,10 @@ export default function CustomerStatement() {
       : 0;
 
     if (selectedCustomer && originalOpeningBalance > 0) {
+      const baseDate = selectedCustomer.createdAt || selectedCustomer.updatedAt || getLocalISOString();
+      const startOfDayDate = baseDate.includes('T') ? baseDate.substring(0, 10) + 'T00:00:00' : baseDate;
       rows.push({
-        date: selectedCustomer.createdAt || selectedCustomer.updatedAt || getLocalISOString(),
+        date: startOfDayDate,
         type: 'opening_balance',
         ref: 'OPENING',
         description: 'Opening Balance (Outstanding Due)',
@@ -497,16 +499,18 @@ export default function CustomerStatement() {
 
     allPayments.forEach(p => rows.push(p));
 
-    /* Sort chronologically (ascending) first to calculate running balance */
-    rows.sort((a, b) => {
-      const diff = normalizeDate(a.date) - normalizeDate(b.date);
-      if (diff !== 0) return diff;
-      const aIsDebit = a.debit > 0;
-      const bIsDebit = b.debit > 0;
-      if (aIsDebit && !bIsDebit) return -1;
-      if (!aIsDebit && bIsDebit) return 1;
-      return 0;
-    });
+     /* Sort chronologically (ascending) first to calculate running balance */
+     rows.sort((a, b) => {
+       if (a.type === 'opening_balance' && b.type !== 'opening_balance') return -1;
+       if (b.type === 'opening_balance' && a.type !== 'opening_balance') return 1;
+       const diff = normalizeDate(a.date) - normalizeDate(b.date);
+       if (diff !== 0) return diff;
+       const aIsDebit = a.debit > 0;
+       const bIsDebit = b.debit > 0;
+       if (aIsDebit && !bIsDebit) return -1;
+       if (!aIsDebit && bIsDebit) return 1;
+       return 0;
+     });
 
     /* Apply date filter BEFORE running balance so balance is correct for the filtered window */
     let finalRows = rows;
