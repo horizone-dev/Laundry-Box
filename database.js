@@ -1075,8 +1075,10 @@ function runDataHealer(db) {
       });
 
       // 5. Process payments
+      const activeOrderIds = orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Deleted').map(o => o.id);
       payments.forEach(p => {
-        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto' || p.method === 'Discount') return;
+        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
+        if (p.method === 'Discount' && p.orderId && activeOrderIds.includes(p.orderId)) return;
         balance -= parseFloat(p.amount || 0); // payment credit
       });
 
@@ -1153,7 +1155,7 @@ function runDataHealer(db) {
         ), 0)
       ) as unapplied
       FROM payments
-      WHERE (orderId IS NULL OR orderId = '') AND method NOT IN ('Refund Advance')
+      WHERE (orderId IS NULL OR orderId = '') AND method NOT IN ('Refund Advance', 'Discount')
       GROUP BY customerId
       HAVING unapplied > 0.01
     `).all();
@@ -1323,8 +1325,10 @@ function runDataHealer(db) {
       });
 
       // 5. Process payments
+      const activeOrderIds = orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Deleted').map(o => o.id);
       payments.forEach(p => {
-        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto' || p.method === 'Discount') return;
+        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
+        if (p.method === 'Discount' && p.orderId && activeOrderIds.includes(p.orderId)) return;
         balance -= parseFloat(p.amount || 0); // payment credit
       });
 

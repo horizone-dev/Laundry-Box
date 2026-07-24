@@ -1700,8 +1700,10 @@ export default function Customers() {
           }
         });
 
+        const activeOrderIds = bills.filter(b => b.status !== 'Cancelled' && b.status !== 'Deleted').map(b => b.id);
         allPaymentsRaw.forEach(p => {
-          if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto' || p.method === 'Discount') return;
+          if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
+          if (p.method === 'Discount' && p.orderId && activeOrderIds.includes(p.orderId)) return;
           runningBalance -= (p.amount || 0); // payment credit (reduces balance)
         });
 
