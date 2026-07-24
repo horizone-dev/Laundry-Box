@@ -497,8 +497,17 @@ export default function Orders() {
           settings
         });
         if (res.success) {
+          // Safety guard: if currentPage is beyond available data, reset to page 1
+          const total = res.totalCount || 0;
+          const maxPage = Math.max(1, Math.ceil(total / 20));
+          if (currentPage > maxPage) {
+            setCurrentPage(1);
+            setLoading(false);
+            return;
+          }
+
           setOrders(res.data || []);
-          setTotalItems(res.totalCount || 0);
+          setTotalItems(total);
           setTotalAmount(res.totalAmount || 0);
           setTotalPaid(res.totalPaid || 0);
           setTotalPending(res.totalPending || 0);
