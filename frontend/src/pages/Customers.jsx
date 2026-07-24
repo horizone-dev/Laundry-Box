@@ -388,9 +388,10 @@ export default function Customers() {
       try {
         let query = `
           SELECT c.*, 
-                 IFNULL(SUM(CASE WHEN o.status NOT IN ('Cancelled', 'Deleted') THEN o.totalAmount ELSE 0 END), 0) as totalSales
+                 (SELECT IFNULL(SUM(o.totalAmount), 0) 
+                  FROM orders o 
+                  WHERE o.customerId = c.id AND o.status NOT IN ('Cancelled', 'Deleted')) as totalSales
           FROM customers c
-          LEFT JOIN orders o ON c.id = o.customerId
         `;
         let params = [];
         let conditions = [];
@@ -420,7 +421,7 @@ export default function Customers() {
           orderByClause = 'c.balance ASC';
         }
 
-        query += ` GROUP BY c.id ORDER BY ${orderByClause}`;
+        query += ` ORDER BY ${orderByClause}`;
 
         const result = await window.electronAPI.dbQuery(query, params);
         if (result.success) {
@@ -852,7 +853,7 @@ export default function Customers() {
 
         if (viewMode === 'insight' && selectedCustomer) {
           const freshCustRes = await window.electronAPI.dbQuery(
-            "SELECT c.*, IFNULL(SUM(CASE WHEN o.status != 'Cancelled' THEN o.totalAmount ELSE 0 END), 0) as totalSales FROM customers c LEFT JOIN orders o ON c.id = o.customerId WHERE c.id = ? GROUP BY c.id",
+            "SELECT c.*, (SELECT IFNULL(SUM(totalAmount), 0) FROM orders WHERE customerId = c.id AND status NOT IN ('Cancelled', 'Deleted')) as totalSales FROM customers c WHERE c.id = ?",
             [selectedCustomer.id]
           );
           if (freshCustRes.success && freshCustRes.data.length > 0) {
@@ -1342,7 +1343,7 @@ export default function Customers() {
       setSelectedBillForDiscount(null);
 
       const freshCustRes = await window.electronAPI.dbQuery(
-        "SELECT c.*, IFNULL(SUM(CASE WHEN o.status != 'Cancelled' THEN o.totalAmount ELSE 0 END), 0) as totalSales FROM customers c LEFT JOIN orders o ON c.id = o.customerId WHERE c.id = ? GROUP BY c.id",
+        "SELECT c.*, (SELECT IFNULL(SUM(totalAmount), 0) FROM orders WHERE customerId = c.id AND status NOT IN ('Cancelled', 'Deleted')) as totalSales FROM customers c WHERE c.id = ?",
         [selectedCustomer.id]
       );
       if (freshCustRes.success && freshCustRes.data.length > 0) {
