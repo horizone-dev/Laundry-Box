@@ -735,6 +735,154 @@ ipcMain.handle('db-query', (event, { query, params }) => {
   }
 });
 
+ipcMain.handle('get-paginated-orders', (event, { currentPage, pageSize, searchTerm, sortBy, dateRange, customStart, customEnd, workflowFilter, settings }) => {
+  try {
+    const db = getDB();
+    const page = parseInt(currentPage) || 1;
+    const limit = parseInt(pageSize) || 20;
+    const offset = (page - 1) * limit;
+
+    // Build WHERE conditions
+    const conditions = ["o.status != 'Deleted'"];
+    const params = [];
+
+    // Search term
+    if (searchTerm && searchTerm.trim()) {
+      const s = `%${searchTerm.trim()}%`;
+      conditions.push("(o.id LIKE ? OR o.billNumber LIKE ? OR o.customerName LIKE ? OR o.customerPhone LIKE ?)");
+      params.push(s, s, s, s);
+    }
+
+    // Workflow filter
+    if (workflowFilter && workflowFilter !== 'All' && workflowFilter !== 'Deleted') {
+      if (workflowFilter === 'Processing') {
+        conditions.push("o.status IN ('Picked Up','Washing','Drying','Ironing','Confirmed')");
+      } else if (workflowFilter === 'Ready') {
+        conditions.push("o.status IN ('Ready','Ready to Pick up','Out for Delivery')");
+      } else if (workflowFilter === 'Delivered') {
+        conditions.push("o.status = 'Delivered'");
+      } else {
+        conditions.push("o.status = ?");
+        params.push(workflowFilter);
+      }
+    } else if (workflowFilter === 'Deleted') {
+      // Override - show only deleted
+      conditions[0] = "o.status = 'Deleted'";
+    }
+
+    // Date range using createdAt
+    const now = new Date();
+    if (dateRange === 'Today') {
+      const todayStr = now.toISOString().split('T')[0];
+      conditions.push("DATE(o.createdAt) = ?");
+      params.push(todayStr);
+    } else if (dateRange === 'This Month') {
+      const startStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+      const endStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-31`;
+      conditions.push("DATE(o.createdAt) BETWEEN ? AND ?");
+      params.push(startStr, endStr);
+    } else if (dateRange === 'This Year') {
+      const startStr = `${now.getFullYear()}-01-01`;
+      const endStr = `${now.getFullYear()}-12-31`;
+      conditions.push("DATE(o.createdAt) BETWEEN ? AND ?");
+      params.push(startStr, endStr);
+    } else if (dateRange === 'Custom' && customStart && customEnd) {
+      conditions.push("DATE(o.createdAt) BETWEEN ? AND ?");
+      params.push(customStart, customEnd);
+    }
+
+    const whereStr = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Sort
+    let orderStr = 'ORDER BY o.createdAt DESC';
+    if (sortBy === 'oldest') orderStr = 'ORDER BY o.createdAt ASC';
+    else if (sortBy === 'date') orderStr = 'ORDER BY o.createdAt DESC';
+    else if (sortBy === 'payment') orderStr = 'ORDER BY o.paymentStatus ASC, o.createdAt DESC';
+
+    const baseQuery = `FROM orders o ${whereStr}`;
+
+    // Total count for pagination
+    const totalRow = db.prepare(`SELECT COUNT(*) as cnt ${baseQuery}`).get(params);
+    const totalCount = totalRow ? totalRow.cnt : 0;
+
+    // Stats (on unfiltered non-deleted orders for accurate dashboard)
+    const statsParams = params.slice(searchTerm && searchTerm.trim() ? 4 : 0); // date params only
+    // Use simpler stats query on full dataset (no search filter, just date+workflow)
+    const statsConditions = ["status != 'Deleted'"];
+    const statsP = [];
+    if (dateRange === 'Today') {
+      const todayStr = now.toISOString().split('T')[0];
+      statsConditions.push("DATE(createdAt) = ?");
+      statsP.push(todayStr);
+    } else if (dateRange === 'This Month') {
+      const startStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+      const endStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-31`;
+      statsConditions.push("DATE(createdAt) BETWEEN ? AND ?");
+      statsP.push(startStr, endStr);
+    } else if (dateRange === 'This Year') {
+      statsConditions.push("DATE(createdAt) BETWEEN ? AND ?");
+      statsP.push(`${now.getFullYear()}-01-01`, `${now.getFullYear()}-12-31`);
+    } else if (dateRange === 'Custom' && customStart && customEnd) {
+      statsConditions.push("DATE(createdAt) BETWEEN ? AND ?");
+      statsP.push(customStart, customEnd);
+    }
+    const statsWhere = `WHERE ${statsConditions.join(' AND ')}`;
+
+    const statsRow = db.prepare(`
+      SELECT 
+        IFNULL(SUM(totalAmount),0) as totalAmount,
+        IFNULL(SUM(paidAmount),0) as totalPaid,
+        IFNULL(SUM(dueAmount),0) as totalPending,
+        COUNT(*) as totalAll,
+        SUM(CASE WHEN (dueAmount > 0 OR paymentStatus IN ('Credit','Partial')) AND status NOT IN ('Delivered','Cancelled','Deleted') THEN 1 ELSE 0 END) as pendingCount,
+        SUM(CASE WHEN status NOT IN ('Delivered','Cancelled','Deleted','Payment Pending') THEN 1 ELSE 0 END) as activeCount,
+        SUM(CASE WHEN paymentStatus = 'Paid' THEN 1 ELSE 0 END) as paidCount,
+        SUM(CASE WHEN dueAmount > 0 THEN dueAmount ELSE 0 END) as overdueAmount
+      FROM orders ${statsWhere}
+    `).get(statsP);
+
+    // Workflow counts
+    const wfRow = db.prepare(`
+      SELECT
+        COUNT(*) as All_count,
+        SUM(CASE WHEN status IN ('Confirmed','Payment Pending','Credit','Picked Up') THEN 1 ELSE 0 END) as Confirmed,
+        SUM(CASE WHEN status IN ('Washing','Drying','Ironing') THEN 1 ELSE 0 END) as Processing,
+        SUM(CASE WHEN status IN ('Ready','Ready to Pick up','Out for Delivery') THEN 1 ELSE 0 END) as Ready,
+        SUM(CASE WHEN status = 'Delivered' THEN 1 ELSE 0 END) as Delivered,
+        SUM(CASE WHEN status = 'Deleted' THEN 1 ELSE 0 END) as Deleted
+      FROM orders
+    `).get([]);
+
+    // Paginated data
+    const data = db.prepare(`SELECT o.* ${baseQuery} ${orderStr} LIMIT ? OFFSET ?`).all([...params, limit, offset]);
+
+    return {
+      success: true,
+      data,
+      totalCount,
+      totalAmount: statsRow ? statsRow.totalAmount : 0,
+      totalPaid: statsRow ? statsRow.totalPaid : 0,
+      totalPending: statsRow ? statsRow.totalPending : 0,
+      overdueAmount: statsRow ? statsRow.overdueAmount : 0,
+      pendingCount: statsRow ? statsRow.pendingCount : 0,
+      overdueCount: 0,
+      activeCount: statsRow ? statsRow.activeCount : 0,
+      paidCount: statsRow ? statsRow.paidCount : 0,
+      workflowCounts: {
+        All: wfRow ? wfRow.All_count : 0,
+        Confirmed: wfRow ? wfRow.Confirmed : 0,
+        Processing: wfRow ? wfRow.Processing : 0,
+        Ready: wfRow ? wfRow.Ready : 0,
+        Delivered: wfRow ? wfRow.Delivered : 0,
+        Deleted: wfRow ? wfRow.Deleted : 0
+      }
+    };
+  } catch (err) {
+    console.error('get-paginated-orders error:', err);
+    return { success: false, error: err.message, data: [], totalCount: 0 };
+  }
+});
+
 ipcMain.handle('get-next-rv-number', async (event) => {
   try {
     const db = getDB();

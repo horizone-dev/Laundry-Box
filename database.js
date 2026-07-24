@@ -839,6 +839,19 @@ function initDB(appPath) {
       db.exec("UPDATE account_transactions SET timezoneMigrated = 1 WHERE timezoneMigrated = 0;");
       console.log('[TZ Migration] UTC device detected. No shift needed.');
     }
+
+    // Safety check: ensure all currently existing rows are marked as migrated so they are never shifted in the future
+    db.exec("UPDATE account_transactions SET timezoneMigrated = 1 WHERE timezoneMigrated = 0;");
+
+    // Add SQLite trigger to automatically mark all new insertions as timezoneMigrated = 1
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS trg_account_transactions_tz 
+      AFTER INSERT ON account_transactions 
+      BEGIN 
+        UPDATE account_transactions SET timezoneMigrated = 1 WHERE id = NEW.id; 
+      END;
+    `);
+
     // ─── Payment Sequence Migration ──────────────────────────────────
     db.exec(`
       CREATE TABLE IF NOT EXISTS payment_sequence (

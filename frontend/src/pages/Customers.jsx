@@ -125,6 +125,7 @@ export default function Customers() {
   const navigate = useNavigate();
   const { settings, formatDate } = useSettings();
   const [customers, setCustomers] = useState([]);
+  const [totalCustomers, setTotalCustomers] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -342,9 +343,12 @@ export default function Customers() {
   }, []); // runs only once on mount
 
   useEffect(() => {
-    fetchCustomers();
     setCurrentPage(1);
   }, [searchTerm, sortBy]);
+
+  useEffect(() => {
+    fetchCustomers();
+  }, [searchTerm, sortBy, currentPage]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -383,18 +387,14 @@ export default function Customers() {
     };
   }, [showModal, showBillsModal, showPaymentModal, showQuickSettleModal, showEditCreditLimitModal, selectedInvoiceForView]);
 
+  const PAGE_SIZE = 20;
+
   const fetchCustomers = async () => {
     if (window.electronAPI?.dbQuery) {
       try {
-        let query = `
-          SELECT c.*, 
-                 (SELECT IFNULL(SUM(o.totalAmount), 0) 
-                  FROM orders o 
-                  WHERE o.customerId = c.id AND o.status NOT IN ('Cancelled', 'Deleted')) as totalSales
-          FROM customers c
-        `;
-        let params = [];
+        setLoading(true);
         let conditions = [];
+        let params = [];
 
         if (searchTerm) {
           conditions.push('(c.name LIKE ? OR c.id LIKE ? OR c.phone LIKE ?)');
@@ -402,9 +402,7 @@ export default function Customers() {
           params.push(param, param, param);
         }
 
-        if (conditions.length > 0) {
-          query += ' WHERE ' + conditions.join(' AND ');
-        }
+        const whereStr = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
         let orderByClause = 'c.rowid DESC';
         if (sortBy === 'oldest' || sortBy === 'id_asc') {
@@ -421,9 +419,30 @@ export default function Customers() {
           orderByClause = 'c.balance ASC';
         }
 
-        query += ` ORDER BY ${orderByClause}`;
+        const offset = (currentPage - 1) * PAGE_SIZE;
 
-        const result = await window.electronAPI.dbQuery(query, params);
+        // Count total for pagination
+        const countResult = await window.electronAPI.dbQuery(
+          `SELECT COUNT(*) as cnt FROM customers c ${whereStr}`,
+          params
+        );
+        if (countResult.success && countResult.data.length > 0) {
+          setTotalCustomers(countResult.data[0].cnt || 0);
+        }
+
+        // Fetch paginated customers (totalSales subquery only on visible page)
+        const query = `
+          SELECT c.*, 
+                 (SELECT IFNULL(SUM(o.totalAmount), 0) 
+                  FROM orders o 
+                  WHERE o.customerId = c.id AND o.status NOT IN ('Cancelled', 'Deleted')) as totalSales
+          FROM customers c
+          ${whereStr}
+          ORDER BY ${orderByClause}
+          LIMIT ? OFFSET ?
+        `;
+
+        const result = await window.electronAPI.dbQuery(query, [...params, PAGE_SIZE, offset]);
         if (result.success) {
           setCustomers(result.data);
         }
@@ -632,7 +651,6 @@ export default function Customers() {
         const discountAmt = parseFloat(paymentData.discount) || 0;
         const timestamp = getLocalISOString();
 
-        // 0. Apply settlement discount to selected bill (or first pending bill) if discountAmt > 0
         if (discountAmt > 0) {
           let targetBill = selectedBillForPayment;
           if (!targetBill) {
@@ -663,6 +681,37 @@ export default function Customers() {
             await window.electronAPI.dbQuery(
               "UPDATE orders SET totalAmount = ?, dueAmount = ?, paymentStatus = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
               [newNetTotal, newDue, newPayStatus, JSON.stringify(breakdownObj), timestamp, targetBill.id]
+            );
+
+            // Record discount in account_transactions
+            const discountTxnId = `TXN-${Date.now()}-Discount`;
+            const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+            const creatorName = currentUser.name || currentUser.username || 'System';
+            const creatorId = currentUser.id || 'SYSTEM';
+            const creatorRole = currentUser.role || 'system';
+            const _nowC = new Date();
+            const txnTimestamp = `${_nowC.getFullYear()}-${String(_nowC.getMonth() + 1).padStart(2, '0')}-${String(_nowC.getDate()).padStart(2, '0')} ${String(_nowC.getHours()).padStart(2, '0')}:${String(_nowC.getMinutes()).padStart(2, '0')}`;
+
+            await window.electronAPI.dbQuery(
+              `INSERT INTO account_transactions 
+               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+              [
+                discountTxnId,
+                DEFAULT_SHOP_ID,
+                'CASH',
+                'EXPENSE',
+                'Discount Given',
+                discountAmt,
+                `Discount given to ${selectedCustomer.name} during payment`,
+                txnTimestamp,
+                timestamp,
+                'Percent',
+                null,
+                creatorName,
+                creatorId,
+                creatorRole
+              ]
             );
           }
         }
@@ -839,7 +888,7 @@ export default function Customers() {
 
         await window.electronAPI.dbQuery(
           'UPDATE customers SET balance = balance - ?, isSynced = 0, updatedAt = ? WHERE id = ?',
-          [totalPaid, timestamp, selectedCustomer.id]
+          [totalPaid + discountAmt, timestamp, selectedCustomer.id]
         );
 
         if (window.electronAPI?.runDataHealer) {
@@ -1825,9 +1874,8 @@ export default function Customers() {
     }
   };
 
-  const paginatedCustomers = React.useMemo(() => {
-    return customers.slice((currentPage - 1) * 20, currentPage * 20);
-  }, [customers, currentPage]);
+  // customers is already the current page (server-side paginated)
+  const paginatedCustomers = customers;
 
 
   if (viewMode === 'insight' && selectedCustomer) {
@@ -1921,18 +1969,12 @@ export default function Customers() {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
-                <span style={{ color: '#64748B', fontWeight: 600 }}>
-                  {selectedCustomerStats.pendingDue > 0 ? 'Pending Due' : selectedCustomerStats.availableAdvance > 0 ? 'Advance Balance' : 'Pending Due'}
-                </span>
+                <span style={{ color: '#64748B', fontWeight: 600 }}>Pending Due</span>
                 <span style={{
                   fontWeight: 800,
-                  color: selectedCustomerStats.pendingDue > 0 ? 'var(--danger)' : selectedCustomerStats.availableAdvance > 0 ? 'var(--secondary)' : '#64748B'
+                  color: selectedCustomerStats.pendingDue > 0 ? 'var(--danger)' : '#64748B'
                 }}>
-                  {selectedCustomerStats.pendingDue > 0
-                    ? (selectedCustomerStats.pendingDue || 0).toFixed(2) + ' Due'
-                    : selectedCustomerStats.availableAdvance > 0
-                      ? (selectedCustomerStats.availableAdvance || 0).toFixed(2) + ' Adv'
-                      : '0.00'}
+                  {(selectedCustomerStats.pendingDue || 0).toFixed(2)}
                 </span>
               </div>
 
@@ -3370,9 +3412,9 @@ export default function Customers() {
         {!loading && (
           <Pagination
             currentPage={currentPage}
-            totalPages={Math.ceil(customers.length / 20)}
+            totalPages={Math.ceil(totalCustomers / 20)}
             onPageChange={setCurrentPage}
-            totalItems={customers.length}
+            totalItems={totalCustomers}
             pageSize={20}
             itemLabel="customers"
           />
