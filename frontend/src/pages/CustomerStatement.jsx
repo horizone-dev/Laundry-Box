@@ -253,6 +253,13 @@ export default function CustomerStatement() {
           const totalAmt = parseFloat(o.totalAmount) || 0;
           const paidAmt = parseFloat(o.paidAmount) || 0;
 
+          let discount = 0;
+          try {
+            const parsedPayments = typeof o.payments === 'string' ? JSON.parse(o.payments || '[]') : (o.payments || []);
+            const discP = parsedPayments.find(p => p.method === 'Discount');
+            if (discP) discount = parseFloat(discP.amount) || 0;
+          } catch (e) {}
+
           // 1. The Original Order Charge (Debit)
           rows.push({
             date: o.createdAt,
@@ -260,23 +267,30 @@ export default function CustomerStatement() {
             ref: cleanRef,
             description: `Order ${cleanRef} (Later Deleted)`,
             itemsSummary: itemSummary,
-            debit: totalAmt,
+            debit: totalAmt + discount,
             credit: 0,
+            discountAmount: discount,
             status: 'Cancelled',
             dueAmount: 0,
             rawOrder: o
           });
 
           // 2. The Deletion Reversal
-          // Always reverse the full original Order debit charge (+totalAmt) with an equal Credit (-totalAmt) so the deleted order charge itself nets out to 0.
+          const isRefunded = o.refundStatus === 'Returned';
+          const deletionCredit = isRefunded ? (totalAmt - paidAmt) : totalAmt;
+          const deletionDescription = paidAmt > 0 
+            ? (isRefunded ? `deleted ${o.id} to refund` : `deleted ${o.id} credited to adv`)
+            : `deleted not paid`;
+
           rows.push({
             date: o.updatedAt || o.createdAt,
             type: 'deleted_order',
             ref: cleanRef,
-            description: `Order Deleted ${cleanRef}`,
+            description: deletionDescription,
             itemsSummary: `Status: ${o.refundStatus || 'Deleted'}`,
             debit: 0,
-            credit: totalAmt,
+            credit: deletionCredit,
+            discountAmount: 0,
             status: o.refundStatus || 'Deleted',
             dueAmount: 0,
             rawOrder: o
@@ -329,20 +343,6 @@ export default function CustomerStatement() {
               });
             }
           }
-
-          if (o.refundStatus === 'Returned' && (o.paidAmount || 0) > 0) {
-            rows.push({
-              date: o.returnedAt || o.updatedAt || o.createdAt,
-              type: 'refund',
-              ref: `REF-${o.id}`,
-              description: `Refund – ${o.refundMethod || 'Cash'}`,
-              itemsSummary: `Refund for Deleted Order ${cleanRef}`,
-              debit: o.paidAmount,
-              credit: 0,
-              status: 'SUCCESS',
-              dueAmount: 0
-            });
-          }
         }
       } else {
         // Active Order
@@ -375,7 +375,7 @@ export default function CustomerStatement() {
             description: displayDesc,
             discountAmount: discount,
             itemsSummary: itemSummary,
-            debit: o.totalAmount,
+            debit: o.totalAmount + discount,
             credit: 0,
             status: o.paymentStatus,
             dueAmount: o.dueAmount,
@@ -545,7 +545,7 @@ export default function CustomerStatement() {
     let balance = openingBalanceForRange;
     finalRows.forEach(row => {
       const priorBalance = balance;
-      const creditToSubtract = row.type === 'payment' ? (row.credit + (row.discountAmount || 0)) : row.credit;
+      const creditToSubtract = row.credit + (row.discountAmount || 0);
       balance += row.debit - creditToSubtract;
       row.runningBalance = balance;
 
@@ -870,9 +870,9 @@ export default function CustomerStatement() {
                     <th>DATE</th>
                     <th>REFERENCE</th>
                     <th>DESCRIPTION</th>
-                    <th className={styles.numCol}>CHARGED</th>
+                    <th className={styles.numCol}>DEBIT</th>
                     <th className={styles.numCol}>DISCOUNT</th>
-                    <th className={styles.numCol}>PAID</th>
+                    <th className={styles.numCol}>CREDIT</th>
                     <th className={styles.numCol}>BALANCE</th>
                   </tr>
                 </thead>
