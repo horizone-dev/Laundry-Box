@@ -381,7 +381,7 @@ export default function CustomerStatement() {
           });
 
           // 2. The Deletion Reversal
-          const isRefunded = o.refundStatus === 'Returned';
+          const isRefunded = o.refundStatus === 'refund' || o.refundStatus === 'Refund' || o.refundStatus === 'Returned';
           const deletionCredit = isRefunded ? (totalAmt - paidAmt) : totalAmt;
           const deletionDescription = paidAmt > 0 
             ? (isRefunded ? `deleted ${o.id} to refund` : `deleted ${o.id} credited to adv`)
