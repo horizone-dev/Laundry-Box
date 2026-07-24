@@ -36,6 +36,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('payment-status-changed', subscription);
     return () => ipcRenderer.off('payment-status-changed', subscription);
   },
+  notifyDatabaseUpdated: (detail) => ipcRenderer.send('notify-database-updated', detail),
+  onDatabaseUpdated: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('database-updated-broadcast', subscription);
+    return () => ipcRenderer.off('database-updated-broadcast', subscription);
+  },
   onNavigateToPendingPayments: (callback) => {
     const subscription = (event) => callback();
     ipcRenderer.on('navigate-to-pending-payments', subscription);

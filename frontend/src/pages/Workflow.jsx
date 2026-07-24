@@ -242,6 +242,22 @@ export default function Workflow() {
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm]);
 
+  useEffect(() => {
+    const handleDbUpdate = () => {
+      fetchColumnCounts();
+      fetchOrders(limit, false, true);
+    };
+    window.addEventListener('database-updated', handleDbUpdate);
+    let unsubscribe = () => {};
+    if (window.electronAPI?.onDatabaseUpdated) {
+      unsubscribe = window.electronAPI.onDatabaseUpdated(handleDbUpdate);
+    }
+    return () => {
+      window.removeEventListener('database-updated', handleDbUpdate);
+      unsubscribe();
+    };
+  }, [limit]);
+
   const loadMoreData = () => {
     if (loading || !hasMore || isFetchingRef.current) return;
     const newLimit = limit + 100;
@@ -536,6 +552,7 @@ export default function Workflow() {
       setShowPayModal(false);
       alert(t('paymentRecordedLocally', settings.language));
       fetchOrders();
+      window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedOrder.customerId } }));
 
       const API_BASE = API_BASE_URL;
       axios.patch(`${API_BASE}/orders/${encodeURIComponent(selectedOrder.id)}/status`, {

@@ -351,6 +351,42 @@ export default function Customers() {
   }, [searchTerm, sortBy, currentPage]);
 
   useEffect(() => {
+    const handleDbUpdate = async (e) => {
+      const detail = e?.detail || e;
+      fetchCustomers();
+      const updatedCustId = detail?.customerId;
+      if (selectedCustomer && (!updatedCustId || updatedCustId === selectedCustomer.id)) {
+        if (window.electronAPI?.dbQuery) {
+          try {
+            const res = await window.electronAPI.dbQuery(
+              'SELECT * FROM customers WHERE id = ?',
+              [selectedCustomer.id]
+            );
+            if (res.success && res.data.length > 0) {
+              const freshCust = res.data[0];
+              setSelectedCustomer(freshCust);
+              if (viewMode === 'insight') {
+                await handleViewCustomerInsight(freshCust);
+              }
+            }
+          } catch (err) {
+            console.error("Failed to refresh selected customer in Customers page:", err);
+          }
+        }
+      }
+    };
+    window.addEventListener('database-updated', handleDbUpdate);
+    let unsubscribe = () => {};
+    if (window.electronAPI?.onDatabaseUpdated) {
+      unsubscribe = window.electronAPI.onDatabaseUpdated(handleDbUpdate);
+    }
+    return () => {
+      window.removeEventListener('database-updated', handleDbUpdate);
+      unsubscribe();
+    };
+  }, [selectedCustomer, searchTerm, sortBy, currentPage, viewMode]);
+
+  useEffect(() => {
     const handleClickOutside = (event) => {
       if (sortDropdownRef.current && !sortDropdownRef.current.contains(event.target)) {
         setIsSortOpen(false);
@@ -899,6 +935,7 @@ export default function Customers() {
         setPaymentData({ amount: '', method: 'Cash' });
         setSelectedBillForPayment(null);
         await fetchCustomers();
+        window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedCustomer.id } }));
 
         if (viewMode === 'insight' && selectedCustomer) {
           const freshCustRes = await window.electronAPI.dbQuery(

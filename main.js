@@ -443,6 +443,14 @@ ipcMain.on('request-refocus', (event) => {
   }
 });
 
+ipcMain.on('notify-database-updated', (event, detail) => {
+  BrowserWindow.getAllWindows().forEach(win => {
+    if (!win.isDestroyed()) {
+      win.webContents.send('database-updated-broadcast', detail);
+    }
+  });
+});
+
 // DB IPC Handlers
 ipcMain.handle('run-data-healer', () => {
   try {

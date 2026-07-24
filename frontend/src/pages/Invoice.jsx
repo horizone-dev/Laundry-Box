@@ -49,13 +49,19 @@ export default function Invoice() {
       console.log("Invoice page fetchOrder starting. ID =", id, "electronAPI =", !!electronAPI);
       if (electronAPI?.dbQuery) {
         try {
-          // Try multiple ID formats for robustness
+          const cleanId = id.replace('#', '');
+          const prefix = settings.invoicePrefix || '';
+          const cleanPrefix = prefix.replace('#', '');
           const idVariations = [
             id,
-            `#${id}`,
+            cleanId,
+            `${prefix}${cleanId}`,
+            `${cleanPrefix}${cleanId}`,
+            `#${prefix}${cleanId}`,
+            `#${cleanPrefix}${cleanId}`,
             id.startsWith('#') ? id.substring(1) : `#${id}`,
             id.replace('#', '').replace('AG-', ''),
-            id.replace('#', '').replace(settings.invoicePrefix || '', '')
+            id.replace('#', '').replace(prefix, '')
           ];
           console.log("ID Variations to query:", idVariations);
           let rawOrder = null;
@@ -208,6 +214,7 @@ export default function Invoice() {
               tax: rawOrder.totalAmount - subtotal,
               total: rawOrder.totalAmount,
               paidAmount: paidAmount,
+              dueAmount: dueAmount,
               previousBalance: previousBalance,
               totalBalance: totalBalance,
               expectedDeliveryDate: (() => {
@@ -245,6 +252,16 @@ export default function Invoice() {
     };
     window.addEventListener('message', handlePostMessageData);
 
+    const handleDbUpdate = () => {
+      console.log("Database updated event triggered in Invoice.jsx, calling fetchOrder()");
+      fetchOrder();
+    };
+    window.addEventListener('database-updated', handleDbUpdate);
+    let unsubscribeDb = () => {};
+    if (window.electronAPI?.onDatabaseUpdated) {
+      unsubscribeDb = window.electronAPI.onDatabaseUpdated(handleDbUpdate);
+    }
+
     const unsubscribe = paymentService.subscribe(({ orderId, status }) => {
       const cleanOrderId = orderId ? orderId.replace('#', '') : '';
       const cleanId = id ? id.replace('#', '') : '';
@@ -255,7 +272,9 @@ export default function Invoice() {
 
     return () => {
       unsubscribe();
+      unsubscribeDb();
       window.removeEventListener('message', handlePostMessageData);
+      window.removeEventListener('database-updated', handleDbUpdate);
     };
   }, [id, settings]);
 

@@ -189,7 +189,6 @@ export default function Settlement() {
     }
   }, [searchTerm, activeTab, selectedCustomer]);
 
-  // 3. Fetch specific customer data when selected
   useEffect(() => {
     if (selectedCustomer) {
       if (window.electronAPI?.runDataHealer) {
@@ -203,6 +202,39 @@ export default function Settlement() {
       }
     }
   }, [selectedCustomer]);
+
+  useEffect(() => {
+    const handleDbUpdate = async (e) => {
+      const detail = e?.detail || e;
+      const updatedCustId = detail?.customerId;
+      if (selectedCustomer && (!updatedCustId || updatedCustId === selectedCustomer.id)) {
+        if (window.electronAPI?.dbQuery) {
+          try {
+            const res = await window.electronAPI.dbQuery(
+              'SELECT * FROM customers WHERE id = ?',
+              [selectedCustomer.id]
+            );
+            const refreshedCustomer = (res.success && res.data && res.data.length > 0) ? res.data[0] : selectedCustomer;
+            if (res.success) setSelectedCustomer(refreshedCustomer);
+            fetchCustomerSpecificData(refreshedCustomer);
+          } catch (err) {
+            console.error("Failed to refresh customer in Settlement:", err);
+          }
+        }
+      }
+      fetchGlobalData();
+      fetchCustomers();
+    };
+    window.addEventListener('database-updated', handleDbUpdate);
+    let unsubscribe = () => {};
+    if (window.electronAPI?.onDatabaseUpdated) {
+      unsubscribe = window.electronAPI.onDatabaseUpdated(handleDbUpdate);
+    }
+    return () => {
+      window.removeEventListener('database-updated', handleDbUpdate);
+      unsubscribe();
+    };
+  }, [selectedCustomer, searchTerm, activeTab]);
 
   const fetchCustomers = async () => {
     if (window.electronAPI?.dbQuery) {
@@ -695,6 +727,7 @@ export default function Settlement() {
         alert("Settlement completed successfully!");
         setPaymentAmount('');
         setShowPayModal(false);
+        window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedCustomer.id } }));
         
         // Refresh customer state
         const updatedCust = await window.electronAPI.dbQuery('SELECT * FROM customers WHERE id = ?', [selectedCustomer.id]);

@@ -75,6 +75,21 @@ export default function ExpectedDeliveries() {
   }, [searchTerm]);
 
   useEffect(() => {
+    const handleDbUpdate = () => {
+      fetchOrders();
+    };
+    window.addEventListener('database-updated', handleDbUpdate);
+    let unsubscribe = () => {};
+    if (window.electronAPI?.onDatabaseUpdated) {
+      unsubscribe = window.electronAPI.onDatabaseUpdated(handleDbUpdate);
+    }
+    return () => {
+      window.removeEventListener('database-updated', handleDbUpdate);
+      unsubscribe();
+    };
+  }, [searchTerm]);
+
+  useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setShowPayModal(false);
@@ -474,6 +489,7 @@ export default function ExpectedDeliveries() {
       setShowPayModal(false);
       setSelectedOrderForPay(null);
       alert('Payment recorded successfully!');
+      window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: order.customerId } }));
     } catch (err) {
       console.error('Failed to settle payment:', err);
       alert('Failed to settle payment.');

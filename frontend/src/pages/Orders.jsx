@@ -479,6 +479,21 @@ export default function Orders() {
     fetchOrders();
   }, [searchTerm, sortBy, currentPage, dateRange, customStart, customEnd, workflowFilter]);
 
+  useEffect(() => {
+    const handleDbUpdate = () => {
+      fetchOrders();
+    };
+    window.addEventListener('database-updated', handleDbUpdate);
+    let unsubscribe = () => {};
+    if (window.electronAPI?.onDatabaseUpdated) {
+      unsubscribe = window.electronAPI.onDatabaseUpdated(handleDbUpdate);
+    }
+    return () => {
+      window.removeEventListener('database-updated', handleDbUpdate);
+      unsubscribe();
+    };
+  }, [searchTerm, sortBy, currentPage, dateRange, customStart, customEnd, workflowFilter]);
+
   const fetchOrders = async () => {
     try {
       setLoading(true);
@@ -1136,6 +1151,7 @@ export default function Orders() {
 
       setShowPayModal(false);
       alert(t('paymentRecordedLocally', settings.language));
+      window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedOrder.customerId } }));
 
       if (window.electronAPI?.dbQuery) {
         // Local DB was updated synchronously, re-fetch immediately

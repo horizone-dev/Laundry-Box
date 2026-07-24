@@ -1341,7 +1341,10 @@ const timestamp = getLocalISOString();
       setQuickUpiAmount('');
       setQuickBankAmount('');
       setQuickSettleResults([]);
-      window.location.reload();
+      window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId } }));
+      if (window.electronAPI?.notifyDatabaseUpdated) {
+        window.electronAPI.notifyDatabaseUpdated({ customerId });
+      }
     } catch (err) {
       console.error("Quick settle error:", err);
       alert("Failed to process settlement: " + err.message);

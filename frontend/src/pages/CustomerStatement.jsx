@@ -89,21 +89,94 @@ export default function CustomerStatement() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  /* ─── Load customer from URL parameter if present ── */
+  // Save statement filters to sessionStorage
   useEffect(() => {
-    if (customerId && window.electronAPI?.dbQuery) {
+    if (selectedCustomer) {
+      const stateToSave = {
+        customerId: selectedCustomer.id,
+        dateRange,
+        dateFrom,
+        dateTo,
+        filterType,
+        sortOrder,
+        currentPage,
+        searchTerm
+      };
+      sessionStorage.setItem('customer_statement_filters', JSON.stringify(stateToSave));
+    }
+  }, [selectedCustomer, dateRange, dateFrom, dateTo, filterType, sortOrder, currentPage, searchTerm]);
+
+  // Restore statement filters from sessionStorage on mount
+  useEffect(() => {
+    const saved = sessionStorage.getItem('customer_statement_filters');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const activeCustId = customerId || parsed.customerId;
+        if (parsed.customerId === activeCustId) {
+          if (parsed.dateRange) setDateRange(parsed.dateRange);
+          if (parsed.dateFrom) setDateFrom(parsed.dateFrom);
+          if (parsed.dateTo) setDateTo(parsed.dateTo);
+          if (parsed.filterType) setFilterType(parsed.filterType);
+          if (parsed.sortOrder) setSortOrder(parsed.sortOrder);
+          if (parsed.currentPage) setCurrentPage(parsed.currentPage);
+          if (parsed.searchTerm) setSearchTerm(parsed.searchTerm);
+        }
+      } catch (e) {
+        console.error("Failed to parse saved filters:", e);
+      }
+    }
+  }, [customerId]);
+
+  // Save/Restore scroll position
+  useEffect(() => {
+    const handleScroll = () => {
+      sessionStorage.setItem('customer_statement_scroll', window.scrollY.toString());
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      const savedScroll = sessionStorage.getItem('customer_statement_scroll');
+      if (savedScroll) {
+        const timer = setTimeout(() => {
+          window.scrollTo(0, parseInt(savedScroll, 10));
+        }, 100);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [loading]);
+
+  /* ─── Load customer from URL or sessionStorage ── */
+  useEffect(() => {
+    const saved = sessionStorage.getItem('customer_statement_filters');
+    let savedCustomerId = null;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        savedCustomerId = parsed.customerId;
+      } catch (e) {
+        console.error("Failed to parse saved customerId:", e);
+      }
+    }
+
+    const activeCustId = customerId || savedCustomerId;
+
+    if (activeCustId && window.electronAPI?.dbQuery) {
       const loadCustomer = async () => {
         try {
           const res = await window.electronAPI.dbQuery(
             'SELECT * FROM customers WHERE id = ?',
-            [customerId]
+            [activeCustId]
           );
           if (res.success && res.data.length > 0) {
             setSelectedCustomer(res.data[0]);
             setSearchTerm(res.data[0].name);
           }
         } catch (err) {
-          console.error("Failed to load customer from URL parameter:", err);
+          console.error("Failed to load customer details:", err);
         }
       };
       loadCustomer();
@@ -132,6 +205,38 @@ export default function CustomerStatement() {
   useEffect(() => {
     if (!selectedCustomer) return;
     fetchStatement(selectedCustomer.id);
+  }, [selectedCustomer, dateRange, dateFrom, dateTo]);
+
+  useEffect(() => {
+    const handleDbUpdate = async (e) => {
+      const detail = e?.detail || e;
+      const updatedCustId = detail?.customerId;
+      if (selectedCustomer && (!updatedCustId || updatedCustId === selectedCustomer.id)) {
+        fetchStatement(selectedCustomer.id);
+        if (window.electronAPI?.dbQuery) {
+          try {
+            const res = await window.electronAPI.dbQuery(
+              'SELECT * FROM customers WHERE id = ?',
+              [selectedCustomer.id]
+            );
+            if (res.success && res.data.length > 0) {
+              setSelectedCustomer(res.data[0]);
+            }
+          } catch (err) {
+            console.error("Failed to refresh customer statement details:", err);
+          }
+        }
+      }
+    };
+    window.addEventListener('database-updated', handleDbUpdate);
+    let unsubscribe = () => {};
+    if (window.electronAPI?.onDatabaseUpdated) {
+      unsubscribe = window.electronAPI.onDatabaseUpdated(handleDbUpdate);
+    }
+    return () => {
+      window.removeEventListener('database-updated', handleDbUpdate);
+      unsubscribe();
+    };
   }, [selectedCustomer, dateRange, dateFrom, dateTo]);
 
   const fetchStatement = async (customerId) => {
