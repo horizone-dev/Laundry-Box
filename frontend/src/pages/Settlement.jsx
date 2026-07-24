@@ -517,7 +517,7 @@ export default function Settlement() {
           const payRef = await window.electronAPI.getNextPaymentReference('SET');
           await window.electronAPI.dbQuery(
             `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference) 
-             VALUES (?, ?, NULL, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?)`,
+             VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 0, ?, ?)`,
             [payId, selectedCustomer.id, DEFAULT_SHOP_ID, split.amount, split.method, 'SUCCESS', timestamp, timestamp, payRef]
           );
 
