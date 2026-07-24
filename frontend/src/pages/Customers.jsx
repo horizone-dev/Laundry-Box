@@ -1361,7 +1361,7 @@ export default function Customers() {
           }
 
           await window.electronAPI.dbQuery(
-            "UPDATE orders SET totalAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
+            "UPDATE orders SET totalAmount = ?, paidAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
             [newNetTotal, newPaidAmount, newDueAmount, newPaymentStatus, finalMethodName, JSON.stringify(paymentBreakdown), timestamp, payment.orderId]
           );
         }
