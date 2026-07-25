@@ -84,8 +84,17 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
     }
   }
 
+  let orderPaymentBreakdown = {};
+  try {
+    orderPaymentBreakdown = typeof order.paymentBreakdown === 'string'
+      ? (JSON.parse(order.paymentBreakdown || '{}') || {})
+      : (order.paymentBreakdown || {});
+  } catch (_) {
+    orderPaymentBreakdown = {};
+  }
+  const orderSettlementDiscount = parseFloat(orderPaymentBreakdown.orderDiscount) || 0;
   const advanceDeducted = (order.previousBalance || 0) < 0 ? Math.min(computedTotal, Math.abs(order.previousBalance)) : 0;
-  const manualPaid = Math.max(0, (order.paidAmount || 0) - advanceDeducted);
+  const manualPaid = Math.max(0, (order.paidAmount || 0) - advanceDeducted - orderSettlementDiscount);
 
   // ── Item edit helpers ──
   const updateItem = (idx, field, value) => {
@@ -213,6 +222,16 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
   const docTitleAr = settings.invoiceDocTitleAr || 'فاتورة ضريبية';
   const footerTagline = settings.invoiceFooterTagline || '';
 
+  const fullAddress = [
+    settings.address,
+    [settings.city, settings.emirate, settings.country].filter(Boolean).join(', ')
+  ].filter(Boolean).join(', ');
+
+  const fullAddressAr = [
+    settings.addressAr,
+    [settings.cityAr, settings.emirateAr, settings.countryAr].filter(Boolean).join('، ')
+  ].filter(Boolean).join('، ');
+
 
   const formatLabel = (en, ar) => showBilingual ? `${en} / ${ar}` : en;
 
@@ -310,8 +329,13 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             {showBilingual && settings.companyNameAr && <div className={styles.horizonBrandNameAr} dir="rtl">{settings.companyNameAr}</div>}
             {settings.email && <div className={styles.horizonBrandSubline}>{settings.email}</div>}
             <div className={styles.horizonMetaLine}>
-              {settings.address || ''}
+              {fullAddress || ''}
             </div>
+            {showBilingual && fullAddressAr && (
+              <div className={styles.horizonMetaLine} dir="rtl">
+                {fullAddressAr}
+              </div>
+            )}
             <div className={styles.horizonMetaLine}>
               {settings.phone && `Tel: ${settings.phone}`} {settings.trn && `| TRN: ${settings.trn}`}
             </div>
@@ -330,7 +354,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             <span className={styles.horizonMetaValue}>{settings.invoicePrefix || ''}{order.id}</span>
           </div>
           <div className={styles.horizonMetaRow}>
-            <span className={styles.horizonMetaLabel}>{formatLabel('DATE', 'التاريخ')}:</span>
+            <span className={styles.horizonMetaLabel}>DATE:</span>
             <span className={styles.horizonMetaValue}>{formattedDate}</span>
           </div>
           <div className={styles.horizonMetaRow}>
@@ -345,7 +369,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           )}
           {order.expectedDeliveryDate && (
             <div className={styles.horizonMetaRow}>
-              <span className={styles.horizonMetaLabel}>{formatLabel('EXP. DELIVERY', 'تاريخ التسليم')}:</span>
+              <span className={styles.horizonMetaLabel}>EXP. DELIVERY:</span>
               <span className={styles.horizonMetaValue} style={{ color: '#E11D48', fontWeight: 'bold' }}>{formatExpectedDate(order.expectedDeliveryDate)}</span>
             </div>
           )}
@@ -434,6 +458,12 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             <span>{(parseFloat(order.discount) || 0).toFixed(2)}</span>
           </div>
           
+          {orderSettlementDiscount > 0.01 && (
+            <div className={styles.horizonTotalRow} style={{ color: '#DC2626' }}>
+              <span>Order Settlement Discount:</span>
+              <span>- {orderSettlementDiscount.toFixed(2)}</span>
+            </div>
+          )}
           <div className={styles.horizonTotalDashedLine}></div>
 
           <div className={styles.horizonGrandTotalRow}>
@@ -559,9 +589,9 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             {showBilingual && settings.companyNameAr && (
               <div className={styles.thermalCompanyNameAr} dir="rtl">{settings.companyNameAr}</div>
             )}
-            {settings.address && <div className={styles.thermalCompanyMeta}>{settings.address}</div>}
-            {showBilingual && settings.addressAr && (
-              <div className={styles.thermalCompanyMeta} dir="rtl">{settings.addressAr}</div>
+            {fullAddress && <div className={styles.thermalCompanyMeta}>{fullAddress}</div>}
+            {showBilingual && fullAddressAr && (
+              <div className={styles.thermalCompanyMeta} dir="rtl">{fullAddressAr}</div>
             )}
             {settings.phone && <div className={styles.thermalCompanyMeta}>Tel: {settings.phone}</div>}
             {settings.email && <div className={styles.thermalCompanyMeta}>{settings.email}</div>}
@@ -584,7 +614,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             )}
             <div className={styles.companyInfoEn}>
               <h2>{settings.companyName || 'Laundry Box'}</h2>
-              <p className={styles.companyAddress}>{settings.address || 'Address not set'}</p>
+              <p className={styles.companyAddress}>{fullAddress || 'Address not set'}</p>
               {settings.phone && <p className={styles.companyContact}>Tel: {settings.phone}</p>}
               {settings.email && <p className={styles.companyContact}>Email: {settings.email}</p>}
             </div>
@@ -592,7 +622,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           {showBilingual && (
             <div className={styles.companySideAr} style={{ direction: 'rtl', textAlign: 'right' }}>
               <h2>{settings.companyNameAr || 'محل غسيل ملابس'}</h2>
-              <p className={styles.companyAddress}>{settings.addressAr || 'العنوان غير محدد'}</p>
+              <p className={styles.companyAddress}>{fullAddressAr || 'العنوان غير محدد'}</p>
               {settings.phone && <p className={styles.companyContact}>هاتف: {settings.phone}</p>}
               {settings.email && <p className={styles.companyContact}>البريد: {settings.email}</p>}
             </div>
@@ -627,12 +657,12 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
         </div>
         <div className={styles.metaRightColumn}>
           <div className={styles.metaRow}>
-            <span className={styles.metaLabelEnAr}>{formatLabel('Date & Time', 'التاريخ والوقت')}:</span>
+            <span className={styles.metaLabelEnAr}>Date & Time:</span>
             <span className={styles.metaValue} style={{ fontSize: '0.82rem' }}>{order.date}</span>
           </div>
           {order.expectedDeliveryDate && (
             <div className={styles.metaRow}>
-              <span className={styles.metaLabelEnAr}>{formatLabel('Exp. Delivery', 'تاريخ التسليم المتوقع')}:</span>
+              <span className={styles.metaLabelEnAr}>Exp. Delivery:</span>
               <span className={styles.metaValue} style={{ color: '#E11D48', fontWeight: 'bold' }}>{order.expectedDeliveryDate}</span>
             </div>
           )}
@@ -961,6 +991,12 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             <span><CurrencySymbol size={11} /> {computedTotal.toFixed(2)}</span>
           </div>
           <div className={styles.thermalDividerDash} />
+          {orderSettlementDiscount > 0.01 && (
+            <div className={styles.thermalTotalRow}>
+              <span>Order Settlement Discount</span>
+              <span className={styles.thermalTotalRed}>- <CurrencySymbol size={10} /> {orderSettlementDiscount.toFixed(2)}</span>
+            </div>
+          )}
           {manualPaid > 0 && (
             <div className={styles.thermalTotalRow}>
               <span>{formatLabel('Paid', 'المدفوع')}</span>

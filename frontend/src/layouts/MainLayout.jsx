@@ -139,6 +139,7 @@ export default function MainLayout() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [overrideModal, setOverrideModal] = useState({ show: false, resolve: null, reject: null, pinValue: '', error: '' });
   const profileRef = useRef(null);
+  const syncInFlightRef = useRef(false);
   const navigate = useNavigate();
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   const [pendingPath, setPendingPath] = useState(null);
@@ -528,7 +529,10 @@ export default function MainLayout() {
   }, [settings.autoBackupPath, settings.autoBackupInterval]);
 
   const handleSync = async () => {
-    if (!isOnline || isSyncing) return;
+    // The 60-second timer uses an older render closure, so state alone cannot
+    // prevent overlapping uploads. A ref is stable across renders.
+    if (!isOnline || syncInFlightRef.current) return;
+    syncInFlightRef.current = true;
     setIsSyncing(true);
     try {
       await syncData();
@@ -542,6 +546,7 @@ export default function MainLayout() {
     } catch (err) {
       console.error('handleSync error:', err);
     } finally {
+      syncInFlightRef.current = false;
       setIsSyncing(false);
     }
   };
@@ -726,6 +731,7 @@ export default function MainLayout() {
         { path: '/reports/daily-tax', label: 'Daily Tax Report' },
         { path: '/reports/z-report', label: 'Z Report (Day Close)' },
         { path: '/reports/credit-overrides', label: 'Credit Overrides' },
+        { path: '/reports/financial-integrity', label: 'Financial Integrity', roleOnly: 'manager' },
         { path: '/reports/nomod-history', label: 'Nomod History' },
       ]
     },
@@ -1077,6 +1083,57 @@ const timestamp = getLocalISOString();
       }
       if (discount > 0) {
         splits.push({ method: 'Discount', amount: discount });
+      }
+
+      // All normal Quick Settle posts now go through one main-process
+      // transaction. The older renderer-side flow remains as a compatibility
+      // fallback only for an older desktop build without this API.
+      if (window.electronAPI?.settleCustomerBalance) {
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const selectedOrderId = selectedSettleTarget.type === 'bill' ? selectedSettleTarget.data.id : null;
+        const selectedCustomerName = selectedSettleTarget.type === 'customer'
+          ? selectedSettleTarget.data.name
+          : selectedSettleTarget.data.customerName;
+        const bankAccountId = settings.bankAccounts?.find((account) => account.bankName === selectedBank || account.id === selectedBank)?.id || selectedBank || null;
+        const result = await window.electronAPI.settleCustomerBalance({
+          customerId,
+          orderId: selectedOrderId,
+          shopId: DEFAULT_SHOP_ID,
+          splits: splits
+            .filter((split) => split.method !== 'Discount')
+            .map((split) => ({
+              ...split,
+              bankAccountId: ['Card', 'UPI', 'Bank'].includes(split.method) ? bankAccountId : null
+            })),
+          discount,
+          actor: {
+            id: userSession.id || 'SYSTEM',
+            name: userSession.name || userSession.username || 'System',
+            role: userSession.role || 'system'
+          },
+          description: selectedOrderId
+            ? `Quick settlement for order ${selectedOrderId}`
+            : `Quick settlement for ${selectedCustomerName || customerId}`
+        });
+
+        if (!result?.success) throw new Error(result?.error || 'Settlement could not be posted.');
+
+        alert(`Settlement completed. Advance created: ${result.advanceCreated || 0}`);
+        setShowQuickSettle(false);
+        setSettleSearch('');
+        setSelectedSettleTarget(null);
+        setSettleAmount('');
+        setQuickDiscountAmount('');
+        setQuickCashAmount('');
+        setQuickCardAmount('');
+        setQuickUpiAmount('');
+        setQuickBankAmount('');
+        setQuickSettleResults([]);
+        window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId } }));
+        if (window.electronAPI?.notifyDatabaseUpdated) {
+          window.electronAPI.notifyDatabaseUpdated({ customerId });
+        }
+        return;
       }
 
       if (selectedSettleTarget.type === 'customer') {

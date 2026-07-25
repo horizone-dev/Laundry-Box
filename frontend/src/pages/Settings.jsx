@@ -563,7 +563,11 @@ export default function Settings() {
         address: '',
         addressAr: '',
         city: '',
-        emirate: 'Dubai'
+        emirate: 'Dubai',
+        country: 'United Arab Emirates',
+        cityAr: '',
+        emirateAr: 'دبي',
+        countryAr: 'الإمارات العربية المتحدة'
       };
     }
 
@@ -1835,7 +1839,7 @@ export default function Settings() {
                 </div>
                 <div className={styles.formGrid}>
                   <div className={styles.formGroup}>
-                    <label>City / Area</label>
+                    <label>City / Area (English)</label>
                     <input
                       type="text"
                       className={styles.inputField}
@@ -1845,11 +1849,79 @@ export default function Settings() {
                     />
                   </div>
                   <div className={styles.formGroup}>
-                    <label>Emirate</label>
+                    <label>City / Area (Arabic / عربي)</label>
+                    <input
+                      type="text"
+                      className={styles.inputField}
+                      style={{ textAlign: 'right', direction: 'rtl' }}
+                      placeholder="المدينة / المنطقة"
+                      value={settings.cityAr || ''}
+                      onChange={(e) => updateSettings({ cityAr: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className={styles.formGrid}>
+                  <div className={styles.formGroup}>
+                    <label>Emirate (English)</label>
                     <CustomSelect
                       value={settings.emirate}
-                      onChange={(e) => updateSettings({ emirate: e.target.value })}
+                      onChange={(e) => {
+                        const en = e.target.value;
+                        const arMap = {
+                          'Dubai': 'دبي',
+                          'Abu Dhabi': 'أبوظبي',
+                          'Sharjah': 'الشارقة',
+                          'Ajman': 'عجمان',
+                          'Umm Al Quwain': 'أم القيوين',
+                          'Ras Al Khaimah': 'رأس الخيمة',
+                          'Fujairah': 'الفجيرة'
+                        };
+                        updateSettings({ emirate: en, emirateAr: arMap[en] || '' });
+                      }}
                       options={['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'Umm Al Quwain', 'Ras Al Khaimah', 'Fujairah'].map(e => ({ value: e, label: e }))}
+                    />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>Emirate (Arabic / عربي)</label>
+                    <CustomSelect
+                      value={settings.emirateAr || 'دبي'}
+                      onChange={(e) => {
+                        const ar = e.target.value;
+                        const enMap = {
+                          'دبي': 'Dubai',
+                          'أبوظبي': 'Abu Dhabi',
+                          'الشارقة': 'Sharjah',
+                          'عجمان': 'Ajman',
+                          'أم القيوين': 'Umm Al Quwain',
+                          'رأس الخيمة': 'Ras Al Khaimah',
+                          'الفجيرة': 'Fujairah'
+                        };
+                        updateSettings({ emirateAr: ar, emirate: enMap[ar] || '' });
+                      }}
+                      options={['دبي', 'أبوظبي', 'الشارقة', 'عجمان', 'أم القيوين', 'رأس الخيمة', 'الفجيرة'].map(e => ({ value: e, label: e }))}
+                    />
+                  </div>
+                </div>
+                <div className={styles.formGrid}>
+                  <div className={styles.formGroup}>
+                    <label>Country (English)</label>
+                    <input
+                      type="text"
+                      className={styles.inputField}
+                      placeholder="e.g. United Arab Emirates"
+                      value={settings.country || ''}
+                      onChange={(e) => updateSettings({ country: e.target.value })}
+                    />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>Country (Arabic / عربي)</label>
+                    <input
+                      type="text"
+                      className={styles.inputField}
+                      style={{ textAlign: 'right', direction: 'rtl' }}
+                      placeholder="الدولة"
+                      value={settings.countryAr || ''}
+                      onChange={(e) => updateSettings({ countryAr: e.target.value })}
                     />
                   </div>
                 </div>

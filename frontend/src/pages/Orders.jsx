@@ -15,6 +15,7 @@ import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
 import { t } from '../utils/translations';
 import { getLocalDateBounds, isWithinBounds } from '../utils/dateFilters';
 import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
+import { getReceiptNumber } from '../utils/receiptNumber';
 import CurrencySymbol from '../components/CurrencySymbol';
 import DressTag from '../components/DressTag';
 import CustomSelect from '../components/CustomSelect';
@@ -45,16 +46,7 @@ export default function Orders() {
   const querySearch = searchParams.get('search') || '';
   const { settings, formatDate } = useSettings();
 
-  const cleanPaymentRef = (p) => {
-    if (!p) return '';
-    if (p.id && p.id.startsWith('RV-')) return p.id;
-    const ref = p.paymentReference || p.id;
-    if (!ref) return '';
-    if (ref.startsWith('ADV-') || ref.startsWith('SET-') || ref.startsWith('PAY-') || ref.startsWith('APY-') || ref.startsWith('QPY-') || ref.startsWith('SYS-')) {
-      return 'RV-' + ref.substring(4);
-    }
-    return ref;
-  };
+  const cleanPaymentRef = (p) => getReceiptNumber(p);
 
   const formatDateTime = (dateVal) => {
     if (!dateVal) return 'N/A';

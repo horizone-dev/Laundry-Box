@@ -11,6 +11,7 @@ import { useSettings } from '../store/SettingsContext';
 import { DEFAULT_SHOP_ID } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { getLocalISOString, getLocalDateStr } from '../utils/dateUtils';
+import { getReceiptNumber } from '../utils/receiptNumber';
 import styles from './Customers.module.css';
 import { checkCreditLimit } from '../utils/creditLimit';
 import InvoiceTemplate from '../components/InvoiceTemplate';
@@ -276,7 +277,7 @@ export default function Customers() {
           throw new Error(softRes.error || 'Failed to soft delete order');
         }
 
-        await window.electronAPI.runDataHealer();
+        await window.electronAPI.runDataHealer(orderToDelete.customerId || selectedCustomer?.id);
       } else if (window.electronAPI?.dbQuery) {
         await window.electronAPI.dbQuery('UPDATE orders SET status = "Deleted", deletedAt = ?, deletedBy = ?, deleteReason = ? WHERE id = ?', [
           getLocalISOString(), currentLoggedInUser, deleteReason || `Deleted by ${pinOwner}`, orderToDelete.id
@@ -327,19 +328,7 @@ export default function Customers() {
   // One-time fix on mount: run data healer to correct any stale customer balances
   // from before the 'Deleted orders inflating balance' bug fix.
   useEffect(() => {
-    const fixExistingData = async () => {
-      try {
-        if (window.electronAPI?.runDataHealer) {
-          await window.electronAPI.runDataHealer();
-        }
-      } catch (e) {
-        console.warn('Data healer skipped:', e);
-      } finally {
-        // Always fetch after healing attempt so UI shows corrected values
-        fetchCustomers();
-      }
-    };
-    fixExistingData();
+    fetchCustomers();
   }, []); // runs only once on mount
 
   useEffect(() => {
@@ -578,7 +567,7 @@ export default function Customers() {
         }
 
         if (window.electronAPI?.runDataHealer) {
-          await window.electronAPI.runDataHealer();
+          await window.electronAPI.runDataHealer(targetCustId);
         }
 
         setSortBy('newest');
@@ -686,6 +675,60 @@ export default function Customers() {
         const totalPaid = parseFloat(paymentData.amount);
         const discountAmt = parseFloat(paymentData.discount) || 0;
         const timestamp = getLocalISOString();
+
+        if (window.electronAPI?.settleCustomerBalance) {
+          const centralSplits = paymentData.method === 'Multipayment'
+            ? [
+              { method: 'Cash', amount: parseFloat(splitCash) || 0 },
+              { method: 'Card', amount: parseFloat(splitCard) || 0 },
+              { method: 'UPI', amount: parseFloat(splitUPI) || 0 },
+              { method: 'Bank', amount: parseFloat(splitBank) || 0 }
+            ].filter((split) => split.amount > 0)
+            : [{ method: paymentData.method, amount: totalPaid }];
+          const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+          const bankForMethod = (method) => method === 'Card'
+            ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+            : (method === 'UPI'
+              ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+              : (method === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
+          const result = await window.electronAPI.settleCustomerBalance({
+            customerId: selectedCustomer.id,
+            orderId: selectedBillForPayment?.id || null,
+            shopId: DEFAULT_SHOP_ID,
+            splits: centralSplits.map((split) => ({ ...split, bankAccountId: bankForMethod(split.method) })),
+            discount: discountAmt,
+            cardCommissionRate: settings.cardCommission || 0,
+            actor: {
+              id: currentUser.id || 'SYSTEM',
+              name: currentUser.name || currentUser.username || 'System',
+              role: currentUser.role || 'system'
+            },
+            description: selectedBillForPayment
+              ? `Customer payment for order ${selectedBillForPayment.id}`
+              : `Customer payment for ${selectedCustomer.name}`
+          });
+
+          if (!result?.success) throw new Error(result?.error || 'Payment could not be posted.');
+
+          setShowPaymentModal(false);
+          setPaymentData({ amount: '', method: 'Cash' });
+          setSelectedBillForPayment(null);
+          await fetchCustomers();
+          window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedCustomer.id } }));
+
+          if (viewMode === 'insight' && selectedCustomer) {
+            const freshCustRes = await window.electronAPI.dbQuery(
+              "SELECT c.*, (SELECT IFNULL(SUM(totalAmount), 0) FROM orders WHERE customerId = c.id AND status NOT IN ('Cancelled', 'Deleted')) as totalSales FROM customers c WHERE c.id = ?",
+              [selectedCustomer.id]
+            );
+            if (freshCustRes.success && freshCustRes.data.length > 0) {
+              await handleViewCustomerInsight(freshCustRes.data[0]);
+            }
+          }
+
+          alert(`Payment completed. Advance created: ${(result.advanceCreated || 0).toFixed(2)}`);
+          return;
+        }
 
         if (discountAmt > 0) {
           let targetBill = selectedBillForPayment;
@@ -928,7 +971,7 @@ export default function Customers() {
         );
 
         if (window.electronAPI?.runDataHealer) {
-          await window.electronAPI.runDataHealer();
+          await window.electronAPI.runDataHealer(selectedCustomer.id);
         }
 
         setShowPaymentModal(false);
@@ -1006,38 +1049,7 @@ export default function Customers() {
     return `PAY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   };
 
-  const formatPaymentId = (pay) => {
-    if (!pay || (!pay.id && !pay.paymentReference)) return '';
-    if (pay.paymentReference) return pay.paymentReference;
-    if (pay.id && pay.id.startsWith('RV-')) return pay.id;
-    if (pay.orderId) return `PAY-${pay.orderId}`;
-
-    if (!pay.id) return '';
-    const parts = pay.id.split('-');
-    const lastPart = parts[parts.length - 1];
-
-    // Find a numeric suffix or fallback to a short part
-    let suffix = lastPart;
-    if (['Cash', 'Card', 'UPI', 'Bank', 'Multipayment', 'Discount'].includes(lastPart) && parts.length > 2) {
-      suffix = parts[parts.length - 2];
-    }
-
-    if (suffix.length > 6) {
-      suffix = suffix.substring(suffix.length - 4);
-    }
-
-    if (parts.includes('ADV')) {
-      return `ADV-${suffix}`;
-    }
-    if (parts.includes('AUTO')) {
-      return `AUTO-${suffix}`;
-    }
-    if (parts.includes('QUIC')) {
-      return `QUIC-${suffix}`;
-    }
-
-    return pay.id.length > 12 ? pay.id.substring(0, 6) + '...' + pay.id.substring(pay.id.length - 4) : pay.id;
-  };
+  const formatPaymentId = (pay) => getReceiptNumber(pay);
 
   const handleUpdateCreditLimit = async (e) => {
     e.preventDefault();
@@ -1184,6 +1196,17 @@ export default function Customers() {
         paymentsToDelete = [...paymentsToDelete, ...discountPayments];
       }
 
+      // If an unlinked advance is deleted, undo every invoice allocation that
+      // used it and remove the matching System Auto receipt. Without this, an
+      // invoice can remain marked as paid after its source advance is gone.
+      const sourceAllocationRes = await window.electronAPI.dbQuery(
+        `SELECT id, paymentId, orderId, amountUsed FROM advance_allocations
+         WHERE paymentId IN (${idsToDelete.map(() => '?').join(',')})`,
+        idsToDelete
+      );
+      const sourceAllocations = sourceAllocationRes.success ? sourceAllocationRes.data : [];
+      const autoPaymentIdsToDelete = [];
+
       const orderUpdates = {};
       paymentsToDelete.forEach(pDel => {
         if (pDel.orderId) {
@@ -1200,6 +1223,24 @@ export default function Customers() {
           });
         }
       });
+
+      for (const allocation of sourceAllocations) {
+        if (!orderUpdates[allocation.orderId]) {
+          orderUpdates[allocation.orderId] = { amountDeducted: 0, methodsDeducted: [] };
+        }
+        orderUpdates[allocation.orderId].amountDeducted += Number(allocation.amountUsed) || 0;
+        orderUpdates[allocation.orderId].methodsDeducted.push({ method: 'System Auto', amount: Number(allocation.amountUsed) || 0 });
+
+        const autoPaymentRes = await window.electronAPI.dbQuery(
+          `SELECT id FROM payments
+           WHERE orderId = ? AND method = 'System Auto' AND ABS(IFNULL(amount, 0) - ?) < 0.01
+           ORDER BY createdAt DESC LIMIT 1`,
+          [allocation.orderId, allocation.amountUsed]
+        );
+        if (autoPaymentRes.success && autoPaymentRes.data.length > 0) {
+          autoPaymentIdsToDelete.push(autoPaymentRes.data[0].id);
+        }
+      }
 
       // 2. Loop and update each affected order in the database
       for (const [orderId, update] of Object.entries(orderUpdates)) {
@@ -1247,9 +1288,13 @@ export default function Customers() {
       );
 
       // 4. Delete advance allocations and payment records
-      for (const id of idsToDelete) {
+      const paymentIdsForDeletion = [...new Set([...idsToDelete, ...autoPaymentIdsToDelete])];
+      for (const id of paymentIdsForDeletion) {
         await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE paymentId = ?", [id]);
         await window.electronAPI.dbQuery("DELETE FROM payments WHERE id = ?", [id]);
+      }
+      for (const allocation of sourceAllocations) {
+        await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE id = ?", [allocation.id]);
       }
 
       // 5. Delete matching account transactions for each deleted payment amount
@@ -1267,6 +1312,10 @@ export default function Customers() {
       }
 
       await window.electronAPI.dbQuery("COMMIT");
+
+      if (window.electronAPI?.runDataHealer) {
+        await window.electronAPI.runDataHealer(selectedCustomer.id);
+      }
 
       const updatedCustomerRes = await window.electronAPI.dbQuery("SELECT * FROM customers WHERE id = ?", [selectedCustomer.id]);
       if (updatedCustomerRes.success && updatedCustomerRes.data.length > 0) {
@@ -1298,12 +1347,63 @@ export default function Customers() {
       return;
     }
 
+    if (oldMethod === 'Discount') {
+      if (!window.electronAPI?.editDiscountReceipt) {
+        alert('Discount editing is unavailable in this application build.');
+        return;
+      }
+      setLoading(true);
+      try {
+        const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const result = await window.electronAPI.editDiscountReceipt({
+          paymentId: payment.id,
+          amount: newAmount,
+          actor: {
+            id: user.id || 'SYSTEM',
+            name: user.name || user.username || 'System',
+            role: user.role || 'system'
+          }
+        });
+        if (!result?.success) throw new Error(result?.error || 'Discount could not be updated.');
+
+        setShowPaymentEditModal(false);
+        setSelectedPaymentForAction(null);
+        const updatedCustomerRes = await window.electronAPI.dbQuery("SELECT * FROM customers WHERE id = ?", [selectedCustomer.id]);
+        if (updatedCustomerRes.success && updatedCustomerRes.data.length > 0) {
+          setSelectedCustomer(updatedCustomerRes.data[0]);
+          await handleViewCustomerInsight(updatedCustomerRes.data[0]);
+        }
+        fetchCustomers();
+        alert('Discount updated successfully!');
+      } catch (err) {
+        console.error('Edit discount error:', err);
+        alert(err.message || 'Failed to update discount.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     setLoading(true);
     const timestamp = getLocalISOString();
     const diff = newAmount - oldAmount;
 
     try {
       await window.electronAPI.dbQuery("BEGIN TRANSACTION");
+
+      // A source advance cannot be reduced below the part already applied to
+      // orders. The allocation must be reversed first so paid/due totals stay
+      // mathematically valid.
+      if (!payment.orderId) {
+        const allocationRes = await window.electronAPI.dbQuery(
+          'SELECT IFNULL(SUM(amountUsed), 0) AS amount FROM advance_allocations WHERE paymentId = ?',
+          [payment.id]
+        );
+        const allocatedAmount = allocationRes.success ? (Number(allocationRes.data?.[0]?.amount) || 0) : 0;
+        if (newAmount + 0.005 < allocatedAmount) {
+          throw new Error(`This advance has ${allocatedAmount.toFixed(2)} already applied to orders. Reverse those allocations before reducing it.`);
+        }
+      }
 
       // 1. Update payments table
       await window.electronAPI.dbQuery(
@@ -1394,7 +1494,7 @@ export default function Customers() {
       await window.electronAPI.dbQuery("COMMIT");
 
       if (window.electronAPI?.runDataHealer) {
-        await window.electronAPI.runDataHealer();
+        await window.electronAPI.runDataHealer(selectedCustomer.id);
       }
 
       setShowPaymentEditModal(false);
@@ -1452,7 +1552,7 @@ export default function Customers() {
       );
 
       if (window.electronAPI?.runDataHealer) {
-        await window.electronAPI.runDataHealer();
+        await window.electronAPI.runDataHealer(selectedCustomer.id);
       }
 
       setShowDiscountEditModal(false);
@@ -1525,11 +1625,16 @@ export default function Customers() {
         // Filter out automatic system transactions and discounts
         payments = payments.filter(p => p.method !== 'System Auto' && p.method !== 'Discount');
 
-        // Group payments that are part of the same transaction event (using second-level timestamp)
+        // Group only receipts with the same purpose. A settlement posted in the
+        // same second as an order receipt must not be displayed as one payment.
         const groupedMap = {};
         payments.forEach(p => {
-          // Group by second-level timestamp (yyyy-MM-ddTHH:mm:ss) to group split checkouts and settlements together
-          const key = p.createdAt ? p.createdAt.substring(0, 19) : p.id;
+          const timestampKey = p.createdAt ? p.createdAt.substring(0, 19) : p.id;
+          const referencePrefix = String(p.paymentReference || p.id || '').split('-')[0] || 'PAY';
+          const purposeKey = p.orderId
+            ? `order:${p.orderId}`
+            : `account:${referencePrefix}:${p.paymentReference || p.id}`;
+          const key = `${timestampKey}:${purposeKey}`;
 
           if (!groupedMap[key]) {
             groupedMap[key] = {
@@ -1581,7 +1686,9 @@ export default function Customers() {
               }
             } catch (e) { }
           }
-          const payDisc = discountPayments.filter(p => p.orderId === bill.id).reduce((sum, p) => sum + (p.amount || 0), 0);
+          const payDisc = discountPayments
+            .filter(p => p.orderId === bill.id && !String(p.paymentReference || '').startsWith('SETDISC-'))
+            .reduce((sum, p) => sum + (p.amount || 0), 0);
           if (payDisc > 0) return payDisc;
           if (bill.items) {
             try {
@@ -1598,7 +1705,9 @@ export default function Customers() {
           return 0;
         };
 
-        const generalDiscountSum = discountPayments.filter(p => !p.orderId).reduce((sum, p) => sum + (p.amount || 0), 0);
+        const generalDiscountSum = discountPayments
+          .filter(p => !p.orderId || String(p.paymentReference || '').startsWith('SETDISC-'))
+          .reduce((sum, p) => sum + (p.amount || 0), 0);
         let totalDiscount = generalDiscountSum;
         bills.forEach(bill => {
           totalDiscount += getDiscountVal(bill);
@@ -1615,11 +1724,6 @@ export default function Customers() {
 
         // All payments for this customer (from payments table)
         const allPaymentsRaw = paymentsRes.success ? paymentsRes.data : [];
-        const allocsRes = await window.electronAPI.dbQuery(
-          "SELECT * FROM advance_allocations WHERE paymentId IN (SELECT id FROM payments WHERE customerId = ?)",
-          [activeCustomer.id]
-        );
-        const customerAllocations = allocsRes.success ? allocsRes.data : [];
 
         // Build debits from all orders
         let runningBalance = 0;
@@ -1708,15 +1812,22 @@ export default function Customers() {
         });
 
         // Final values — mirror CustomerStatement KPIs exactly
-        const pendingDue = Math.max(0, runningBalance);
-        const availableAdvance = runningBalance < 0 ? Math.abs(runningBalance) : 0;
+        const canonicalBalance = Number(activeCustomer.balance) || 0;
+        const pendingDue = Math.max(0, canonicalBalance);
+        const availableAdvance = Math.max(0, -canonicalBalance);
 
         // totalAdvanceReceived: unlinked payments minus their allocations (for display in Advance Details section)
         const rawAdvanceReceived = allPaymentsRaw
-          .filter(p => (!p.orderId || p.orderId === '') && p.method !== 'System Auto' && p.method !== 'Discount' && p.method !== 'Refund Advance')
-          .reduce((s, p) => s + (p.amount || 0), 0);
-        const rawAllocationsSum = customerAllocations.reduce((s, a) => s + (a.amountUsed || 0), 0);
-        const totalAdvanceReceived = Math.max(0, rawAdvanceReceived - rawAllocationsSum);
+          .filter(p => {
+            const reference = String(p.paymentReference || '');
+            return (!p.orderId || p.orderId === '')
+              && !reference.startsWith('ACC-')
+              && p.method !== 'System Auto'
+              && p.method !== 'Discount'
+              && (Number(p.amount) || 0) > 0;
+          })
+          .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+        const totalAdvanceReceived = Math.max(0, rawAdvanceReceived);
         const advanceUsed = Math.max(0, totalAdvanceReceived - availableAdvance);
 
         setSelectedCustomerStats({
@@ -1774,7 +1885,10 @@ export default function Customers() {
     }
   };
 
-  const confirmRefund = async () => {
+  /* Legacy client-side refund workflow. Refunds now run through the single
+     audited desktop transaction below. */
+  /*
+  const confirmRefundLegacy = async () => {
     if (!orderToRefund) return;
     try {
       const nowIso = getLocalISOString();
@@ -1831,7 +1945,7 @@ export default function Customers() {
 
         // 4. Run data healer to make sure sync and state are correct
         if (window.electronAPI?.runDataHealer) {
-          await window.electronAPI.runDataHealer();
+          await window.electronAPI.runDataHealer(orderToRefund.customerId);
         }
       }
 
@@ -1878,6 +1992,68 @@ export default function Customers() {
     } catch (err) {
       console.error("Refund error:", err);
       alert("Failed to process refund: " + err.message);
+    }
+  };
+
+  */
+  const confirmRefund = async () => {
+    if (!orderToRefund) return;
+    try {
+      const nowIso = getLocalISOString();
+      const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+      const refundedBy = userSession.name || userSession.username || 'System';
+
+      if (window.electronAPI?.refundDeletedOrder) {
+        const result = await window.electronAPI.refundDeletedOrder({
+          orderId: orderToRefund.id,
+          refundMethod: selectedRefundMethod,
+          refundedBy
+        });
+        if (!result?.success) throw new Error(result?.error || 'Failed to process refund');
+      } else {
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/orders/deleted/${encodeURIComponent(orderToRefund.id)}/refund`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ returnStatus: 'Returned', refundStatus: 'Returned', refundMethod: selectedRefundMethod })
+          }
+        );
+        if (!response.ok) throw new Error('Failed to process refund');
+      }
+
+      setCustomerReturns(prev => prev.map(order => order.id === orderToRefund.id
+        ? { ...order, returnStatus: 'Returned', refundStatus: 'Returned', refundMethod: selectedRefundMethod, returnedAt: nowIso }
+        : order));
+
+      // Keep the server audit in sync when the desktop app is online. The
+      // local transaction above remains authoritative when the app is offline.
+      if (window.electronAPI?.refundDeletedOrder) {
+        fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/orders/deleted/${encodeURIComponent(orderToRefund.id)}/refund`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ returnStatus: 'Returned', refundStatus: 'Returned', refundMethod: selectedRefundMethod })
+          }
+        ).catch(() => { });
+      }
+
+      const customerId = orderToRefund.customerId || selectedCustomer?.id;
+      if (customerId && window.electronAPI?.dbQuery) {
+        const updatedCustomerRes = await window.electronAPI.dbQuery('SELECT * FROM customers WHERE id = ?', [customerId]);
+        if (updatedCustomerRes.success && updatedCustomerRes.data.length > 0) {
+          setSelectedCustomer(updatedCustomerRes.data[0]);
+          await handleViewCustomerInsight(updatedCustomerRes.data[0]);
+        }
+      }
+      fetchCustomers();
+      alert('Refund processed successfully!');
+      setShowRefundModal(false);
+      setOrderToRefund(null);
+    } catch (err) {
+      console.error('Refund error:', err);
+      alert('Failed to process refund: ' + err.message);
     }
   };
 
@@ -2411,8 +2587,6 @@ export default function Customers() {
                             }
                           } catch (e) { }
                         }
-                        const payDisc = customerDiscounts.filter(p => p.orderId === bill.id).reduce((sum, p) => sum + (p.amount || 0), 0);
-                        if (payDisc > 0) return payDisc;
                         if (bill.items) {
                           try {
                             const itemsArr = typeof bill.items === 'string' ? JSON.parse(bill.items) : bill.items;
@@ -2442,10 +2616,10 @@ export default function Customers() {
                         };
                       });
 
-                      const generalDiscounts = customerDiscounts.filter(p => !p.orderId).map(p => ({
+                      const receiptDiscounts = customerDiscounts.map(p => ({
                         id: p.id,
                         date: p.createdAt,
-                        type: 'general',
+                        type: 'receipt',
                         orderTotal: null,
                         discount: p.amount,
                         netPayable: null,
@@ -2453,7 +2627,7 @@ export default function Customers() {
                         payment: p
                       }));
 
-                      const allDiscounts = [...discountedBills, ...generalDiscounts].sort((a, b) => new Date(b.date) - new Date(a.date));
+                      const allDiscounts = [...discountedBills, ...receiptDiscounts].sort((a, b) => new Date(b.date) - new Date(a.date));
 
                       if (allDiscounts.length === 0) {
                         return (
@@ -2544,9 +2718,15 @@ export default function Customers() {
                           );
                         } else {
                           const p = item.payment;
+                          const isSettlementDiscount = String(p.paymentReference || '').startsWith('SETDISC-');
+                          const isOrderDiscount = Boolean(p.orderId) && !isSettlementDiscount;
                           return (
                             <tr key={p.id}>
-                              <td style={{ color: '#64748B', fontStyle: 'italic' }}>General Account</td>
+                              <td style={{ color: '#64748B', fontStyle: 'italic' }}>
+                                {isOrderDiscount
+                                  ? `Order Discount #${settings.invoicePrefix || ''}${p.orderId}`
+                                  : (isSettlementDiscount ? 'Settlement Discount' : 'General Account')}
+                              </td>
                               <td>{formatDate(p.createdAt)}</td>
                               <td>N/A</td>
                               <td style={{ fontWeight: 800, color: 'var(--danger)' }}>
@@ -2565,8 +2745,20 @@ export default function Customers() {
                                   APPLIED
                                 </span>
                               </td>
-                              <td style={{ textAlign: 'center', color: '#64748B', fontSize: '0.85rem' }} colSpan="2">
-                                Settlement Adjustment
+                              <td style={{ textAlign: 'center' }}>
+                                <button
+                                  style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
+                                  onClick={() => {
+                                    setSelectedPaymentForAction(p);
+                                    setEditPaymentAmount(String(p.amount || 0));
+                                    setEditPaymentMethod('Discount');
+                                    setEditPaymentDiscount('0');
+                                    setShowPaymentEditModal(true);
+                                  }}
+                                  title="Edit Discount"
+                                >
+                                  <Edit2 size={16} />
+                                </button>
                               </td>
                             </tr>
                           );
@@ -2709,7 +2901,7 @@ export default function Customers() {
               <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
                 <div>
                   <h2 style={{ color: '#0F172A' }}>Payment Details</h2>
-                  <p>Receipt ID: {selectedPaymentForAction.paymentReference || selectedPaymentForAction.id}</p>
+                  <p>Receipt ID: {getReceiptNumber(selectedPaymentForAction)}</p>
                 </div>
                 <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentViewModal(false)} />
               </div>
@@ -2753,14 +2945,16 @@ export default function Customers() {
                 <div>
                   <h2 style={{ color: '#0F172A', fontSize: '1.15rem' }}>Edit Payment</h2>
                   <p style={{ fontSize: '0.8rem', color: '#64748B' }}>
-                    Receipt: {selectedPaymentForAction.paymentReference || selectedPaymentForAction.id}
+                    Receipt: {getReceiptNumber(selectedPaymentForAction)}
                   </p>
                 </div>
                 <X size={22} className={styles.closeBtn} onClick={() => setShowPaymentEditModal(false)} />
               </div>
               <div className={styles.modalContent} style={{ padding: '1.25rem 1.5rem' }}>
                 <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
-                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>Payment Amount</label>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>
+                    {selectedPaymentForAction.method === 'Discount' ? 'Discount Amount' : 'Payment Amount'}
+                  </label>
                   <input
                     type="number"
                     step="0.01"
@@ -2770,6 +2964,7 @@ export default function Customers() {
                     style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem', fontWeight: 700 }}
                   />
                 </div>
+                {selectedPaymentForAction.method !== 'Discount' && (
                 <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
                   <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem', display: 'block' }}>Payment Method</label>
                   <PaymentMethodSelect
@@ -2778,7 +2973,8 @@ export default function Customers() {
                     settings={settings}
                   />
                 </div>
-                {selectedPaymentForAction.orderId && (
+                )}
+                {selectedPaymentForAction.method !== 'Discount' && selectedPaymentForAction.orderId && (
                   <div className={styles.formGroup}>
                     <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>Discount Amount (Order #{settings.invoicePrefix || ''}{selectedPaymentForAction.orderId})</label>
                     <input
@@ -4055,7 +4251,7 @@ export default function Customers() {
             <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
               <div>
                 <h2 style={{ color: '#0F172A' }}>Payment Details</h2>
-                <p>Receipt ID: {selectedPaymentForAction.paymentReference || selectedPaymentForAction.id}</p>
+                <p>Receipt ID: {getReceiptNumber(selectedPaymentForAction)}</p>
               </div>
               <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentViewModal(false)} />
             </div>

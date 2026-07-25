@@ -15,6 +15,7 @@ import axios from 'axios';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
 import { getLocalISOString, getLocalDateTime } from '../utils/dateUtils';
+import { getReceiptNumber } from '../utils/receiptNumber';
 import styles from './Settlement.module.css';
 import { QRCodeCanvas } from 'qrcode.react';
 import { checkCreditLimit } from '../utils/creditLimit';
@@ -192,7 +193,7 @@ export default function Settlement() {
   useEffect(() => {
     if (selectedCustomer) {
       if (window.electronAPI?.runDataHealer) {
-        window.electronAPI.runDataHealer()
+        window.electronAPI.runDataHealer(selectedCustomer.id)
           .catch(err => console.error("Data healer failed on customer select:", err))
           .finally(() => {
             fetchCustomerSpecificData(selectedCustomer);
@@ -532,6 +533,44 @@ export default function Settlement() {
           splits.push({ method: 'Discount', amount: discount });
         }
 
+        if (window.electronAPI?.settleCustomerBalance) {
+          const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+          const bankAccountId = settings.bankAccounts?.find((account) => account.bankName === selectedBank || account.id === selectedBank)?.id || selectedBank || null;
+          const result = await window.electronAPI.settleCustomerBalance({
+            customerId: selectedCustomer.id,
+            shopId: DEFAULT_SHOP_ID,
+            splits: splits
+              .filter((split) => split.method !== 'Discount')
+              .map((split) => ({
+                ...split,
+                bankAccountId: ['Card', 'UPI', 'Bank'].includes(split.method) ? bankAccountId : null
+              })),
+            discount,
+            cardCommissionRate: settings.cardCommission || 0,
+            actor: {
+              id: currentUser.id || 'SYSTEM',
+              name: currentUser.name || currentUser.username || 'System',
+              role: currentUser.role || 'system'
+            },
+            description: `Settlement for ${selectedCustomer.name}`
+          });
+
+          if (!result?.success) throw new Error(result?.error || 'Settlement could not be posted.');
+
+          alert('Settlement completed successfully!');
+          setPaymentAmount('');
+          setShowPayModal(false);
+          window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedCustomer.id } }));
+
+          const updatedCust = await window.electronAPI.dbQuery('SELECT * FROM customers WHERE id = ?', [selectedCustomer.id]);
+          const refreshedCustomer = (updatedCust.success && updatedCust.data?.length > 0) ? updatedCust.data[0] : selectedCustomer;
+          if (updatedCust.success) setSelectedCustomer(refreshedCustomer);
+          fetchCustomerSpecificData(refreshedCustomer);
+          fetchGlobalData();
+          fetchCustomers();
+          return;
+        }
+
         // Process each split payment sequentially
         // Process each split payment sequentially
         for (const split of splits) {
@@ -721,7 +760,7 @@ export default function Settlement() {
         }
 
         if (window.electronAPI?.runDataHealer) {
-          await window.electronAPI.runDataHealer();
+          await window.electronAPI.runDataHealer(selectedCustomer.id);
         }
 
         alert("Settlement completed successfully!");
@@ -1095,7 +1134,7 @@ export default function Settlement() {
                           
                           return (
                             <tr key={pay.id}>
-                              <td className={styles.receiptIdText}>{pay.paymentReference || ((pay.id || '').split('-')[0] + '-' + ((pay.id || '').split('-')[1] || ''))}</td>
+                              <td className={styles.receiptIdText}>{getReceiptNumber(pay)}</td>
                               <td className={styles.boldText}>{pay.orderId ? pay.orderId : <span className={styles.advanceLabel}>Unlinked (Advance)</span>}</td>
                               <td>{payDate}</td>
                               <td className={styles.boldText}>{pay.method}</td>

@@ -15,6 +15,7 @@ import DailyTaxReport from './pages/DailyTaxReport';
 import ZReport from './pages/ZReport';
 
 import CreditOverridesReport from './pages/CreditOverridesReport';
+import FinancialIntegrity from './pages/FinancialIntegrity';
 import DeletedOrders from './pages/DeletedOrders';
 import ExpectedDeliveries from './pages/ExpectedDeliveries';
 import ServicesReport from './pages/ServicesReport';
@@ -75,6 +76,7 @@ function App() {
             <Route path="daily-tax" element={<DailyTaxReport />} />
             <Route path="z-report" element={<ZReport />} />
             <Route path="credit-overrides" element={<CreditOverridesReport />} />
+            <Route path="financial-integrity" element={<FinancialIntegrity />} />
             <Route path="nomod-history" element={<NomodHistory />} />
           </Route>
           <Route path="expenses" element={<Expenses />} />

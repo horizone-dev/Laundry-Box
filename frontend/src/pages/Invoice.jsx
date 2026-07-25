@@ -297,6 +297,14 @@ export default function Invoice() {
     const tax = total - subtotal;
     const bi = stg.showBilingual !== false;
     const logoSrc = stg.logo || '';
+    const fullAddress = [
+      stg.address,
+      [stg.city, stg.emirate, stg.country].filter(Boolean).join(', ')
+    ].filter(Boolean).join(', ');
+    const fullAddressAr = [
+      stg.addressAr,
+      [stg.cityAr, stg.emirateAr, stg.countryAr].filter(Boolean).join('، ')
+    ].filter(Boolean).join('، ');
 
     const row = (label, value, bold = false) => `
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin:2px 0;${bold ? 'font-weight:900;font-size:13px;border-top:1px solid #000;border-bottom:1px solid #000;padding:3px 0;' : ''}">
@@ -331,12 +339,13 @@ export default function Invoice() {
         ${logoSrc ? `<div style="text-align:center;margin-bottom:4px;"><img src="${logoSrc}" style="max-height:50px;max-width:60mm;" /></div>` : ''}
         <div style="text-align:center;font-size:15px;font-weight:900;">${stg.companyName || 'Laundry Box'}</div>
         ${bi && stg.companyNameAr ? `<div style="text-align:center;font-size:13px;direction:rtl;">${stg.companyNameAr}</div>` : ''}
-        ${stg.address ? `<div style="text-align:center;font-size:11px;">${stg.address}</div>` : ''}
+        ${fullAddress ? `<div style="text-align:center;font-size:11px;">${fullAddress}</div>` : ''}
+        ${bi && fullAddressAr ? `<div style="text-align:center;font-size:11px;" dir="rtl">${fullAddressAr}</div>` : ''}
         ${stg.phone ? `<div style="text-align:center;font-size:11px;">Tel: ${stg.phone}</div>` : ''}
         ${dash}
         <div style="margin:2px 0;"><span style="font-size:11px;">Invoice No${bi ? ' / رقم الفاتورة' : ''}:</span> <b>${stg.invoicePrefix || ''}${ord.id}</b></div>
-        <div style="margin:2px 0;"><span style="font-size:11px;">Date${bi ? ' / التاريخ' : ''}:</span> ${ord.date || ''}</div>
-        ${ord.expectedDeliveryDate ? `<div style="margin:2px 0;"><span style="font-size:11px;">Exp. Delivery${bi ? ' / تاريخ التسليم المتوقع' : ''}:</span> <b>${ord.expectedDeliveryDate}</b></div>` : ''}
+        <div style="margin:2px 0;"><span style="font-size:11px;">Date:</span> ${ord.date || ''}</div>
+        ${ord.expectedDeliveryDate ? `<div style="margin:2px 0;"><span style="font-size:11px;">Exp. Delivery:</span> <b>${ord.expectedDeliveryDate}</b></div>` : ''}
         ${dash}
         <div style="margin:2px 0;"><span style="font-size:11px;">Name${bi ? ' / الاسم' : ''}:</span> <b>${ord.customer || ''}</b></div>
         ${ord.customerPhone ? `<div style="margin:2px 0;"><span style="font-size:11px;">Phone${bi ? ' / الهاتف' : ''}:</span> ${ord.customerPhone}</div>` : ''}

@@ -80,7 +80,10 @@ export default function DeletedOrders() {
     }
   };
 
-  const confirmRefund = async () => {
+  /* Legacy client-side refund workflow. Refunds now run through the single
+     audited desktop transaction below. */
+  /*
+  const confirmRefundLegacy = async () => {
     if (!orderToRefund) return;
     try {
       const nowIso = getLocalISOString();
@@ -174,6 +177,57 @@ export default function DeletedOrders() {
     } catch (err) {
       console.error('Failed to mark as returned:', err);
       alert('Failed to update return status: ' + err.message);
+    }
+  };
+
+  */
+  const confirmRefund = async () => {
+    if (!orderToRefund) return;
+    try {
+      const nowIso = getLocalISOString();
+      const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+      const refundedBy = userSession.name || userSession.username || 'System';
+
+      if (window.electronAPI?.refundDeletedOrder) {
+        const result = await window.electronAPI.refundDeletedOrder({
+          orderId: orderToRefund.id,
+          refundMethod: selectedRefundMethod,
+          refundedBy
+        });
+        if (!result?.success) throw new Error(result?.error || 'Failed to process refund');
+      } else {
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/orders/deleted/${encodeURIComponent(orderToRefund.id)}/refund`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ returnStatus: 'Returned', refundStatus: 'Returned', refundMethod: selectedRefundMethod })
+          }
+        );
+        if (!response.ok) throw new Error('Failed to process refund');
+      }
+
+      setOrders(prev => prev.map(order => order.id === orderToRefund.id
+        ? { ...order, returnStatus: 'Returned', refundStatus: 'Returned', refundMethod: selectedRefundMethod, returnedAt: nowIso }
+        : order));
+
+      if (window.electronAPI?.refundDeletedOrder) {
+        fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/orders/deleted/${encodeURIComponent(orderToRefund.id)}/refund`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ returnStatus: 'Returned', refundStatus: 'Returned', refundMethod: selectedRefundMethod })
+          }
+        ).catch(() => { });
+      }
+
+      alert('Refund processed successfully.');
+      setShowRefundModal(false);
+      setOrderToRefund(null);
+    } catch (err) {
+      console.error('Failed to process refund:', err);
+      alert('Failed to process refund: ' + err.message);
     }
   };
 

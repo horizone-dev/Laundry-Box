@@ -102,7 +102,7 @@ process.on('unhandledRejection', (reason) => {
 
 const { spawn } = require('child_process');
 logStartup('Importing database module...');
-const { initDB, getDB, closeDB, generateServiceSVG, softDeleteOrder } = require('./database');
+const { initDB, getDB, closeDB, generateServiceSVG, softDeleteOrder, refundDeletedOrder } = require('./database');
 logStartup('Importing email service module...');
 const emailService = require('./emailService');
 logStartup('Importing payment checkout service module...');
@@ -452,11 +452,10 @@ ipcMain.on('notify-database-updated', (event, detail) => {
 });
 
 // DB IPC Handlers
-ipcMain.handle('run-data-healer', () => {
+ipcMain.handle('run-data-healer', (event, customerId) => {
   try {
     const { runDataHealer, getDB } = require('./database');
-    runDataHealer(getDB());
-    return { success: true };
+    return runDataHealer(getDB(), customerId);
   } catch (err) {
     console.error('Failed to run healer:', err);
     return { success: false, error: err.message };
@@ -719,6 +718,50 @@ ipcMain.handle('soft-delete-order', async (event, options) => {
     return { success: true, data: result };
   } catch (err) {
     console.error('soft-delete-order IPC error:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Finance audit is intentionally read-only. It is used to compare the new
+// canonical ledger with existing cached balances during the staged rollout.
+ipcMain.handle('audit-financial-integrity', (event, customerId = null) => {
+  try {
+    const { auditFinancialIntegrity, getDB } = require('./database');
+    return { success: true, data: auditFinancialIntegrity(getDB(), customerId) };
+  } catch (err) {
+    console.error('Financial integrity audit failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// New transactional settlement endpoint. Existing pages are migrated to this
+// one by one; no page should combine these writes manually once migrated.
+ipcMain.handle('settle-customer-balance', (event, payload) => {
+  try {
+    const { settleCustomerBalance } = require('./financialService');
+    return settleCustomerBalance(getDB(), payload || {});
+  } catch (err) {
+    console.error('Customer settlement failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('edit-discount-receipt', (event, payload) => {
+  try {
+    const { editDiscountReceipt } = require('./financialService');
+    return editDiscountReceipt(getDB(), payload || {});
+  } catch (err) {
+    console.error('Discount receipt edit failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('refund-deleted-order', async (event, options) => {
+  try {
+    const result = refundDeletedOrder(options || {});
+    return { success: true, data: result };
+  } catch (err) {
+    console.error('refund-deleted-order IPC error:', err);
     return { success: false, error: err.message };
   }
 });
@@ -1456,7 +1499,7 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
           try {
             const { runDataHealer } = require('./database');
             runDataHealer(db);
-            logTracker(orderId, `Reconciliation runDataHealer successfully executed.`, 'info');
+            logTracker(orderId, `Read-only financial verification successfully executed.`, 'info');
           } catch (healErr) {
             logTracker(orderId, `Healer run failed: ${healErr.message}`, 'error');
           }
@@ -1575,7 +1618,7 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
           try {
             const { runDataHealer } = require('./database');
             runDataHealer(db);
-            logTracker(orderId, `Reconciliation runDataHealer successfully executed.`, 'info');
+            logTracker(orderId, `Read-only financial verification successfully executed.`, 'info');
           } catch (healErr) {
             logTracker(orderId, `Healer run failed: ${healErr.message}`, 'error');
           }

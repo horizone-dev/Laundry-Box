@@ -4,6 +4,8 @@ const Service = require('../models/Service');
 const Category = require('../models/Category');
 const Payment = require('../models/Payment');
 const AccountTransaction = require('../models/AccountTransaction');
+const DeletedOrder = require('../models/DeletedOrder');
+const FinancialRecord = require('../models/FinancialRecord');
 const mongoose = require('mongoose');
 const AdvanceAllocation = require('../models/AdvanceAllocation');
 
@@ -16,7 +18,21 @@ exports.syncData = async (req, res) => {
     return res.status(503).json({ success: false, message: 'Sync failed: MongoDB offline' });
   }
 
-  const { shopId, orders, customers, payments, accountTransactions, advanceAllocations, lastSyncTimestamp } = req.body;
+  const {
+    shopId,
+    orders,
+    customers,
+    payments,
+    accountTransactions,
+    advanceAllocations,
+    deletedOrders,
+    refunds,
+    customerLedgerEntries,
+    cashLedgerEntries,
+    salesReturns,
+    auditLogs,
+    lastSyncTimestamp
+  } = req.body;
 
   if (!shopId) {
     return res.status(400).json({ success: false, message: 'Missing required field: shopId' });
@@ -171,6 +187,56 @@ exports.syncData = async (req, res) => {
       }
     }
 
+    // Deleted-order state includes whether money was refunded or converted to
+    // advance. It must travel with its payment snapshot, not only as an order
+    // status, otherwise another branch can recreate an already-refunded sale.
+    if (deletedOrders && deletedOrders.length > 0) {
+      for (const deletedOrder of deletedOrders) {
+        try {
+          const { isSynced, ...rest } = deletedOrder;
+          const items = typeof deletedOrder.items === 'string'
+            ? JSON.parse(deletedOrder.items || '[]')
+            : (deletedOrder.items || []);
+          const paymentSnapshot = typeof deletedOrder.payments === 'string'
+            ? JSON.parse(deletedOrder.payments || '[]')
+            : (deletedOrder.payments || []);
+          await DeletedOrder.findOneAndUpdate(
+            { id: deletedOrder.id, shopId },
+            { $set: { ...rest, shopId, items, payments: paymentSnapshot, updatedAt: new Date() } },
+            { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+          );
+        } catch (deletedOrderErr) {
+          console.error(`[Sync] Failed to upsert deleted order ${deletedOrder.id}:`, deletedOrderErr.message);
+        }
+      }
+    }
+
+    // Ledger, refund, return and audit records are append-only financial
+    // evidence. Preserve their complete local payload in one idempotent cloud
+    // collection; no balance is recalculated during sync.
+    const financialBatches = [
+      ['refunds', refunds],
+      ['customerLedgerEntries', customerLedgerEntries],
+      ['cashLedgerEntries', cashLedgerEntries],
+      ['salesReturns', salesReturns],
+      ['auditLogs', auditLogs]
+    ];
+    for (const [kind, records] of financialBatches) {
+      for (const record of records || []) {
+        try {
+          const { isSynced, ...payload } = record;
+          const occurredAt = payload.createdAt || payload.timestamp || payload.updatedAt || new Date();
+          await FinancialRecord.findOneAndUpdate(
+            { id: record.id, shopId, kind },
+            { $set: { payload, occurredAt, updatedAt: new Date() } },
+            { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+          );
+        } catch (financialRecordErr) {
+          console.error(`[Sync] Failed to upsert ${kind} record ${record.id}:`, financialRecordErr.message);
+        }
+      }
+    }
+
     // ────────────────────────────────────────────────────────────
     // 4. Process Categories from client (if sent)
     // ────────────────────────────────────────────────────────────
@@ -197,7 +263,7 @@ exports.syncData = async (req, res) => {
       updatedAt: { $gt: new Date(lastSyncTimestamp || 0) }
     };
 
-    const [newOrders, newCustomers, newServices, newCategories, newPayments, newAccountTransactions] =
+    const [newOrders, newCustomers, newServices, newCategories, newPayments, newAccountTransactions, newAdvanceAllocations, newDeletedOrders, newFinancialRecords] =
       await Promise.all([
         Order.find(query).lean(),
         Customer.find(query).lean(),
@@ -205,7 +271,16 @@ exports.syncData = async (req, res) => {
         Category.find(query).lean(),
         Payment.find(query).lean(),
         AccountTransaction.find(query).lean(),
+        AdvanceAllocation.find(query).lean(),
+        DeletedOrder.find(query).lean(),
+        FinancialRecord.find(query).lean(),
       ]);
+
+    const financialByKind = newFinancialRecords.reduce((result, record) => {
+      if (!result[record.kind]) result[record.kind] = [];
+      result[record.kind].push(record.payload);
+      return result;
+    }, {});
 
     return res.json({
       success: true,
@@ -216,7 +291,14 @@ exports.syncData = async (req, res) => {
         services: newServices,
         categories: newCategories,
         payments: newPayments,
-        accountTransactions: newAccountTransactions
+        accountTransactions: newAccountTransactions,
+        advanceAllocations: newAdvanceAllocations,
+        deletedOrders: newDeletedOrders,
+        refunds: financialByKind.refunds || [],
+        customerLedgerEntries: financialByKind.customerLedgerEntries || [],
+        cashLedgerEntries: financialByKind.cashLedgerEntries || [],
+        salesReturns: financialByKind.salesReturns || [],
+        auditLogs: financialByKind.auditLogs || []
       }
     });
 

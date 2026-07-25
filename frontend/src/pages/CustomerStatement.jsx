@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { getLocalISOString } from '../utils/dateUtils';
+import { getReceiptNumber } from '../utils/receiptNumber';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
 import CustomSelect from '../components/CustomSelect';
@@ -344,7 +345,6 @@ export default function CustomerStatement() {
       const cleanRef = `${settings.invoicePrefix || '#'}${o.id}`;
 
       if (o.isDeleted) {
-        console.log("DELETED ORDER FOUND IN STATEMENT:", o);
         if (filterType !== 'Payments') {
           // 1. The Original Order Charge
           let itemSummary = '';
@@ -420,7 +420,7 @@ export default function CustomerStatement() {
               rows.push({
                 date: p.createdAt || o.createdAt,
                 type: 'payment',
-                ref: p.paymentReference || p.id || `PAY-DEL-${o.id}`,
+                ref: getReceiptNumber(p),
                 description: `Payment – ${p.method || 'Cash'}`,
                 itemsSummary: `Linked to Order ${cleanRef}`,
                 debit: 0,
@@ -492,12 +492,23 @@ export default function CustomerStatement() {
 
     const groupedPaymentsMap = {};
     payments.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto').forEach(p => {
-      const key = p.createdAt ? p.createdAt.substring(0, 19) : p.id;
+      const timestampKey = p.createdAt ? p.createdAt.substring(0, 19) : p.id;
+      const referencePrefix = String(p.paymentReference || p.id || '').split('-')[0] || 'PAY';
+      // Discount, order receipts and account settlements may be posted in the
+      // same second, but they must remain separate in the customer statement.
+      const purposeKey = p.method === 'Discount'
+        ? `discount:${p.paymentReference || p.id}`
+        : (p.orderId ? `order:${p.orderId}` : `account:${referencePrefix}:${p.paymentReference || p.id}`);
+      const key = `${timestampKey}:${purposeKey}`;
+      const discountScope = p.method === 'Discount' && (String(p.paymentReference || '').startsWith('SETDISC-') || !p.orderId)
+        ? 'settlement'
+        : 'order';
       if (!groupedPaymentsMap[key]) {
         groupedPaymentsMap[key] = {
           date: p.createdAt,
           type: 'payment',
-          ref: p.paymentReference || p.id,
+          ref: getReceiptNumber(p),
+          internalReference: p.paymentReference || p.id,
           description: `Payment – ${p.method || 'Cash'}`,
           debit: 0,
           credit: p.method === 'Discount' ? 0 : (p.amount || 0),
@@ -506,6 +517,7 @@ export default function CustomerStatement() {
           dueAmount: 0,
           orderId: p.orderId,
           paymentMethod: p.method,
+          discountScope,
           orderIds: p.orderId ? [p.orderId] : [],
           methods: [p.method]
         };
@@ -530,19 +542,25 @@ export default function CustomerStatement() {
 
       let description = p.description;
       let finalPaymentMethod = p.paymentMethod;
-      if (p.methods.length > 1) {
+      if (p.paymentMethod === 'Discount') {
+        description = p.discountScope === 'settlement' ? 'Settlement Discount' : 'Order Discount';
+      } else if (p.methods.length > 1) {
         description = 'Payment – Multipayment';
         finalPaymentMethod = 'Multipayment';
       }
 
       if (p.paymentMethod === 'Advance') {
         itemsSummary = `Advance Consumed for Order ${cleanOrderRef}`;
+      } else if (p.paymentMethod === 'Discount') {
+        itemsSummary = p.discountScope === 'settlement'
+          ? (p.orderId ? `Settlement discount applied to Order ${cleanOrderRef}` : 'Settlement discount')
+          : `Order discount for ${cleanOrderRef}`;
       } else if (p.orderIds.length > 1) {
         itemsSummary = 'Quick Pay Settlement';
       } else if (p.orderId) {
         itemsSummary = `Linked to Order ${cleanOrderRef}`;
       } else {
-        const refStr = p.ref || '';
+        const refStr = p.internalReference || p.ref || '';
         if (refStr.startsWith('QPY-')) itemsSummary = 'Quick Pay Settlement';
         else if (refStr.startsWith('ADV-')) itemsSummary = 'Advance Deposit';
         else if (refStr.startsWith('SYS-')) itemsSummary = 'System Auto Offset';
@@ -1027,9 +1045,7 @@ export default function CustomerStatement() {
                         {row.debit > 0 ? <><CurrencySymbol size={11} /> {row.debit.toFixed(2)}</> : <span className={styles.dash}>—</span>}
                       </td>
                       <td className={`${styles.numCol} ${styles.discountCell}`} style={{ color: 'var(--danger)' }}>
-                        {row.paymentMethod === 'Discount' ? (
-                          <><CurrencySymbol size={11} /> {row.credit.toFixed(2)}</>
-                        ) : (row.discountAmount && row.discountAmount > 0) ? (
+                        {row.discountAmount && row.discountAmount > 0 ? (
                           <><CurrencySymbol size={11} /> {row.discountAmount.toFixed(2)}</>
                         ) : (
                           <span className={styles.dash}>—</span>
@@ -1053,7 +1069,7 @@ export default function CustomerStatement() {
                       <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + r.debit, 0).toFixed(2)}
                     </td>
                     <td className={`${styles.numCol} ${styles.discountCell} ${styles.totalsNum}`} style={{ color: 'var(--danger)' }}>
-                      <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + (r.paymentMethod === 'Discount' ? r.credit : (r.discountAmount || 0)), 0).toFixed(2)}
+                      <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + (r.discountAmount || 0), 0).toFixed(2)}
                     </td>
                     <td className={`${styles.numCol} ${styles.creditCell} ${styles.totalsNum}`}>
                       <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + (r.paymentMethod === 'Discount' ? 0 : r.credit), 0).toFixed(2)}
