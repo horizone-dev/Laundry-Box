@@ -827,7 +827,7 @@ export default function ExpectedDeliveries() {
 
       {/* Settle Payment Modal */}
       {showPayModal && selectedOrderForPay && (
-        <div className={styles.modalOverlay} onClick={() => { setShowPayModal(false); setSelectedOrderForPay(null); }}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h3>Record Payment for {settings.invoicePrefix || '#'}{selectedOrderForPay.id}</h3>

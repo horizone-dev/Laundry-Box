@@ -176,7 +176,8 @@ function initDB(appPath) {
       isSynced INTEGER DEFAULT 0,
       createdAt TEXT,
       updatedAt TEXT,
-      paymentReference TEXT
+      paymentReference TEXT,
+      discountScope TEXT
     );
 
     CREATE TABLE IF NOT EXISTS expenses (
@@ -834,6 +835,9 @@ function initDB(appPath) {
       CREATE TABLE IF NOT EXISTS payment_sequence (
         id INTEGER PRIMARY KEY AUTOINCREMENT
       );
+      CREATE TABLE IF NOT EXISTS discount_sequence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT
+      );
     `);
     const seqRow = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'payment_sequence'").get();
     if (!seqRow) {
@@ -863,6 +867,10 @@ function initDB(appPath) {
     if (!paymentCols.some(col => col.name === 'paymentReference')) {
       db.exec("ALTER TABLE payments ADD COLUMN paymentReference TEXT DEFAULT NULL;");
       console.log("[Sequence Migration] Added paymentReference column to payments table.");
+    }
+    if (!paymentCols.some(col => col.name === 'discountScope')) {
+      db.exec("ALTER TABLE payments ADD COLUMN discountScope TEXT DEFAULT NULL;");
+      console.log("[Discount Migration] Added discountScope column to payments table.");
     }
     // ───────────────────────────────────────────────────────────────────
 

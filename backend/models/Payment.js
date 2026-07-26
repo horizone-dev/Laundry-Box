@@ -9,6 +9,9 @@ const paymentSchema = new mongoose.Schema({
   method: { type: String, required: true },
   status: { type: String, required: true },
   paymentReference: { type: String },
+  // Stored separately from the display reference so DISC-0000001 can be
+  // used for every discount without losing order vs settlement meaning.
+  discountScope: { type: String, enum: ['order', 'settlement'], default: null },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });

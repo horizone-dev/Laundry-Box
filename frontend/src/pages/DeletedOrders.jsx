@@ -551,7 +551,7 @@ export default function DeletedOrders() {
 
       {/* Refund Method Selection Modal */}
       {showRefundModal && orderToRefund && (
-        <div className={styles.modalOverlay} onClick={() => { setShowRefundModal(false); setOrderToRefund(null); }}>
+        <div className={styles.modalOverlay}>
           <div className={styles.pinCard} style={{ maxWidth: '400px', textAlign: 'left', alignItems: 'stretch' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.pinIconBox} style={{ alignSelf: 'center' }}>
               <DollarSign size={32} />

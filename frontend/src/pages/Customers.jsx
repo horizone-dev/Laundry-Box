@@ -12,6 +12,7 @@ import { DEFAULT_SHOP_ID } from '../constants';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { getLocalISOString, getLocalDateStr } from '../utils/dateUtils';
 import { getReceiptNumber } from '../utils/receiptNumber';
+import { getDiscountScope } from '../utils/discountScope';
 import styles from './Customers.module.css';
 import { checkCreditLimit } from '../utils/creditLimit';
 import InvoiceTemplate from '../components/InvoiceTemplate';
@@ -122,6 +123,15 @@ function PaymentMethodSelect({ value, onChange, settings }) {
   );
 }
 
+// An "Advance" record linked to an order is an internal allocation of an
+// existing customer advance, not a new cash/card receipt. It must never be
+// edited through the normal payment editor, otherwise the allocation can be
+// accidentally converted into a fresh payment method.
+const isAdvanceAllocation = (payment) => payment?.method === 'Advance' && Boolean(payment?.orderId);
+const getPaymentMethodLabel = (payment) => isAdvanceAllocation(payment)
+  ? 'Advance Applied'
+  : (payment?.method || '—');
+
 export default function Customers() {
   const navigate = useNavigate();
   const { settings, formatDate } = useSettings();
@@ -193,8 +203,6 @@ export default function Customers() {
   const [editDiscountValue, setEditDiscountValue] = useState('');
   const [editPaymentMethod, setEditPaymentMethod] = useState('Cash');
   const [editPaymentAmount, setEditPaymentAmount] = useState('');
-  const [editPaymentDiscount, setEditPaymentDiscount] = useState('');
-  const [editOrderGrossTotal, setEditOrderGrossTotal] = useState(0);
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinActionTarget, setPinActionTarget] = useState(null);
   const [selectedBillForPayment, setSelectedBillForPayment] = useState(null);
@@ -1099,44 +1107,18 @@ export default function Customers() {
     setManagerPinValue('');
     setShowPinModal(false);
 
+    if (isAdvanceAllocation(selectedPaymentForAction)) {
+      alert('This is an advance amount already applied to an order. It cannot be edited or deleted as a normal payment.');
+      return;
+    }
+
     if (pinActionTarget === 'delete_payment' && selectedPaymentForAction) {
       handleDeletePaymentRecord(selectedPaymentForAction.id);
     } else if (pinActionTarget === 'edit_payment' && selectedPaymentForAction) {
-      let existingDisc = 0;
-      let gross = 0;
-      if (selectedPaymentForAction.orderId && window.electronAPI?.dbQuery) {
-        window.electronAPI.dbQuery("SELECT * FROM orders WHERE id = ?", [selectedPaymentForAction.orderId]).then(res => {
-          if (res.success && res.data.length > 0) {
-            const ord = res.data[0];
-            try {
-              if (ord.paymentBreakdown) {
-                const bd = typeof ord.paymentBreakdown === 'string' ? JSON.parse(ord.paymentBreakdown) : ord.paymentBreakdown;
-                existingDisc = parseFloat(bd.discount || bd.discountAmount || 0) || 0;
-              }
-            } catch (e) { }
-            if (existingDisc === 0 && ord.items) {
-              try {
-                const itemsArr = typeof ord.items === 'string' ? JSON.parse(ord.items) : ord.items;
-                if (Array.isArray(itemsArr) && itemsArr.length > 0) {
-                  const itemsTotal = itemsArr.reduce((s, i) => s + ((parseFloat(i.qty) || 0) * (parseFloat(i.price) || 0)), 0);
-                  const taxRate = settings.isTaxEnabled ? ((settings.taxRate || 0) / 100) : 0;
-                  const grossWithTax = settings.taxMethod === 'exclusive' ? (itemsTotal * (1 + taxRate)) : itemsTotal;
-                  const diff = grossWithTax - (ord.totalAmount || 0);
-                  if (diff > 0.05) existingDisc = parseFloat(diff.toFixed(2));
-                }
-              } catch (e) { }
-            }
-            gross = (ord.totalAmount || 0) + existingDisc;
-          }
-          setEditOrderGrossTotal(gross);
-          setEditPaymentDiscount(existingDisc ? existingDisc.toString() : '0');
-          setShowPaymentEditModal(true);
-        });
-      } else {
-        setEditOrderGrossTotal(0);
-        setEditPaymentDiscount('0');
-        setShowPaymentEditModal(true);
-      }
+      // Payment and discount are separate accounting records.  Never infer a
+      // discount's scope from this payment's orderId: a customer settlement
+      // can legitimately be allocated across one or more orders.
+      setShowPaymentEditModal(true);
     }
   };
 
@@ -1149,6 +1131,10 @@ export default function Customers() {
   const handleDeletePaymentRecord = async (paymentId) => {
     const payment = customerPayments.find(p => p.id === paymentId);
     if (!payment) return;
+    if (isAdvanceAllocation(payment)) {
+      alert('This is an advance amount already applied to an order. It cannot be deleted as a normal payment.');
+      return;
+    }
     if (!window.confirm("Are you sure you want to delete this payment? The customer balance will increase.")) return;
 
     setLoading(true);
@@ -1336,11 +1322,14 @@ export default function Customers() {
   const handleSavePaymentEdit = async () => {
     if (!selectedPaymentForAction) return;
     const payment = selectedPaymentForAction;
+    if (isAdvanceAllocation(payment)) {
+      alert('This is an advance amount already applied to an order. It cannot be edited as a normal payment.');
+      return;
+    }
     const oldMethod = payment.method;
     const newMethod = editPaymentMethod;
     const oldAmount = parseFloat(payment.amount) || 0;
     const newAmount = parseFloat(editPaymentAmount) || 0;
-    const newDisc = parseFloat(editPaymentDiscount) || 0;
 
     if (newAmount <= 0) {
       alert("Please enter a valid amount greater than 0.");
@@ -1423,11 +1412,9 @@ export default function Customers() {
         if (orderRes.success && orderRes.data.length > 0) {
           const order = orderRes.data[0];
           let paymentBreakdown = {};
-          let oldDisc = 0;
           try {
             if (order.paymentBreakdown) {
               paymentBreakdown = typeof order.paymentBreakdown === 'string' ? JSON.parse(order.paymentBreakdown) : order.paymentBreakdown;
-              oldDisc = parseFloat(paymentBreakdown.discount || paymentBreakdown.discountAmount || 0) || 0;
             }
           } catch (e) { }
 
@@ -1438,10 +1425,6 @@ export default function Customers() {
             paymentBreakdown[oldKey] = Math.max(0, (paymentBreakdown[oldKey] || 0) - oldAmount);
           }
           paymentBreakdown[newKey] = (paymentBreakdown[newKey] || 0) + newAmount;
-          paymentBreakdown.discount = newDisc;
-
-          const grossTotal = (order.totalAmount || 0) + oldDisc;
-          const newNetTotal = Math.max(0, grossTotal - newDisc);
 
           let activeMethods = Object.keys(paymentBreakdown).filter(k => k !== 'discount' && k !== 'advance' && paymentBreakdown[k] > 0);
           const keyMap = { cash: 'Cash', card: 'Card', upi: 'UPI', bank: 'Bank Transfer' };
@@ -1451,7 +1434,7 @@ export default function Customers() {
           }
 
           const newPaidAmount = (order.paidAmount || 0) + diff;
-          const newDueAmount = Math.max(0, newNetTotal - newPaidAmount);
+          const newDueAmount = Math.max(0, (order.totalAmount || 0) - newPaidAmount);
 
           let newPaymentStatus = 'Partial';
           if (newDueAmount <= 0) {
@@ -1462,7 +1445,7 @@ export default function Customers() {
 
           await window.electronAPI.dbQuery(
             "UPDATE orders SET totalAmount = ?, paidAmount = ?, dueAmount = ?, paymentStatus = ?, paymentMethod = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
-            [newNetTotal, newPaidAmount, newDueAmount, newPaymentStatus, finalMethodName, JSON.stringify(paymentBreakdown), timestamp, payment.orderId]
+            [order.totalAmount || 0, newPaidAmount, newDueAmount, newPaymentStatus, finalMethodName, JSON.stringify(paymentBreakdown), timestamp, payment.orderId]
           );
         }
       }
@@ -1622,18 +1605,30 @@ export default function Customers() {
         let payments = paymentsRes.success ? paymentsRes.data : [];
         const discountPayments = payments.filter(p => p.method === 'Discount');
         setCustomerDiscounts(discountPayments);
-        // Filter out automatic system transactions and discounts
-        payments = payments.filter(p => p.method !== 'System Auto' && p.method !== 'Discount');
+        // Payments tab shows only amounts actually received from the customer.
+        // An Advance row linked to an order is merely the later application of
+        // an existing advance credit, so showing it here would make a single
+        // payment appear twice.
+        payments = payments.filter(p => (
+          p.method !== 'System Auto'
+          && p.method !== 'Discount'
+          && !isAdvanceAllocation(p)
+        ));
 
-        // Group only receipts with the same purpose. A settlement posted in the
-        // same second as an order receipt must not be displayed as one payment.
+        // A customer makes one Quick Settle payment, even when the accounting
+        // engine applies it to several places (orders, opening due or advance).
+        // Those rows share the exact settlement timestamp, so show their total
+        // as one customer-facing receipt. Other payment types remain separate.
         const groupedMap = {};
         payments.forEach(p => {
-          const timestampKey = p.createdAt ? p.createdAt.substring(0, 19) : p.id;
+          const timestampKey = p.createdAt || p.id;
           const referencePrefix = String(p.paymentReference || p.id || '').split('-')[0] || 'PAY';
-          const purposeKey = p.orderId
-            ? `order:${p.orderId}`
-            : `account:${referencePrefix}:${p.paymentReference || p.id}`;
+          const isSettlementReceipt = ['SET', 'ACC', 'ADV'].includes(referencePrefix);
+          const purposeKey = isSettlementReceipt
+            ? `settlement:${timestampKey}`
+            : (p.orderId
+              ? `order:${p.orderId}`
+              : `account:${referencePrefix}:${p.paymentReference || p.id}`);
           const key = `${timestampKey}:${purposeKey}`;
 
           if (!groupedMap[key]) {
@@ -1641,7 +1636,8 @@ export default function Customers() {
               ...p,
               methodsList: [p.method],
               totalAmount: p.amount || 0,
-              paymentIds: [p.id]
+              paymentIds: [p.id],
+              isSettlementGroup: isSettlementReceipt
             };
           } else {
             groupedMap[key].totalAmount += p.amount || 0;
@@ -1661,7 +1657,11 @@ export default function Customers() {
           return {
             ...p,
             method: finalMethod,
-            amount: p.totalAmount
+            amount: p.totalAmount,
+            // A grouped settlement is safe to view or delete as one event.
+            // Editing only one of its underlying allocation rows would make
+            // its shown total disagree with the accounting records.
+            isSettlementGroup: Boolean(p.isSettlementGroup && p.paymentIds.length > 1)
           };
         });
 
@@ -1687,7 +1687,7 @@ export default function Customers() {
             } catch (e) { }
           }
           const payDisc = discountPayments
-            .filter(p => p.orderId === bill.id && !String(p.paymentReference || '').startsWith('SETDISC-'))
+            .filter(p => p.orderId === bill.id && getDiscountScope(p) === 'order')
             .reduce((sum, p) => sum + (p.amount || 0), 0);
           if (payDisc > 0) return payDisc;
           if (bill.items) {
@@ -1706,7 +1706,7 @@ export default function Customers() {
         };
 
         const generalDiscountSum = discountPayments
-          .filter(p => !p.orderId || String(p.paymentReference || '').startsWith('SETDISC-'))
+          .filter(p => getDiscountScope(p) === 'settlement')
           .reduce((sum, p) => sum + (p.amount || 0), 0);
         let totalDiscount = generalDiscountSum;
         bills.forEach(bill => {
@@ -2245,7 +2245,7 @@ export default function Customers() {
               <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.5rem', marginBottom: '1rem', letterSpacing: '0.05em' }}>Advance Details</h3>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
-                <span style={{ color: '#64748B', fontWeight: 600 }}>Total Advance Received</span>
+                <span style={{ color: '#64748B', fontWeight: 600 }}>Total Advance Credit</span>
                 <span style={{ fontWeight: 700, color: '#1E293B' }}>{(selectedCustomerStats.totalAdvanceReceived || 0).toFixed(2)}</span>
               </div>
 
@@ -2454,7 +2454,7 @@ export default function Customers() {
                         <td style={{ fontWeight: 700 }} title={formatPaymentId(pay)}>{formatPaymentId(pay)}</td>
                         <td>{formatDate(pay.createdAt)}</td>
                         <td><CurrencySymbol size={13} /> {(pay.amount || 0).toFixed(2)}</td>
-                        <td style={{ fontWeight: 600 }}>{pay.method}</td>
+                        <td style={{ fontWeight: 600 }}>{getPaymentMethodLabel(pay)}</td>
                         <td>
                           <span className={styles.statusPaid} style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', background: '#DCFCE7', color: '#15803D', fontSize: '0.75rem', fontWeight: 700 }}>SUCCESS</span>
                         </td>
@@ -2470,7 +2470,7 @@ export default function Customers() {
                             >
                               <Eye size={16} />
                             </button>
-                            {pay.method !== 'Multipayment' && (
+                            {pay.method !== 'Multipayment' && !pay.isSettlementGroup && !isAdvanceAllocation(pay) && (
                               <button
                                 style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
                                 onClick={(e) => {
@@ -2486,7 +2486,7 @@ export default function Customers() {
                                 <Edit2 size={16} />
                               </button>
                             )}
-                            <button
+                            {!isAdvanceAllocation(pay) && <button
                               style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}
                               onClick={(e) => {
                                 e.preventDefault(); e.stopPropagation();
@@ -2497,7 +2497,7 @@ export default function Customers() {
                               title="Delete Payment"
                             >
                               <Trash2 size={16} />
-                            </button>
+                            </button>}
                           </div>
                         </td>
                       </tr>
@@ -2718,7 +2718,7 @@ export default function Customers() {
                           );
                         } else {
                           const p = item.payment;
-                          const isSettlementDiscount = String(p.paymentReference || '').startsWith('SETDISC-');
+                          const isSettlementDiscount = getDiscountScope(p) === 'settlement';
                           const isOrderDiscount = Boolean(p.orderId) && !isSettlementDiscount;
                           return (
                             <tr key={p.id}>
@@ -2752,7 +2752,6 @@ export default function Customers() {
                                     setSelectedPaymentForAction(p);
                                     setEditPaymentAmount(String(p.amount || 0));
                                     setEditPaymentMethod('Discount');
-                                    setEditPaymentDiscount('0');
                                     setShowPaymentEditModal(true);
                                   }}
                                   title="Edit Discount"
@@ -2778,7 +2777,7 @@ export default function Customers() {
             <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
                 <div>
-                  <h2 style={{ color: '#0F172A' }}>Settle Customer Invoice</h2>
+                  <h2 style={{ color: '#0F172A' }}>{selectedBillForPayment ? 'Settle Customer Invoice' : 'Settle Customer Balance'}</h2>
                   <p>{selectedBillForPayment ? `Record payment for Invoice #${settings.invoicePrefix || ''}${selectedBillForPayment.id}` : 'Record payment and settle outstanding credit'}</p>
                 </div>
                 <X size={24} className={styles.closeBtn} onClick={() => { setShowPaymentModal(false); setSelectedBillForPayment(null); }} />
@@ -2793,7 +2792,8 @@ export default function Customers() {
                     <div>
                       <h4 style={{ margin: 0, fontSize: '1rem', color: '#1E293B' }}>{selectedCustomer.name}</h4>
                       <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748B' }}>
-                        Due for this invoice: <strong><CurrencySymbol size={14} /> {selectedBillForPayment ? selectedBillForPayment.dueAmount.toFixed(2) : selectedCustomer.balance.toFixed(2)}</strong>
+                        {selectedBillForPayment ? 'Due for this invoice: ' : 'Customer balance: '}
+                        <strong><CurrencySymbol size={14} /> {selectedBillForPayment ? selectedBillForPayment.dueAmount.toFixed(2) : selectedCustomer.balance.toFixed(2)}</strong>
                       </p>
                     </div>
                   </div>
@@ -2869,7 +2869,7 @@ export default function Customers() {
 
         {/* INVOICE VIEW MODAL */}
         {selectedInvoiceForView && (
-          <div className={styles.modalOverlay} onClick={() => setSelectedInvoiceForView(null)} style={{ zIndex: 10000 }}>
+          <div className={styles.modalOverlay} style={{ zIndex: 10000 }}>
             <div className={styles.modal} style={{ maxWidth: '800px', width: '95%', maxHeight: '90vh', overflowY: 'auto', padding: 0 }} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader} style={{ position: 'sticky', top: 0, background: 'white', zIndex: 10, padding: '1.25rem 1.5rem', borderBottom: '1px solid #E2E8F0' }}>
                 <div>
@@ -2896,7 +2896,7 @@ export default function Customers() {
 
         {/* View Payment Details Modal */}
         {showPaymentViewModal && selectedPaymentForAction && (
-          <div className={styles.modalOverlay} onClick={() => setShowPaymentViewModal(false)}>
+          <div className={styles.modalOverlay}>
             <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
                 <div>
@@ -2913,7 +2913,7 @@ export default function Customers() {
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
                     <span style={{ color: '#64748B', fontWeight: 600 }}>Method</span>
-                    <span style={{ fontWeight: 700, color: '#0F172A' }}>{selectedPaymentForAction.method}</span>
+                    <span style={{ fontWeight: 700, color: '#0F172A' }}>{getPaymentMethodLabel(selectedPaymentForAction)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
                     <span style={{ color: '#64748B', fontWeight: 600 }}>Date</span>
@@ -2939,11 +2939,11 @@ export default function Customers() {
 
         {/* Edit Payment Modal */}
         {showPaymentEditModal && selectedPaymentForAction && (
-          <div className={styles.modalOverlay} onClick={() => setShowPaymentEditModal(false)}>
+          <div className={styles.modalOverlay}>
             <div className={styles.modal} style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.25rem' }}>
                 <div>
-                  <h2 style={{ color: '#0F172A', fontSize: '1.15rem' }}>Edit Payment</h2>
+                  <h2 style={{ color: '#0F172A', fontSize: '1.15rem' }}>{isAdvanceAllocation(selectedPaymentForAction) ? 'Advance Applied' : 'Edit Payment'}</h2>
                   <p style={{ fontSize: '0.8rem', color: '#64748B' }}>
                     Receipt: {getReceiptNumber(selectedPaymentForAction)}
                   </p>
@@ -2951,6 +2951,11 @@ export default function Customers() {
                 <X size={22} className={styles.closeBtn} onClick={() => setShowPaymentEditModal(false)} />
               </div>
               <div className={styles.modalContent} style={{ padding: '1.25rem 1.5rem' }}>
+                {isAdvanceAllocation(selectedPaymentForAction) ? (
+                  <div style={{ padding: '0.85rem', borderRadius: '8px', background: '#EFF6FF', color: '#1E40AF', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                    ₹{(Number(selectedPaymentForAction.amount) || 0).toFixed(2)} from the customer's existing advance was applied to Order #{settings.invoicePrefix || ''}{selectedPaymentForAction.orderId}. This is not a new cash payment and cannot be edited here.
+                  </div>
+                ) : <>
                 <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
                   <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>
                     {selectedPaymentForAction.method === 'Discount' ? 'Discount Amount' : 'Payment Amount'}
@@ -2974,27 +2979,7 @@ export default function Customers() {
                   />
                 </div>
                 )}
-                {selectedPaymentForAction.method !== 'Discount' && selectedPaymentForAction.orderId && (
-                  <div className={styles.formGroup}>
-                    <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>Discount Amount (Order #{settings.invoicePrefix || ''}{selectedPaymentForAction.orderId})</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={editPaymentDiscount}
-                      onChange={(e) => {
-                        const newDiscStr = e.target.value;
-                        setEditPaymentDiscount(newDiscStr);
-                        const newDisc = parseFloat(newDiscStr) || 0;
-                        if (editOrderGrossTotal > 0) {
-                          const newNetPayable = Math.max(0, editOrderGrossTotal - newDisc);
-                          setEditPaymentAmount(newNetPayable.toFixed(2));
-                        }
-                      }}
-                      style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem', fontWeight: 700, color: 'var(--danger)' }}
-                    />
-                  </div>
-                )}
+                </>}
               </div>
               <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
                 <button
@@ -3003,12 +2988,12 @@ export default function Customers() {
                 >
                   Cancel
                 </button>
-                <button
+                {!isAdvanceAllocation(selectedPaymentForAction) && <button
                   style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
                   onClick={handleSavePaymentEdit}
                 >
                   Save Changes
-                </button>
+                </button>}
               </div>
             </div>
           </div>
@@ -3016,7 +3001,7 @@ export default function Customers() {
 
         {/* Edit Discount Modal */}
         {showDiscountEditModal && selectedBillForDiscount && (
-          <div className={styles.modalOverlay} onClick={() => setShowDiscountEditModal(false)}>
+          <div className={styles.modalOverlay}>
             <div className={styles.modal} style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.25rem' }}>
                 <div>
@@ -3066,7 +3051,7 @@ export default function Customers() {
 
         {/* Payment Action Secure PIN Modal */}
         {showPinModal && (
-          <div className={styles.modalOverlay} onClick={() => setShowPinModal(false)}>
+          <div className={styles.modalOverlay}>
             <div className={styles.modal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
                 <div>
@@ -3124,7 +3109,7 @@ export default function Customers() {
 
         {/* Edit Credit Limit Modal */}
         {showEditCreditLimitModal && selectedCustomer && (
-          <div className={styles.modalOverlay} onClick={() => { setShowEditCreditLimitModal(false); }}>
+          <div className={styles.modalOverlay}>
             <div className={styles.modal} style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div>
@@ -3231,7 +3216,7 @@ export default function Customers() {
 
         {/* Refund Method Selection Modal */}
         {showRefundModal && orderToRefund && (
-          <div className={styles.modalOverlay} onClick={() => { setShowRefundModal(false); setOrderToRefund(null); }}>
+          <div className={styles.modalOverlay}>
             <div className={styles.modal} style={{ maxWidth: '400px', width: '90%' }} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.25rem' }}>
                 <div>
@@ -3688,7 +3673,7 @@ export default function Customers() {
 
       {/* Add/Edit Customer Modal */}
       {showModal && (
-        <div className={styles.modalOverlay} onClick={() => { setShowModal(false); setEditingCustomer(null); }}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div>
@@ -3767,7 +3752,7 @@ export default function Customers() {
 
       {/* Bills Modal */}
       {showBillsModal && (
-        <div className={styles.modalOverlay} onClick={() => setShowBillsModal(false)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} style={{ width: '800px', maxWidth: '95vw' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div>
@@ -3863,7 +3848,7 @@ export default function Customers() {
           <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
               <div>
-                <h2 style={{ color: '#0F172A' }}>Settle Customer Invoice</h2>
+                <h2 style={{ color: '#0F172A' }}>{selectedBillForPayment ? 'Settle Customer Invoice' : 'Settle Customer Balance'}</h2>
                 <p>{selectedBillForPayment ? `Record payment for Invoice #${settings.invoicePrefix || ''}${selectedBillForPayment.id}` : 'Record payment and settle outstanding credit'}</p>
               </div>
               <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentModal(false)} />
@@ -3991,7 +3976,7 @@ export default function Customers() {
         </div>
       )}
       {showQuickSettleModal && (
-        <div className={styles.modalOverlay} onClick={() => { setShowQuickSettleModal(false); setQuickSettleSearch(''); }}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div>
@@ -4051,7 +4036,7 @@ export default function Customers() {
 
       {/* Edit Credit Limit Modal */}
       {showEditCreditLimitModal && selectedCustomer && (
-        <div className={styles.modalOverlay} onClick={() => { setShowEditCreditLimitModal(false); }}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div>
@@ -4157,7 +4142,7 @@ export default function Customers() {
       )}
 
       {showCreditWarning && creditWarningDetails && (
-        <div className={styles.modalOverlay} onClick={handleCancelOverride}>
+        <div className={styles.modalOverlay}>
           <div className={styles.statusModal} style={{ maxWidth: '450px', borderRadius: '24px', background: 'white', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)', padding: '2rem' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '1.5rem' }}>
               <AlertTriangle size={24} color="#EF4444" style={{ marginTop: '2px' }} />
@@ -4246,7 +4231,7 @@ export default function Customers() {
 
       {/* View Payment Details Modal */}
       {showPaymentViewModal && selectedPaymentForAction && (
-        <div className={styles.modalOverlay} onClick={() => setShowPaymentViewModal(false)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
               <div>
@@ -4263,7 +4248,7 @@ export default function Customers() {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
                   <span style={{ color: '#64748B', fontWeight: 600 }}>Method</span>
-                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{selectedPaymentForAction.method}</span>
+                    <span style={{ fontWeight: 700, color: '#0F172A' }}>{getPaymentMethodLabel(selectedPaymentForAction)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
                   <span style={{ color: '#64748B', fontWeight: 600 }}>Date</span>
@@ -4271,7 +4256,11 @@ export default function Customers() {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
                   <span style={{ color: '#64748B', fontWeight: 600 }}>Linked Order</span>
-                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{selectedPaymentForAction.orderId || 'Settlement (Advance)'}</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A' }}>
+                    {selectedPaymentForAction.isSettlementGroup
+                      ? `Quick Settlement (${selectedPaymentForAction.paymentIds.length} accounting allocations)`
+                      : (selectedPaymentForAction.orderId || 'Settlement (Advance)')}
+                  </span>
                 </div>
               </div>
             </div>
@@ -4289,16 +4278,21 @@ export default function Customers() {
 
       {/* Edit Payment Modal */}
       {showPaymentEditModal && selectedPaymentForAction && (
-        <div className={styles.modalOverlay} onClick={() => setShowPaymentEditModal(false)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
               <div>
-                <h2 style={{ color: '#0F172A' }}>Edit Payment</h2>
-                <p>Change payment details</p>
+                <h2 style={{ color: '#0F172A' }}>{isAdvanceAllocation(selectedPaymentForAction) ? 'Advance Applied' : 'Edit Payment'}</h2>
+                <p>{isAdvanceAllocation(selectedPaymentForAction) ? 'Existing advance applied to the linked order' : 'Change payment details'}</p>
               </div>
               <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentEditModal(false)} />
             </div>
             <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
+              {isAdvanceAllocation(selectedPaymentForAction) ? (
+                <div style={{ padding: '0.85rem', borderRadius: '8px', background: '#EFF6FF', color: '#1E40AF', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                  ₹{(Number(selectedPaymentForAction.amount) || 0).toFixed(2)} from the customer's existing advance was applied to Order #{settings.invoicePrefix || ''}{selectedPaymentForAction.orderId}. This is not a new cash payment and cannot be edited here.
+                </div>
+              ) : <>
               <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
                 <label>Payment Amount</label>
                 <input
@@ -4323,6 +4317,7 @@ export default function Customers() {
                   <option value="Bank">Bank Transfer</option>
                 </select>
               </div>
+              </>}
             </div>
             <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
               <button
@@ -4331,12 +4326,12 @@ export default function Customers() {
               >
                 Cancel
               </button>
-              <button
+              {!isAdvanceAllocation(selectedPaymentForAction) && <button
                 style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
                 onClick={handleSavePaymentEdit}
               >
                 Save Changes
-              </button>
+              </button>}
             </div>
           </div>
         </div>
@@ -4344,7 +4339,7 @@ export default function Customers() {
 
       {/* Payment Action Secure PIN Modal */}
       {showPinModal && (
-        <div className={styles.modalOverlay} onClick={() => setShowPinModal(false)}>
+        <div className={styles.modalOverlay}>
           <div className={styles.modal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.5rem' }}>
               <div>
@@ -4472,7 +4467,7 @@ export default function Customers() {
 
       {/* INVOICE VIEW MODAL */}
       {selectedInvoiceForView && (
-        <div className={styles.modalOverlay} onClick={() => setSelectedInvoiceForView(null)} style={{ zIndex: 10000 }}>
+        <div className={styles.modalOverlay} style={{ zIndex: 10000 }}>
           <div className={styles.modal} style={{ maxWidth: '800px', width: '95%', maxHeight: '90vh', overflowY: 'auto', padding: 0 }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ position: 'sticky', top: 0, background: 'white', zIndex: 10, padding: '1.25rem 1.5rem', borderBottom: '1px solid #E2E8F0' }}>
               <div>

@@ -9,6 +9,7 @@ import {
 import { useSettings } from '../store/SettingsContext';
 import { getLocalISOString } from '../utils/dateUtils';
 import { getReceiptNumber } from '../utils/receiptNumber';
+import { getDiscountScope } from '../utils/discountScope';
 import CurrencySymbol from '../components/CurrencySymbol';
 import Pagination from '../components/Pagination';
 import CustomSelect from '../components/CustomSelect';
@@ -494,15 +495,15 @@ export default function CustomerStatement() {
     payments.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto').forEach(p => {
       const timestampKey = p.createdAt ? p.createdAt.substring(0, 19) : p.id;
       const referencePrefix = String(p.paymentReference || p.id || '').split('-')[0] || 'PAY';
-      // Discount, order receipts and account settlements may be posted in the
-      // same second, but they must remain separate in the customer statement.
+      // One customer settlement can be internally allocated between opening
+      // balance, invoices and advance in the same transaction.  It is still
+      // one payment from the customer, so show one payment row per method and
+      // timestamp. Discounts remain separate accounting rows.
       const purposeKey = p.method === 'Discount'
         ? `discount:${p.paymentReference || p.id}`
-        : (p.orderId ? `order:${p.orderId}` : `account:${referencePrefix}:${p.paymentReference || p.id}`);
+        : `payment:${p.method || referencePrefix}`;
       const key = `${timestampKey}:${purposeKey}`;
-      const discountScope = p.method === 'Discount' && (String(p.paymentReference || '').startsWith('SETDISC-') || !p.orderId)
-        ? 'settlement'
-        : 'order';
+      const discountScope = p.method === 'Discount' ? getDiscountScope(p) : 'order';
       if (!groupedPaymentsMap[key]) {
         groupedPaymentsMap[key] = {
           date: p.createdAt,
@@ -519,7 +520,8 @@ export default function CustomerStatement() {
           paymentMethod: p.method,
           discountScope,
           orderIds: p.orderId ? [p.orderId] : [],
-          methods: [p.method]
+          methods: [p.method],
+          receiptCount: 1
         };
       } else {
         if (p.method === 'Discount') {
@@ -533,6 +535,7 @@ export default function CustomerStatement() {
         if (!groupedPaymentsMap[key].methods.includes(p.method)) {
           groupedPaymentsMap[key].methods.push(p.method);
         }
+        groupedPaymentsMap[key].receiptCount += 1;
       }
     });
 
@@ -571,7 +574,11 @@ export default function CustomerStatement() {
         ...p,
         description,
         paymentMethod: finalPaymentMethod,
-        itemsSummary
+        itemsSummary,
+        // Keep the first real RV reference as the display reference. The
+        // amount is the full customer payment even when legacy data stored
+        // multiple internal allocation rows.
+        ref: p.ref
       };
     });
 

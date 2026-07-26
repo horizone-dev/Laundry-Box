@@ -2282,7 +2282,7 @@ export default function Orders() {
 
       {/* Credit Limit Warning Modal */}
       {showCreditWarning && creditWarningDetails && (
-        <div className={styles.modalOverlay} onClick={handleCancelOverride}>
+        <div className={styles.modalOverlay}>
           <div className={styles.statusModal} style={{ maxWidth: '450px', borderRadius: '24px', background: 'white', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)', padding: '2rem' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '1.5rem' }}>
               <AlertTriangle size={24} color="#EF4444" style={{ marginTop: '2px' }} />

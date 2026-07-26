@@ -128,6 +128,21 @@ function logTracker(orderId, message, level = 'info') {
 let mainWindow;
 let backendProcess;
 
+// Keep one desktop session only. A second shortcut/double-click should bring
+// the running window to the front, never start another Electron process and
+// another local backend.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
 function createWindow() {
   logStartup('Creating BrowserWindow instance...');
   const preloadPath = path.join(__dirname, 'preload.js');
@@ -226,8 +241,12 @@ function createWindow() {
   });
 
   if (isDev) {
-    logStartup('Opening DevTools in development mode...');
-    mainWindow.webContents.openDevTools();
+    // DevTools is expensive to initialize and should not delay every normal
+    // local launch. Open it only when a developer explicitly asks for it.
+    if (process.env.OPEN_DEVTOOLS === '1') {
+      logStartup('Opening DevTools because OPEN_DEVTOOLS=1...');
+      mainWindow.webContents.openDevTools();
+    }
     logStartup('Loading development server URL: http://localhost:5173...');
     mainWindow.loadURL('http://localhost:5173').catch(err => {
       logStartup('Vite not ready, retrying in 2s...', err);
@@ -380,19 +399,19 @@ app.whenReady().then(async () => {
     logStartup("Database is empty. Fresh installation detected (seeding skipped to start clean).");
   }
 
-  // App open -> server auto start
+  // App open -> server auto start. The SQLite desktop app is fully usable
+  // while the optional local API starts, so never hold the main window behind
+  // a health-check timeout.
   startBackend();
-
-  // -> server ready check
-  await waitForServer('http://127.0.0.1:3000/api/health');
-
-  // -> then UI load
   createWindow();
 
-  // Resume tracking for recent pending payments and show reminder
-  logStartup("Resuming active tracking for recent pending checkouts...");
-  resumeRecentPendingTrackers();
-  showPendingPaymentsReminder();
+  // Payment-link tracking does require the API. Start it in the background
+  // once that API is available, without delaying the customer-facing UI.
+  void waitForServer('http://127.0.0.1:3000/api/health').then(() => {
+    logStartup("Resuming active tracking for recent pending checkouts...");
+    resumeRecentPendingTrackers();
+    showPendingPaymentsReminder();
+  });
 
   app.on('activate', () => {
     logStartup('App event: activate');

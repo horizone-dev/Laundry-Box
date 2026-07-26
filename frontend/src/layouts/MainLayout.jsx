@@ -1753,7 +1753,7 @@ const timestamp = getLocalISOString();
 
       {/* Unsaved Changes Confirmation Modal */}
       {showUnsavedModal && (
-        <div className={styles.modalOverlay} onClick={() => setShowUnsavedModal(false)} style={{ zIndex: 9999 }}>
+        <div className={styles.modalOverlay} style={{ zIndex: 9999 }}>
           <div className={styles.quickModal} style={{ maxWidth: '450px', width: '90%' }} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader} style={{ borderBottom: '1px solid #E2E8F0', paddingBottom: '1rem' }}>
               <div className={styles.titleWithIcon} style={{ display: 'flex', alignItems: 'center' }}>
@@ -2167,10 +2167,7 @@ const timestamp = getLocalISOString();
       )}
 
       {overrideModal.show && (
-        <div className={styles.modalOverlay} onClick={() => {
-          overrideModal.reject(new Error("Cancelled"));
-          setOverrideModal({ show: false, resolve: null, reject: null, pinValue: '', error: '' });
-        }}>
+        <div className={styles.modalOverlay}>
           <div className={styles.statusModal} style={{ maxWidth: '450px', borderRadius: '24px', background: 'white', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)', padding: '2rem' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '1.5rem' }}>
               <Lock size={24} color="#D97706" style={{ marginTop: '2px' }} />

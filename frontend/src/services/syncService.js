@@ -275,8 +275,8 @@ export const syncData = async () => {
 
         await window.electronAPI.dbQuery(`
           INSERT INTO payments
-          (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+          (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference, discountScope)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             customerId = excluded.customerId,
             orderId = excluded.orderId,
@@ -286,7 +286,8 @@ export const syncData = async () => {
             status = excluded.status,
             isSynced = 1,
             updatedAt = excluded.updatedAt,
-            paymentReference = COALESCE(excluded.paymentReference, payments.paymentReference)
+            paymentReference = COALESCE(excluded.paymentReference, payments.paymentReference),
+            discountScope = COALESCE(excluded.discountScope, payments.discountScope)
         `, [
           payment.id,
           payment.customerId || null,
@@ -297,7 +298,8 @@ export const syncData = async () => {
           payment.status,
           payment.createdAt,
           payment.updatedAt || new Date().toISOString(),
-          payment.paymentReference || null
+          payment.paymentReference || null,
+          payment.discountScope || null
         ]);
       }
 

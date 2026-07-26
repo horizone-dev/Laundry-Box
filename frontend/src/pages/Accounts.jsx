@@ -1914,7 +1914,7 @@ export default function Accounts() {
 
       {/* ── Modal: Add Transaction ────────────────────── */}
       {showAddModal && (
-        <div className={styles.modalOverlay} data-noprint="true" onClick={() => setShowAddModal(false)}>
+        <div className={styles.modalOverlay} data-noprint="true">
           <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>Add New {formData.type === 'INCOME' ? 'Income' : 'Expense'} Entry ({activeAccountType})</h2>
@@ -1988,7 +1988,7 @@ export default function Accounts() {
 
       {/* ── Modal: Transfer Funds ─────────────────────── */}
       {showTransferModal && (
-        <div className={styles.modalOverlay} data-noprint="true" onClick={() => setShowTransferModal(false)}>
+        <div className={styles.modalOverlay} data-noprint="true">
           <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>Transfer Funds</h2>
@@ -2092,7 +2092,7 @@ export default function Accounts() {
 
       {/* ── Modal: Add Bank Account ────────────────────── */}
       {showAddAccountModal && (
-        <div className={styles.modalOverlay} data-noprint="true" onClick={() => setShowAddAccountModal(false)}>
+        <div className={styles.modalOverlay} data-noprint="true">
           <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2>Add New Bank Account</h2>
@@ -2171,7 +2171,7 @@ export default function Accounts() {
 
       {/* ── Modal: Payslip Preview ───────────────────── */}
       {showPayslipModal && activePayslip && (
-        <div className={styles.payslipOverlay} data-noprint="true" onClick={() => { setShowPayslipModal(false); setActivePayslip(null); }}>
+        <div className={styles.payslipOverlay} data-noprint="true">
           <div className={styles.payslipCard} onClick={(e) => e.stopPropagation()}>
             <div className={styles.payslipHeader}>
               <h2>STAFF PAY SLIP</h2>

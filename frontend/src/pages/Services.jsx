@@ -1188,7 +1188,7 @@ export default function Services({ defaultTab = 'list' }) {
           alignItems: 'center',
           zIndex: 9999,
           padding: '1rem',
-        }} onClick={() => setShowPresetLibrary(false)}>
+        }}>
           <div style={{
             background: 'white',
             width: '100%',
