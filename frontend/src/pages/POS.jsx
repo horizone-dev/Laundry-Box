@@ -42,6 +42,7 @@ export default function POS() {
   const [addons, setAddons] = useState([]);
   const [categories, setCategories] = useState([]);
   const [editOrderId, setEditOrderId] = useState(null);
+  const [editOrderPaidAmount, setEditOrderPaidAmount] = useState(0);
 
   const [step, setStep] = useState('pos'); // pos, checkout
   const [cart, setCart] = useState([]);
@@ -187,6 +188,7 @@ export default function POS() {
       if (res.success && res.data.length > 0) {
         const order = res.data[0];
         setEditOrderId(orderId);
+        setEditOrderPaidAmount(Math.max(0, Number(order.paidAmount) || 0));
 
         let parsedItems = [];
         try {
@@ -683,14 +685,16 @@ export default function POS() {
   const nomodVal = parseFloat(nomodAmount || 0);
   const totalPaidManual = cashVal + cardVal + upiVal + bankVal + nomodVal;
   
+  const existingEditPayment = editOrderId ? Math.max(0, Number(editOrderPaidAmount) || 0) : 0;
+  const remainingOrderAmount = Math.max(0, total - existingEditPayment);
   let appliedAdvanceUI = 0;
   if (selectedCustomer && selectedCustomer.balance < 0) {
-    appliedAdvanceUI = Math.min(Math.max(0, total - totalPaidManual), Math.abs(selectedCustomer.balance));
+    appliedAdvanceUI = Math.min(Math.max(0, remainingOrderAmount - totalPaidManual), Math.abs(selectedCustomer.balance));
   }
   
-  const totalPaid = totalPaidManual + appliedAdvanceUI;
+  const totalPaid = existingEditPayment + totalPaidManual + appliedAdvanceUI;
   const remainingDue = Math.max(0, total - totalPaid);
-  const changeDue = Math.max(0, totalPaidManual - total);
+  const changeDue = Math.max(0, totalPaid - total);
 
   const handleWhatsApp = (phone, text = null) => {
     if (!phone) return;
@@ -1061,22 +1065,27 @@ export default function POS() {
     const bankVal = parseFloat(bankAmount || 0);
     const nomodVal = parseFloat(nomodAmount || 0);
     const totalPaid = cashVal + cardVal + upiVal + bankVal + nomodVal;
+    const existingPaidForEdit = editOrderId ? Math.max(0, Number(editOrderPaidAmount) || 0) : 0;
+    const remainingForOrder = Math.max(0, total - existingPaidForEdit);
 
-    if (totalPaid > total + 0.01) {
+    // For a new invoice, a cashier must not collect more than its total. When
+    // editing an existing invoice, any genuine excess is retained as customer
+    // advance; money must never be silently treated as change or discarded.
+    if (!editOrderId && totalPaid > total + 0.01) {
       alert("Validation Error: Total Paid cannot exceed the Invoice Total!");
       return;
     }
-    if (totalPaid < total && (!selectedCustomer || selectedCustomer.id === 'Walk-in')) {
+    if (totalPaid < remainingForOrder && (!selectedCustomer || selectedCustomer.id === 'Walk-in')) {
       alert("Walk-in customers cannot have unpaid balance. Please select a customer to record credit/partial payment.");
       return;
     }
 
     let appliedAdvance = 0;
     if (selectedCustomer && selectedCustomer.balance < 0) {
-      appliedAdvance = Math.min(Math.max(0, total - totalPaid), Math.abs(selectedCustomer.balance));
+      appliedAdvance = Math.min(Math.max(0, remainingForOrder - totalPaid), Math.abs(selectedCustomer.balance));
     }
 
-    const newPaidAmount = totalPaid + appliedAdvance;
+    const newPaidAmount = Math.min(total, existingPaidForEdit + totalPaid + appliedAdvance);
     const newDueAmount = Math.max(0, total - newPaidAmount);
     
     let newPayStatus = PAYMENT_STATUS.PARTIAL;
@@ -1215,9 +1224,16 @@ export default function POS() {
           if (oldOrderRes.success && oldOrderRes.data.length > 0) {
             const oldOrder = oldOrderRes.data[0];
 
-            const previouslyPaid = oldOrder.paidAmount || 0;
-            const updatedPaidAmount = previouslyPaid + totalPaid + appliedAdvance;
+            const previouslyPaid = Math.max(0, Number(oldOrder.paidAmount) || 0);
+            const paidBeforeCapping = previouslyPaid + totalPaid + appliedAdvance;
+            const updatedPaidAmount = Math.min(total, paidBeforeCapping);
+            const excessPaymentAmount = Math.max(0, paidBeforeCapping - total);
             const updatedDueAmount = Math.max(0, total - updatedPaidAmount);
+
+            if (excessPaymentAmount > 0.005 && (!selectedCustomer || selectedCustomer.id === 'Walk-in')) {
+              alert('This edit would create an excess payment. Select the saved customer first, or use Delete / Refund to return the money.');
+              return;
+            }
 
             let updatedPayStatus = PAYMENT_STATUS.PARTIAL;
             if (Math.abs(updatedPaidAmount - total) < 0.01) {
@@ -1396,11 +1412,16 @@ export default function POS() {
                }
              }
 
-            if (window.electronAPI?.runDataHealer) {
-              await window.electronAPI.runDataHealer();
-            }
+             if (window.electronAPI?.runDataHealer) {
+               await window.electronAPI.runDataHealer();
+             }
 
-            setEditOrderId(null);
+             if (excessPaymentAmount > 0.005) {
+               alert(`The excess ${excessPaymentAmount.toFixed(2)} has been retained as customer advance. Use Delete / Refund only when money is actually returned to the customer.`);
+             }
+
+             setEditOrderId(null);
+             setEditOrderPaidAmount(0);
             setCart([]);
             setSelectedCustomer(null);
             setExpectedDeliveryDate(getTomorrowDateString());
@@ -1725,9 +1746,55 @@ export default function POS() {
           if (oldOrderRes.success && oldOrderRes.data.length > 0) {
             const oldOrder = oldOrderRes.data[0];
 
-            const previouslyPaid = oldOrder.paidAmount || 0;
-            const updatedPaidAmount = previouslyPaid;
+            const previouslyPaid = Math.max(0, Number(oldOrder.paidAmount) || 0);
+            const updatedPaidAmount = Math.min(total, previouslyPaid);
+            const excessPaymentAmount = Math.max(0, previouslyPaid - total);
             const updatedDueAmount = Math.max(0, total - updatedPaidAmount);
+
+            if (excessPaymentAmount > 0.005 && (!selectedCustomer || selectedCustomer.id === 'Walk-in')) {
+              alert('This edit would create an excess payment. Select the saved customer first, or use Delete / Refund to return the money.');
+              return;
+            }
+
+            // A paid invoice reduced below its recorded payment is a financial
+            // reclassification, not a normal order update.  The main-process
+            // service keeps the real tender as advance, adjusts discount
+            // receipts separately and rebuilds allocations atomically.
+            if (excessPaymentAmount > 0.005 && window.electronAPI?.reclassifyPaidOrderEdit) {
+              if (!selectedCustomer || selectedCustomer.id !== oldOrder.customerId) {
+                alert('Keep the original customer for this paid order edit. Use Delete / Refund before moving it to another customer.');
+                return;
+              }
+              const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+              const result = await window.electronAPI.reclassifyPaidOrderEdit({
+                orderId: editOrderId,
+                totalAmount: total,
+                customerId: selectedCustomer.id,
+                items: cart,
+                expectedDeliveryDate: combinedExpectedDelivery,
+                specialInstructions,
+                actor: {
+                  id: userSession.id || 'SYSTEM',
+                  name: userSession.name || userSession.username || 'System',
+                  role: userSession.role || 'system'
+                }
+              });
+              if (!result?.success) {
+                alert('Failed to update paid order: ' + (result?.error || 'Unknown error'));
+                return;
+              }
+              setEditOrderId(null);
+              setEditOrderPaidAmount(0);
+              setCart([]);
+              setSelectedCustomer(null);
+              setExpectedDeliveryDate(getTomorrowDateString());
+              setExpectedDeliveryTime('17:00');
+              setSpecialInstructions('');
+              window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: oldOrder.customerId } }));
+              alert(`Order updated. ${Number(result.advanceCreated || 0).toFixed(2)} retained as customer advance.`);
+              navigate('/orders');
+              return;
+            }
 
             let updatedPayStatus = PAYMENT_STATUS.CREDIT;
             if (updatedDueAmount === 0) {
@@ -1809,7 +1876,12 @@ export default function POS() {
               await window.electronAPI.runDataHealer();
             }
 
+            if (excessPaymentAmount > 0.005) {
+              alert(`The excess ${excessPaymentAmount.toFixed(2)} has been retained as customer advance. Use Delete / Refund only when money is actually returned to the customer.`);
+            }
+
             setEditOrderId(null);
+            setEditOrderPaidAmount(0);
             setCart([]);
             setSelectedCustomer(null);
             setExpectedDeliveryDate(getTomorrowDateString());

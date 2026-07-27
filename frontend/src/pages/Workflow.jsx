@@ -390,6 +390,22 @@ export default function Workflow() {
       return;
     }
 
+    if (window.electronAPI?.dbQuery) {
+      const paymentsRes = await window.electronAPI.dbQuery(
+        "SELECT COUNT(*) AS count FROM payments WHERE orderId = ? AND status NOT IN ('FAILED', 'CANCELLED', 'EXPIRED', 'VOIDED')",
+        [selectedOrder.id]
+      );
+      const hasReceipt = Number(paymentsRes?.data?.[0]?.count || 0) > 0 || Number(selectedOrder.paidAmount || 0) > 0;
+      if (newPayStatus === 'Partial') {
+        alert('Enter a partial amount through Record Payment. Partial status cannot be set manually.');
+        return;
+      }
+      if (hasReceipt) {
+        alert('This order already has a payment. Use the audited Delete / Refund flow instead of changing its payment status.');
+        return;
+      }
+    }
+
     try {
       let updatedPaidAmount = selectedOrder.paidAmount || 0;
       let updatedDueAmount = selectedOrder.dueAmount ?? selectedOrder.totalAmount;
@@ -443,6 +459,33 @@ export default function Workflow() {
         : selectedOrder.status;
 
       const amountToPay = selectedOrder.dueAmount > 0 ? selectedOrder.dueAmount : selectedOrder.totalAmount;
+
+      if (window.electronAPI?.settleOrderPayment) {
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const bankAccountId = payMethod === 'Card'
+          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+          : (payMethod === 'UPI'
+            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+            : (payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
+        const result = await window.electronAPI.settleOrderPayment({
+          orderId: selectedOrder.id,
+          shopId: DEFAULT_SHOP_ID,
+          splits: [{ method: payMethod, amount: amountToPay, bankAccountId }],
+          cardCommissionRate: Number(settings.cardCommission) || 0,
+          actor: {
+            id: userSession.id || 'SYSTEM',
+            name: userSession.name || userSession.username || 'System',
+            role: userSession.role || 'system'
+          },
+          description: `Workflow payment for ${selectedOrder.id}`
+        });
+        if (!result?.success) throw new Error(result?.error || 'Payment could not be posted.');
+        setShowPayModal(false);
+        fetchOrders();
+        window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedOrder.customerId } }));
+        alert(t('paymentRecordedLocally', settings.language));
+        return;
+      }
 
       if (window.electronAPI?.dbQuery) {
         await window.electronAPI.dbQuery(

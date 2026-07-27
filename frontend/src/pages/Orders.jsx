@@ -744,6 +744,25 @@ export default function Orders() {
       return;
     }
 
+    // A payment status must never erase or hide an existing receipt.  A
+    // received payment can only be reversed through the audited delete/refund
+    // flow; a partial amount must be entered through the settlement modal.
+    if (window.electronAPI?.dbQuery) {
+      const paymentsRes = await window.electronAPI.dbQuery(
+        "SELECT COUNT(*) AS count FROM payments WHERE orderId = ? AND status NOT IN ('FAILED', 'CANCELLED', 'EXPIRED', 'VOIDED')",
+        [selectedOrder.id]
+      );
+      const hasReceipt = Number(paymentsRes?.data?.[0]?.count || 0) > 0 || Number(selectedOrder.paidAmount || 0) > 0;
+      if (newPayStatus === 'Partial') {
+        alert('Enter the received amount through Record Payment. Partial status cannot be set manually.');
+        return;
+      }
+      if (hasReceipt) {
+        alert('This order already has a payment. Use the audited Delete / Refund flow instead of changing its payment status.');
+        return;
+      }
+    }
+
     if (!isOverridden) {
       const blocked = await checkCreditLimitBeforeUpdate(newPayStatus);
       if (blocked) return;
@@ -940,6 +959,48 @@ export default function Orders() {
           linkId,
           amount: amountToPay
         });
+        return;
+      }
+
+      // The current desktop API posts the complete settlement in one SQLite
+      // transaction.  Do not let this screen separately update the order,
+      // payment, account transaction and customer cache: that was the source
+      // of discount and balance mismatches in older versions.
+      if (window.electronAPI?.settleOrderPayment) {
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const bankAccountId = (payMethod === 'Card')
+          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+          : (payMethod === 'UPI'
+            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+            : (payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
+        const receiptAmount = Math.max(0, amountToPay - (Number(discVal) || 0));
+        const canonicalSplits = payMethod === 'Multipayment'
+          ? [
+              { method: 'Cash', amount: Number(cashVal) || 0 },
+              { method: 'Card', amount: Number(cardVal) || 0, bankAccountId: settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null },
+              { method: 'UPI', amount: Number(upiVal) || 0, bankAccountId: settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null },
+              { method: 'Bank', amount: Number(bankVal) || 0, bankAccountId: settings.defaultBankId || settings.bankAccounts?.[0]?.id || null }
+            ]
+          : [{ method: payMethod, amount: receiptAmount, bankAccountId }];
+        const result = await window.electronAPI.settleOrderPayment({
+          orderId: selectedOrder.id,
+          shopId: DEFAULT_SHOP_ID,
+          splits: canonicalSplits,
+          discount: Number(discVal) || 0,
+          cardCommissionRate: Number(settings.cardCommission) || 0,
+          actor: {
+            id: userSession.id || 'SYSTEM',
+            name: userSession.name || userSession.username || 'System',
+            role: userSession.role || 'system'
+          },
+          description: `Order payment for ${selectedOrder.id}`
+        });
+        if (!result?.success) throw new Error(result?.error || 'Payment could not be posted.');
+
+        setShowPayModal(false);
+        window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedOrder.customerId } }));
+        fetchOrders();
+        alert(t('paymentRecordedLocally', settings.language));
         return;
       }
 

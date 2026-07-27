@@ -10,6 +10,35 @@ import { useSettings } from '../store/SettingsContext';
 import defaultLogo from '../assets/logo.png';
 import styles from './Login.module.css';
 
+const wait = (milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+// The desktop window can appear before the local API has finished starting.
+// Retry only temporary connection/startup failures; bad PINs and access errors
+// still return immediately and are never retried.
+const isTemporaryLoginError = (error) => {
+  if (!error?.response) return true;
+  return [502, 503, 504].includes(error.response.status);
+};
+
+async function loginWhenApiReady(credentials) {
+  const attempts = 8;
+  let lastError;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await authApi.login(credentials);
+    } catch (error) {
+      lastError = error;
+      if (!isTemporaryLoginError(error) || attempt === attempts - 1) {
+        throw error;
+      }
+      await wait(350);
+    }
+  }
+
+  throw lastError;
+}
+
 export default function Login({ onLogin }) {
   const { settings } = useSettings();
   const [method, setMethod] = useState('pin'); // 'pin' or 'password'
@@ -231,7 +260,7 @@ export default function Login({ onLogin }) {
     setIsLoading(true);
     
     try {
-      const response = await authApi.login({ 
+      const response = await loginWhenApiReady({
         identifier, 
         secret, 
         method,
@@ -252,7 +281,10 @@ export default function Login({ onLogin }) {
       }
     } catch (err) {
       console.error("Login failed:", err);
-      alert(err.response?.data?.message || "Login failed. Please check your credentials.");
+      alert(
+        err.response?.data?.message ||
+        "Login service is still starting. Please wait a moment and try again."
+      );
     } finally {
       setIsLoading(false);
     }
@@ -401,7 +433,9 @@ export default function Login({ onLogin }) {
                   inputMode={method === 'pin' ? 'numeric' : undefined}
                   placeholder={method === 'pin' ? "••••" : "••••••••"} 
                   value={secret}
-                  onChange={(e) => setSecret(e.target.value)}
+                  onChange={(e) => setSecret(
+                    method === 'pin' ? e.target.value.replace(/\D/g, '') : e.target.value
+                  )}
                   required 
                 />
                 <div className={styles.eyeIcon} onClick={() => setShowSecret(!showSecret)}>

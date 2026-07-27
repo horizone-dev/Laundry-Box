@@ -158,13 +158,16 @@ export default function SalesReport() {
 
       // 2. Fetch Orders
       const ordersRes = await window.electronAPI.dbQuery(
-        "SELECT * FROM orders ORDER BY createdAt DESC", []
+        "SELECT * FROM orders WHERE COALESCE(status, '') NOT IN ('Deleted', 'Cancelled') ORDER BY createdAt DESC", []
       );
       if (ordersRes.success) setOrders(ordersRes.data);
 
       // 3. Fetch Payments
       const paymentsRes = await window.electronAPI.dbQuery(
-        "SELECT * FROM payments ORDER BY createdAt DESC", []
+        `SELECT * FROM payments
+         WHERE COALESCE(status, '') NOT IN ('FAILED', 'CANCELLED', 'EXPIRED', 'VOIDED')
+           AND COALESCE(method, '') NOT IN ('Discount', 'Advance', 'Refund Advance', 'System Auto')
+         ORDER BY createdAt DESC`, []
       );
       if (paymentsRes.success) setPayments(paymentsRes.data);
 

@@ -46,7 +46,15 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use((req, res, next) => {
   if (process.env.NODE_ENV === 'production') {
     const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-    if (!isHttps) {
+    // The packaged Electron app talks to this backend only through its local
+    // loopback server. Requiring public HTTPS for that internal hop makes a
+    // correct PIN intermittently fail after a production launch.
+    const remoteAddress = String(req.ip || req.socket?.remoteAddress || '');
+    const isLoopback = req.hostname === 'localhost'
+      || req.hostname === '127.0.0.1'
+      || remoteAddress.includes('127.0.0.1')
+      || remoteAddress === '::1';
+    if (!isHttps && !isLoopback) {
       return res.status(403).json({ success: false, message: 'HTTPS security connection is required' });
     }
   }
@@ -84,6 +92,7 @@ mongoose.connect(MONGO_URI, {
   .catch(err => console.error('MongoDB Connection Error:', err));
 
 // Routes
+app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth',      authRoutes);
 app.use('/api/sync',      apiLimiter, syncRoutes);
 app.use('/api/orders',    apiLimiter, orderRoutes);
@@ -96,7 +105,9 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
   console.log('--- REFRESHED SCHEMA ACTIVE: SECURE AUTHENTICATION ---');
 });
+
+module.exports = server;

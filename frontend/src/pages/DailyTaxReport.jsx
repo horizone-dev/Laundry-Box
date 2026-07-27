@@ -123,6 +123,7 @@ export default function DailyTaxReport() {
           SELECT orders.id, orders.totalAmount, orders.items, orders.createdAt 
           FROM orders 
           WHERE orders.id IS NOT NULL
+            AND COALESCE(orders.status, '') NOT IN ('Deleted', 'Cancelled')
         `;
         let ordersParams = [];
 

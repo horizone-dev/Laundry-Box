@@ -95,6 +95,7 @@ export default function TaxReport() {
           FROM orders 
           LEFT JOIN customers ON orders.customerId = customers.id 
           WHERE orders.id IS NOT NULL
+            AND COALESCE(orders.status, '') NOT IN ('Deleted', 'Cancelled')
         `;
 
         const expensesQuery = `

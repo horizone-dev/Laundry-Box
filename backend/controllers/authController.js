@@ -6,6 +6,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 
 const USERS_FILE = path.join(__dirname, '..', 'local_db_users.json');
+const USERS_BACKUP_FILE = `${USERS_FILE}.bak`;
 
 function isMongoConnected() {
   return mongoose.connection.readyState === 1; // 1 = connected
@@ -28,20 +29,38 @@ async function initLocalDb() {
         createdAt: new Date().toISOString()
       }
     ];
-    fs.writeFileSync(USERS_FILE, JSON.stringify(defaultUsers, null, 2), 'utf8');
+    saveLocalUsers(defaultUsers);
   }
 }
 
 function loadLocalUsers() {
-  try {
-    return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
-  } catch (err) {
-    return [];
+  // A completed backup lets authentication continue if the computer is shut
+  // down during a previous user/PIN update.
+  for (const filePath of [USERS_FILE, USERS_BACKUP_FILE]) {
+    try {
+      const users = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      if (Array.isArray(users)) return users;
+    } catch (err) {
+      // Try the backup file next.
+    }
   }
+  return [];
 }
 
 function saveLocalUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
+  const temporaryFile = `${USERS_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(temporaryFile, JSON.stringify(users, null, 2), 'utf8');
+
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      fs.copyFileSync(USERS_FILE, USERS_BACKUP_FILE);
+    }
+    fs.renameSync(temporaryFile, USERS_FILE);
+  } finally {
+    if (fs.existsSync(temporaryFile)) {
+      fs.unlinkSync(temporaryFile);
+    }
+  }
 }
 
 exports.signup = async (req, res) => {

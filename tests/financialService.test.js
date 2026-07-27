@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
-const { settleCustomerBalance, editDiscountReceipt } = require('../financialService');
+const { settleCustomerBalance, settleOrderPayment, reclassifyPaidOrderForEdit, editDiscountReceipt } = require('../financialService');
 
 function setup() {
   const db = new Database(':memory:');
@@ -42,6 +42,110 @@ function setup() {
   });
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM account_transactions').get().count, 2);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM audit_logs WHERE event = ?').get('CUSTOMER_SETTLEMENT_POSTED').count, 1);
+  db.close();
+}
+
+{
+  // Legacy order screens may also settle a walk-in invoice.  The canonical
+  // path must keep its cash and discount as separate accounting records.
+  const db = setup();
+  db.prepare('INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run('W1', 'Walk-in', 'Payment Pending', 100, 0, 100, 'Credit', 'Not Paid', '2026-01-01', 0, '2026-01-01');
+
+  const result = settleOrderPayment(db, {
+    orderId: 'W1',
+    splits: [{ method: 'Cash', amount: 60 }],
+    discount: 40
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(db.prepare('SELECT dueAmount FROM orders WHERE id = ?').get('W1').dueAmount, 0);
+  assert.deepEqual(
+    db.prepare('SELECT method, amount, discountScope FROM payments WHERE orderId = ? ORDER BY method').all('W1'),
+    [
+      { method: 'Cash', amount: 60, discountScope: null },
+      { method: 'Discount', amount: 40, discountScope: 'order' }
+    ]
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM account_transactions WHERE category = 'Discount Given'").get().count, 1);
+  db.close();
+}
+
+{
+  // Reducing a fully paid invoice must retain only real tender as advance.
+  // The source payment stays available for the customer, while the edited
+  // invoice uses a precise allocation that a later refund can unwind.
+  const db = setup();
+  db.exec(`
+    ALTER TABLE orders ADD COLUMN shopId TEXT;
+    ALTER TABLE orders ADD COLUMN items TEXT;
+    ALTER TABLE orders ADD COLUMN expectedDeliveryDate TEXT;
+    ALTER TABLE orders ADD COLUMN specialInstructions TEXT;
+    ALTER TABLE orders ADD COLUMN paymentBreakdown TEXT;
+    ALTER TABLE advance_allocations ADD COLUMN date TEXT;
+    ALTER TABLE advance_allocations ADD COLUMN isSynced INTEGER;
+    ALTER TABLE advance_allocations ADD COLUMN updatedAt TEXT;
+  `);
+  db.prepare('INSERT INTO customers (id, name, balance, advanceBalance) VALUES (?, ?, ?, ?)').run('C1', 'Customer One', 0, 0);
+  db.prepare(`
+    INSERT INTO orders (id, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, paymentMethod, createdAt, isSynced, updatedAt, shopId, items, paymentBreakdown)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run('O1', 'C1', 'Confirmed', 1000, 1000, 0, 'Paid', 'Cash', '2026-01-01', 0, '2026-01-01', 'SHOP_01', '[]', '{"cash":1000}');
+  db.prepare(`
+    INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference)
+    VALUES (?, ?, ?, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?)
+  `).run('RV-000001', 'C1', 'O1', 'SHOP_01', 1000, 'Cash', '2026-01-01', '2026-01-01', 'SET-000001');
+
+  const result = reclassifyPaidOrderForEdit(db, {
+    orderId: 'O1', totalAmount: 800, customerId: 'C1', items: []
+  });
+
+  assert.equal(result.advanceCreated, 200);
+  assert.deepEqual(db.prepare('SELECT totalAmount, paidAmount, dueAmount, paymentMethod FROM orders WHERE id = ?').get('O1'), {
+    totalAmount: 800, paidAmount: 800, dueAmount: 0, paymentMethod: 'Advance'
+  });
+  assert.equal(db.prepare('SELECT orderId FROM payments WHERE id = ?').get('RV-000001').orderId, null);
+  assert.equal(db.prepare('SELECT amountUsed FROM advance_allocations WHERE orderId = ?').get('O1').amountUsed, 800);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE orderId = ? AND method = 'Advance'").get('O1').count, 1);
+  assert.equal(db.prepare('SELECT balance FROM customers WHERE id = ?').get('C1').balance, -200);
+  db.close();
+}
+
+{
+  // A discount reduction is never turned into advance cash.
+  const db = setup();
+  db.exec(`
+    ALTER TABLE orders ADD COLUMN shopId TEXT;
+    ALTER TABLE orders ADD COLUMN items TEXT;
+    ALTER TABLE orders ADD COLUMN expectedDeliveryDate TEXT;
+    ALTER TABLE orders ADD COLUMN specialInstructions TEXT;
+    ALTER TABLE orders ADD COLUMN paymentBreakdown TEXT;
+    ALTER TABLE advance_allocations ADD COLUMN date TEXT;
+    ALTER TABLE advance_allocations ADD COLUMN isSynced INTEGER;
+    ALTER TABLE advance_allocations ADD COLUMN updatedAt TEXT;
+  `);
+  db.prepare('INSERT INTO customers (id, name, balance, advanceBalance) VALUES (?, ?, ?, ?)').run('C1', 'Customer One', 0, 0);
+  db.prepare(`
+    INSERT INTO orders (id, customerId, status, totalAmount, paidAmount, dueAmount, paymentStatus, paymentMethod, createdAt, isSynced, updatedAt, shopId, items, paymentBreakdown)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run('O1', 'C1', 'Confirmed', 1000, 1000, 0, 'Paid', 'Cash', '2026-01-01', 0, '2026-01-01', 'SHOP_01', '[]', '{"cash":100,"orderDiscount":900}');
+  db.prepare(`
+    INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference, discountScope)
+    VALUES (?, ?, ?, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?, ?)
+  `).run('RV-000001', 'C1', 'O1', 'SHOP_01', 100, 'Cash', '2026-01-01', '2026-01-01', 'SET-000001', null);
+  db.prepare(`
+    INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference, discountScope)
+    VALUES (?, ?, ?, ?, ?, 'Discount', 'SUCCESS', ?, 0, ?, ?, 'order')
+  `).run('DISC-0000001', 'C1', 'O1', 'SHOP_01', 900, '2026-01-01', '2026-01-01', 'DISC-0000001');
+
+  const result = reclassifyPaidOrderForEdit(db, {
+    orderId: 'O1', totalAmount: 800, customerId: 'C1', items: []
+  });
+
+  assert.equal(result.advanceCreated, 0);
+  assert.equal(db.prepare("SELECT amount FROM payments WHERE id = 'DISC-0000001'").get().amount, 700);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE method = 'Advance'").get().count, 0);
+  assert.equal(db.prepare('SELECT balance FROM customers WHERE id = ?').get('C1').balance, 0);
   db.close();
 }
 
@@ -172,9 +276,8 @@ function setup() {
 }
 
 {
-  // Quick/customer settlement discounts are validated against the payment,
-  // not against an invoice or the current customer due. With no due, both
-  // the money and settlement discount become clearly recorded customer credit.
+  // With no due, a Quick Settlement payment and its settlement discount both
+  // become clearly recorded customer credit, up to the received amount.
   const db = setup();
   db.prepare('INSERT INTO customers (id, name, balance, openingBalance, advanceBalance) VALUES (?, ?, ?, ?, ?)')
     .run('C1', 'Customer One', 0, 0, 0);
@@ -205,8 +308,33 @@ function setup() {
     customerId: 'C1',
     splits: [{ method: 'Cash', amount: 500 }],
     discount: 501
-  }), /settlement payment amount/);
+  }), /customer due and settlement payment amount/);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM payments').get().count, 0);
+  db.close();
+}
+
+{
+  // Customer-selected Quick Settlement may use the customer due as discount
+  // and records the extra money as advance. It must not reject the discount
+  // merely because it is larger than the cash/card amount.
+  const db = setup();
+  db.prepare('INSERT INTO customers (id, name, balance, advanceBalance) VALUES (?, ?, ?, ?)').run('C1', 'Customer One', 900, 0);
+  db.prepare('INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run('O1', 'C1', 'Payment Pending', 900, 0, 900, 'Credit', 'Not Paid', '2026-01-01', 0, '2026-01-01');
+
+  const result = settleCustomerBalance(db, {
+    customerId: 'C1',
+    splits: [{ method: 'Card', amount: 100, bankAccountId: 'BANK-1' }],
+    discount: 900
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.discountScope, 'settlement');
+  assert.equal(result.advanceCreated, 100);
+  assert.equal(db.prepare('SELECT dueAmount FROM orders WHERE id = ?').get('O1').dueAmount, 0);
+  assert.equal(db.prepare('SELECT balance FROM customers WHERE id = ?').get('C1').balance, -100);
+  assert.equal(db.prepare('SELECT advanceBalance FROM customers WHERE id = ?').get('C1').advanceBalance, 100);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE method = 'Discount' AND discountScope = 'settlement'").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE method = 'Card' AND paymentReference LIKE 'ADV-%'").get().count, 1);
   db.close();
 }
 

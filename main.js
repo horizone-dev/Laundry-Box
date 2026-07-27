@@ -88,21 +88,17 @@ process.on('unhandledRejection', (reason) => {
     return; // Continue running normally in offline mode
   }
 
-  try {
-    const errorMsg = reason instanceof Error ? (reason.stack || reason.message) : reason;
-    logStartup(`CRITICAL UNHANDLED REJECTION: ${errorMsg}`);
-    dialog.showErrorBox(
-      'Laundry Box - Promise Rejection',
-      `An unhandled Promise rejection occurred during startup:\n\n${errorMsg}\n\nThe application will now close.`
-    );
-  } catch (_) { }
-  process.exit(1);
+  // A renderer/background promise must not close the cashier application and
+  // risk interrupting an already-committed local transaction. Persist the
+  // diagnostic, keep the SQLite database open and let the affected feature
+  // show its own actionable error instead.
+  const errorMsg = reason instanceof Error ? (reason.stack || reason.message) : reason;
+  logStartup(`UNHANDLED REJECTION (application kept open): ${errorMsg}`);
 });
 
 
-const { spawn } = require('child_process');
 logStartup('Importing database module...');
-const { initDB, getDB, closeDB, generateServiceSVG, softDeleteOrder, refundDeletedOrder } = require('./database');
+const { initDB, getDB, closeDB, generateServiceSVG, softDeleteOrder, refundDeletedOrder, refreshCustomerFinancialCaches } = require('./database');
 logStartup('Importing email service module...');
 const emailService = require('./emailService');
 logStartup('Importing payment checkout service module...');
@@ -126,7 +122,7 @@ function logTracker(orderId, message, level = 'info') {
 }
 
 let mainWindow;
-let backendProcess;
+let backendServer;
 
 // Keep one desktop session only. A second shortcut/double-click should bring
 // the running window to the front, never start another Electron process and
@@ -279,42 +275,30 @@ function startBackend() {
     ? path.join(__dirname, 'backend', 'server.js')
     : path.join(process.resourcesPath, 'backend', 'server.js');
 
-  logStartup(`Backend process startup requested. Script path: ${scriptPath}`);
+  logStartup(`Local backend startup requested. Script path: ${scriptPath}`);
 
   if (!fs.existsSync(scriptPath)) {
     logStartup(`CRITICAL ERROR: Backend script not found at ${scriptPath}`);
     return;
   }
 
-  logStartup(`Spawning backend process running: ${process.execPath} with ELECTRON_RUN_AS_NODE=1...`);
   try {
-    backendProcess = spawn(process.execPath, [scriptPath], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PORT: '3000' }
+    // Loading the local API in this already-running Node process avoids the
+    // 20+ second delay caused by launching the full Electron executable again
+    // with ELECTRON_RUN_AS_NODE. Login can now use the API as soon as it listens.
+    backendServer = require(scriptPath);
+    if (!backendServer || typeof backendServer.on !== 'function') {
+      throw new Error('Local backend did not return its HTTP server instance.');
+    }
+
+    backendServer.on('error', (err) => {
+      logStartup('Local backend server error:', err);
     });
-
-    logStartup(`Backend process spawned successfully. PID: ${backendProcess.pid}`);
-
-    backendProcess.stdout.on('data', (data) => {
-      logStartup(`Backend Process stdout: ${data.toString().trim()}`);
-    });
-
-    backendProcess.stderr.on('data', (data) => {
-      logStartup(`Backend Process stderr: ${data.toString().trim()}`);
-    });
-
-    backendProcess.on('error', (err) => {
-      logStartup('Backend Process failed to start or experienced an error:', err);
-    });
-
-    backendProcess.on('close', (code, signal) => {
-      logStartup(`Backend Process closed: Code = ${code}, Signal = ${signal}`);
-    });
-
-    backendProcess.on('exit', (code, signal) => {
-      logStartup(`Backend Process exited: Code = ${code}, Signal = ${signal}`);
+    backendServer.on('listening', () => {
+      logStartup('Local backend server is listening.');
     });
   } catch (err) {
-    logStartup('CRITICAL ERROR: Failed to spawn backend child process', err);
+    logStartup('CRITICAL ERROR: Failed to start local backend', err);
   }
 }
 
@@ -378,7 +362,9 @@ app.whenReady().then(async () => {
   logStartup('Connecting to SQLite database...');
   try {
     initDB(app.getPath('userData'));
+    const cacheRefresh = refreshCustomerFinancialCaches(getDB());
     logStartup('SQLite Database connection and migrations completed.');
+    logStartup(`Customer financial cache refresh completed. Updated: ${cacheRefresh.updated}.`);
   } catch (dbErr) {
     logStartup('CRITICAL ERROR: Failed to initialize SQLite database', dbErr);
     throw dbErr; // Let the process error handlers catch it and exit cleanly
@@ -436,8 +422,8 @@ app.on('quit', () => {
   }
   activeTrackers.clear();
 
-  if (backendProcess) {
-    backendProcess.kill();
+  if (backendServer?.listening) {
+    backendServer.close();
   }
 });
 
@@ -753,6 +739,18 @@ ipcMain.handle('audit-financial-integrity', (event, customerId = null) => {
   }
 });
 
+ipcMain.handle('get-customer-financial-state', (event, customerId) => {
+  try {
+    const { getCanonicalFinancialState, getDB } = require('./database');
+    const state = getCanonicalFinancialState(getDB(), customerId);
+    if (!state) return { success: false, error: 'Customer not found' };
+    return { success: true, data: state };
+  } catch (err) {
+    console.error('Customer financial state lookup failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 // New transactional settlement endpoint. Existing pages are migrated to this
 // one by one; no page should combine these writes manually once migrated.
 ipcMain.handle('settle-customer-balance', (event, payload) => {
@@ -761,6 +759,121 @@ ipcMain.handle('settle-customer-balance', (event, payload) => {
     return settleCustomerBalance(getDB(), payload || {});
   } catch (err) {
     console.error('Customer settlement failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Invoice-only settlement for legacy screens and walk-in orders.  It uses the
+// same transaction rules as Customer Settlement instead of letting a renderer
+// update orders, payments, accounts and balances independently.
+ipcMain.handle('settle-order-payment', (event, payload) => {
+  try {
+    const { settleOrderPayment } = require('./financialService');
+    return settleOrderPayment(getDB(), payload || {});
+  } catch (err) {
+    console.error('Invoice settlement failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// A paid invoice that is edited down must retain only real tender as advance.
+// The financial service performs the order update and allocation rebuild in a
+// single transaction so a discount can never become refundable cash.
+ipcMain.handle('reclassify-paid-order-edit', (event, payload) => {
+  try {
+    const { reclassifyPaidOrderForEdit } = require('./financialService');
+    return reclassifyPaidOrderForEdit(getDB(), payload || {});
+  } catch (err) {
+    console.error('Paid order edit reclassification failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Generic account entries and transfers are posted in the main process so an
+// expense cannot exist without its matching Expenses row and a transfer can
+// never leave only one side of the movement behind.
+ipcMain.handle('post-account-entry', (event, payload = {}) => {
+  try {
+    const db = getDB();
+    const amount = Number(payload.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Amount must be greater than zero');
+    const id = payload.id || `TXN-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    const timestamp = payload.timestamp || new Date().toISOString();
+    const date = payload.date || timestamp.replace('T', ' ').substring(0, 19);
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO account_transactions
+          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        payload.shopId || 'SHOP_01',
+        payload.accountType || 'CASH',
+        payload.type || 'INCOME',
+        payload.category || 'Other',
+        amount,
+        payload.description || '',
+        date,
+        timestamp,
+        payload.icon || 'DollarSign',
+        payload.bankAccountId || null,
+        payload.actor?.name || payload.actor?.id || 'System',
+        payload.actor?.id || 'SYSTEM',
+        payload.actor?.role || 'system'
+      );
+      if (payload.type === 'EXPENSE' && payload.createExpense !== false) {
+        db.prepare(`
+          INSERT INTO expenses
+            (id, shopId, title, amount, taxAmount, isTaxEnabled, taxMethod, category, date, updatedAt)
+          VALUES (?, ?, ?, ?, 0, 0, 'inclusive', ?, ?, ?)
+        `).run(
+          id,
+          payload.shopId || 'SHOP_01',
+          payload.description || payload.category || 'Expense',
+          amount,
+          payload.category || 'Other',
+          date,
+          timestamp
+        );
+      }
+    })();
+    return { success: true, id };
+  } catch (err) {
+    console.error('Account entry failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('transfer-account-funds', (event, payload = {}) => {
+  try {
+    const db = getDB();
+    const amount = Number(payload.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Amount must be greater than zero');
+    const timestamp = payload.timestamp || new Date().toISOString();
+    const date = payload.date || timestamp.replace('T', ' ').substring(0, 19);
+    const transferId = `XFER-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    db.transaction(() => {
+      const insert = db.prepare(`
+        INSERT INTO account_transactions
+          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)
+        VALUES (?, ?, ?, ?, 'Transfer', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+      `);
+      insert.run(
+        `${transferId}-OUT`, payload.shopId || 'SHOP_01', payload.sourceAccountType || 'CASH', 'EXPENSE', amount,
+        `Transfer to ${payload.targetName || payload.targetAccountType || 'account'}${payload.note ? ` (${payload.note})` : ''}`,
+        date, timestamp, 'Receipt', payload.sourceBankAccountId || null,
+        payload.actor?.name || payload.actor?.id || 'System', payload.actor?.id || 'SYSTEM', payload.actor?.role || 'system'
+      );
+      insert.run(
+        `${transferId}-IN`, payload.shopId || 'SHOP_01', payload.targetAccountType || 'CASH', 'INCOME', amount,
+        `Transfer from ${payload.sourceName || payload.sourceAccountType || 'account'}${payload.note ? ` (${payload.note})` : ''}`,
+        date, timestamp, 'DollarSign', payload.targetBankAccountId || null,
+        payload.actor?.name || payload.actor?.id || 'System', payload.actor?.id || 'SYSTEM', payload.actor?.role || 'system'
+      );
+    })();
+    return { success: true, transferId };
+  } catch (err) {
+    console.error('Account transfer failed:', err);
     return { success: false, error: err.message };
   }
 });
@@ -785,6 +898,14 @@ ipcMain.handle('refund-deleted-order', async (event, options) => {
   }
 });
 
+function changesFinancialSourceData(query) {
+  const normalized = String(query || '').trim().replace(/\s+/g, ' ').toUpperCase();
+  if (!/^(INSERT(?: OR REPLACE)?|UPDATE|DELETE|REPLACE)\b/.test(normalized)) return false;
+  if (/\b(ORDERS|PAYMENTS|ADVANCE_ALLOCATIONS|DELETED_ORDERS|REFUNDS)\b/.test(normalized)) return true;
+  return /^UPDATE CUSTOMERS\b/.test(normalized)
+    && /\b(BALANCE|ADVANCEBALANCE|OPENINGBALANCE)\b/.test(normalized);
+}
+
 ipcMain.handle('db-query', (event, { query, params }) => {
   try {
     const db = getDB();
@@ -797,6 +918,9 @@ ipcMain.handle('db-query', (event, { query, params }) => {
       return { success: true, data: stmt.all(params || []) };
     } else {
       const info = stmt.run(params || []);
+      if (changesFinancialSourceData(query)) {
+        refreshCustomerFinancialCaches(db);
+      }
       return { success: true, data: info };
     }
   } catch (err) {
@@ -1516,11 +1640,10 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
           }
 
           try {
-            const { runDataHealer } = require('./database');
-            runDataHealer(db);
-            logTracker(orderId, `Read-only financial verification successfully executed.`, 'info');
-          } catch (healErr) {
-            logTracker(orderId, `Healer run failed: ${healErr.message}`, 'error');
+            const cacheRefresh = refreshCustomerFinancialCaches(db, linkRecord?.customerId || null);
+            logTracker(orderId, `Customer financial cache refreshed after online settlement. Updated: ${cacheRefresh.updated}, review required: ${cacheRefresh.skippedForReview}.`, 'info');
+          } catch (refreshErr) {
+            logTracker(orderId, `Customer financial cache refresh failed: ${refreshErr.message}`, 'error');
           }
         } else {
           db.prepare(`UPDATE payment_links SET status = ? WHERE checkoutId = ?`).run(status, checkoutId);
@@ -1635,11 +1758,10 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
           }
 
           try {
-            const { runDataHealer } = require('./database');
-            runDataHealer(db);
-            logTracker(orderId, `Read-only financial verification successfully executed.`, 'info');
-          } catch (healErr) {
-            logTracker(orderId, `Healer run failed: ${healErr.message}`, 'error');
+            const cacheRefresh = refreshCustomerFinancialCaches(db, order.customerId);
+            logTracker(orderId, `Customer financial cache refreshed after online order payment. Updated: ${cacheRefresh.updated}, review required: ${cacheRefresh.skippedForReview}.`, 'info');
+          } catch (refreshErr) {
+            logTracker(orderId, `Customer financial cache refresh failed: ${refreshErr.message}`, 'error');
           }
         } else {
           db.prepare(`

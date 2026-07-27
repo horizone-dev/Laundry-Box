@@ -21,6 +21,13 @@ assert.equal(state({
   payments: [{ id: 'P1', orderId: 'O1', amount: 100, method: 'Cash', status: 'SUCCESS' }]
 }).balance, 0);
 
+// When an edited invoice total is reduced below money already received, the
+// order is capped at its new total and the excess remains customer advance.
+assert.equal(state({
+  orders: [{ id: 'O1', status: 'Confirmed', totalAmount: 900, paidAmount: 900, dueAmount: 0 }],
+  payments: [{ id: 'P1', orderId: 'O1', amount: 1000, method: 'Cash', status: 'SUCCESS' }]
+}).balance, -100);
+
 // An earlier cash advance is one credit. Its linked technical Advance row must
 // not create a second credit when the advance is spent on a later order.
 assert.equal(state({

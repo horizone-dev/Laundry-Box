@@ -194,6 +194,7 @@ export default function Customers() {
   const [insightTab, setInsightTab] = useState('sales'); // 'sales', 'payments', 'returns'
   const [customerPayments, setCustomerPayments] = useState([]);
   const [customerDiscounts, setCustomerDiscounts] = useState([]);
+  const [customerDeletedDiscounts, setCustomerDeletedDiscounts] = useState([]);
   const [customerReturns, setCustomerReturns] = useState([]);
   const [selectedPaymentForAction, setSelectedPaymentForAction] = useState(null);
   const [showPaymentViewModal, setShowPaymentViewModal] = useState(false);
@@ -1563,11 +1564,22 @@ export default function Customers() {
     setLoading(true);
     if (window.electronAPI?.dbQuery) {
       try {
+        const financialStateRes = window.electronAPI?.getCustomerFinancialState
+          ? await window.electronAPI.getCustomerFinancialState(customer.id)
+          : null;
+        const financialState = financialStateRes?.success ? financialStateRes.data : null;
         const freshCustRes = await window.electronAPI.dbQuery(
           "SELECT * FROM customers WHERE id = ?",
           [customer.id]
         );
-        const activeCustomer = freshCustRes.success && freshCustRes.data.length > 0 ? freshCustRes.data[0] : customer;
+        const savedCustomer = freshCustRes.success && freshCustRes.data.length > 0 ? freshCustRes.data[0] : customer;
+        const activeCustomer = financialState
+          ? {
+              ...savedCustomer,
+              balance: financialState.balance,
+              advanceBalance: financialState.availableAdvance
+            }
+          : savedCustomer;
         setSelectedCustomer(activeCustomer);
 
         const result = await window.electronAPI.dbQuery(
@@ -1582,6 +1594,26 @@ export default function Customers() {
           [activeCustomer.id]
         );
         let deletedBills = deletedRes.success ? deletedRes.data : [];
+        const deletedDiscounts = deletedBills.flatMap((deletedBill) => {
+          let paymentSnapshot = [];
+          try {
+            paymentSnapshot = typeof deletedBill.payments === 'string'
+              ? JSON.parse(deletedBill.payments || '[]')
+              : (deletedBill.payments || []);
+          } catch (_) {
+            paymentSnapshot = [];
+          }
+          return paymentSnapshot
+            .filter((payment) => payment.method === 'Discount' && Number(payment.amount || 0) > 0)
+            .map((payment, index) => ({
+              ...payment,
+              id: `DELETED-DISC-${deletedBill.id}-${payment.id || index}`,
+              originalPaymentId: payment.id || null,
+              deletedOrderId: deletedBill.id,
+              deletedAt: deletedBill.deletedAt || deletedBill.returnedAt || payment.updatedAt || payment.createdAt
+            }));
+        });
+        setCustomerDeletedDiscounts(deletedDiscounts);
 
         const combinedReturns = [
           ...bills.filter(b => b.status === 'Cancelled' || b.status === 'Deleted').map(b => ({
@@ -1675,21 +1707,24 @@ export default function Customers() {
 
         const getDiscountVal = (bill) => {
           if (!bill) return 0;
+          // A current order-base Quick Settlement stores its discount as a
+          // dedicated DISC receipt. That receipt is the source of truth and
+          // must be shown on the linked order, not as a separate settlement.
+          const receiptDiscount = discountPayments
+            .filter(p => p.orderId === bill.id && getDiscountScope(p) === 'order')
+            .reduce((sum, p) => sum + (p.amount || 0), 0);
+          if (receiptDiscount > 0) return receiptDiscount;
           if (typeof bill.discount === 'number' && bill.discount > 0) return bill.discount;
           if (typeof bill.discountAmount === 'number' && bill.discountAmount > 0) return bill.discountAmount;
           if (bill.paymentBreakdown) {
             try {
               const bd = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
               if (bd) {
-                const val = parseFloat(bd.discount || bd.discountAmount || bd.discount_amount || bd.discountValue || 0);
+                const val = parseFloat(bd.orderDiscount || bd.discount || bd.discountAmount || bd.discount_amount || bd.discountValue || 0);
                 if (!isNaN(val) && val > 0) return val;
               }
             } catch (e) { }
           }
-          const payDisc = discountPayments
-            .filter(p => p.orderId === bill.id && getDiscountScope(p) === 'order')
-            .reduce((sum, p) => sum + (p.amount || 0), 0);
-          if (payDisc > 0) return payDisc;
           if (bill.items) {
             try {
               const itemsArr = typeof bill.items === 'string' ? JSON.parse(bill.items) : bill.items;
@@ -1705,12 +1740,15 @@ export default function Customers() {
           return 0;
         };
 
-        const generalDiscountSum = discountPayments
-          .filter(p => getDiscountScope(p) === 'settlement')
-          .reduce((sum, p) => sum + (p.amount || 0), 0);
-        let totalDiscount = generalDiscountSum;
+        // Dedicated DISC receipts are the source of truth. Old order
+        // paymentBreakdown values are a legacy fallback only when an order
+        // has no corresponding discount receipt, avoiding double counting.
+        let totalDiscount = discountPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
         bills.forEach(bill => {
-          totalDiscount += getDiscountVal(bill);
+          const hasDiscountReceipt = discountPayments.some(
+            p => p.orderId === bill.id && getDiscountScope(p) === 'order'
+          );
+          if (!hasDiscountReceipt) totalDiscount += getDiscountVal(bill);
         });
 
         // ─── Derive pendingDue & availableAdvance using the SAME running-balance
@@ -1804,15 +1842,13 @@ export default function Customers() {
           }
         });
 
-        const activeOrderIds = bills.filter(b => b.status !== 'Cancelled' && b.status !== 'Deleted').map(b => b.id);
         allPaymentsRaw.forEach(p => {
           if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
-          if (p.method === 'Discount' && p.orderId && activeOrderIds.includes(p.orderId)) return;
           runningBalance -= (p.amount || 0); // payment credit (reduces balance)
         });
 
         // Final values — mirror CustomerStatement KPIs exactly
-        const canonicalBalance = Number(activeCustomer.balance) || 0;
+        const canonicalBalance = Number(financialState?.balance ?? runningBalance) || 0;
         const pendingDue = Math.max(0, canonicalBalance);
         const availableAdvance = Math.max(0, -canonicalBalance);
 
@@ -2576,13 +2612,19 @@ export default function Customers() {
                     {(() => {
                       const getDiscountVal = (bill) => {
                         if (!bill) return 0;
+                        // Keep this tab aligned with Customer Statement: a
+                        // DISC receipt linked to an order is an order discount.
+                        const receiptDiscount = customerDiscounts
+                          .filter(p => p.orderId === bill.id && getDiscountScope(p) === 'order')
+                          .reduce((sum, p) => sum + (p.amount || 0), 0);
+                        if (receiptDiscount > 0) return receiptDiscount;
                         if (typeof bill.discount === 'number' && bill.discount > 0) return bill.discount;
                         if (typeof bill.discountAmount === 'number' && bill.discountAmount > 0) return bill.discountAmount;
                         if (bill.paymentBreakdown) {
                           try {
                             const bd = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
                             if (bd) {
-                              const val = parseFloat(bd.discount || bd.discountAmount || bd.discount_amount || bd.discountValue || 0);
+                              const val = parseFloat(bd.orderDiscount || bd.discount || bd.discountAmount || bd.discount_amount || bd.discountValue || 0);
                               if (!isNaN(val) && val > 0) return val;
                             }
                           } catch (e) { }
@@ -2616,7 +2658,12 @@ export default function Customers() {
                         };
                       });
 
-                      const receiptDiscounts = customerDiscounts.map(p => ({
+                      // Settlement discounts have no invoice of their own and
+                      // remain standalone. Order discounts are already shown
+                      // in the linked order row above.
+                      const receiptDiscounts = customerDiscounts
+                        .filter(p => !(p.orderId && getDiscountScope(p) === 'order'))
+                        .map(p => ({
                         id: p.id,
                         date: p.createdAt,
                         type: 'receipt',
@@ -2624,10 +2671,21 @@ export default function Customers() {
                         discount: p.amount,
                         netPayable: null,
                         status: 'SUCCESS',
+                          payment: p
+                        }));
+
+                      // Deleted orders keep a snapshot of their original DISC
+                      // receipts for audit history. These rows are deliberately
+                      // excluded from totalDiscount and all financial balances.
+                      const deletedDiscountRows = customerDeletedDiscounts.map(p => ({
+                        id: p.id,
+                        date: p.deletedAt || p.createdAt,
+                        type: 'deleted',
+                        discount: p.amount || 0,
                         payment: p
                       }));
 
-                      const allDiscounts = [...discountedBills, ...receiptDiscounts].sort((a, b) => new Date(b.date) - new Date(a.date));
+                      const allDiscounts = [...discountedBills, ...receiptDiscounts, ...deletedDiscountRows].sort((a, b) => new Date(b.date) - new Date(a.date));
 
                       if (allDiscounts.length === 0) {
                         return (
@@ -2714,6 +2772,34 @@ export default function Customers() {
                                   </button>
                                 </div>
                               </td>
+                            </tr>
+                          );
+                        } else if (item.type === 'deleted') {
+                          const p = item.payment;
+                          return (
+                            <tr key={p.id} style={{ background: '#FFF7ED' }}>
+                              <td style={{ color: '#9A3412', fontWeight: 700 }}>
+                                Deleted Order #{settings.invoicePrefix || ''}{p.deletedOrderId}
+                              </td>
+                              <td>{formatDate(p.createdAt || p.deletedAt)}</td>
+                              <td>N/A</td>
+                              <td style={{ fontWeight: 800, color: '#9A3412' }}>
+                                <CurrencySymbol size={13} /> {item.discount.toFixed(2)}
+                              </td>
+                              <td>N/A</td>
+                              <td>
+                                <span style={{
+                                  padding: '0.2rem 0.5rem',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  background: '#FFEDD5',
+                                  color: '#C2410C'
+                                }}>
+                                  DELETED / REVERSED
+                                </span>
+                              </td>
+                              <td style={{ textAlign: 'center', color: '#94A3B8' }}>—</td>
                             </tr>
                           );
                         } else {

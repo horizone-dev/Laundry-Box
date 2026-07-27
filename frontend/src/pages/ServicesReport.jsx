@@ -63,7 +63,7 @@ export default function ServicesReport() {
       setLoading(true);
       // Fetch all active orders
       const res = await window.electronAPI.dbQuery(
-        "SELECT id, billNumber, totalAmount, items, status, createdAt FROM orders ORDER BY createdAt DESC",
+        "SELECT id, billNumber, totalAmount, items, status, createdAt FROM orders WHERE COALESCE(status, '') NOT IN ('Deleted', 'Cancelled') ORDER BY createdAt DESC",
         []
       );
       if (res.success) {

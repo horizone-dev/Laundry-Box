@@ -1716,6 +1716,41 @@ function recalculateCustomerBalances(connection, targetCustomerId = null, timest
   customers.forEach(({ id }) => recalculateCustomerBalance(connection, id, timestamp));
 }
 
+// Balance and advanceBalance are display caches, never financial source data.
+// Refresh only mismatched rows so normal application startup does not create
+// needless sync activity.
+function refreshCustomerFinancialCaches(connection, targetCustomerId = null, timestamp = getLocalISOString()) {
+  const customers = targetCustomerId
+    ? connection.prepare('SELECT id FROM customers WHERE id = ?').all(targetCustomerId)
+    : connection.prepare('SELECT id FROM customers').all();
+  const update = connection.prepare(`
+    UPDATE customers
+    SET balance = ?, advanceBalance = ?, isSynced = 0, updatedAt = ?
+    WHERE id = ?
+  `);
+  let updated = 0;
+  let skippedForReview = 0;
+
+  customers.forEach(({ id }) => {
+    const state = getCustomerFinancialState(connection, id);
+    if (!state) return;
+    const needsReview = state.audit.ambiguousConvertedDeletes.length > 0
+      || state.audit.overAllocatedSources.length > 0;
+    if (needsReview) {
+      skippedForReview += 1;
+      return;
+    }
+    const balanceChanged = Math.abs(state.savedBalance - state.balance) > EPSILON;
+    const advanceChanged = Math.abs(state.savedAdvance - state.availableAdvance) > EPSILON;
+    if (!balanceChanged && !advanceChanged) return;
+
+    update.run(state.balance, state.availableAdvance, timestamp, id);
+    updated += 1;
+  });
+
+  return { inspected: customers.length, updated, skippedForReview };
+}
+
 function auditFinancialIntegrity(connection, targetCustomerId = null) {
   const customers = targetCustomerId
     ? connection.prepare('SELECT id, name FROM customers WHERE id = ?').all(targetCustomerId)
@@ -1808,6 +1843,80 @@ function getRefundAccountType(method) {
   return ['BANK', 'CARD', 'UPI'].includes(String(method || '').toUpperCase()) ? 'BANK' : 'CASH';
 }
 
+// Discounts settle an invoice but are not money received from the customer.
+// Deleting an invoice must therefore never turn a discount into a cash refund
+// or a newly-created advance.  Older orders may have the discount only in the
+// payment breakdown, so use the larger of the receipt total and breakdown
+// total rather than adding both representations together.
+function getOrderDiscountCredit(order, linkedPayments = []) {
+  const receiptDiscount = linkedPayments
+    .filter((payment) => payment.method === 'Discount')
+    .reduce((sum, payment) => sum + Math.max(0, toAmount(payment.amount)), 0);
+
+  let breakdownDiscount = 0;
+  try {
+    const breakdown = typeof order?.paymentBreakdown === 'string'
+      ? JSON.parse(order.paymentBreakdown || '{}')
+      : (order?.paymentBreakdown || {});
+    const scopedDiscount = Math.max(0, toAmount(breakdown.orderDiscount))
+      + Math.max(0, toAmount(breakdown.settlementDiscount));
+    const legacyDiscount = Math.max(0, toAmount(breakdown.discount), toAmount(breakdown.discountAmount));
+    // Scope fields are the current representation.  Generic legacy fields
+    // are an alternative representation, not an extra discount to add.
+    breakdownDiscount = scopedDiscount > EPSILON ? scopedDiscount : legacyDiscount;
+  } catch (_) {
+    breakdownDiscount = 0;
+  }
+
+  return roundCurrency(Math.max(receiptDiscount, breakdownDiscount));
+}
+
+function getRefundableOrderPaymentAmount(order, linkedPayments = [], allocations = []) {
+  const totalAmount = Math.max(0, toAmount(order?.totalAmount));
+  const directTender = linkedPayments
+    .filter((payment) => !['System Auto', 'Discount', 'Advance', 'Refund Advance'].includes(payment.method))
+    .reduce((sum, payment) => sum + Math.max(0, toAmount(payment.amount)), 0);
+  const appliedAdvance = allocations
+    .reduce((sum, allocation) => sum + Math.max(0, toAmount(allocation.amountUsed)), 0);
+  const paidCredit = Math.max(0, toAmount(order?.paidAmount));
+  const discountCredit = getOrderDiscountCredit(order, linkedPayments);
+
+  // A payment receipt can be present even when a legacy order cache is stale.
+  // Conversely, a legacy order can have paidAmount without individual receipts.
+  // Either way, refund only real tender/advance and never discount credit.
+  const fromOrderCache = Math.max(0, paidCredit - discountCredit);
+  return roundCurrency(Math.min(totalAmount, Math.max(directTender + appliedAdvance, fromOrderCache)));
+}
+
+function recordOrderDiscountReversal(connection, {
+  orderId,
+  shopId,
+  billNumber,
+  amount,
+  actor,
+  timestamp
+}) {
+  const discountAmount = roundCurrency(amount);
+  if (discountAmount <= EPSILON) return null;
+
+  const transactionId = `TXN-DISC-REV-${orderId}`;
+  connection.prepare(`
+    INSERT OR IGNORE INTO account_transactions
+      (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, createdBy)
+    VALUES (?, ?, 'CASH', 'INCOME', 'Discount Reversal', ?, ?, ?, 0, ?, 'Percent', ?)
+  `).run(
+    transactionId,
+    shopId || 'SHOP_01',
+    discountAmount,
+    `Discount reversal - Deleted Order ${billNumber || '#' + orderId}`,
+    timestamp.replace('T', ' ').substring(0, 16),
+    timestamp,
+    actor || 'System'
+  );
+
+  return transactionId;
+}
+
 function unwindOrderPayments(connection, {
   orderId,
   customerId,
@@ -1825,14 +1934,16 @@ function unwindOrderPayments(connection, {
     GROUP BY paymentId
   `).all(orderId);
 
-  const directPayments = linkedPayments.filter(p => !['System Auto', 'Discount'].includes(p.method));
+  // "Advance" is a consumption marker, while the allocation identifies the
+  // original advance source.  It must not be moved as a second advance.
+  const directPayments = linkedPayments.filter(p => !['System Auto', 'Discount', 'Advance', 'Refund Advance'].includes(p.method));
   const directPaid = directPayments.reduce((sum, p) => sum + Math.max(0, Number(p.amount) || 0), 0);
   const allocatedPaid = allocations.reduce((sum, a) => sum + Math.max(0, Number(a.amountUsed) || 0), 0);
 
   if (convertToAdvance) {
     // System Auto rows only represent the use of an existing advance. Removing
     // their allocations makes the original advance available again.
-    connection.prepare("DELETE FROM payments WHERE orderId = ? AND method IN ('System Auto', 'Discount')").run(orderId);
+    connection.prepare("DELETE FROM payments WHERE orderId = ? AND method IN ('System Auto', 'Discount', 'Advance', 'Refund Advance')").run(orderId);
     connection.prepare('DELETE FROM advance_allocations WHERE orderId = ?').run(orderId);
 
     directPayments.forEach(payment => {
@@ -2077,10 +2188,18 @@ function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'ref
     const shopId = order.shopId || 'SHOP_01';
     const customerId = order.customerId || '';
     const totalAmount = Number(order.totalAmount) || 0;
-    const linkedPayments = db.prepare('SELECT amount FROM payments WHERE orderId = ?').all(orderId);
-    const paymentTotal = linkedPayments.reduce((sum, payment) => sum + Math.max(0, Number(payment.amount) || 0), 0);
-    const actualPaidAmt = Math.min(totalAmount, Math.max(Number(order.paidAmount) || 0, paymentTotal));
-    const outstandingAmt = Math.max(0, totalAmount - actualPaidAmt);
+    const linkedPayments = db.prepare('SELECT * FROM payments WHERE orderId = ?').all(orderId);
+    const orderAllocations = db.prepare(`
+      SELECT paymentId, IFNULL(SUM(amountUsed), 0) AS amountUsed
+      FROM advance_allocations
+      WHERE orderId = ?
+      GROUP BY paymentId
+    `).all(orderId);
+    const discountCredit = getOrderDiscountCredit(order, linkedPayments);
+    // Only real tender and an advance that was actually consumed can be
+    // refunded or retained as advance.  Discount is an expense, not money.
+    const actualPaidAmt = getRefundableOrderPaymentAmount(order, linkedPayments, orderAllocations);
+    const outstandingAmt = Math.max(0, totalAmount - actualPaidAmt - discountCredit);
     const refundImmediately = deleteAction === 'refund';
     const isPaid = actualPaidAmt > 0.005;
     const returnStatus = isPaid ? (refundImmediately ? 'Returned' : 'Converted to Advance') : 'N/A';
@@ -2134,6 +2253,14 @@ function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'ref
       fallbackMethod: order.paymentMethod,
       timestamp: now
     });
+    const discountReversalId = recordOrderDiscountReversal(db, {
+      orderId,
+      shopId,
+      billNumber: order.billNumber,
+      amount: discountCredit,
+      actor: deletedBy,
+      timestamp: now
+    });
 
     let customerState = null;
     if (customerId && customerId !== 'Walk-in') {
@@ -2174,7 +2301,7 @@ function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'ref
       VALUES (?, 'ORDER_DELETED', ?, ?, 'Manager', ?, ?)
     `).run(
       `AUDIT-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
-      JSON.stringify({ orderId, totalAmount, actualPaidAmt, outstandingAmt, deleteAction, refundMethod, deleteReason }),
+      JSON.stringify({ orderId, totalAmount, actualPaidAmt, discountCredit, outstandingAmt, deleteAction, refundMethod, deleteReason, discountReversalId }),
       deletedBy,
       now,
       process.platform || 'Desktop'
@@ -2207,6 +2334,15 @@ function refundDeletedOrder({ orderId, refundMethod = 'Cash', refundedBy = 'Syst
     const customerId = deletedOrder.customerId || '';
     const paidAmount = Math.max(0, Number(deletedOrder.paidAmount) || 0);
     const liveOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId) || {};
+    let deletedPaymentSnapshot = [];
+    try {
+      deletedPaymentSnapshot = typeof deletedOrder.payments === 'string'
+        ? JSON.parse(deletedOrder.payments || '[]')
+        : (deletedOrder.payments || []);
+    } catch (_) {
+      deletedPaymentSnapshot = [];
+    }
+    const discountCredit = getOrderDiscountCredit(liveOrder, deletedPaymentSnapshot);
 
     unwindOrderPayments(db, {
       orderId,
@@ -2215,6 +2351,14 @@ function refundDeletedOrder({ orderId, refundMethod = 'Cash', refundedBy = 'Syst
       actualPaidAmt: paidAmount,
       convertToAdvance: false,
       fallbackMethod: deletedOrder.originalPaymentMethod,
+      timestamp: now
+    });
+    const discountReversalId = recordOrderDiscountReversal(db, {
+      orderId,
+      shopId,
+      billNumber: deletedOrder.billNumber,
+      amount: discountCredit,
+      actor: refundedBy,
       timestamp: now
     });
 
@@ -2258,7 +2402,7 @@ function refundDeletedOrder({ orderId, refundMethod = 'Cash', refundedBy = 'Syst
     db.prepare(`
       INSERT INTO audit_logs (id, event, details, userId, userRole, timestamp, device)
       VALUES (?, 'DELETED_ORDER_REFUNDED', ?, ?, 'Manager', ?, ?)
-    `).run(`AUDIT-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, JSON.stringify({ orderId, paidAmount, refundMethod }), refundedBy, now, process.platform || 'Desktop');
+    `).run(`AUDIT-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, JSON.stringify({ orderId, paidAmount, discountCredit, refundMethod, discountReversalId }), refundedBy, now, process.platform || 'Desktop');
 
     return { success: true, orderId, refundId, paidAmount, refundMethod, customerState };
   })();
@@ -2285,9 +2429,12 @@ module.exports = {
   runDataHealer,
   auditFinancialIntegrity,
   getCanonicalFinancialState,
+  refreshCustomerFinancialCaches,
   closeDB,
   generateServiceSVG,
   getNextPaymentReference,
+  getOrderDiscountCredit,
+  getRefundableOrderPaymentAmount,
   softDeleteOrder,
   refundDeletedOrder
 };

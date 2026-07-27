@@ -20,6 +20,7 @@ export default function CustomerStatement() {
   const navigate = useNavigate();
   const { settings, formatDate } = useSettings();
   const printRef = useRef(null);
+  const statementRequestRef = useRef(0);
 
   /* ─── State ──────────────────────────────────────── */
   const [searchTerm, setSearchTerm] = useState('');
@@ -242,12 +243,20 @@ export default function CustomerStatement() {
   }, [selectedCustomer, dateRange, dateFrom, dateTo]);
 
   const fetchStatement = async (customerId) => {
+    // A settlement can be posted while an earlier statement query is still
+    // running. Only the most recent request may update the screen, otherwise
+    // an older response can hide the new payment until the user refreshes.
+    const requestId = statementRequestRef.current + 1;
+    statementRequestRef.current = requestId;
+
     if (!window.electronAPI?.dbQuery) return;
     if (dateRange === 'Custom' && (!dateFrom || !dateTo)) {
-      setOrders([]);
-      setPayments([]);
-      setAllocations([]);
-      setLoading(false);
+      if (requestId === statementRequestRef.current) {
+        setOrders([]);
+        setPayments([]);
+        setAllocations([]);
+        setLoading(false);
+      }
       return;
     }
     setLoading(true);
@@ -256,12 +265,17 @@ export default function CustomerStatement() {
       let orderQuery = `
         SELECT * FROM (
           SELECT 
-            id, shopId, billNumber, customerId, totalAmount, paidAmount, dueAmount, 
-            paymentStatus, status, paymentMethod, items, createdAt, updatedAt, 
-            paymentBreakdown,
-            CASE WHEN status = 'Deleted' THEN 1 ELSE 0 END AS isDeleted, 
-            deletedAction AS refundStatus, NULL AS refundMethod, deletedAt AS returnedAt, NULL AS payments 
-          FROM orders 
+            o.id, o.shopId, o.billNumber, o.customerId, o.totalAmount,
+            COALESCE(d.paidAmount, o.paidAmount) AS paidAmount, o.dueAmount,
+            o.paymentStatus, o.status, o.paymentMethod, o.items, o.createdAt, o.updatedAt,
+            o.paymentBreakdown,
+            CASE WHEN o.status = 'Deleted' THEN 1 ELSE 0 END AS isDeleted,
+            COALESCE(d.refundStatus, d.returnStatus, o.deletedAction) AS refundStatus,
+            d.refundMethod,
+            COALESCE(d.returnedAt, d.deletedAt, o.deletedAt) AS returnedAt,
+            d.payments
+          FROM orders o
+          LEFT JOIN deleted_orders d ON d.id = o.id
 
           UNION ALL
 
@@ -292,13 +306,19 @@ export default function CustomerStatement() {
         [customerId]
       );
 
+      if (requestId !== statementRequestRef.current) return;
+
       setOrders(ordersRes.success ? ordersRes.data : []);
       setPayments(paymentsRes.success ? paymentsRes.data : []);
       setAllocations(allocationsRes.success ? allocationsRes.data : []);
     } catch (err) {
-      console.error('Statement fetch error:', err);
+      if (requestId === statementRequestRef.current) {
+        console.error('Statement fetch error:', err);
+      }
     } finally {
-      setLoading(false);
+      if (requestId === statementRequestRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -328,19 +348,36 @@ export default function CustomerStatement() {
       });
     }
 
-    // Robust date normalizer to handle space and timezone offsets safely
-    const normalizeDate = (dStr) => {
-      if (!dStr) return new Date(0);
-      let normalized = dStr.replace(' ', 'T');
-      if (normalized.includes('+')) {
-        normalized = normalized.split('+')[0];
-      }
-      if (normalized.endsWith('Z')) {
-        normalized = normalized.substring(0, normalized.length - 1);
-      }
-      const parsed = new Date(normalized);
-      return isNaN(parsed.getTime()) ? new Date(0) : parsed;
+    // Preserve timezone information: legacy rows can be stored as local (+04:00)
+    // or UTC (Z). Stripping the suffix makes the same instant sort incorrectly.
+    const normalizeDate = (dateValue) => {
+      if (!dateValue) return 0;
+      if (dateValue instanceof Date) return dateValue.getTime();
+
+      const raw = String(dateValue).trim();
+      const isoLike = raw.includes('T') ? raw : raw.replace(' ', 'T');
+      const timestamp = Date.parse(isoLike);
+      return Number.isFinite(timestamp) ? timestamp : 0;
     };
+
+    // When a deleted invoice is converted to advance, its genuine payment is
+    // moved to an unlinked receipt. The deleted-order snapshot remains the
+    // historical source for that receipt, so exclude the moved live copy to
+    // avoid counting one customer payment twice.
+    const movedDeletedPaymentIds = new Set();
+    orders.filter((order) => {
+      const status = String(order.refundStatus || '').toLowerCase();
+      return order.isDeleted && (status.includes('advance') || status === 'converted to advance');
+    }).forEach((order) => {
+      try {
+        const snapshot = typeof order.payments === 'string'
+          ? JSON.parse(order.payments || '[]')
+          : (order.payments || []);
+        snapshot.forEach((payment) => {
+          if (payment?.id) movedDeletedPaymentIds.add(payment.id);
+        });
+      } catch (_) { /* malformed legacy snapshot: keep its live payment visible */ }
+    });
 
     orders.forEach(o => {
       const cleanRef = `${settings.invoicePrefix || '#'}${o.id}`;
@@ -423,7 +460,9 @@ export default function CustomerStatement() {
                 type: 'payment',
                 ref: getReceiptNumber(p),
                 description: `Payment – ${p.method || 'Cash'}`,
-                itemsSummary: `Linked to Order ${cleanRef}`,
+                itemsSummary: p.method === 'Discount'
+                  ? `Discount reversed because Order ${cleanRef} was deleted`
+                  : `Linked to Order ${cleanRef}`,
                 debit: 0,
                 credit: p.method === 'Discount' ? 0 : (p.amount || 0),
                 discountAmount: p.method === 'Discount' ? (p.amount || 0) : 0,
@@ -492,18 +531,28 @@ export default function CustomerStatement() {
     });
 
     const groupedPaymentsMap = {};
-    payments.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto').forEach(p => {
-      const timestampKey = p.createdAt ? p.createdAt.substring(0, 19) : p.id;
+    const statementPayments = payments.filter((payment) => !movedDeletedPaymentIds.has(payment.id));
+    statementPayments.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto').forEach(p => {
+      const discountScope = p.method === 'Discount' ? getDiscountScope(p) : 'order';
+      // A customer-level settlement can be allocated across several invoices
+      // internally. Keep its exact shared timestamp so all of those DISC rows
+      // are displayed as one settlement discount, not order discounts.
+      const timestampKey = p.method === 'Discount' && discountScope === 'settlement'
+        ? (p.createdAt || p.id)
+        : (p.createdAt ? p.createdAt.substring(0, 19) : p.id);
       const referencePrefix = String(p.paymentReference || p.id || '').split('-')[0] || 'PAY';
+      const isSettlementPayment = p.method !== 'Discount'
+        && ['SET', 'ACC'].includes(referencePrefix);
       // One customer settlement can be internally allocated between opening
       // balance, invoices and advance in the same transaction.  It is still
       // one payment from the customer, so show one payment row per method and
       // timestamp. Discounts remain separate accounting rows.
       const purposeKey = p.method === 'Discount'
-        ? `discount:${p.paymentReference || p.id}`
+        ? (discountScope === 'settlement'
+          ? 'settlement-discount'
+          : `discount:${p.paymentReference || p.id}`)
         : `payment:${p.method || referencePrefix}`;
       const key = `${timestampKey}:${purposeKey}`;
-      const discountScope = p.method === 'Discount' ? getDiscountScope(p) : 'order';
       if (!groupedPaymentsMap[key]) {
         groupedPaymentsMap[key] = {
           date: p.createdAt,
@@ -519,6 +568,7 @@ export default function CustomerStatement() {
           orderId: p.orderId,
           paymentMethod: p.method,
           discountScope,
+          isSettlementPayment,
           orderIds: p.orderId ? [p.orderId] : [],
           methods: [p.method],
           receiptCount: 1
@@ -535,6 +585,7 @@ export default function CustomerStatement() {
         if (!groupedPaymentsMap[key].methods.includes(p.method)) {
           groupedPaymentsMap[key].methods.push(p.method);
         }
+        groupedPaymentsMap[key].isSettlementPayment = groupedPaymentsMap[key].isSettlementPayment || isSettlementPayment;
         groupedPaymentsMap[key].receiptCount += 1;
       }
     });
@@ -547,6 +598,9 @@ export default function CustomerStatement() {
       let finalPaymentMethod = p.paymentMethod;
       if (p.paymentMethod === 'Discount') {
         description = p.discountScope === 'settlement' ? 'Settlement Discount' : 'Order Discount';
+      } else if (p.isSettlementPayment) {
+        if (p.methods.length > 1) finalPaymentMethod = 'Multipayment';
+        description = `Settlement Paid â€“ ${finalPaymentMethod || 'Cash'}`;
       } else if (p.methods.length > 1) {
         description = 'Payment – Multipayment';
         finalPaymentMethod = 'Multipayment';
@@ -556,8 +610,10 @@ export default function CustomerStatement() {
         itemsSummary = `Advance Consumed for Order ${cleanOrderRef}`;
       } else if (p.paymentMethod === 'Discount') {
         itemsSummary = p.discountScope === 'settlement'
-          ? (p.orderId ? `Settlement discount applied to Order ${cleanOrderRef}` : 'Settlement discount')
+          ? 'Settlement discount'
           : `Order discount for ${cleanOrderRef}`;
+      } else if (p.isSettlementPayment) {
+        itemsSummary = 'Customer settlement';
       } else if (p.orderIds.length > 1) {
         itemsSummary = 'Quick Pay Settlement';
       } else if (p.orderId) {
@@ -591,7 +647,7 @@ export default function CustomerStatement() {
 
     // Capture initial payments made at order creation time that aren't in the payments table, subtracting allocations
     const initialPaymentsFromOrders = [];
-    if (filterType !== 'Orders' && payments.length === 0) {
+    if (filterType !== 'Orders' && statementPayments.length === 0) {
       orders.forEach(o => {
         if (o.isDeleted) return; // Skip deleted orders here, we already extracted their payments!
 
@@ -620,11 +676,10 @@ export default function CustomerStatement() {
       });
     }
 
-    const allPayments = [];
-    if (filterType !== 'Orders') {
-      paymentsFromTable.forEach(p => allPayments.push(p));
-      initialPaymentsFromOrders.forEach(p => allPayments.push(p));
-    }
+    // KPI totals are customer-wide and must not change merely because the
+    // table is filtered to Orders. The filter controls visible rows only.
+    const allCustomerPayments = [...paymentsFromTable, ...initialPaymentsFromOrders];
+    const allPayments = filterType !== 'Orders' ? allCustomerPayments : [];
 
     allPayments.forEach(p => rows.push(p));
 
@@ -710,7 +765,7 @@ export default function CustomerStatement() {
       finalRows = [...finalRows].reverse();
     }
 
-    const computedPaid = allPayments.reduce((s, p) => s + (p.credit || 0), 0);
+    const computedPaid = allCustomerPayments.reduce((s, p) => s + (p.credit || 0), 0);
     return { filteredRows: finalRows, totalBalance: balance, totalPaid: computedPaid };
   }, [orders, payments, allocations, filterType, sortOrder, dateFrom, dateTo, dateRange, selectedCustomer]);
 

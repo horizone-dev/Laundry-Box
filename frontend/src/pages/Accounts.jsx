@@ -497,6 +497,34 @@ export default function Accounts() {
 
   const handleAddTransaction = async (e) => {
     e.preventDefault();
+    if (window.electronAPI?.postAccountEntry) {
+      try {
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const result = await window.electronAPI.postAccountEntry({
+          shopId: DEFAULT_SHOP_ID,
+          accountType: activeAccountType,
+          type: formData.type,
+          category: formData.category,
+          amount: parseFloat(formData.amount),
+          description: formData.description,
+          icon: formData.icon,
+          bankAccountId: activeAccountType === 'BANK' ? activeBankAccountId : null,
+          actor: {
+            id: userSession.id || 'SYSTEM',
+            name: userSession.name || userSession.username || 'System',
+            role: userSession.role || 'system'
+          }
+        });
+        if (!result?.success) throw new Error(result?.error || 'Account entry could not be saved.');
+        setShowAddModal(false);
+        fetchData();
+        return;
+      } catch (err) {
+        console.error('Account entry error:', err);
+        alert('Failed to save transaction: ' + err.message);
+        return;
+      }
+    }
     if (window.electronAPI?.dbQuery) {
       try {
         const id = `TXN-${Date.now()}`;
@@ -605,6 +633,38 @@ export default function Accounts() {
 
     if (amount > sourceBalanceVal) {
       if (!window.confirm(`Warning: Source account "${sourceName}" has insufficient funds (${sourceBalanceVal.toFixed(2)} available). Proceed anyway?`)) return;
+    }
+
+    if (window.electronAPI?.transferAccountFunds) {
+      try {
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const result = await window.electronAPI.transferAccountFunds({
+          shopId: DEFAULT_SHOP_ID,
+          sourceAccountType: source,
+          sourceBankAccountId: sourceBankId,
+          sourceName,
+          targetAccountType: target,
+          targetBankAccountId: targetBankId,
+          targetName,
+          amount,
+          note: transferData.note,
+          actor: {
+            id: userSession.id || 'SYSTEM',
+            name: userSession.name || userSession.username || 'System',
+            role: userSession.role || 'system'
+          }
+        });
+        if (!result?.success) throw new Error(result?.error || 'Transfer could not be posted.');
+        setShowTransferModal(false);
+        setTransferData({ amount: '', note: '' });
+        fetchData();
+        alert(`Successfully transferred ${amount.toFixed(2)} ${settings.currencySymbol || 'AED'} from ${sourceName} to ${targetName}.`);
+        return;
+      } catch (err) {
+        console.error('Transfer error:', err);
+        alert('Transfer failed: ' + err.message);
+        return;
+      }
     }
 
     if (window.electronAPI?.dbQuery) {
@@ -862,67 +922,20 @@ export default function Accounts() {
       alert("Please select an order and amount");
       return;
     }
-    const order = dbOrders.find(o => o.id === refundFormData.orderId);
     const amountVal = parseFloat(refundFormData.amount);
     if (isNaN(amountVal) || amountVal <= 0) {
       alert("Please enter a valid amount");
       return;
     }
 
-    let accountLabel = 'Cash';
-    if (refundFormData.accountId !== 'CASH') {
-      const bank = settings.bankAccounts?.find(b => b.id === refundFormData.accountId);
-      accountLabel = bank ? bank.bankName : 'Bank';
-    }
-
-    if (window.electronAPI?.dbQuery) {
-      try {
-        const id = `TXN-RFD-${Date.now()}`;
-        const timestamp = getLocalDateTime();
-        const nowIso = getLocalISOString();
-
-        await window.electronAPI.dbQuery(
-          `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
-          [
-            id,
-            DEFAULT_SHOP_ID,
-            refundFormData.accountId === 'CASH' ? 'CASH' : 'BANK',
-            'EXPENSE',
-            'Return',
-            amountVal,
-            `Refund for Order #${refundFormData.orderId} - ${refundFormData.reason}`,
-            timestamp,
-            nowIso,
-            'Receipt',
-            refundFormData.accountId === 'CASH' ? null : refundFormData.accountId,
-            user.name || user.username || 'System',
-            user.id || 'SYSTEM',
-            user.role || 'system'
-          ]
-        );
-        fetchData();
-      } catch (err) {
-        console.error("Database refund insertion failed:", err);
-      }
-    }
-
-    const newRefund = {
-      id: `RFD-${Date.now().toString().slice(-4)}`,
-      date: getLocalDateTime(),
-      orderId: refundFormData.orderId,
-      customerName: order ? (dbCustomers.find(c => c.id === order.customerId)?.name || 'Customer') : 'Walk-in Customer',
-      amount: amountVal,
-      reason: refundFormData.reason,
-      account: accountLabel,
-      status: 'Processed'
-    };
-
-    setRefunds(prev => [newRefund, ...prev]);
+    // A refund is not an Accounts-only expense.  It must also reverse the
+    // order receipt, customer state, refund history and cash ledger.  The
+    // audited Deleted Orders flow performs all of those writes atomically and
+    // enforces its manager approval, so this shortcut must never create a
+    // standalone expense that could later be refunded a second time.
+    alert('Process customer refunds from Deleted Orders. That flow records the order return, refund, customer statement and account entry together.');
     setShowNewRefundCard(false);
     setRefundFormData({ orderId: '', amount: '', reason: 'Damaged Garment', accountId: 'CASH' });
-    alert(`Refund of ${amountVal.toFixed(2)} ${settings.currencySymbol || 'AED'} successfully processed.`);
   };
 
   // Reconciliation handler

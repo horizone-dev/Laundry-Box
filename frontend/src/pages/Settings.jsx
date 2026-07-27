@@ -690,6 +690,27 @@ export default function Settings() {
     };
 
     const summaryList = [];
+    const clearFinancialHistory = async () => {
+      // These are financial children of orders/payments.  SQLite does not
+      // enforce every relationship in older databases, so a reset must clear
+      // them explicitly rather than leaving orphan ledgers or allocations.
+      await runQuery('DELETE FROM advance_allocations');
+      await runQuery('DELETE FROM refunds');
+      await runQuery('DELETE FROM customer_ledger');
+      await runQuery('DELETE FROM cash_ledger');
+      await runQuery('DELETE FROM sales_returns');
+      await runQuery(`
+        DELETE FROM account_transactions
+        WHERE category IN (
+          'Sales Settlement', 'Credit Settlement', 'Customer Advance',
+          'Account Settlement', 'Discount Given', 'Discount Reversal',
+          'Return', 'Card Commission'
+        )
+      `);
+      await runQuery('DELETE FROM payment_sequence');
+      await runQuery('DELETE FROM discount_sequence');
+      await runQuery('DELETE FROM sync_state');
+    };
 
     try {
       await runQuery('BEGIN TRANSACTION');
@@ -702,6 +723,7 @@ export default function Settings() {
           await runQuery('DELETE FROM nomod_transactions');
           await runQuery('DELETE FROM reconciliations');
           await runQuery('DELETE FROM credit_override_logs');
+          await clearFinancialHistory();
           summaryList.push('Transactions (Orders & Payments): Deleted all records');
         }
 
@@ -717,6 +739,7 @@ export default function Settings() {
           await runQuery('DELETE FROM nomod_transactions');
           await runQuery('DELETE FROM reconciliations');
           await runQuery('DELETE FROM credit_override_logs');
+          await clearFinancialHistory();
           if (!summaryList.includes('Transactions (Orders & Payments): Deleted all records')) {
             summaryList.push('Transactions (Orders & Payments): Deleted all records (cascaded from Customers reset)');
           }

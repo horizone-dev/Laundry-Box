@@ -96,8 +96,8 @@ exports.syncData = async (req, res) => {
             { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
           );
         } catch (orderErr) {
-          // Log per-order errors but continue syncing the remaining orders
           console.error(`[Sync] Failed to upsert order ${order.id}:`, orderErr.message, orderErr.stack);
+          throw new Error(`Order ${order.id} was not synced: ${orderErr.message}`);
         }
       }
     }
@@ -116,6 +116,7 @@ exports.syncData = async (req, res) => {
           );
         } catch (custErr) {
           console.error(`[Sync] Failed to upsert customer ${cust.id}:`, custErr.message, custErr.stack);
+          throw new Error(`Customer ${cust.id} was not synced: ${custErr.message}`);
         }
       }
     }
@@ -138,6 +139,7 @@ exports.syncData = async (req, res) => {
             console.warn(`[Sync] Duplicate payment skipped: ${payment.id}`);
           } else {
             console.error(`[Sync] Failed to upsert payment ${payment.id}:`, payErr.message, payErr.stack);
+            throw new Error(`Payment ${payment.id} was not synced: ${payErr.message}`);
           }
         }
       }
@@ -160,6 +162,7 @@ exports.syncData = async (req, res) => {
             console.warn(`[Sync] Duplicate account transaction skipped: ${txn.id}`);
           } else {
             console.error(`[Sync] Failed to upsert account_transaction ${txn.id}:`, txnErr.message, txnErr.stack);
+            throw new Error(`Account transaction ${txn.id} was not synced: ${txnErr.message}`);
           }
         }
       }
@@ -182,6 +185,7 @@ exports.syncData = async (req, res) => {
             console.warn(`[Sync] Duplicate advance allocation skipped: ${alloc.id}`);
           } else {
             console.error(`[Sync] Failed to upsert advance_allocation ${alloc.id}:`, allocErr.message, allocErr.stack);
+            throw new Error(`Advance allocation ${alloc.id} was not synced: ${allocErr.message}`);
           }
         }
       }
@@ -207,6 +211,7 @@ exports.syncData = async (req, res) => {
           );
         } catch (deletedOrderErr) {
           console.error(`[Sync] Failed to upsert deleted order ${deletedOrder.id}:`, deletedOrderErr.message);
+          throw new Error(`Deleted order ${deletedOrder.id} was not synced: ${deletedOrderErr.message}`);
         }
       }
     }
@@ -233,6 +238,7 @@ exports.syncData = async (req, res) => {
           );
         } catch (financialRecordErr) {
           console.error(`[Sync] Failed to upsert ${kind} record ${record.id}:`, financialRecordErr.message);
+          throw new Error(`${kind} record ${record.id} was not synced: ${financialRecordErr.message}`);
         }
       }
     }
@@ -251,6 +257,7 @@ exports.syncData = async (req, res) => {
           );
         } catch (catErr) {
           console.error(`[Sync] Failed to upsert category ${cat.id}:`, catErr.message, catErr.stack);
+          throw new Error(`Category ${cat.id} was not synced: ${catErr.message}`);
         }
       }
     }

@@ -115,7 +115,7 @@ export default function ZReport() {
 
       // 1. Orders
       const ordersRes = await window.electronAPI.dbQuery(
-        `SELECT * FROM orders WHERE createdAt LIKE ?`, [dateParam]
+        `SELECT * FROM orders WHERE createdAt LIKE ? AND COALESCE(status, '') NOT IN ('Deleted', 'Cancelled')`, [dateParam]
       );
       // 2. Expenses
       const expensesRes = await window.electronAPI.dbQuery(
@@ -156,7 +156,7 @@ export default function ZReport() {
         `SELECT c.name, SUM(o.totalAmount) as totalSpent 
          FROM orders o
          JOIN customers c ON o.customerId = c.id
-         WHERE o.createdAt LIKE ? AND o.status != 'Cancelled'
+         WHERE o.createdAt LIKE ? AND COALESCE(o.status, '') NOT IN ('Deleted', 'Cancelled')
          GROUP BY o.customerId
          ORDER BY totalSpent DESC
          LIMIT 1`,
@@ -226,7 +226,7 @@ export default function ZReport() {
 
   // Perform Calculations
   const metrics = useMemo(() => {
-    const activeOrders = orders.filter(o => o.status !== 'Cancelled');
+    const activeOrders = orders.filter(o => !['Deleted', 'Cancelled'].includes(o.status));
 
     // 1. Business Hours
     let earliestTime = null;

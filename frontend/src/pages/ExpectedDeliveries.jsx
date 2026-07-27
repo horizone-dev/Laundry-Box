@@ -365,6 +365,34 @@ export default function ExpectedDeliveries() {
         ? 'Confirmed'
         : order.status;
 
+      if (window.electronAPI?.settleOrderPayment) {
+        const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const bankAccountId = payMethod === 'Card'
+          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+          : (payMethod === 'UPI'
+            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+            : (payMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
+        const result = await window.electronAPI.settleOrderPayment({
+          orderId: order.id,
+          shopId: DEFAULT_SHOP_ID,
+          splits: [{ method: payMethod, amount: amountToPay, bankAccountId }],
+          cardCommissionRate: Number(settings.cardCommission) || 0,
+          actor: {
+            id: userSession.id || 'SYSTEM',
+            name: userSession.name || userSession.username || 'System',
+            role: userSession.role || 'system'
+          },
+          description: `Delivery payment for ${order.id}`
+        });
+        if (!result?.success) throw new Error(result?.error || 'Payment could not be posted.');
+        setShowPayModal(false);
+        setSelectedOrderForPay(null);
+        await fetchOrders();
+        window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: order.customerId } }));
+        alert('Payment recorded successfully!');
+        return;
+      }
+
       if (window.electronAPI?.dbQuery) {
         // Update order
         const r1 = await window.electronAPI.dbQuery(
