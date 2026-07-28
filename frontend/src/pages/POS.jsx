@@ -190,6 +190,19 @@ export default function POS() {
         setEditOrderId(orderId);
         setEditOrderPaidAmount(Math.max(0, Number(order.paidAmount) || 0));
 
+        if (order.paymentBreakdown) {
+          try {
+            const breakdown = typeof order.paymentBreakdown === 'string'
+              ? JSON.parse(order.paymentBreakdown)
+              : order.paymentBreakdown;
+            if (breakdown) {
+              setDiscount(parseFloat(breakdown.discount || breakdown.discountAmount || 0) || 0);
+            }
+          } catch (e) {
+            console.error("Failed to parse breakdown during edit load", e);
+          }
+        }
+
         let parsedItems = [];
         try {
           parsedItems = typeof order.items === 'string' ? JSON.parse(order.items || '[]') : (order.items || []);
@@ -378,14 +391,17 @@ export default function POS() {
     let oldDueAmount = 0;
     if (editOrderId && window.electronAPI?.dbQuery) {
       const oldOrderRes = await window.electronAPI.dbQuery(
-        'SELECT dueAmount, totalAmount FROM orders WHERE id = ?', 
+        'SELECT customerId, dueAmount, totalAmount FROM orders WHERE id = ?', 
         [editOrderId]
       );
       if (oldOrderRes.success && oldOrderRes.data.length > 0) {
-        if (actionType === 'completePayment') {
-          oldDueAmount = oldOrderRes.data[0].dueAmount || 0;
-        } else {
-          oldDueAmount = oldOrderRes.data[0].totalAmount || 0;
+        const oldOrder = oldOrderRes.data[0];
+        if (oldOrder.customerId === selectedCustomer.id) {
+          if (actionType === 'completePayment') {
+            oldDueAmount = oldOrder.dueAmount || 0;
+          } else {
+            oldDueAmount = oldOrder.totalAmount || 0;
+          }
         }
       }
     }
@@ -1309,7 +1325,7 @@ export default function POS() {
                dueAmount: newDueAmount,
                paymentStatus: newPayStatus,
                paymentMethod: newPayMethod,
-               paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal, nomod: nomodVal },
+               paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal, nomod: nomodVal, discount: discount || 0 },
                items: cart,
                expectedDeliveryDate: combinedExpectedDelivery,
                specialInstructions
@@ -1549,7 +1565,7 @@ export default function POS() {
           dueAmount: newDueAmount,
           paymentStatus: newPayStatus,
           paymentMethod: newPayMethod,
-          paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal, nomod: nomodVal },
+          paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal, nomod: nomodVal, discount: discount || 0 },
           items: cart,
           statusHistory: [{ status: newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
           expectedDeliveryDate: combinedExpectedDelivery,
@@ -1573,7 +1589,7 @@ export default function POS() {
             dueAmount: newDueAmount,
             paymentStatus: newPayStatus,
             paymentMethod: newPayMethod,
-            paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal, nomod: nomodVal },
+            paymentBreakdown: { cash: cashVal, card: cardVal, upi: upiVal, bank: bankVal, nomod: nomodVal, discount: discount || 0 },
             items: cart,
             statusHistory: [{ status: newPayStatus === PAYMENT_STATUS.CREDIT ? ORDER_STATUS.CREDIT : ORDER_STATUS.CONFIRMED, updatedBy: 'POS System', timestamp: getLocalISOString() }],
             expectedDeliveryDate: combinedExpectedDelivery,
@@ -1933,7 +1949,7 @@ export default function POS() {
             newPayMethod,
             combinedExpectedDelivery,
             specialInstructions,
-            JSON.stringify({ cash: 0, card: 0, upi: 0, bank: 0 })
+            JSON.stringify({ cash: 0, card: 0, upi: 0, bank: 0, discount: discount || 0 })
           ]
         );
 
@@ -2059,7 +2075,7 @@ export default function POS() {
             dueAmount: total,
             paymentStatus: PAYMENT_STATUS.CREDIT,
             paymentMethod: PAYMENT_METHODS.NOT_PAID.toUpperCase(),
-            paymentBreakdown: { cash: 0, card: 0, upi: 0, bank: 0 },
+            paymentBreakdown: { cash: 0, card: 0, upi: 0, bank: 0, discount: discount || 0 },
             items: cart,
             statusHistory: [{ status: ORDER_STATUS.PAYMENT_PENDING, updatedBy: 'POS System', timestamp: getLocalISOString() }],
             expectedDeliveryDate: combinedExpectedDelivery,

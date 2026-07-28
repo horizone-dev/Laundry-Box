@@ -111,7 +111,7 @@ function calculateCustomerFinancialState({
     return status !== 'Deleted' && status !== 'Cancelled';
   });
 
-  const openingBalance = toAmount(customer.openingBalance);
+  const openingBalance = Math.max(0, toAmount(customer.openingBalance));
   const orderCharges = activeOrders.reduce(
     (sum, order) => sum + Math.max(0, toAmount(order.totalAmount)),
     0

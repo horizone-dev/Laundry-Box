@@ -585,39 +585,21 @@ function validateQueryCreditLimit(db, query, params) {
 
         if (orderId) {
           const order = db.prepare('SELECT customerId, dueAmount FROM orders WHERE id = ?').get(orderId);
-          if (order && order.customerId && order.customerId !== 'Walk-in') {
-            const oldDueAmount = order.dueAmount || 0;
-            const netIncrease = dueAmount - oldDueAmount;
-            if (netIncrease > 0) {
-              const ruleErr = checkCustomerCreditLimitRules(db, order.customerId, netIncrease);
-              if (ruleErr) {
-                throw new Error(ruleErr);
+          if (order) {
+            const queryCustomerId = getParamValue(setClause, 'customerId', params);
+            const targetCustomerId = queryCustomerId !== null ? queryCustomerId : order.customerId;
+
+            if (targetCustomerId && targetCustomerId !== 'Walk-in') {
+              const oldDueAmount = (targetCustomerId === order.customerId) ? (order.dueAmount || 0) : 0;
+              const netIncrease = dueAmount - oldDueAmount;
+              if (netIncrease > 0) {
+                const ruleErr = checkCustomerCreditLimitRules(db, targetCustomerId, netIncrease);
+                if (ruleErr) {
+                  throw new Error(ruleErr);
+                }
               }
             }
           }
-        }
-      }
-    }
-  }
-  else if (queryUpper.startsWith('UPDATE CUSTOMERS') && queryUpper.includes('SET BALANCE')) {
-    const whereMatch = cleanQuery.match(/WHERE\s+id\s*=\s*(.+)$/i);
-    let customerId = null;
-    if (whereMatch) {
-      const expr = whereMatch[1].trim();
-      if (expr === '?') {
-        customerId = params[params.length - 1];
-      } else {
-        customerId = expr.replace(/['"]/g, '');
-      }
-    }
-
-    if (customerId && customerId !== 'Walk-in') {
-      const isSubtraction = cleanQuery.toLowerCase().includes('balance -');
-      const netIncrease = isSubtraction ? -parseFloat(params[0]) : parseFloat(params[0]) || 0;
-      if (netIncrease > 0) {
-        const ruleErr = checkCustomerCreditLimitRules(db, customerId, netIncrease);
-        if (ruleErr) {
-          throw new Error(ruleErr);
         }
       }
     }

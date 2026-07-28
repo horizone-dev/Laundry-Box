@@ -1924,7 +1924,8 @@ function unwindOrderPayments(connection, {
   actualPaidAmt,
   convertToAdvance,
   fallbackMethod,
-  timestamp
+  timestamp,
+  discountAction = 'delete'
 }) {
   const linkedPayments = connection.prepare('SELECT * FROM payments WHERE orderId = ?').all(orderId);
   const allocations = connection.prepare(`
@@ -1943,7 +1944,15 @@ function unwindOrderPayments(connection, {
   if (convertToAdvance) {
     // System Auto rows only represent the use of an existing advance. Removing
     // their allocations makes the original advance available again.
-    connection.prepare("DELETE FROM payments WHERE orderId = ? AND method IN ('System Auto', 'Discount', 'Advance', 'Refund Advance')").run(orderId);
+    connection.prepare("DELETE FROM payments WHERE orderId = ? AND method IN ('System Auto', 'Advance', 'Refund Advance')").run(orderId);
+    connection.prepare("DELETE FROM payments WHERE orderId = ? AND method = 'Discount' AND (discountScope IS NULL OR discountScope != 'settlement')").run(orderId);
+    
+    if (discountAction === 'delete') {
+      connection.prepare("DELETE FROM payments WHERE orderId = ? AND method = 'Discount' AND discountScope = 'settlement'").run(orderId);
+    } else {
+      connection.prepare("UPDATE payments SET orderId = NULL, isSynced = 0, updatedAt = ? WHERE orderId = ? AND method = 'Discount' AND discountScope = 'settlement'").run(timestamp, orderId);
+    }
+
     connection.prepare('DELETE FROM advance_allocations WHERE orderId = ?').run(orderId);
 
     directPayments.forEach(payment => {
@@ -1986,6 +1995,13 @@ function unwindOrderPayments(connection, {
           .run(remaining, timestamp, source.id);
       }
     });
+
+    if (discountAction === 'delete') {
+      connection.prepare("DELETE FROM payments WHERE orderId = ? AND method = 'Discount' AND discountScope = 'settlement'").run(orderId);
+    } else {
+      connection.prepare("UPDATE payments SET orderId = NULL, isSynced = 0, updatedAt = ? WHERE orderId = ? AND method = 'Discount' AND discountScope = 'settlement'").run(timestamp, orderId);
+    }
+
     connection.prepare('DELETE FROM advance_allocations WHERE orderId = ?').run(orderId);
     connection.prepare('DELETE FROM payments WHERE orderId = ?').run(orderId);
   }
@@ -2176,7 +2192,7 @@ function softDeleteOrderLegacy({ orderId, deletedBy, deleteReason, deleteAction 
   return executeTransaction();
 }
 
-function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'refund', refundMethod = 'CASH' }) {
+function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'refund', refundMethod = 'CASH', discountAction = 'delete' }) {
   if (!db) throw new Error('Database not initialized');
 
   return db.transaction(() => {
@@ -2251,16 +2267,17 @@ function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'ref
       actualPaidAmt,
       convertToAdvance: !refundImmediately,
       fallbackMethod: order.paymentMethod,
-      timestamp: now
+      timestamp: now,
+      discountAction
     });
-    const discountReversalId = recordOrderDiscountReversal(db, {
+    const discountReversalId = discountAction === 'delete' ? recordOrderDiscountReversal(db, {
       orderId,
       shopId,
       billNumber: order.billNumber,
       amount: discountCredit,
       actor: deletedBy,
       timestamp: now
-    });
+    }) : null;
 
     let customerState = null;
     if (customerId && customerId !== 'Walk-in') {

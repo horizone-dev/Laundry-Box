@@ -383,6 +383,13 @@ export default function CustomerStatement() {
       const cleanRef = `${settings.invoicePrefix || '#'}${o.id}`;
 
       if (o.isDeleted) {
+        let discount = 0;
+        try {
+          const parsedPayments = typeof o.payments === 'string' ? JSON.parse(o.payments || '[]') : (o.payments || []);
+          const discP = parsedPayments.find(p => p.method === 'Discount');
+          if (discP) discount = parseFloat(discP.amount) || 0;
+        } catch (e) {}
+
         if (filterType !== 'Payments') {
           // 1. The Original Order Charge
           let itemSummary = '';
@@ -395,13 +402,6 @@ export default function CustomerStatement() {
 
           const totalAmt = parseFloat(o.totalAmount) || 0;
           const paidAmt = parseFloat(o.paidAmount) || 0;
-
-          let discount = 0;
-          try {
-            const parsedPayments = typeof o.payments === 'string' ? JSON.parse(o.payments || '[]') : (o.payments || []);
-            const discP = parsedPayments.find(p => p.method === 'Discount');
-            if (discP) discount = parseFloat(discP.amount) || 0;
-          } catch (e) {}
 
           // 1. The Original Order Charge (Debit)
           rows.push({
@@ -420,7 +420,8 @@ export default function CustomerStatement() {
 
           // 2. The Deletion Reversal
           const isRefunded = o.refundStatus === 'refund' || o.refundStatus === 'Refund' || o.refundStatus === 'Returned';
-          const deletionCredit = isRefunded ? (totalAmt - paidAmt) : totalAmt;
+          const cashPaidAmt = Math.max(0, paidAmt);
+          const deletionCredit = isRefunded ? (totalAmt - cashPaidAmt) : totalAmt;
           const deletionDescription = paidAmt > 0 
             ? (isRefunded ? `deleted ${o.id} to refund` : `deleted ${o.id} credited to adv`)
             : `deleted not paid`;
@@ -449,9 +450,14 @@ export default function CustomerStatement() {
             parsedPayments = [];
           }
 
-          const validParsedPayments = parsedPayments.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto');
+          const isRefunded = o.refundStatus === 'refund' || o.refundStatus === 'Refund' || o.refundStatus === 'Returned';
+          const validParsedPayments = parsedPayments.filter(p => {
+            if (p.method === 'Refund Advance' || p.method === 'System Auto' || p.method === 'Discount') return false;
+            if (p.method === 'Advance') return isRefunded;
+            return true;
+          });
           const deletedPaySum = validParsedPayments.reduce((sum, p) => sum + (p.method === 'Discount' ? 0 : (p.amount || 0)), 0);
-          const initialDeletedPay = (o.paidAmount || 0) - deletedPaySum;
+          const initialDeletedPay = Math.max(0, (o.paidAmount || 0) - deletedPaySum);
 
           if (Array.isArray(validParsedPayments)) {
             validParsedPayments.forEach(p => {
@@ -473,7 +479,7 @@ export default function CustomerStatement() {
           }
 
           // Fallback: if the order was paid via cash/card but payments JSON is empty
-          if (initialDeletedPay > 0.01 && validParsedPayments.length === 0) {
+          if (initialDeletedPay > 0.01 && parsedPayments.length === 0) {
             if (o.paymentMethod !== 'Advance' && o.paymentMethod !== 'Refund Advance' && o.paymentMethod !== 'System Auto') {
               rows.push({
                 date: o.createdAt,
@@ -600,7 +606,7 @@ export default function CustomerStatement() {
         description = p.discountScope === 'settlement' ? 'Settlement Discount' : 'Order Discount';
       } else if (p.isSettlementPayment) {
         if (p.methods.length > 1) finalPaymentMethod = 'Multipayment';
-        description = `Settlement Paid â€“ ${finalPaymentMethod || 'Cash'}`;
+        description = `Settlement Paid – ${finalPaymentMethod || 'Cash'}`;
       } else if (p.methods.length > 1) {
         description = 'Payment – Multipayment';
         finalPaymentMethod = 'Multipayment';
@@ -710,9 +716,7 @@ export default function CustomerStatement() {
         const rDate = normalizeDate(r.date);
         const beforeWindow = dFrom ? rDate < dFrom : false;
         if (beforeWindow) {
-          const creditToSubtract = r.type === 'payment'
-            ? (r.credit + (r.discountAmount || 0))
-            : r.credit;
+          const creditToSubtract = r.credit + (r.discountAmount || 0);
           openingBalanceForRange += r.debit - creditToSubtract;
         }
       });

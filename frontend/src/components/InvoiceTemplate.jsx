@@ -92,7 +92,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
   } catch (_) {
     orderPaymentBreakdown = {};
   }
-  const orderSettlementDiscount = parseFloat(orderPaymentBreakdown.orderDiscount) || 0;
+  const orderSettlementDiscount = parseFloat(orderPaymentBreakdown.orderDiscount || orderPaymentBreakdown.settlementDiscount || orderPaymentBreakdown.discount || 0) || 0;
   const advanceDeducted = (order.previousBalance || 0) < 0 ? Math.min(computedTotal, Math.abs(order.previousBalance)) : 0;
   const manualPaid = Math.max(0, (order.paidAmount || 0) - advanceDeducted - orderSettlementDiscount);
 

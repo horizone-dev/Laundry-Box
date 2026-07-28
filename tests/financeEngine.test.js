@@ -65,4 +65,10 @@ const overAllocated = state({
 });
 assert.equal(overAllocated.audit.overAllocatedSources.length, 1);
 
+// Negative opening balance representing an advance should not be double counted
+assert.equal(state({
+  customer: { id: 'C1', openingBalance: -1000 },
+  payments: [{ id: 'P1', orderId: null, amount: 1000, method: 'Opening Advance', status: 'SUCCESS' }]
+}).balance, -1000);
+
 console.log('financeEngine tests passed');

@@ -104,13 +104,8 @@ export default function Orders() {
         `SELECT p.id, p.customerId, p.orderId, p.shopId, p.amount, p.method, p.status, p.createdAt, p.paymentReference 
          FROM payments p 
          WHERE p.orderId = ?
-         UNION ALL
-         SELECT p.id, p.customerId, a.orderId, p.shopId, a.amountUsed as amount, 'Advance' as method, p.status, a.date as createdAt, p.paymentReference 
-         FROM payments p 
-         JOIN advance_allocations a ON a.paymentId = p.id 
-         WHERE a.orderId = ?
-         ORDER BY createdAt DESC`,
-        [selectedOrder.id, selectedOrder.id]
+         ORDER BY p.createdAt ASC`,
+        [selectedOrder.id]
       ).then(res => {
         if (res.success) {
           setOrderPayments(res.data || []);
@@ -269,6 +264,7 @@ export default function Orders() {
   const [deleteOption, setDeleteOption] = useState('refund'); // 'refund' or 'advance'
   const [refundMethod, setRefundMethod] = useState('Cash');
   const [deleteReason, setDeleteReason] = useState('');
+  const [discountDeleteAction, setDiscountDeleteAction] = useState('delete'); // 'delete' or 'keep'
 
   // Credit Limit Protection states
   const [showCreditWarning, setShowCreditWarning] = useState(false);
@@ -688,7 +684,8 @@ export default function Orders() {
           deletedBy: currentLoggedInUser,
           deleteReason: deleteReason || `Deleted by ${pinOwner}`,
           deleteAction: deleteOption, // 'refund' or 'advance'
-          refundMethod: refundMethod
+          refundMethod: refundMethod,
+          discountAction: discountDeleteAction
         });
 
         if (!softRes.success) {
@@ -1345,6 +1342,35 @@ export default function Orders() {
     }
   };
 
+  // Get delete breakdown
+  let settlementDiscount = 0;
+  let paidWithoutDiscount = 0;
+  if (orderToDelete) {
+    try {
+      if (orderToDelete.paymentBreakdown) {
+        const bd = typeof orderToDelete.paymentBreakdown === 'string'
+          ? JSON.parse(orderToDelete.paymentBreakdown)
+          : orderToDelete.paymentBreakdown;
+        settlementDiscount = parseFloat(bd?.settlementDiscount || 0) || 0;
+      }
+    } catch (e) {
+      console.warn("Failed to parse paymentBreakdown:", e);
+    }
+    const totalPaid = parseFloat(orderToDelete?.paidAmount || 0) || 0;
+    paidWithoutDiscount = Math.max(0, totalPaid - settlementDiscount);
+  }
+
+  // Parse settlement discount from selectedOrder paymentBreakdown for display in order view
+  let orderSettlementDiscount = 0;
+  try {
+    if (selectedOrder?.paymentBreakdown) {
+      const bd = typeof selectedOrder.paymentBreakdown === 'string'
+        ? JSON.parse(selectedOrder.paymentBreakdown)
+        : selectedOrder.paymentBreakdown;
+      orderSettlementDiscount = parseFloat(bd?.settlementDiscount || 0) || 0;
+    }
+  } catch (e) {}
+
   return (
     <div className={`${styles.ordersPage} ${selectedOrder ? styles.modalActive : ''}`}>
       {/* Header */}
@@ -1815,6 +1841,21 @@ export default function Orders() {
                               </div>
                             </div>
                           ))}
+                          {/* Settlement Discount row – read from paymentBreakdown, not orderId-linked */}
+                          {orderSettlementDiscount > 0.005 && (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem', background: '#FFFBEB', borderRadius: '8px', border: '1px solid #FDE68A' }}>
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#92400E' }}>Settlement Discount</div>
+                                <div style={{ fontSize: '0.72rem', color: '#B45309', marginTop: '0.15rem' }}>Applied during settlement</div>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <span style={{ fontWeight: 800, fontSize: '0.9rem', color: '#92400E' }}>
+                                  <CurrencySymbol size={11} /> {orderSettlementDiscount.toFixed(2)}
+                                </span>
+                                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#10B981', marginTop: '0.15rem' }}>SUCCESS</div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.85rem' }}>
@@ -2087,6 +2128,7 @@ export default function Orders() {
                       setOrderToDelete(selectedOrder);
                       setDeleteOption('refund');
                       setDeleteReason('');
+                      setDiscountDeleteAction('delete');
                       setShowPinModal(true);
                     }}
                   >
@@ -2235,7 +2277,25 @@ export default function Orders() {
 
               {orderToDelete && (orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus)) ? (
                 <div style={{ margin: '1rem 0', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: '#F8FAFC', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Choose Action for Payment (<CurrencySymbol size={11} />{(orderToDelete.paidAmount || 0).toFixed(2)}):</span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Payment Details:</span>
+                  <div style={{ fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', color: '#475569', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem', marginBottom: '0.25rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Paid Amount (Tender):</span>
+                      <span style={{ fontWeight: 600 }}><CurrencySymbol size={11} />{paidWithoutDiscount.toFixed(2)}</span>
+                    </div>
+                    {settlementDiscount > 0.005 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#B45309' }}>
+                        <span>Settlement Discount Applied:</span>
+                        <span style={{ fontWeight: 600 }}><CurrencySymbol size={11} />{settlementDiscount.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, paddingTop: '0.25rem', borderTop: '1px dashed #CBD5E1' }}>
+                      <span>Total Paid/Credit:</span>
+                      <span><CurrencySymbol size={11} />{(orderToDelete.paidAmount || 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Choose Action for Paid Amount (<CurrencySymbol size={11} />{paidWithoutDiscount.toFixed(2)}):</span>
 
                   {/* Option 1: Refund */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
@@ -2296,6 +2356,37 @@ export default function Orders() {
                         />
                         Convert Payment to Advance
                       </label>
+                    </div>
+                  )}
+
+                  {/* Settlement Discount action choice */}
+                  {settlementDiscount > 0.005 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid #E2E8F0', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Choose Action for Settlement Discount (<CurrencySymbol size={11} />{settlementDiscount.toFixed(2)}):</span>
+                      <div style={{ display: 'flex', gap: '1.25rem', marginTop: '0.1rem' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                          <input
+                            type="radio"
+                            name="discountDeleteAction"
+                            value="delete"
+                            checked={discountDeleteAction === 'delete'}
+                            onChange={() => setDiscountDeleteAction('delete')}
+                            style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                          />
+                          Delete/Revert Discount
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                          <input
+                            type="radio"
+                            name="discountDeleteAction"
+                            value="keep"
+                            checked={discountDeleteAction === 'keep'}
+                            onChange={() => setDiscountDeleteAction('keep')}
+                            style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                          />
+                          Move to Customer Advance
+                        </label>
+                      </div>
                     </div>
                   )}
                 </div>

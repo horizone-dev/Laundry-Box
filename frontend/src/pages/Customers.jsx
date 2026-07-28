@@ -128,9 +128,13 @@ function PaymentMethodSelect({ value, onChange, settings }) {
 // edited through the normal payment editor, otherwise the allocation can be
 // accidentally converted into a fresh payment method.
 const isAdvanceAllocation = (payment) => payment?.method === 'Advance' && Boolean(payment?.orderId);
-const getPaymentMethodLabel = (payment) => isAdvanceAllocation(payment)
-  ? 'Advance Applied'
-  : (payment?.method || '—');
+const getPaymentMethodLabel = (payment) => {
+  if (isAdvanceAllocation(payment)) return 'Advance Applied';
+  if (payment?.method === 'Discount') {
+    return getDiscountScope(payment) === 'settlement' ? 'Settlement Discount' : 'Order Discount';
+  }
+  return payment?.method || '—';
+};
 
 export default function Customers() {
   const navigate = useNavigate();
@@ -195,6 +199,8 @@ export default function Customers() {
   const [customerPayments, setCustomerPayments] = useState([]);
   const [customerDiscounts, setCustomerDiscounts] = useState([]);
   const [customerDeletedDiscounts, setCustomerDeletedDiscounts] = useState([]);
+  const [customerDeletedBills, setCustomerDeletedBills] = useState([]);
+  const [selectedPaymentAllocations, setSelectedPaymentAllocations] = useState([]);
   const [customerReturns, setCustomerReturns] = useState([]);
   const [selectedPaymentForAction, setSelectedPaymentForAction] = useState(null);
   const [showPaymentViewModal, setShowPaymentViewModal] = useState(false);
@@ -206,6 +212,7 @@ export default function Customers() {
   const [editPaymentAmount, setEditPaymentAmount] = useState('');
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinActionTarget, setPinActionTarget] = useState(null);
+  const [selectedCustomerIdForAction, setSelectedCustomerIdForAction] = useState(null);
   const [selectedBillForPayment, setSelectedBillForPayment] = useState(null);
   const [selectedInvoiceForView, setSelectedInvoiceForView] = useState(null);
   const [showRefundModal, setShowRefundModal] = useState(false);
@@ -718,7 +725,6 @@ export default function Customers() {
           });
 
           if (!result?.success) throw new Error(result?.error || 'Payment could not be posted.');
-
           setShowPaymentModal(false);
           setPaymentData({ amount: '', method: 'Cash' });
           setSelectedBillForPayment(null);
@@ -998,16 +1004,13 @@ export default function Customers() {
             await handleViewCustomerInsight(freshCustRes.data[0]);
           }
         }
-
-        setTimeout(() => {
-          alert(`Settlement complete! Remaining unallocated: ${totalRemaining.toFixed(2)}`);
-        }, 300);
       } catch (err) {
         console.error("Payment error:", err);
         alert("Payment failed. Please check console for details.");
       }
     }
   };
+
   const handleDeleteCustomer = async (id) => {
     if (window.electronAPI?.dbQuery) {
       try {
@@ -1035,10 +1038,24 @@ export default function Customers() {
           return;
         }
 
-        if (!window.confirm("Are you sure you want to delete this customer?")) return;
+        setSelectedCustomerIdForAction(id);
+        setPinActionTarget('delete_customer');
+        setShowPinModal(true);
+      } catch (err) {
+        console.error("Delete customer check error:", err);
+        alert("Failed to perform customer delete checks.");
+      }
+    }
+  };
 
+  const executeDeleteCustomer = async (id) => {
+    if (window.electronAPI?.dbQuery) {
+      try {
+        if (!window.confirm("Are you sure you want to delete this customer?")) return;
         await window.electronAPI.dbQuery('DELETE FROM customers WHERE id = ?', [id]);
+        setSelectedCustomerIdForAction(null);
         fetchCustomers();
+        alert("Customer deleted successfully!");
       } catch (err) {
         console.error("Delete customer error:", err);
         alert("Failed to delete customer.");
@@ -1108,7 +1125,7 @@ export default function Customers() {
     setManagerPinValue('');
     setShowPinModal(false);
 
-    if (isAdvanceAllocation(selectedPaymentForAction)) {
+    if (selectedPaymentForAction && isAdvanceAllocation(selectedPaymentForAction)) {
       alert('This is an advance amount already applied to an order. It cannot be edited or deleted as a normal payment.');
       return;
     }
@@ -1120,23 +1137,132 @@ export default function Customers() {
       // discount's scope from this payment's orderId: a customer settlement
       // can legitimately be allocated across one or more orders.
       setShowPaymentEditModal(true);
+    } else if (pinActionTarget === 'delete_customer' && selectedCustomerIdForAction) {
+      executeDeleteCustomer(selectedCustomerIdForAction);
+    } else if (pinActionTarget === 'edit_order_discount' && selectedBillForDiscount) {
+      setShowDiscountEditModal(true);
+    } else if (pinActionTarget === 'delete_order_discount' && selectedBillForDiscount) {
+      handleDeleteOrderDiscount(selectedBillForDiscount);
     }
   };
 
-  const handleViewPaymentDetails = (pay) => {
+  const getPaymentSourceInfo = (pay) => {
+    if (!pay) return '';
+    if (pay.orderId) {
+      return `Linked to active Order #${pay.orderId}`;
+    }
+    // Check if it was originally part of a deleted order
+    const origOrder = customerDeletedBills.find(db => {
+      try {
+        const snapshot = typeof db.payments === 'string' ? JSON.parse(db.payments || '[]') : (db.payments || []);
+        return snapshot.some(p => p.id === pay.id);
+      } catch (e) {
+        return false;
+      }
+    });
+    if (origOrder) {
+      return `Moved to Customer Advance (Originally applied to Order #${origOrder.id}, which was deleted)`;
+    }
+    return 'General Account / Standalone';
+  };
+
+  const handleViewPaymentDetails = async (pay) => {
     if (!pay) return;
     setSelectedPaymentForAction(pay);
     setShowPaymentViewModal(true);
+    setSelectedPaymentAllocations([]);
+
+    const ids = pay.paymentIds && pay.paymentIds.length > 0 ? pay.paymentIds : [pay.id];
+    
+    try {
+      const placeholders = ids.map(() => '?').join(',');
+      const payQuery = await window.electronAPI.dbQuery(
+        `SELECT id, orderId, amount, method, createdAt FROM payments WHERE id IN (${placeholders})`,
+        ids
+      );
+      const paymentsList = payQuery.success ? payQuery.data : [];
+
+      const allocations = [];
+
+      for (const p of paymentsList) {
+        const amt = parseFloat(p.amount) || 0;
+        let remaining = amt;
+
+        if (p.orderId) {
+          allocations.push({
+            paymentId: p.id,
+            target: `Order #${p.orderId}`,
+            amount: amt,
+            type: 'Order Payment',
+            date: p.createdAt
+          });
+          remaining = 0;
+          continue;
+        }
+
+        const allocQuery = await window.electronAPI.dbQuery(
+          `SELECT orderId, amountUsed, createdAt FROM advance_allocations WHERE paymentId = ?`,
+          [p.id]
+        );
+        const allocList = allocQuery.success ? allocQuery.data : [];
+        allocList.forEach(a => {
+          allocations.push({
+            paymentId: p.id,
+            target: `Order #${a.orderId}`,
+            amount: parseFloat(a.amountUsed) || 0,
+            type: 'Advance Allocation',
+            date: a.createdAt
+          });
+          remaining -= parseFloat(a.amountUsed) || 0;
+        });
+
+        const txnQuery = await window.electronAPI.dbQuery(
+          `SELECT description FROM account_transactions WHERE id = ? OR id = ?`,
+          [`FIN-TXN-${p.id}`, `FIN-TXN-DISC-${p.id}`]
+        );
+        const txnDesc = txnQuery.success && txnQuery.data[0] ? txnQuery.data[0].description : '';
+
+        if (txnDesc.toLowerCase().includes('opening/account') || txnDesc.toLowerCase().includes('settlement discount via') || txnDesc.toLowerCase().includes('settlement discount -')) {
+          if (remaining > 0.005) {
+            allocations.push({
+              paymentId: p.id,
+              target: 'Account Opening Balance',
+              amount: remaining,
+              type: 'Opening Balance Settlement',
+              date: p.createdAt
+            });
+            remaining = 0;
+          }
+        }
+
+        if (remaining > 0.005) {
+          allocations.push({
+            paymentId: p.id,
+            target: 'Customer Advance (Unused)',
+            amount: remaining,
+            type: 'Unused Advance Credit',
+            date: p.createdAt
+          });
+        }
+      }
+
+      setSelectedPaymentAllocations(allocations);
+    } catch (e) {
+      console.error('Error fetching payment allocations:', e);
+    }
   };
 
   const handleDeletePaymentRecord = async (paymentId) => {
-    const payment = customerPayments.find(p => p.id === paymentId);
+    let payment = customerPayments.find(p => p.id === paymentId);
+    if (!payment) {
+      payment = customerDiscounts.find(p => p.id === paymentId);
+    }
     if (!payment) return;
     if (isAdvanceAllocation(payment)) {
-      alert('This is an advance amount already applied to an order. It cannot be deleted as a normal payment.');
+      alert('This is an advance amount already applied to an order. It cannot be edited or deleted as a normal payment.');
       return;
     }
-    if (!window.confirm("Are you sure you want to delete this payment? The customer balance will increase.")) return;
+    if (!window.confirm("Are you sure you want to delete this payment/discount? The customer balance will increase.")) return;
 
     setLoading(true);
     const timestamp = getLocalISOString();
@@ -1559,6 +1685,76 @@ export default function Customers() {
     }
   };
 
+  const handleDeleteOrderDiscount = async (bill) => {
+    if (!bill || !window.electronAPI?.dbQuery) return;
+    if (!window.confirm("Are you sure you want to delete this discount? The order's due amount will increase.")) return;
+
+    try {
+      setLoading(true);
+      const timestamp = getLocalISOString();
+
+      let oldDisc = 0;
+      let breakdownObj = {};
+      try {
+        if (bill.paymentBreakdown) {
+          breakdownObj = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
+          oldDisc = parseFloat(breakdownObj.discount || breakdownObj.discountAmount || 0) || 0;
+        }
+      } catch (e) { }
+
+      const grossTotal = (bill.totalAmount || 0) + oldDisc;
+      const newNetTotal = grossTotal;
+      const newDue = Math.max(0, newNetTotal - (bill.paidAmount || 0));
+      const newPayStatus = newDue <= 0 ? 'Paid' : ((bill.paidAmount || 0) > 0 ? 'Partial' : 'Credit');
+
+      breakdownObj.discount = 0;
+      if (breakdownObj.orderDiscount) breakdownObj.orderDiscount = 0;
+      if (breakdownObj.settlementDiscount) breakdownObj.settlementDiscount = 0;
+      if (breakdownObj.discountAmount) breakdownObj.discountAmount = 0;
+      const newBreakdownStr = JSON.stringify(breakdownObj);
+
+      await window.electronAPI.dbQuery("BEGIN TRANSACTION");
+
+      await window.electronAPI.dbQuery(
+        `UPDATE orders SET totalAmount = ?, dueAmount = ?, paymentStatus = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
+        [newNetTotal, newDue, newPayStatus, newBreakdownStr, timestamp, bill.id]
+      );
+
+      // Delete associated discount transactions from account_transactions
+      const payDate = new Date(bill.createdAt);
+      const datePrefix = `${payDate.getFullYear()}-${String(payDate.getMonth() + 1).padStart(2, '0')}-${String(payDate.getDate()).padStart(2, '0')}`;
+      const txnRes = await window.electronAPI.dbQuery(
+        "SELECT id FROM account_transactions WHERE category = 'Discount Given' AND amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
+        [oldDisc, `%${selectedCustomer.name}%`, `${datePrefix}%`]
+      );
+      if (txnRes.success && txnRes.data.length > 0) {
+        await window.electronAPI.dbQuery("DELETE FROM account_transactions WHERE id = ?", [txnRes.data[0].id]);
+      }
+
+      await window.electronAPI.dbQuery("COMMIT");
+
+      if (window.electronAPI?.runDataHealer) {
+        await window.electronAPI.runDataHealer(selectedCustomer.id);
+      }
+
+      const freshCustRes = await window.electronAPI.dbQuery(
+        "SELECT c.*, (SELECT IFNULL(SUM(totalAmount), 0) FROM orders WHERE customerId = c.id AND status NOT IN ('Cancelled', 'Deleted')) as totalSales FROM customers c WHERE c.id = ?",
+        [selectedCustomer.id]
+      );
+      if (freshCustRes.success && freshCustRes.data.length > 0) {
+        await handleViewCustomerInsight(freshCustRes.data[0]);
+      }
+      fetchCustomers();
+      alert("Discount deleted successfully!");
+    } catch (err) {
+      await window.electronAPI.dbQuery("ROLLBACK");
+      console.error("Delete discount error:", err);
+      alert("Failed to delete discount.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   const handleViewCustomerInsight = async (customer) => {
     setLoading(true);
@@ -1614,6 +1810,7 @@ export default function Customers() {
             }));
         });
         setCustomerDeletedDiscounts(deletedDiscounts);
+        setCustomerDeletedBills(deletedBills);
 
         const combinedReturns = [
           ...bills.filter(b => b.status === 'Cancelled' || b.status === 'Deleted').map(b => ({
@@ -1720,7 +1917,7 @@ export default function Customers() {
             try {
               const bd = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
               if (bd) {
-                const val = parseFloat(bd.orderDiscount || bd.discount || bd.discountAmount || bd.discount_amount || bd.discountValue || 0);
+                const val = parseFloat(bd.orderDiscount || bd.discount || bd.discountAmount || bd.discount_amount || bd.discountValue || bd.settlementDiscount || 0);
                 if (!isNaN(val) && val > 0) return val;
               }
             } catch (e) { }
@@ -1745,8 +1942,9 @@ export default function Customers() {
         // has no corresponding discount receipt, avoiding double counting.
         let totalDiscount = discountPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
         bills.forEach(bill => {
+          if (bill.status === 'Deleted' || bill.status === 'Cancelled') return;
           const hasDiscountReceipt = discountPayments.some(
-            p => p.orderId === bill.id && getDiscountScope(p) === 'order'
+            p => p.orderId === bill.id
           );
           if (!hasDiscountReceipt) totalDiscount += getDiscountVal(bill);
         });
@@ -2615,7 +2813,7 @@ export default function Customers() {
                         // Keep this tab aligned with Customer Statement: a
                         // DISC receipt linked to an order is an order discount.
                         const receiptDiscount = customerDiscounts
-                          .filter(p => p.orderId === bill.id && getDiscountScope(p) === 'order')
+                          .filter(p => p.orderId === bill.id)
                           .reduce((sum, p) => sum + (p.amount || 0), 0);
                         if (receiptDiscount > 0) return receiptDiscount;
                         if (typeof bill.discount === 'number' && bill.discount > 0) return bill.discount;
@@ -2624,7 +2822,7 @@ export default function Customers() {
                           try {
                             const bd = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
                             if (bd) {
-                              const val = parseFloat(bd.orderDiscount || bd.discount || bd.discountAmount || bd.discount_amount || bd.discountValue || 0);
+                              const val = parseFloat(bd.orderDiscount || bd.discount || bd.discountAmount || bd.discount_amount || bd.discountValue || bd.settlementDiscount || 0);
                               if (!isNaN(val) && val > 0) return val;
                             }
                           } catch (e) { }
@@ -2661,23 +2859,45 @@ export default function Customers() {
                       // Settlement discounts have no invoice of their own and
                       // remain standalone. Order discounts are already shown
                       // in the linked order row above.
-                      const receiptDiscounts = customerDiscounts
-                        .filter(p => !(p.orderId && getDiscountScope(p) === 'order'))
-                        .map(p => ({
+                      const groupedDiscountsMap = {};
+                      customerDiscounts
+                        .filter(p => !p.orderId)
+                        .forEach(p => {
+                          const timestampKey = p.createdAt || p.id;
+                          const key = `settlement_disc:${timestampKey}`;
+                          if (!groupedDiscountsMap[key]) {
+                            groupedDiscountsMap[key] = {
+                              ...p,
+                              totalAmount: p.amount || 0,
+                              paymentIds: [p.id]
+                            };
+                          } else {
+                            groupedDiscountsMap[key].totalAmount += p.amount || 0;
+                            groupedDiscountsMap[key].paymentIds.push(p.id);
+                          }
+                        });
+
+                      const receiptDiscounts = Object.values(groupedDiscountsMap).map(p => ({
                         id: p.id,
                         date: p.createdAt,
                         type: 'receipt',
                         orderTotal: null,
-                        discount: p.amount,
+                        discount: p.totalAmount,
                         netPayable: null,
                         status: 'SUCCESS',
-                          payment: p
-                        }));
+                        payment: {
+                          ...p,
+                          amount: p.totalAmount,
+                          isSettlementGroup: p.paymentIds.length > 1
+                        }
+                      }));
 
                       // Deleted orders keep a snapshot of their original DISC
                       // receipts for audit history. These rows are deliberately
                       // excluded from totalDiscount and all financial balances.
-                      const deletedDiscountRows = customerDeletedDiscounts.map(p => ({
+                      const deletedDiscountRows = customerDeletedDiscounts
+                        .filter(p => !customerDiscounts.some(activeP => activeP.id === p.originalPaymentId))
+                        .map(p => ({
                         id: p.id,
                         date: p.deletedAt || p.createdAt,
                         type: 'deleted',
@@ -2728,13 +2948,11 @@ export default function Customers() {
                                     style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer' }}
                                     onClick={() => {
                                       let parsedItems = [];
+                                      let parsedBreakdown = null;
                                       try {
                                         if (bill.items && bill.items !== 'null') {
                                           parsedItems = typeof bill.items === 'string' ? JSON.parse(bill.items) : bill.items;
                                         }
-                                      } catch (e) { }
-                                      let parsedBreakdown = null;
-                                      try {
                                         if (bill.paymentBreakdown && bill.paymentBreakdown !== 'null') {
                                           parsedBreakdown = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
                                         }
@@ -2764,11 +2982,23 @@ export default function Customers() {
                                     onClick={() => {
                                       setSelectedBillForDiscount(bill);
                                       setEditDiscountValue(discVal.toString());
-                                      setShowDiscountEditModal(true);
+                                      setPinActionTarget('edit_order_discount');
+                                      setShowPinModal(true);
                                     }}
                                     title="Edit Discount"
                                   >
                                     <Edit2 size={16} />
+                                  </button>
+                                  <button
+                                    style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}
+                                    onClick={() => {
+                                      setSelectedBillForDiscount(bill);
+                                      setPinActionTarget('delete_order_discount');
+                                      setShowPinModal(true);
+                                    }}
+                                    title="Delete Discount"
+                                  >
+                                    <Trash2 size={16} />
                                   </button>
                                 </div>
                               </td>
@@ -2832,18 +3062,41 @@ export default function Customers() {
                                 </span>
                               </td>
                               <td style={{ textAlign: 'center' }}>
-                                <button
-                                  style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
-                                  onClick={() => {
-                                    setSelectedPaymentForAction(p);
-                                    setEditPaymentAmount(String(p.amount || 0));
-                                    setEditPaymentMethod('Discount');
-                                    setShowPaymentEditModal(true);
-                                  }}
-                                  title="Edit Discount"
-                                >
-                                  <Edit2 size={16} />
-                                </button>
+                                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}>
+                                  <button
+                                    style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer' }}
+                                    onClick={() => {
+                                      handleViewPaymentDetails(p);
+                                    }}
+                                    title="View Discount Details"
+                                  >
+                                    <Eye size={16} />
+                                  </button>
+                                  <button
+                                    style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
+                                    onClick={() => {
+                                      setSelectedPaymentForAction(p);
+                                      setEditPaymentAmount(String(p.amount || 0));
+                                      setEditPaymentMethod('Discount');
+                                      setPinActionTarget('edit_payment');
+                                      setShowPinModal(true);
+                                    }}
+                                    title="Edit Discount"
+                                  >
+                                    <Edit2 size={16} />
+                                  </button>
+                                  <button
+                                    style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}
+                                    onClick={() => {
+                                      setSelectedPaymentForAction(p);
+                                      setPinActionTarget('delete_payment');
+                                      setShowPinModal(true);
+                                    }}
+                                    title="Delete Discount"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -2991,25 +3244,82 @@ export default function Customers() {
                 </div>
                 <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentViewModal(false)} />
               </div>
-              <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Amount</span>
-                    <span style={{ fontWeight: 700, color: '#0F172A' }}><CurrencySymbol size={14} /> {(parseFloat(selectedPaymentForAction.amount) || 0).toFixed(2)}</span>
+              <div className={styles.modalContent} style={{ padding: '1.25rem 1.5rem' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                  <tbody>
+                    <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
+                      <td style={{ padding: '0.85rem 0.5rem', color: '#64748B', fontWeight: 600, width: '35%' }}>Amount</td>
+                      <td style={{ padding: '0.85rem 0.5rem', fontWeight: 800, color: '#0F172A', fontSize: '1.05rem' }}>
+                        <CurrencySymbol size={13} /> {(parseFloat(selectedPaymentForAction.amount) || 0).toFixed(2)}
+                      </td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
+                      <td style={{ padding: '0.85rem 0.5rem', color: '#64748B', fontWeight: 600 }}>Method</td>
+                      <td style={{ padding: '0.85rem 0.5rem' }}>
+                        <span style={{
+                          padding: '0.25rem 0.6rem',
+                          borderRadius: '6px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          background: selectedPaymentForAction.method === 'Discount' ? '#FEE2E2' : '#E0F2FE',
+                          color: selectedPaymentForAction.method === 'Discount' ? '#991B1B' : '#0369A1',
+                          display: 'inline-block'
+                        }}>
+                          {getPaymentMethodLabel(selectedPaymentForAction)}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
+                      <td style={{ padding: '0.85rem 0.5rem', color: '#64748B', fontWeight: 600 }}>Date & Time</td>
+                      <td style={{ padding: '0.85rem 0.5rem', fontWeight: 600, color: '#334155' }}>
+                        {formatDate(selectedPaymentForAction.createdAt)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: '0.85rem 0.5rem', color: '#64748B', fontWeight: 600, verticalAlign: 'top' }}>Usage / Link</td>
+                      <td style={{ padding: '0.85rem 0.5rem', fontWeight: 700, color: '#1E293B', lineHeight: 1.45 }}>
+                        {selectedPaymentForAction.isSettlementGroup ? (
+                          <div style={{ color: '#0369A1', background: '#F0F9FF', padding: '0.4rem 0.6rem', borderRadius: '6px', fontSize: '0.78rem', display: 'inline-block', border: '1px solid #BAE6FD' }}>
+                            Quick Settlement ({selectedPaymentForAction.paymentIds.length} allocations)
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: '0.85rem', color: selectedPaymentForAction.orderId ? '#0F172A' : '#475569' }}>
+                            {getPaymentSourceInfo(selectedPaymentForAction)}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                {selectedPaymentAllocations && selectedPaymentAllocations.length > 0 && (
+                  <div style={{ marginTop: '1.25rem' }}>
+                    <h4 style={{ fontSize: '0.82rem', color: '#475569', marginBottom: '0.5rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Usage / Allocation Breakdown
+                    </h4>
+                    <div style={{ background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0', overflow: 'hidden' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                        <thead>
+                          <tr style={{ background: '#F1F5F9', borderBottom: '1px solid #E2E8F0' }}>
+                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Applied To</th>
+                            <th style={{ textAlign: 'right', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Amount</th>
+                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Type</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedPaymentAllocations.map((alloc, idx) => (
+                            <tr key={idx} style={{ borderBottom: idx < selectedPaymentAllocations.length - 1 ? '1px solid #E2E8F0' : 'none' }}>
+                              <td style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: '#0F172A' }}>{alloc.target}</td>
+                              <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 700, color: '#0F172A' }}>
+                                <CurrencySymbol size={11} /> {alloc.amount.toFixed(2)}
+                              </td>
+                              <td style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.78rem' }}>{alloc.type}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Method</span>
-                    <span style={{ fontWeight: 700, color: '#0F172A' }}>{getPaymentMethodLabel(selectedPaymentForAction)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Date</span>
-                    <span style={{ fontWeight: 700, color: '#0F172A' }}>{formatDate(selectedPaymentForAction.createdAt)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
-                    <span style={{ color: '#64748B', fontWeight: 600 }}>Linked Order</span>
-                    <span style={{ fontWeight: 700, color: '#0F172A' }}>{selectedPaymentForAction.orderId || 'Settlement (Advance)'}</span>
-                  </div>
-                </div>
+                )}
               </div>
               <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end' }}>
                 <button
@@ -4326,30 +4636,83 @@ export default function Customers() {
               </div>
               <X size={24} className={styles.closeBtn} onClick={() => setShowPaymentViewModal(false)} />
             </div>
-            <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Amount</span>
-                  <span style={{ fontWeight: 700, color: '#0F172A' }}><CurrencySymbol size={14} /> {(parseFloat(selectedPaymentForAction.amount) || 0).toFixed(2)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Method</span>
-                    <span style={{ fontWeight: 700, color: '#0F172A' }}>{getPaymentMethodLabel(selectedPaymentForAction)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Date</span>
-                  <span style={{ fontWeight: 700, color: '#0F172A' }}>{formatDate(selectedPaymentForAction.createdAt)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem' }}>
-                  <span style={{ color: '#64748B', fontWeight: 600 }}>Linked Order</span>
-                  <span style={{ fontWeight: 700, color: '#0F172A' }}>
-                    {selectedPaymentForAction.isSettlementGroup
-                      ? `Quick Settlement (${selectedPaymentForAction.paymentIds.length} accounting allocations)`
-                      : (selectedPaymentForAction.orderId || 'Settlement (Advance)')}
-                  </span>
-                </div>
+             <div className={styles.modalContent} style={{ padding: '1.25rem 1.5rem' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                  <tbody>
+                    <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
+                      <td style={{ padding: '0.85rem 0.5rem', color: '#64748B', fontWeight: 600, width: '35%' }}>Amount</td>
+                      <td style={{ padding: '0.85rem 0.5rem', fontWeight: 800, color: '#0F172A', fontSize: '1.05rem' }}>
+                        <CurrencySymbol size={13} /> {(parseFloat(selectedPaymentForAction.amount) || 0).toFixed(2)}
+                      </td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
+                      <td style={{ padding: '0.85rem 0.5rem', color: '#64748B', fontWeight: 600 }}>Method</td>
+                      <td style={{ padding: '0.85rem 0.5rem' }}>
+                        <span style={{
+                          padding: '0.25rem 0.6rem',
+                          borderRadius: '6px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          background: selectedPaymentForAction.method === 'Discount' ? '#FEE2E2' : '#E0F2FE',
+                          color: selectedPaymentForAction.method === 'Discount' ? '#991B1B' : '#0369A1',
+                          display: 'inline-block'
+                        }}>
+                          {getPaymentMethodLabel(selectedPaymentForAction)}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
+                      <td style={{ padding: '0.85rem 0.5rem', color: '#64748B', fontWeight: 600 }}>Date & Time</td>
+                      <td style={{ padding: '0.85rem 0.5rem', fontWeight: 600, color: '#334155' }}>
+                        {formatDate(selectedPaymentForAction.createdAt)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: '0.85rem 0.5rem', color: '#64748B', fontWeight: 600, verticalAlign: 'top' }}>Usage / Link</td>
+                      <td style={{ padding: '0.85rem 0.5rem', fontWeight: 700, color: '#1E293B', lineHeight: 1.45 }}>
+                        {selectedPaymentForAction.isSettlementGroup ? (
+                          <div style={{ color: '#0369A1', background: '#F0F9FF', padding: '0.4rem 0.6rem', borderRadius: '6px', fontSize: '0.78rem', display: 'inline-block', border: '1px solid #BAE6FD' }}>
+                            Quick Settlement ({selectedPaymentForAction.paymentIds.length} allocations)
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: '0.85rem', color: selectedPaymentForAction.orderId ? '#0F172A' : '#475569' }}>
+                            {getPaymentSourceInfo(selectedPaymentForAction)}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                {selectedPaymentAllocations && selectedPaymentAllocations.length > 0 && (
+                  <div style={{ marginTop: '1.25rem' }}>
+                    <h4 style={{ fontSize: '0.82rem', color: '#475569', marginBottom: '0.5rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Usage / Allocation Breakdown
+                    </h4>
+                    <div style={{ background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0', overflow: 'hidden' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                        <thead>
+                          <tr style={{ background: '#F1F5F9', borderBottom: '1px solid #E2E8F0' }}>
+                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Applied To</th>
+                            <th style={{ textAlign: 'right', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Amount</th>
+                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Type</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedPaymentAllocations.map((alloc, idx) => (
+                            <tr key={idx} style={{ borderBottom: idx < selectedPaymentAllocations.length - 1 ? '1px solid #E2E8F0' : 'none' }}>
+                              <td style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: '#0F172A' }}>{alloc.target}</td>
+                              <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 700, color: '#0F172A' }}>
+                                <CurrencySymbol size={11} /> {alloc.amount.toFixed(2)}
+                              </td>
+                              <td style={{ padding: '0.5rem 0.75rem', color: '#64748B', fontSize: '0.78rem' }}>{alloc.type}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
             <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
