@@ -731,7 +731,6 @@ export default function MainLayout() {
         { path: '/reports/daily-tax', label: 'Daily Tax Report' },
         { path: '/reports/z-report', label: 'Z Report (Day Close)' },
         { path: '/reports/credit-overrides', label: 'Credit Overrides' },
-        { path: '/reports/financial-integrity', label: 'Financial Integrity', roleOnly: 'manager' },
         { path: '/reports/nomod-history', label: 'Nomod History' },
       ]
     },
