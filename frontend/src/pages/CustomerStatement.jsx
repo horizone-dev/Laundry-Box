@@ -19,6 +19,16 @@ export default function CustomerStatement() {
   const { customerId } = useParams();
   const navigate = useNavigate();
   const { settings, formatDate } = useSettings();
+  const formatDateTime = (dateVal) => {
+    if (!dateVal) return '';
+    const dateStr = formatDate(dateVal);
+    try {
+      const timeStr = new Date(dateVal).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return `${dateStr} ${timeStr}`;
+    } catch (e) {
+      return dateStr;
+    }
+  };
   const printRef = useRef(null);
   const statementRequestRef = useRef(0);
 
@@ -37,6 +47,8 @@ export default function CustomerStatement() {
   const [orders, setOrders] = useState([]);
   const [payments, setPayments] = useState([]);
   const [allocations, setAllocations] = useState([]);
+  const [cancellations, setCancellations] = useState([]);
+  const [refunds, setRefunds] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -306,11 +318,23 @@ export default function CustomerStatement() {
         [customerId]
       );
 
+      const cancellationsRes = await window.electronAPI.dbQuery(
+        `SELECT * FROM cancellations WHERE customerId = ? ORDER BY createdAt ASC`,
+        [customerId]
+      );
+
+      const refundsRes = await window.electronAPI.dbQuery(
+        `SELECT * FROM refunds WHERE customerId = ? ORDER BY createdAt ASC`,
+        [customerId]
+      );
+
       if (requestId !== statementRequestRef.current) return;
 
       setOrders(ordersRes.success ? ordersRes.data : []);
       setPayments(paymentsRes.success ? paymentsRes.data : []);
       setAllocations(allocationsRes.success ? allocationsRes.data : []);
+      setCancellations(cancellationsRes.success ? cancellationsRes.data : []);
+      setRefunds(refundsRes.success ? refundsRes.data : []);
     } catch (err) {
       if (requestId === statementRequestRef.current) {
         console.error('Statement fetch error:', err);
@@ -360,176 +384,60 @@ export default function CustomerStatement() {
       return Number.isFinite(timestamp) ? timestamp : 0;
     };
 
-    // When a deleted invoice is converted to advance, its genuine payment is
-    // moved to an unlinked receipt. The deleted-order snapshot remains the
-    // historical source for that receipt, so exclude the moved live copy to
-    // avoid counting one customer payment twice.
-    const movedDeletedPaymentIds = new Set();
-    orders.filter((order) => {
-      const status = String(order.refundStatus || '').toLowerCase();
-      return order.isDeleted && (status.includes('advance') || status === 'converted to advance');
-    }).forEach((order) => {
-      try {
-        const snapshot = typeof order.payments === 'string'
-          ? JSON.parse(order.payments || '[]')
-          : (order.payments || []);
-        snapshot.forEach((payment) => {
-          if (payment?.id) movedDeletedPaymentIds.add(payment.id);
-        });
-      } catch (_) { /* malformed legacy snapshot: keep its live payment visible */ }
-    });
-
     orders.forEach(o => {
       const cleanRef = `${settings.invoicePrefix || '#'}${o.id}`;
+      let discount = 0;
+      try {
+        if (o.paymentBreakdown) {
+          const breakdown = typeof o.paymentBreakdown === 'string'
+            ? JSON.parse(o.paymentBreakdown)
+            : o.paymentBreakdown;
+          discount = parseFloat(breakdown.discount || breakdown.discountAmount || breakdown.orderDiscount || 0) || 0;
+        }
+      } catch (e) { }
 
-      if (o.isDeleted) {
-        let discount = 0;
-        try {
-          const parsedPayments = typeof o.payments === 'string' ? JSON.parse(o.payments || '[]') : (o.payments || []);
-          const discP = parsedPayments.find(p => p.method === 'Discount');
-          if (discP) discount = parseFloat(discP.amount) || 0;
-        } catch (e) {}
+      let itemSummary = '';
+      try {
+        const itemsList = typeof o.items === 'string' ? JSON.parse(o.items || '[]') : (o.items || []);
+        if (Array.isArray(itemsList) && itemsList.length > 0) {
+          itemSummary = itemsList.map(item => `${item.qty || item.quantity || 1}x ${item.name}`).join(', ');
+        }
+      } catch (e) { }
 
-        if (filterType !== 'Payments') {
-          // 1. The Original Order Charge
-          let itemSummary = '';
-          try {
-            const itemsList = typeof o.items === 'string' ? JSON.parse(o.items || '[]') : (o.items || []);
-            if (Array.isArray(itemsList) && itemsList.length > 0) {
-              itemSummary = itemsList.map(item => `${item.qty || item.quantity || 1}x ${item.name}`).join(', ');
-            }
-          } catch (e) { }
+      const totalAmt = parseFloat(o.totalAmount) || 0;
 
-          const totalAmt = parseFloat(o.totalAmount) || 0;
-          const paidAmt = parseFloat(o.paidAmount) || 0;
+      if (filterType !== 'Payments') {
+        // 1. The Invoice Charge (Debit = Net Order Total)
+        const orderDesc = `Order ${cleanRef}` + (o.isDeleted ? ' (Deleted)' : '');
+        const orderSummary = itemSummary;
 
-          // 1. The Original Order Charge (Debit)
-          rows.push({
-            date: o.createdAt,
-            type: 'order',
-            ref: cleanRef,
-            description: `Order ${cleanRef} (Later Deleted)`,
-            itemsSummary: itemSummary,
-            debit: totalAmt + discount,
-            credit: 0,
-            discountAmount: discount,
-            status: 'Cancelled',
-            dueAmount: 0,
-            rawOrder: o
-          });
+        rows.push({
+          date: o.createdAt,
+          type: 'order',
+          ref: cleanRef,
+          description: orderDesc,
+          itemsSummary: orderSummary,
+          debit: totalAmt,
+          credit: 0,
+          discountAmount: discount,
+          status: o.isDeleted ? 'Deleted' : o.paymentStatus,
+          dueAmount: o.isDeleted ? 0 : o.dueAmount,
+          rawOrder: o
+        });
 
-          // 2. The Deletion Reversal
-          const isRefunded = o.refundStatus === 'refund' || o.refundStatus === 'Refund' || o.refundStatus === 'Returned';
-          const cashPaidAmt = Math.max(0, paidAmt);
-          const deletionCredit = isRefunded ? (totalAmt - cashPaidAmt) : totalAmt;
-          const deletionDescription = paidAmt > 0 
-            ? (isRefunded ? `deleted ${o.id} to refund` : `deleted ${o.id} credited to adv`)
-            : `deleted not paid`;
-
+        // 2. Cancellation Reversal (Credit)
+        if (o.isDeleted) {
           rows.push({
             date: o.updatedAt || o.createdAt,
-            type: 'deleted_order',
+            type: 'cancellation',
             ref: cleanRef,
-            description: deletionDescription,
-            itemsSummary: `Status: ${o.refundStatus || 'Deleted'}`,
+            description: `Deleted (Order ${cleanRef} Reversed)`,
+            itemsSummary: `Reason: ${o.deleteReason || 'Order Deleted'}`,
             debit: 0,
-            credit: deletionCredit,
+            credit: totalAmt,
             discountAmount: 0,
-            status: o.refundStatus || 'Deleted',
+            status: 'Deleted',
             dueAmount: 0,
-            rawOrder: o
-          });
-        }
-
-        if (filterType !== 'Orders') {
-          // Add original payments parsed from JSON (these are CREDIT rows — money came in from the customer)
-          let parsedPayments = [];
-          try {
-            parsedPayments = typeof o.payments === 'string' ? JSON.parse(o.payments || '[]') : (o.payments || []);
-          } catch (e) {
-            parsedPayments = [];
-          }
-
-          const isRefunded = o.refundStatus === 'refund' || o.refundStatus === 'Refund' || o.refundStatus === 'Returned';
-          const validParsedPayments = parsedPayments.filter(p => {
-            if (p.method === 'Refund Advance' || p.method === 'System Auto' || p.method === 'Discount') return false;
-            if (p.method === 'Advance') return isRefunded;
-            return true;
-          });
-          const deletedPaySum = validParsedPayments.reduce((sum, p) => sum + (p.method === 'Discount' ? 0 : (p.amount || 0)), 0);
-          const initialDeletedPay = Math.max(0, (o.paidAmount || 0) - deletedPaySum);
-
-          if (Array.isArray(validParsedPayments)) {
-            validParsedPayments.forEach(p => {
-              rows.push({
-                date: p.createdAt || o.createdAt,
-                type: 'payment',
-                ref: getReceiptNumber(p),
-                description: `Payment – ${p.method || 'Cash'}`,
-                itemsSummary: p.method === 'Discount'
-                  ? `Discount reversed because Order ${cleanRef} was deleted`
-                  : `Linked to Order ${cleanRef}`,
-                debit: 0,
-                credit: p.method === 'Discount' ? 0 : (p.amount || 0),
-                discountAmount: p.method === 'Discount' ? (p.amount || 0) : 0,
-                status: 'SUCCESS',
-                dueAmount: 0
-              });
-            });
-          }
-
-          // Fallback: if the order was paid via cash/card but payments JSON is empty
-          if (initialDeletedPay > 0.01 && parsedPayments.length === 0) {
-            if (o.paymentMethod !== 'Advance' && o.paymentMethod !== 'Refund Advance' && o.paymentMethod !== 'System Auto') {
-              rows.push({
-                date: o.createdAt,
-                type: 'payment',
-                ref: cleanRef,
-                description: `Payment – ${o.paymentMethod || 'Cash'}`,
-                itemsSummary: `Linked to Order ${cleanRef}`,
-                debit: 0,
-                credit: initialDeletedPay,
-                status: 'SUCCESS',
-                dueAmount: 0
-              });
-            }
-          }
-        }
-      } else {
-        // Active Order
-        if (filterType !== 'Payments') {
-          const displayDesc = `Order ${settings.invoicePrefix || ''}${o.id}`;
-          let itemSummary = '';
-          try {
-            const itemsList = typeof o.items === 'string' ? JSON.parse(o.items || '[]') : (o.items || []);
-            if (Array.isArray(itemsList) && itemsList.length > 0) {
-              itemSummary = itemsList.map(item => `${item.qty || item.quantity || 1}x ${item.name}`).join(', ');
-            }
-          } catch (e) {
-            console.error("Failed to parse items for ledger row", e);
-          }
-
-          let discount = 0;
-          try {
-            if (o.paymentBreakdown) {
-              const breakdown = typeof o.paymentBreakdown === 'string'
-                ? JSON.parse(o.paymentBreakdown)
-                : o.paymentBreakdown;
-              discount = parseFloat(breakdown.discount || breakdown.discountAmount || 0) || 0;
-            }
-          } catch (e) { }
-
-          rows.push({
-            date: o.createdAt,
-            type: 'order',
-            ref: cleanRef,
-            description: displayDesc,
-            discountAmount: discount,
-            itemsSummary: itemSummary,
-            debit: o.totalAmount + discount,
-            credit: 0,
-            status: o.paymentStatus,
-            dueAmount: o.dueAmount,
             rawOrder: o
           });
         }
@@ -537,28 +445,25 @@ export default function CustomerStatement() {
     });
 
     const groupedPaymentsMap = {};
-    const statementPayments = payments.filter((payment) => !movedDeletedPaymentIds.has(payment.id));
+    const statementPayments = payments;
     statementPayments.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto').forEach(p => {
       const discountScope = p.method === 'Discount' ? getDiscountScope(p) : 'order';
-      // A customer-level settlement can be allocated across several invoices
-      // internally. Keep its exact shared timestamp so all of those DISC rows
-      // are displayed as one settlement discount, not order discounts.
       const timestampKey = p.method === 'Discount' && discountScope === 'settlement'
         ? (p.createdAt || p.id)
         : (p.createdAt ? p.createdAt.substring(0, 19) : p.id);
       const referencePrefix = String(p.paymentReference || p.id || '').split('-')[0] || 'PAY';
       const isSettlementPayment = p.method !== 'Discount'
         && ['SET', 'ACC'].includes(referencePrefix);
-      // One customer settlement can be internally allocated between opening
-      // balance, invoices and advance in the same transaction.  It is still
-      // one payment from the customer, so show one payment row per method and
-      // timestamp. Discounts remain separate accounting rows.
       const purposeKey = p.method === 'Discount'
         ? (discountScope === 'settlement'
-          ? 'settlement-discount'
+          ? (p.amount < 0 ? `reverse-settlement-discount:${p.id}` : 'settlement-discount')
           : `discount:${p.paymentReference || p.id}`)
         : `payment:${p.method || referencePrefix}`;
       const key = `${timestampKey}:${purposeKey}`;
+      
+      const isReverseDiscount = p.method === 'Discount' && p.amount < 0;
+      const amtVal = parseFloat(p.amount) || 0;
+
       if (!groupedPaymentsMap[key]) {
         groupedPaymentsMap[key] = {
           date: p.createdAt,
@@ -566,9 +471,9 @@ export default function CustomerStatement() {
           ref: getReceiptNumber(p),
           internalReference: p.paymentReference || p.id,
           description: `Payment – ${p.method || 'Cash'}`,
-          debit: 0,
-          credit: p.method === 'Discount' ? 0 : (p.amount || 0),
-          discountAmount: p.method === 'Discount' ? (p.amount || 0) : 0,
+          debit: isReverseDiscount ? Math.abs(amtVal) : 0,
+          credit: isReverseDiscount ? 0 : amtVal,
+          discountAmount: 0,
           status: 'SUCCESS',
           dueAmount: 0,
           orderId: p.orderId,
@@ -580,10 +485,10 @@ export default function CustomerStatement() {
           receiptCount: 1
         };
       } else {
-        if (p.method === 'Discount') {
-          groupedPaymentsMap[key].discountAmount += p.amount || 0;
+        if (isReverseDiscount) {
+          groupedPaymentsMap[key].debit += Math.abs(amtVal);
         } else {
-          groupedPaymentsMap[key].credit += p.amount || 0;
+          groupedPaymentsMap[key].credit += amtVal;
         }
         if (p.orderId && !groupedPaymentsMap[key].orderIds.includes(p.orderId)) {
           groupedPaymentsMap[key].orderIds.push(p.orderId);
@@ -603,7 +508,11 @@ export default function CustomerStatement() {
       let description = p.description;
       let finalPaymentMethod = p.paymentMethod;
       if (p.paymentMethod === 'Discount') {
-        description = p.discountScope === 'settlement' ? 'Settlement Discount' : 'Order Discount';
+        if (p.debit > 0) {
+          description = 'Reverse Settlement Discount';
+        } else {
+          description = p.discountScope === 'settlement' ? 'Settlement Discount' : 'Order Discount';
+        }
       } else if (p.isSettlementPayment) {
         if (p.methods.length > 1) finalPaymentMethod = 'Multipayment';
         description = `Settlement Paid – ${finalPaymentMethod || 'Cash'}`;
@@ -615,9 +524,13 @@ export default function CustomerStatement() {
       if (p.paymentMethod === 'Advance') {
         itemsSummary = `Advance Consumed for Order ${cleanOrderRef}`;
       } else if (p.paymentMethod === 'Discount') {
-        itemsSummary = p.discountScope === 'settlement'
-          ? 'Settlement discount'
-          : `Order discount for ${cleanOrderRef}`;
+        if (p.debit > 0) {
+          itemsSummary = `Reversed settlement discount for ${cleanOrderRef || 'settlement'}`;
+        } else {
+          itemsSummary = p.discountScope === 'settlement'
+            ? 'Settlement discount'
+            : `Order discount for ${cleanOrderRef}`;
+        }
       } else if (p.isSettlementPayment) {
         itemsSummary = 'Customer settlement';
       } else if (p.orderIds.length > 1) {
@@ -637,9 +550,6 @@ export default function CustomerStatement() {
         description,
         paymentMethod: finalPaymentMethod,
         itemsSummary,
-        // Keep the first real RV reference as the display reference. The
-        // amount is the full customer payment even when legacy data stored
-        // multiple internal allocation rows.
         ref: p.ref
       };
     });
@@ -689,6 +599,24 @@ export default function CustomerStatement() {
 
     allPayments.forEach(p => rows.push(p));
 
+    // PUSH REFUNDS
+    if (filterType !== 'Orders') {
+      refunds.forEach(r => {
+        const cleanOrderRef = r.orderId ? `${settings.invoicePrefix || '#'}${r.orderId}` : '';
+        rows.push({
+          date: r.createdAt,
+          type: 'refund',
+          ref: r.id || 'REFUND',
+          description: `Refund Voucher (${r.refundMethod || 'Cash'})`,
+          itemsSummary: r.reason ? `${r.reason}${cleanOrderRef ? ` for ${cleanOrderRef}` : ''}` : `Refund for ${cleanOrderRef}`,
+          debit: r.amount || 0,
+          credit: 0,
+          status: 'SUCCESS',
+          dueAmount: 0
+        });
+      });
+    }
+
      /* Sort chronologically (ascending) first to calculate running balance */
      rows.sort((a, b) => {
        if (a.type === 'opening_balance' && b.type !== 'opening_balance') return -1;
@@ -716,8 +644,7 @@ export default function CustomerStatement() {
         const rDate = normalizeDate(r.date);
         const beforeWindow = dFrom ? rDate < dFrom : false;
         if (beforeWindow) {
-          const creditToSubtract = r.credit + (r.discountAmount || 0);
-          openingBalanceForRange += r.debit - creditToSubtract;
+          openingBalanceForRange += r.debit - r.credit;
         }
       });
 
@@ -734,8 +661,7 @@ export default function CustomerStatement() {
     let balance = openingBalanceForRange;
     finalRows.forEach(row => {
       const priorBalance = balance;
-      const creditToSubtract = row.credit + (row.discountAmount || 0);
-      balance += row.debit - creditToSubtract;
+      balance += row.debit - row.credit;
       row.runningBalance = balance;
 
       if (row.type === 'payment' && !row.orderId && row.itemsSummary === 'Advance Deposit') {
@@ -771,7 +697,7 @@ export default function CustomerStatement() {
 
     const computedPaid = allCustomerPayments.reduce((s, p) => s + (p.credit || 0), 0);
     return { filteredRows: finalRows, totalBalance: balance, totalPaid: computedPaid };
-  }, [orders, payments, allocations, filterType, sortOrder, dateFrom, dateTo, dateRange, selectedCustomer]);
+  }, [orders, payments, allocations, cancellations, refunds, filterType, sortOrder, dateFrom, dateTo, dateRange, selectedCustomer]);
 
   const paginatedLedgerRows = React.useMemo(() => {
     const startIndex = (currentPage - 1) * 20;
@@ -789,7 +715,7 @@ export default function CustomerStatement() {
   const exportCSV = () => {
     const headers = ['Date', 'Reference', 'Description', 'Debit (Charged)', 'Credit (Paid)', 'Running Balance'];
     const rows = ledgerRows.filteredRows.map(r => [
-      formatDate(r.date),
+      formatDateTime(r.date),
       r.ref,
       `"${r.description}${r.itemsSummary ? ` (${r.itemsSummary})` : ''}"`,
       r.debit.toFixed(2),
@@ -1060,7 +986,6 @@ export default function CustomerStatement() {
                     <th>REFERENCE</th>
                     <th>DESCRIPTION</th>
                     <th className={styles.numCol}>DEBIT</th>
-                    <th className={styles.numCol}>DISCOUNT</th>
                     <th className={styles.numCol}>CREDIT</th>
                     <th className={styles.numCol}>BALANCE</th>
                   </tr>
@@ -1076,7 +1001,7 @@ export default function CustomerStatement() {
                         <div className={styles.refCell}>
                           {row.type === 'order'
                             ? <Package size={13} color="#2563EB" />
-                            : row.type === 'deleted_order'
+                            : row.type === 'deleted_order' || row.type === 'cancellation'
                               ? <X size={13} color="#EF4444" />
                               : row.type === 'refund'
                                 ? <RotateCcw size={13} color="#F59E0B" />
@@ -1084,7 +1009,7 @@ export default function CustomerStatement() {
                                   ? <TrendingUp size={13} color="#7C3AED" />
                                   : <Wallet size={13} color="#10B981" />
                           }
-                          {['order', 'deleted_order', 'refund'].includes(row.type) ? (
+                          {['order', 'deleted_order', 'cancellation', 'refund'].includes(row.type) ? (
                             <span
                               className={`${styles.refText} ${styles.refLink}`}
                               onClick={() => {
@@ -1110,15 +1035,8 @@ export default function CustomerStatement() {
                       <td className={`${styles.numCol} ${styles.debitCell}`}>
                         {row.debit > 0 ? <><CurrencySymbol size={11} /> {row.debit.toFixed(2)}</> : <span className={styles.dash}>—</span>}
                       </td>
-                      <td className={`${styles.numCol} ${styles.discountCell}`} style={{ color: 'var(--danger)' }}>
-                        {row.discountAmount && row.discountAmount > 0 ? (
-                          <><CurrencySymbol size={11} /> {row.discountAmount.toFixed(2)}</>
-                        ) : (
-                          <span className={styles.dash}>—</span>
-                        )}
-                      </td>
                       <td className={`${styles.numCol} ${styles.creditCell}`}>
-                        {row.paymentMethod !== 'Discount' && row.credit > 0 ? <><CurrencySymbol size={11} /> {row.credit.toFixed(2)}</> : <span className={styles.dash}>—</span>}
+                        {row.credit > 0 ? <><CurrencySymbol size={11} /> {row.credit.toFixed(2)}</> : <span className={styles.dash}>—</span>}
                       </td>
                       <td className={`${styles.numCol} ${row.runningBalance < 0 ? styles.balanceAdvNum : row.runningBalance > 0 ? styles.balanceDueNum : styles.balanceZero}`}>
                         <CurrencySymbol size={11} /> {Math.abs(row.runningBalance).toFixed(2)}
@@ -1134,11 +1052,8 @@ export default function CustomerStatement() {
                     <td className={`${styles.numCol} ${styles.debitCell} ${styles.totalsNum}`}>
                       <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + r.debit, 0).toFixed(2)}
                     </td>
-                    <td className={`${styles.numCol} ${styles.discountCell} ${styles.totalsNum}`} style={{ color: 'var(--danger)' }}>
-                      <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + (r.discountAmount || 0), 0).toFixed(2)}
-                    </td>
                     <td className={`${styles.numCol} ${styles.creditCell} ${styles.totalsNum}`}>
-                      <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + (r.paymentMethod === 'Discount' ? 0 : r.credit), 0).toFixed(2)}
+                      <CurrencySymbol size={12} /> {ledgerRows.filteredRows.reduce((s, r) => s + r.credit, 0).toFixed(2)}
                     </td>
                     <td className={`${styles.numCol} ${styles.totalsNum} ${ledgerRows.totalBalance > 0
                         ? styles.balanceDueNum

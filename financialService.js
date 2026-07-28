@@ -38,8 +38,9 @@ function getFinanceState(db, customerId) {
     WHERE p.customerId = ?
   `).all(customerId);
   const deletedOrders = db.prepare('SELECT * FROM deleted_orders WHERE customerId = ?').all(customerId);
+  const refunds = db.prepare('SELECT * FROM refunds WHERE customerId = ?').all(customerId);
 
-  return calculateCustomerFinancialState({ customer, orders, payments, allocations, deletedOrders });
+  return calculateCustomerFinancialState({ customer, orders, payments, allocations, deletedOrders, refunds });
 }
 
 function getNextFinanceReference(db, type = 'PAY') {
@@ -266,6 +267,13 @@ function settleCustomerBalance(db, {
           VALUES (?, ?, ?, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?, ?)
         `).run(reference.paymentId, customerId, order.id, shopId, appliedAmount, method, timestamp, timestamp, reference.paymentReference, method === 'Discount' ? discountScope : null);
 
+        if (method === 'Discount' && discountScope === 'settlement') {
+          db.prepare(`
+            INSERT INTO settlement_discounts (id, shopId, customerId, orderId, amount, createdAt, updatedAt, paymentReference)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(reference.paymentId, shopId, customerId, order.id, appliedAmount, timestamp, timestamp, reference.paymentReference);
+        }
+
         const accountTransactionId = reference.accountTransactionId;
         db.prepare(`
           INSERT INTO account_transactions
@@ -319,6 +327,13 @@ function settleCustomerBalance(db, {
           (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference, discountScope)
         VALUES (?, ?, NULL, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?, ?)
       `).run(reference.paymentId, customerId, shopId, amount, method, timestamp, timestamp, reference.paymentReference, discountScope);
+
+      if (method === 'Discount') {
+        db.prepare(`
+          INSERT INTO settlement_discounts (id, shopId, customerId, orderId, amount, createdAt, updatedAt, paymentReference)
+          VALUES (?, ?, ?, NULL, ?, ?, ?, ?)
+        `).run(reference.paymentId, shopId, customerId, amount, timestamp, timestamp, reference.paymentReference);
+      }
       db.prepare(`
         INSERT INTO account_transactions
           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)
@@ -343,46 +358,31 @@ function settleCustomerBalance(db, {
       transactionIds.push(accountTransactionId);
     };
 
-    // A selected invoice gets an order discount. A customer/quick settlement
-    // gets a settlement discount, kept distinct in the receipt reference.
+    // A selected invoice gets an order discount attached to that order.
+    // A customer-level settlement discount is posted as an unlinked account-level credit
+    // that reduces total customer due without mutating individual order dueAmounts.
     const discountScope = selectedOrder ? 'order' : 'settlement';
-    let remainingDiscount = applyCredit('Discount', discountAmount, null, discountScope);
+    let remainingDiscount = discountAmount;
     let settlementDiscountApplied = 0;
-    if (remainingDiscount > EPSILON && discountScope === 'settlement' && accountDueRemaining > EPSILON) {
-      const accountDiscount = roundCurrency(Math.min(remainingDiscount, accountDueRemaining));
+
+    if (discountAmount > EPSILON && discountScope === 'settlement') {
       postUnlinkedReceipt({
         method: 'Discount',
-        amount: accountDiscount,
+        amount: roundCurrency(discountAmount),
         bankAccountId: null,
         referenceType: 'SETDISC',
         category: 'Discount Given',
-        receiptDescription: 'Settlement discount',
+        receiptDescription: 'Settlement discount (Account level)',
         accountType: 'CASH',
         transactionType: 'EXPENSE',
         icon: 'Percent'
       });
-      accountDueRemaining = roundCurrency(accountDueRemaining - accountDiscount);
-      settlementDiscountApplied = accountDiscount;
-      remainingDiscount = roundCurrency(remainingDiscount - accountDiscount);
-    }
-    if (remainingDiscount > EPSILON && discountScope === 'settlement') {
-      // A Quick Settle discount may be entered against the payment amount even
-      // when there is no outstanding invoice. Keep that remainder as a clear
-      // settlement-discount credit; it is never attached to an invoice.
-      postUnlinkedReceipt({
-        method: 'Discount',
-        amount: remainingDiscount,
-        bankAccountId: null,
-        referenceType: 'SETDISC',
-        category: 'Discount Given',
-        receiptDescription: 'Settlement discount credit',
-        accountType: 'CASH',
-        transactionType: 'EXPENSE',
-        icon: 'Percent'
-      });
-      settlementDiscountApplied = roundCurrency(settlementDiscountApplied + remainingDiscount);
+      settlementDiscountApplied = roundCurrency(discountAmount);
       remainingDiscount = 0;
+    } else if (discountAmount > EPSILON && discountScope === 'order') {
+      remainingDiscount = applyCredit('Discount', discountAmount, null, 'order');
     }
+
     if (remainingDiscount > EPSILON) {
       throw new Error('Discount could not be applied to the selected invoice');
     }

@@ -2244,171 +2244,184 @@ export default function Orders() {
           </div>
         </div>
       )}
-      {/* PIN Verification Modal */}
+      {/* PIN Verification & Order Deletion Modal */}
       {showPinModal && (
         <div className={styles.modalOverlay}>
-          <div className={styles.statusModal} style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader} style={{ backgroundColor: '#EF4444' }}>
-              <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'white', margin: 0 }}>
-                <Trash2 size={20} /> Confirm Deletion
+          <div className={styles.statusModal} style={{ maxWidth: '440px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader} style={{ backgroundColor: '#DC2626', padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: '#FFFFFF', margin: 0, fontSize: '1.15rem', fontWeight: 700 }}>
+                <Trash2 size={22} color="#FFFFFF" /> Confirm Order Deletion
               </h2>
-              <X size={24} className={styles.closeBtn} onClick={() => { setShowPinModal(false); setPinValue(''); setPinError(''); }} />
+              <X size={22} style={{ cursor: 'pointer', color: '#FFFFFF', opacity: 0.9 }} onClick={() => { setShowPinModal(false); setPinValue(''); setPinError(''); }} />
             </div>
-            <div className={styles.modalBody}>
-              <p style={{ marginBottom: '1.2rem', color: '#64748B', fontSize: '0.9rem', lineHeight: '1.4' }}>
-                You are deleting order <strong>{orderToDelete?.id}</strong>. This action is permanent and cannot be undone.
-              </p>
+            <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
+              <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', padding: '0.85rem 1rem', borderRadius: '10px', marginBottom: '1.25rem', textAlign: 'left' }}>
+                <p style={{ margin: 0, color: '#991B1B', fontSize: '0.88rem', fontWeight: 600, lineHeight: 1.4 }}>
+                  Deleting order <span style={{ textDecoration: 'underline', fontWeight: 700 }}>#{orderToDelete?.id}</span>.
+                </p>
+                <p style={{ margin: '0.2rem 0 0 0', color: '#7F1D1D', fontSize: '0.78rem' }}>
+                  This will record a cancellation reversal in the ledger and update inventory/accounts.
+                </p>
+              </div>
 
-              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '0.5rem' }}>
-                Enter Manager/Admin Access PIN
-              </label>
-              <input
-                type="password"
-                maxLength={4}
-                value={pinValue}
-                onChange={(e) => {
-                  const val = e.target.value.replace(/\D/g, ''); // only digits
-                  setPinValue(val);
-                }}
-                placeholder="••••"
-                className={`${styles.pinInput} ${pinError ? styles.pinInputError : ''}`}
-                autoFocus
-              />
+              <div style={{ marginBottom: '1.25rem', textAlign: 'left' }}>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#374151', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Manager / Admin Access PIN
+                </label>
+                <input
+                  type="password"
+                  maxLength={4}
+                  value={pinValue}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '');
+                    setPinValue(val);
+                  }}
+                  placeholder="••••"
+                  className={`${styles.pinInput} ${pinError ? styles.pinInputError : ''}`}
+                  style={{ width: '100%', fontSize: '1.4rem', letterSpacing: '0.5rem', textAlign: 'center', padding: '0.6rem', borderRadius: '8px', border: '1.5px solid #CBD5E1' }}
+                  autoFocus
+                />
+              </div>
 
               {orderToDelete && (orderToDelete.paidAmount > 0 || ['Paid', 'Partial'].includes(orderToDelete.paymentStatus)) ? (
-                <div style={{ margin: '1rem 0', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: '#F8FAFC', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Payment Details:</span>
-                  <div style={{ fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', color: '#475569', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.5rem', marginBottom: '0.25rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: '#F8FAFC', padding: '1rem', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
+                  {/* Summary row */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.84rem', color: '#334155', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.65rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>Paid Amount (Tender):</span>
-                      <span style={{ fontWeight: 600 }}><CurrencySymbol size={11} />{paidWithoutDiscount.toFixed(2)}</span>
+                      <span style={{ fontWeight: 700, color: '#0F172A' }}><CurrencySymbol size={12} />{paidWithoutDiscount.toFixed(2)}</span>
                     </div>
                     {settlementDiscount > 0.005 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#B45309' }}>
-                        <span>Settlement Discount Applied:</span>
-                        <span style={{ fontWeight: 600 }}><CurrencySymbol size={11} />{settlementDiscount.toFixed(2)}</span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#D97706' }}>
+                        <span>Settlement Discount:</span>
+                        <span style={{ fontWeight: 700 }}><CurrencySymbol size={12} />{settlementDiscount.toFixed(2)}</span>
                       </div>
                     )}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, paddingTop: '0.25rem', borderTop: '1px dashed #CBD5E1' }}>
-                      <span>Total Paid/Credit:</span>
-                      <span><CurrencySymbol size={11} />{(orderToDelete.paidAmount || 0).toFixed(2)}</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '0.9rem', color: '#1E293B', paddingTop: '0.35rem', borderTop: '1px dashed #CBD5E1', marginTop: '0.2rem' }}>
+                      <span>Total Account Credit:</span>
+                      <span style={{ color: '#2563EB' }}><CurrencySymbol size={13} />{(orderToDelete.paidAmount || 0).toFixed(2)}</span>
                     </div>
                   </div>
 
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Choose Action for Paid Amount (<CurrencySymbol size={11} />{paidWithoutDiscount.toFixed(2)}):</span>
+                  {/* Paid Amount Action Selection */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Paid Amount Action (<CurrencySymbol size={11} />{paidWithoutDiscount.toFixed(2)})
+                    </span>
 
-                  {/* Option 1: Refund */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
-                      <input
-                        type="radio"
-                        name="deleteOption"
-                        value="refund"
-                        checked={deleteOption === 'refund'}
-                        onChange={() => setDeleteOption('refund')}
-                        style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                      />
-                      Refund Customer
-                    </label>
+                    {/* Card 1: Refund */}
+                    <div
+                      onClick={() => setDeleteOption('refund')}
+                      style={{
+                        padding: '0.75rem 0.85rem',
+                        borderRadius: '10px',
+                        border: deleteOption === 'refund' ? '2px solid #2563EB' : '1px solid #CBD5E1',
+                        background: deleteOption === 'refund' ? '#EFF6FF' : '#FFFFFF',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <input
+                          type="radio"
+                          name="deleteOption"
+                          value="refund"
+                          checked={deleteOption === 'refund'}
+                          onChange={() => setDeleteOption('refund')}
+                          style={{ width: '17px', height: '17px', accentColor: '#2563EB', cursor: 'pointer' }}
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#1E293B' }}>Refund Customer</span>
+                          <span style={{ fontSize: '0.76rem', color: '#64748B' }}>Issue payout & log refund voucher in cash/bank ledger</span>
+                        </div>
+                      </div>
 
-                    {deleteOption === 'refund' && (
-                      <div style={{ paddingLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.2rem' }}>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748B' }}>Select Refund Account:</span>
-                        <div style={{ display: 'flex', gap: '1.25rem' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                      {deleteOption === 'refund' && (
+                        <div style={{ marginTop: '0.65rem', paddingLeft: '1.75rem', borderTop: '1px solid #DBEAFE', paddingTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                          <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#1E40AF' }}>Payout Account:</span>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', fontWeight: 600, color: '#1E293B', cursor: 'pointer' }}>
                             <input
                               type="radio"
                               name="refundMethod"
                               value="Cash"
                               checked={refundMethod === 'Cash'}
                               onChange={() => setRefundMethod('Cash')}
-                              style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                              style={{ width: '15px', height: '15px', accentColor: '#2563EB' }}
                             />
                             Cash Account
                           </label>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', fontWeight: 600, color: '#1E293B', cursor: 'pointer' }}>
                             <input
                               type="radio"
                               name="refundMethod"
                               value="Bank"
                               checked={refundMethod === 'Bank'}
                               onChange={() => setRefundMethod('Bank')}
-                              style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                              style={{ width: '15px', height: '15px', accentColor: '#2563EB' }}
                             />
                             Bank Account
                           </label>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Card 2: Advance Credit */}
+                    {orderToDelete.customerId && orderToDelete.customerId !== 'Walk-in' && (
+                      <div
+                        onClick={() => setDeleteOption('advance')}
+                        style={{
+                          padding: '0.75rem 0.85rem',
+                          borderRadius: '10px',
+                          border: deleteOption === 'advance' ? '2px solid #2563EB' : '1px solid #CBD5E1',
+                          background: deleteOption === 'advance' ? '#EFF6FF' : '#FFFFFF',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                          <input
+                            type="radio"
+                            name="deleteOption"
+                            value="advance"
+                            checked={deleteOption === 'advance'}
+                            onChange={() => setDeleteOption('advance')}
+                            style={{ width: '17px', height: '17px', accentColor: '#2563EB', cursor: 'pointer' }}
+                          />
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#1E293B' }}>Convert to Customer Advance</span>
+                            <span style={{ fontSize: '0.76rem', color: '#64748B' }}>Keep credit balance in customer's account for future orders</span>
+                          </div>
                         </div>
                       </div>
                     )}
                   </div>
 
-                  {/* Option 2: Convert to Advance */}
-                  {orderToDelete.customerId && orderToDelete.customerId !== 'Walk-in' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
-                        <input
-                          type="radio"
-                          name="deleteOption"
-                          value="advance"
-                          checked={deleteOption === 'advance'}
-                          onChange={() => setDeleteOption('advance')}
-                          style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                        />
-                        Convert Payment to Advance
-                      </label>
-                    </div>
-                  )}
-
-                  {/* Settlement Discount action choice */}
+                  {/* Automatic note for settlement discount reversal if present */}
                   {settlementDiscount > 0.005 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid #E2E8F0', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Choose Action for Settlement Discount (<CurrencySymbol size={11} />{settlementDiscount.toFixed(2)}):</span>
-                      <div style={{ display: 'flex', gap: '1.25rem', marginTop: '0.1rem' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
-                          <input
-                            type="radio"
-                            name="discountDeleteAction"
-                            value="delete"
-                            checked={discountDeleteAction === 'delete'}
-                            onChange={() => setDiscountDeleteAction('delete')}
-                            style={{ width: '15px', height: '15px', cursor: 'pointer' }}
-                          />
-                          Delete/Revert Discount
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>
-                          <input
-                            type="radio"
-                            name="discountDeleteAction"
-                            value="keep"
-                            checked={discountDeleteAction === 'keep'}
-                            onChange={() => setDiscountDeleteAction('keep')}
-                            style={{ width: '15px', height: '15px', cursor: 'pointer' }}
-                          />
-                          Move to Customer Advance
-                        </label>
-                      </div>
+                    <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', padding: '0.6rem 0.75rem', borderRadius: '8px', fontSize: '0.78rem', color: '#92400E' }}>
+                      <strong>Note:</strong> Applied settlement discount of <CurrencySymbol size={11} />{settlementDiscount.toFixed(2)} will be automatically reversed in the ledger.
                     </div>
                   )}
                 </div>
               ) : (
-                <div style={{ margin: '1rem 0', background: '#F8FAFC', padding: '0.75rem', borderRadius: '8px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Payment Status:</span>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748B', marginTop: '0.25rem' }}>
-                    Not Paid (No transactions recorded)
+                <div style={{ margin: '1rem 0', background: '#F8FAFC', padding: '0.85rem 1rem', borderRadius: '10px', border: '1px solid #E2E8F0', textAlign: 'left' }}>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Payment Status:</span>
+                  <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#64748B', marginTop: '0.2rem' }}>
+                    Not Paid (No financial tender recorded)
                   </div>
                 </div>
               )}
 
               {pinError && (
-                <p style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '0.5rem', fontWeight: 500, textAlign: 'center' }}>
+                <p style={{ color: '#DC2626', fontSize: '0.82rem', marginTop: '0.6rem', fontWeight: 600, textAlign: 'center', background: '#FEF2F2', padding: '0.4rem', borderRadius: '6px' }}>
                   {pinError}
                 </p>
               )}
 
-              <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem' }}>
+              <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.85rem' }}>
                 <button
                   className={styles.secondaryBtn}
-                  style={{ flex: 1 }}
+                  style={{ flex: 1, padding: '0.65rem 1rem', borderRadius: '8px', fontWeight: 600 }}
                   onClick={() => {
                     setShowPinModal(false);
                     setPinValue('');
@@ -2419,12 +2432,12 @@ export default function Orders() {
                   Cancel
                 </button>
                 <button
-                  className={styles.deleteConfirmBtn}
-                  style={{ flex: 1.5 }}
+                  className={styles.dangerBtn}
+                  style={{ flex: 1.4, padding: '0.65rem 1rem', borderRadius: '8px', backgroundColor: '#DC2626', color: '#FFFFFF', fontWeight: 700, border: 'none', cursor: 'pointer' }}
                   onClick={handleDeleteOrder}
                   disabled={isDeleting || pinValue.length < 4}
                 >
-                  {isDeleting ? 'Deleting...' : 'Authorize & Delete'}
+                  {isDeleting ? 'Deleting…' : 'Authorize & Delete'}
                 </button>
               </div>
             </div>

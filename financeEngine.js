@@ -84,27 +84,12 @@ function calculateCustomerFinancialState({
   orders = [],
   payments = [],
   allocations = [],
-  deletedOrders = []
+  refunds = []
 } = {}) {
   const liveOrders = Array.isArray(orders) ? orders : [];
-  const archivedDeletedOrders = Array.isArray(deletedOrders) ? deletedOrders : [];
   const allPayments = Array.isArray(payments) ? payments : [];
   const allAllocations = Array.isArray(allocations) ? allocations : [];
-
-  const liveOrderIds = new Set(liveOrders.map((order) => order?.id).filter(Boolean));
-  const deletedById = new Map();
-
-  liveOrders.filter(isDeletedOrder).forEach((order) => {
-    deletedById.set(order.id, order);
-  });
-  archivedDeletedOrders
-    .filter((order) => order?.id && !liveOrderIds.has(order.id))
-    .forEach((order) => deletedById.set(order.id, { ...order, status: 'Deleted' }));
-
-  const deletedOrdersById = [...deletedById.values()];
-  const returnedOrderIds = new Set(
-    deletedOrdersById.filter(isReturnedDeletedOrder).map((order) => order.id)
-  );
+  const allRefunds = Array.isArray(refunds) ? refunds : [];
 
   const activeOrders = liveOrders.filter((order) => {
     const status = String(order?.status || '').trim();
@@ -117,33 +102,20 @@ function calculateCustomerFinancialState({
     0
   );
 
-  const usablePayments = allPayments.filter((payment) => isUsablePayment(payment, returnedOrderIds));
+  const usablePayments = allPayments.filter((payment) => {
+    if (!payment || !isSuccessfulPayment(payment)) return false;
+    if (SYNTHETIC_PAYMENT_METHODS.has(payment.method)) return false;
+    return true;
+  });
   const paymentCredits = usablePayments.reduce(
     (sum, payment) => sum + toAmount(payment.amount),
     0
   );
 
-  // A current converted deletion normally moves the original payment to an
-  // unlinked receipt. When historic data has no usable receipt at all, flag it
-  // for review instead of inventing a balance-changing entry.
-  const usablePaymentOrderIds = new Set(
-    usablePayments.map(getPaymentOrderId).filter(Boolean)
+  const refundDebits = allRefunds.reduce(
+    (sum, refund) => sum + toAmount(refund.amount),
+    0
   );
-  const usablePaymentIds = new Set(usablePayments.map((payment) => payment?.id).filter(Boolean));
-  const ambiguousConvertedDeletes = deletedOrdersById
-    .filter((order) => isConvertedToAdvance(order) && toAmount(order.paidAmount) > EPSILON)
-    .filter((order) => {
-      const snapshotIds = parsePaymentSnapshot(order.payments)
-        .map((payment) => payment?.id)
-        .filter(Boolean);
-      return !usablePaymentOrderIds.has(order.id) && !snapshotIds.some((paymentId) => usablePaymentIds.has(paymentId));
-    })
-    .map((order) => ({
-      orderId: order.id,
-      customerId: order.customerId,
-      paidAmount: roundCurrency(order.paidAmount),
-      reason: 'Converted deleted order has no linked usable payment; check whether its receipt was moved to advance.'
-    }));
 
   const sourceAllocations = new Map();
   allAllocations.forEach((allocation) => {
@@ -168,7 +140,7 @@ function calculateCustomerFinancialState({
     })
     .filter((source) => source.amountUsed > source.sourceAmount + EPSILON);
 
-  const rawBalance = openingBalance + orderCharges - paymentCredits;
+  const rawBalance = openingBalance + orderCharges + refundDebits - paymentCredits;
   const balance = roundCurrency(rawBalance);
 
   return {
@@ -178,10 +150,11 @@ function calculateCustomerFinancialState({
     openingBalance: roundCurrency(openingBalance),
     orderCharges: roundCurrency(orderCharges),
     paymentCredits: roundCurrency(paymentCredits),
+    refundDebits: roundCurrency(refundDebits),
     activeOrderCount: activeOrders.length,
     paymentCount: usablePayments.length,
     audit: {
-      ambiguousConvertedDeletes,
+      ambiguousConvertedDeletes: [],
       overAllocatedSources
     }
   };

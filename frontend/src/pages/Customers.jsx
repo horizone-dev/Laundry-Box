@@ -1785,46 +1785,25 @@ export default function Customers() {
         let bills = result.success ? result.data : [];
         setCustomerBills(bills.filter(b => b.status !== 'Cancelled' && b.status !== 'Deleted'));
 
-        const deletedRes = await window.electronAPI.dbQuery(
-          "SELECT * FROM deleted_orders WHERE customerId = ? ORDER BY deletedAt DESC",
+        const deletedBillsRes = await window.electronAPI.dbQuery(
+          "SELECT * FROM deleted_orders WHERE customerId = ?",
           [activeCustomer.id]
         );
-        let deletedBills = deletedRes.success ? deletedRes.data : [];
-        const deletedDiscounts = deletedBills.flatMap((deletedBill) => {
-          let paymentSnapshot = [];
-          try {
-            paymentSnapshot = typeof deletedBill.payments === 'string'
-              ? JSON.parse(deletedBill.payments || '[]')
-              : (deletedBill.payments || []);
-          } catch (_) {
-            paymentSnapshot = [];
-          }
-          return paymentSnapshot
-            .filter((payment) => payment.method === 'Discount' && Number(payment.amount || 0) > 0)
-            .map((payment, index) => ({
-              ...payment,
-              id: `DELETED-DISC-${deletedBill.id}-${payment.id || index}`,
-              originalPaymentId: payment.id || null,
-              deletedOrderId: deletedBill.id,
-              deletedAt: deletedBill.deletedAt || deletedBill.returnedAt || payment.updatedAt || payment.createdAt
-            }));
-        });
-        setCustomerDeletedDiscounts(deletedDiscounts);
-        setCustomerDeletedBills(deletedBills);
+        const deletedBills = deletedBillsRes.success ? deletedBillsRes.data : [];
 
         const combinedReturns = [
           ...bills.filter(b => b.status === 'Cancelled' || b.status === 'Deleted').map(b => ({
             ...b,
-            isDeleted: b.status === 'Deleted',
+            isDeleted: true,
             refundStatus: b.status === 'Deleted' ? (b.deletedAction || 'Deleted') : 'Cancelled'
           })),
           ...deletedBills.filter(db => !bills.some(b => b.id === db.id)).map(db => ({
             ...db,
-            createdAt: db.deletedAt,
-            isDeleted: true
+            isDeleted: true,
+            refundStatus: db.refundStatus || db.returnStatus || 'Deleted'
           }))
         ];
-        combinedReturns.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        combinedReturns.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
         setCustomerReturns(combinedReturns);
 
         const paymentsRes = await window.electronAPI.dbQuery(

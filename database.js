@@ -423,6 +423,31 @@ function initDB(appPath) {
       createdBy TEXT,
       createdAt TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS settlement_discounts (
+      id TEXT PRIMARY KEY,
+      shopId TEXT,
+      customerId TEXT,
+      orderId TEXT,
+      amount REAL DEFAULT 0,
+      createdAt TEXT,
+      updatedAt TEXT,
+      paymentReference TEXT,
+      isSynced INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS cancellations (
+      id TEXT PRIMARY KEY,
+      shopId TEXT,
+      orderId TEXT,
+      customerId TEXT,
+      amount REAL DEFAULT 0,
+      reason TEXT,
+      createdBy TEXT,
+      createdAt TEXT,
+      updatedAt TEXT,
+      isSynced INTEGER DEFAULT 0
+    );
   `);
 
 
@@ -784,6 +809,22 @@ function initDB(appPath) {
       db.exec("ALTER TABLE account_transactions ADD COLUMN createdByRole TEXT;");
     }
 
+    // Universal auto-migration: Ensure every table in the SQLite database has an isSynced column
+    try {
+      const allTables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+      for (const tbl of allTables) {
+        if (!tbl.name || tbl.name.startsWith('sqlite_')) continue;
+        try {
+          const cols = db.prepare(`PRAGMA table_info("${tbl.name}")`).all();
+          if (cols && cols.length > 0 && !cols.some(col => col.name === 'isSynced')) {
+            db.exec(`ALTER TABLE "${tbl.name}" ADD COLUMN isSynced INTEGER DEFAULT 0;`);
+          }
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.warn('isSynced column auto-migration warning:', e.message);
+    }
+
     // Detect the device's UTC offset in hours (positive = ahead of UTC, e.g. +4 for UAE)
     const tzOffsetHours = -(new Date().getTimezoneOffset()) / 60;
 
@@ -1018,89 +1059,46 @@ function legacyMutatingDataHealer(db, targetCustomerId = null) {
       : db.prepare('SELECT id, balance, openingBalance FROM customers').all();
     const updateBalStmt = db.prepare('UPDATE customers SET balance = ?, isSynced = 0, updatedAt = ? WHERE id = ?');
 
-    const ordersStmt = db.prepare(`
-      SELECT totalAmount, paidAmount, status, deletedAction, paymentMethod, NULL as payments
+    const activeOrdersStmt = db.prepare(`
+      SELECT totalAmount
       FROM orders 
-      WHERE customerId = ?
-      
-      UNION ALL
-      
-      SELECT totalAmount, paidAmount, 'Deleted' as status, refundStatus as deletedAction, originalPaymentMethod as paymentMethod, payments
-      FROM deleted_orders 
-      WHERE customerId = ? AND id NOT IN (SELECT id FROM orders)
+      WHERE customerId = ? AND IFNULL(status, '') NOT IN ('Deleted', 'Cancelled')
     `);
 
-    const paymentsStmt = db.prepare('SELECT amount, method, orderId FROM payments WHERE customerId = ?');
+    const paymentsStmt = db.prepare(`
+      SELECT amount, method 
+      FROM payments 
+      WHERE customerId = ? AND status = 'SUCCESS'
+    `);
+
+    const refundsStmt = db.prepare(`
+      SELECT amount 
+      FROM refunds 
+      WHERE customerId = ?
+    `);
 
     for (const cust of allCustomers) {
       const custId = cust.id;
       const openingBalance = parseFloat(cust.openingBalance || 0);
 
-      // 1. Fetch orders (both active and deleted)
-      const orders = ordersStmt.all(custId, custId);
+      // 1. Fetch active orders sum
+      const activeOrders = activeOrdersStmt.all(custId);
+      const ordersSum = activeOrders.reduce((sum, o) => sum + (parseFloat(o.totalAmount) || 0), 0);
 
-      // 2. Fetch payments
+      // 2. Fetch payments sum
       const payments = paymentsStmt.all(custId);
-
-      // 3. System Auto offset
-      const systemAutoOffsetSum = payments
-        .filter(p => p.method === 'System Auto' && !p.orderId)
+      const paymentSum = payments
+        .filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto')
         .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
 
-      let balance = Math.max(0, openingBalance) + Math.abs(systemAutoOffsetSum);
+      // 3. Fetch refunds sum
+      const refunds = refundsStmt.all(custId);
+      const refundSum = refunds.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
 
-      // 4. Process orders
-      orders.forEach(o => {
-        const totalAmount = parseFloat(o.totalAmount || 0);
-        const paidAmount = parseFloat(o.paidAmount || 0);
-        const isDeleted = o.status === 'Deleted';
+      // 4. Calculate net balance (debits - credits)
+      const balance = openingBalance + ordersSum + refundSum - paymentSum;
 
-        if (o.status !== 'Cancelled') {
-          balance += totalAmount; // charge debit
-          
-          if (isDeleted) {
-            balance -= totalAmount; // deletion reversal credit
-
-            // Parse payments associated with deleted order
-            let parsedPays = [];
-            try {
-              parsedPays = typeof o.payments === 'string' ? JSON.parse(o.payments || '[]') : (o.payments || []);
-            } catch (e) {
-              parsedPays = [];
-            }
-
-            const validPays = parsedPays.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto');
-            const deletedPaySum = validPays.reduce((sum, p) => sum + (p.method === 'Discount' ? 0 : (parseFloat(p.amount) || 0)), 0);
-            const initialDeletedPay = paidAmount - deletedPaySum;
-
-            validPays.forEach(p => {
-              if (p.method !== 'Discount') {
-                balance -= parseFloat(p.amount || 0); // payment credit
-              }
-            });
-
-            if (initialDeletedPay > 0.01 && validPays.length === 0) {
-              if (o.paymentMethod !== 'Advance' && o.paymentMethod !== 'Refund Advance' && o.paymentMethod !== 'System Auto') {
-                balance -= initialDeletedPay; // payment fallback credit
-              }
-            }
-
-            if ((o.deletedAction === 'refund' || o.deletedAction === 'Refund' || o.deletedAction === 'Returned') && paidAmount > 0) {
-              balance += paidAmount; // refund debit (money went back to customer)
-            }
-          }
-        }
-      });
-
-      // 5. Process payments
-      const activeOrderIds = orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Deleted').map(o => o.id);
-      payments.forEach(p => {
-        if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
-        if (p.method === 'Discount' && p.orderId && activeOrderIds.includes(p.orderId)) return;
-        balance -= parseFloat(p.amount || 0); // payment credit
-      });
-
-      // 6. Update customer balance in DB if changed
+      // 5. Update customer balance in DB if changed
       if (Math.abs((parseFloat(cust.balance) || 0) - balance) > 0.005) {
         updateBalStmt.run(balance, new Date().toISOString(), custId);
       }
@@ -1680,7 +1678,8 @@ function getCanonicalFinancialState(connection, customerId) {
       JOIN payments p ON p.id = a.paymentId
       WHERE p.customerId = ?
     `).all(customerId),
-    deletedOrders: connection.prepare('SELECT * FROM deleted_orders WHERE customerId = ?').all(customerId)
+    deletedOrders: connection.prepare('SELECT * FROM deleted_orders WHERE customerId = ?').all(customerId),
+    refunds: connection.prepare('SELECT * FROM refunds WHERE customerId = ?').all(customerId)
   });
 
   return {
@@ -1996,14 +1995,10 @@ function unwindOrderPayments(connection, {
       }
     });
 
-    if (discountAction === 'delete') {
-      connection.prepare("DELETE FROM payments WHERE orderId = ? AND method = 'Discount' AND discountScope = 'settlement'").run(orderId);
-    } else {
-      connection.prepare("UPDATE payments SET orderId = NULL, isSynced = 0, updatedAt = ? WHERE orderId = ? AND method = 'Discount' AND discountScope = 'settlement'").run(timestamp, orderId);
-    }
-
+    // Do NOT delete the direct payments! Keep them for the ledger trace.
+    // Only delete synthetic allocation rows.
+    connection.prepare("DELETE FROM payments WHERE orderId = ? AND method IN ('System Auto', 'Advance', 'Refund Advance')").run(orderId);
     connection.prepare('DELETE FROM advance_allocations WHERE orderId = ?').run(orderId);
-    connection.prepare('DELETE FROM payments WHERE orderId = ?').run(orderId);
   }
 
   return { linkedPayments, directPaid, allocatedPaid };
@@ -2239,6 +2234,38 @@ function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'ref
           deletedAction = ?, isSynced = 0, updatedAt = ?
       WHERE id = ?
     `).run(now, deletedBy, deleteReason, deleteAction, now, orderId);
+
+    // 1. Insert cancellation audit entry
+    db.prepare(`
+      INSERT INTO cancellations (id, shopId, orderId, customerId, amount, reason, createdBy, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      `CAN-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+      shopId,
+      orderId,
+      customerId,
+      totalAmount,
+      deleteReason,
+      deletedBy,
+      now,
+      now
+    );
+
+    // 2. Reverse any settlement discounts linked to this order
+    const linkedSettlementDiscounts = db.prepare("SELECT * FROM payments WHERE orderId = ? AND method = 'Discount' AND discountScope = 'settlement'").all(orderId);
+    linkedSettlementDiscounts.forEach(sd => {
+      const revId = `REV-SD-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      db.prepare(`
+        INSERT INTO settlement_discounts (id, shopId, customerId, orderId, amount, createdAt, updatedAt, paymentReference)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(revId, shopId, customerId, orderId, -Math.abs(sd.amount), now, now, `REV-${sd.paymentReference || sd.id}`);
+
+      // Insert negative payment to maintain sync and backward compatibility
+      db.prepare(`
+        INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference, discountScope)
+        VALUES (?, ?, ?, ?, ?, 'Discount', 'SUCCESS', ?, 0, ?, ?, 'settlement')
+      `).run(revId, customerId, orderId, shopId, -Math.abs(sd.amount), now, now, `REV-${sd.paymentReference || sd.id}`);
+    });
 
     db.prepare(`
       INSERT OR REPLACE INTO deleted_orders (

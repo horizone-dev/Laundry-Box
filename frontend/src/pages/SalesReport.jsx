@@ -171,9 +171,9 @@ export default function SalesReport() {
       );
       if (paymentsRes.success) setPayments(paymentsRes.data);
 
-      // 4. Fetch Returns from deleted_orders
+      // 4. Fetch Returns from refunds
       const returnsRes = await window.electronAPI.dbQuery(
-        "SELECT * FROM deleted_orders WHERE returnStatus IN ('Returned', 'Return Pending') ORDER BY returnedAt DESC", []
+        "SELECT * FROM refunds ORDER BY createdAt DESC", []
       );
       if (returnsRes.success) setReturns(returnsRes.data);
 
