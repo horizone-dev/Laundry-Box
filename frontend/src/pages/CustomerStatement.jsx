@@ -529,15 +529,17 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
       const timestampKey = p.method === 'Discount' && discountScope === 'settlement'
         ? (p.createdAt || p.id)
         : (p.createdAt ? p.createdAt.substring(0, 19) : p.id);
-      const referencePrefix = String(p.paymentReference || p.id || '').split('-')[0] || 'PAY';
+      const cleanRef = String(p.paymentReference || p.id || '');
+      const refToUse = cleanRef.startsWith('DEL-') ? cleanRef.substring(4) : cleanRef;
+      const referencePrefix = refToUse.split('-')[0] || 'PAY';
       const isSettlementPayment = p.method !== 'Discount'
-        && ['SET', 'ACC'].includes(referencePrefix);
+        && ['SET', 'ACC', 'ADV'].includes(referencePrefix);
       const isReverse = amtVal < 0;
       const purposeKey = p.method === 'Discount'
         ? (discountScope === 'settlement'
-          ? (isReverse ? `reverse-settlement-discount:${p.id}` : 'settlement-discount')
-          : (isReverse ? `reverse-discount:${p.id}` : `discount:${p.paymentReference || p.id}`))
-        : (isReverse ? `reverse-payment:${p.id}` : `payment:${p.method || referencePrefix}`);
+          ? (isReverse ? `reverse-settlement-discount:${refToUse}` : 'settlement-discount')
+          : (isReverse ? `reverse-discount:${refToUse}` : `discount:${refToUse}`))
+        : (isReverse ? `reverse-payment:${refToUse}` : `payment:${p.method || referencePrefix}`);
       const key = `${timestampKey}:${purposeKey}`;
 
       if (!groupedPaymentsMap[key]) {

@@ -2062,14 +2062,23 @@ export default function Customers() {
         let payments = paymentsRes.success ? paymentsRes.data : [];
         const discountPayments = payments.filter(p => p.method === 'Discount');
         setCustomerDiscounts(discountPayments);
+        // Find all references that have been deleted/reversed
+        const deletedRefs = new Set(
+          payments
+            .filter(p => String(p.paymentReference || '').startsWith('DEL-'))
+            .map(p => String(p.paymentReference || '').substring(4))
+        );
+
         // Payments tab shows only amounts actually received from the customer.
         // An Advance row linked to an order is merely the later application of
         // an existing advance credit, so showing it here would make a single
-        // payment appear twice.
+        // payment appear twice. We also exclude deleted/reversed payments.
         payments = payments.filter(p => (
           p.method !== 'System Auto'
           && p.method !== 'Discount'
           && !isAdvanceAllocation(p)
+          && !String(p.paymentReference || '').startsWith('DEL-')
+          && !deletedRefs.has(p.paymentReference || p.id)
         ));
 
         // A customer makes one Quick Settle payment, even when the accounting
