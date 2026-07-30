@@ -2033,6 +2033,12 @@ export default function Customers() {
         combinedReturns.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
         setCustomerReturns(combinedReturns);
 
+        const refundsRes = await window.electronAPI.dbQuery(
+          "SELECT * FROM refunds WHERE customerId = ?",
+          [activeCustomer.id]
+        );
+        const refundsList = refundsRes.success ? refundsRes.data : [];
+
         const paymentsRes = await window.electronAPI.dbQuery(
           "SELECT * FROM payments WHERE customerId = ? ORDER BY createdAt DESC",
           [activeCustomer.id]
@@ -2163,89 +2169,28 @@ export default function Customers() {
         // All payments for this customer (from payments table)
         const allPaymentsRaw = paymentsRes.success ? paymentsRes.data : [];
 
-        // Build debits from all orders
-        let runningBalance = 0;
-
         // Opening balance (debit)
         const systemAutoOffset = allPaymentsRaw
           .filter(p => p.method === 'System Auto' && !p.orderId)
           .reduce((s, p) => s + (p.amount || 0), 0);
         const openingBal = Math.max(0, activeCustomer.openingBalance || 0) + Math.abs(systemAutoOffset);
-        runningBalance += openingBal;
+        let runningBalance = openingBal;
 
-        // Active orders: add totalAmount as debit (charges to customer)
-        // Deleted orders: add totalAmount as debit then subtract totalAmount as credit (nets to 0)
-        // Refunded deleted orders: also debit back the paidAmount (cash went out)
-        // Subtract any payments linked to active/deleted orders as credit (except Refund/Advance/System Auto)
-        bills.forEach(b => {
-          if (b.status === 'Cancelled') return; // cancelled orders don't affect balance
-          runningBalance += (b.totalAmount || 0); // order debit
-          if (b.status === 'Deleted') {
-            runningBalance -= (b.totalAmount || 0); // deletion reversal credit
-            // If refunded: cash went out, so debit the refund back
-            if ((b.deletedAction === 'refund' || b.deletedAction === 'Refund') && (b.paidAmount || 0) > 0) {
-              runningBalance += (b.paidAmount || 0);
-            }
+        // Active orders charges (debit)
+        const orderCharges = bills
+          .filter(b => b.status !== 'Cancelled' && b.status !== 'Deleted')
+          .reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+        runningBalance += orderCharges;
 
-            // Parse payments associated with deleted orders
-            let parsedPays = [];
-            try {
-              parsedPays = typeof b.payments === 'string' ? JSON.parse(b.payments || '[]') : (b.payments || []);
-            } catch (e) {
-              parsedPays = [];
-            }
-            const validPays = parsedPays.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto');
-            const deletedPaySum = validPays.reduce((sum, p) => sum + (p.method === 'Discount' ? 0 : (p.amount || 0)), 0);
-            const initialDeletedPay = (b.paidAmount || 0) - deletedPaySum;
+        // Refunds paid out (debit)
+        const refundDebits = refundsList.reduce((sum, r) => sum + (r.amount || 0), 0);
+        runningBalance += refundDebits;
 
-            validPays.forEach(p => {
-              if (p.method !== 'Discount') {
-                runningBalance -= (p.amount || 0); // payment credit
-              }
-            });
-            if (initialDeletedPay > 0.01 && validPays.length === 0) {
-              if (b.paymentMethod !== 'Advance' && b.paymentMethod !== 'Refund Advance' && b.paymentMethod !== 'System Auto') {
-                runningBalance -= initialDeletedPay; // payment fallback credit
-              }
-            }
-          }
-        });
-
-        // Also account for deleted_orders that only exist in deleted_orders table (not in orders)
-        deletedBills.filter(db => !bills.some(b => b.id === db.id)).forEach(db => {
-          runningBalance += (db.totalAmount || 0); // original charge
-          runningBalance -= (db.totalAmount || 0); // reversal credit
-          if (db.refundStatus === 'Returned' && (db.paidAmount || 0) > 0) {
-            runningBalance += (db.paidAmount || 0); // refund went out
-          }
-
-          // Parse payments associated with deleted orders
-          let parsedPays = [];
-          try {
-            parsedPays = typeof db.payments === 'string' ? JSON.parse(db.payments || '[]') : (db.payments || []);
-          } catch (e) {
-            parsedPays = [];
-          }
-          const validPays = parsedPays.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto');
-          const deletedPaySum = validPays.reduce((sum, p) => sum + (p.method === 'Discount' ? 0 : (p.amount || 0)), 0);
-          const initialDeletedPay = (db.paidAmount || 0) - deletedPaySum;
-
-          validPays.forEach(p => {
-            if (p.method !== 'Discount') {
-              runningBalance -= (p.amount || 0); // payment credit
-            }
-          });
-          if (initialDeletedPay > 0.01 && validPays.length === 0) {
-            if (db.paymentMethod !== 'Advance' && db.paymentMethod !== 'Refund Advance' && db.paymentMethod !== 'System Auto') {
-              runningBalance -= initialDeletedPay; // payment fallback credit
-            }
-          }
-        });
-
-        allPaymentsRaw.forEach(p => {
-          if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return;
-          runningBalance -= (p.amount || 0); // payment credit (reduces balance)
-        });
+        // Payments received (credit)
+        const paymentCredits = allPaymentsRaw
+          .filter(p => p.method !== 'System Auto' && p.method !== 'Advance')
+          .reduce((sum, p) => sum + (p.amount || 0), 0);
+        runningBalance -= paymentCredits;
 
         // Final values — mirror CustomerStatement KPIs exactly
         const canonicalBalance = Number(financialState?.balance ?? runningBalance) || 0;
