@@ -1441,27 +1441,43 @@ export default function Customers() {
       for (const id of paymentIdsForDeletion) {
         await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE paymentId = ?", [id]);
         const pCheckRes = await window.electronAPI.dbQuery("SELECT * FROM payments WHERE id = ?", [id]);
-        if (pCheckRes.success && pCheckRes.data.length > 0 && pCheckRes.data[0].method === 'Discount') {
-          const pDisc = pCheckRes.data[0];
-          const revId = `DISC-REV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-          await window.electronAPI.dbQuery("DELETE FROM payments WHERE id = ?", [id]);
-          await window.electronAPI.dbQuery(
-            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference, discountScope)
-             VALUES (?, ?, ?, ?, ?, 'Discount', 'SUCCESS', ?, 0, ?, ?, ?)`,
-            [
-              revId,
-              selectedCustomer.id,
-              pDisc.orderId || null,
-              pDisc.shopId || DEFAULT_SHOP_ID,
-              -Math.abs(pDisc.amount || 0),
-              timestamp,
-              timestamp,
-              `DEL-${pDisc.paymentReference || pDisc.id}`,
-              pDisc.discountScope || (pDisc.orderId ? 'order' : 'settlement')
-            ]
-          );
-        } else {
-          await window.electronAPI.dbQuery("DELETE FROM payments WHERE id = ?", [id]);
+        if (pCheckRes.success && pCheckRes.data.length > 0) {
+          const pOrig = pCheckRes.data[0];
+          if (pOrig.method === 'Discount') {
+            const revId = `DISC-REV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            await window.electronAPI.dbQuery(
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference, discountScope)
+               VALUES (?, ?, ?, ?, ?, 'Discount', 'SUCCESS', ?, 0, ?, ?, ?)`,
+              [
+                revId,
+                selectedCustomer.id,
+                pOrig.orderId || null,
+                pOrig.shopId || DEFAULT_SHOP_ID,
+                -Math.abs(pOrig.amount || 0),
+                timestamp,
+                timestamp,
+                `DEL-${pOrig.paymentReference || pOrig.id}`,
+                pOrig.discountScope || (pOrig.orderId ? 'order' : 'settlement')
+              ]
+            );
+          } else {
+            const revId = `PAY-REV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            await window.electronAPI.dbQuery(
+              `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference)
+               VALUES (?, ?, ?, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?)`,
+              [
+                revId,
+                selectedCustomer.id,
+                pOrig.orderId || null,
+                pOrig.shopId || DEFAULT_SHOP_ID,
+                -Math.abs(pOrig.amount || 0),
+                pOrig.method || 'Cash',
+                timestamp,
+                timestamp,
+                `DEL-${pOrig.paymentReference || pOrig.id}`
+              ]
+            );
+          }
         }
       }
       for (const allocation of sourceAllocations) {
