@@ -2104,9 +2104,9 @@ export default function Customers() {
         processedPayments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         setCustomerPayments(processedPayments);
 
-        const totalSales = bills.filter(b => b.status !== 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
-        const salesReturn = bills.filter(b => b.status === 'Cancelled').reduce((sum, b) => sum + (b.totalAmount || 0), 0) +
-          deletedBills.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+        const totalSales = bills.filter(b => b.status !== 'Cancelled' && b.status !== 'Deleted').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+        const salesReturn = bills.filter(b => b.status === 'Cancelled' || b.status === 'Deleted').reduce((sum, b) => sum + (b.totalAmount || 0), 0) +
+          deletedBills.filter(db => !bills.some(b => b.id === db.id)).reduce((sum, b) => sum + (b.totalAmount || 0), 0);
 
         const getDiscountVal = (bill) => {
           if (!bill) return 0;

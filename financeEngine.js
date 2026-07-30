@@ -60,15 +60,9 @@ function parsePaymentSnapshot(value) {
   }
 }
 
-function isUsablePayment(payment, returnedOrderIds) {
+function isUsablePayment(payment) {
   if (!payment || !isSuccessfulPayment(payment)) return false;
   if (SYNTHETIC_PAYMENT_METHODS.has(payment.method)) return false;
-
-  // If a deleted order was refunded, any receipt still linked to that order is
-  // historical only; it must not remain as customer credit.
-  const orderId = getPaymentOrderId(payment);
-  if (orderId && returnedOrderIds.has(orderId)) return false;
-
   return true;
 }
 
@@ -109,7 +103,7 @@ function calculateCustomerFinancialState({
     }
   });
 
-  const usablePayments = allPayments.filter((payment) => isUsablePayment(payment, returnedOrderIds));
+  const usablePayments = allPayments.filter((payment) => isUsablePayment(payment));
   const paymentCredits = usablePayments.reduce(
     (sum, payment) => sum + toAmount(payment.amount),
     0
