@@ -4,7 +4,7 @@ import {
   Search, User, Download, Printer, FileText, Calendar,
   ChevronDown, ChevronRight, ArrowUpRight, ArrowDownRight,
   CheckCircle, Clock, AlertCircle, CreditCard, Wallet,
-  X, Filter, Package, TrendingUp, RotateCcw
+  X, Filter, Package, TrendingUp, RotateCcw, Percent
 } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import { getLocalISOString } from '../utils/dateUtils';
@@ -402,50 +402,41 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
     };
 
     orders.forEach(o => {
-      const cleanRef = `${settings.invoicePrefix || '#'}${o.id}`;
-      let discount = 0;
-      try {
-        if (o.paymentBreakdown) {
-          const breakdown = typeof o.paymentBreakdown === 'string'
-            ? JSON.parse(o.paymentBreakdown)
-            : o.paymentBreakdown;
-          discount = parseFloat(breakdown.discount || breakdown.discountAmount || breakdown.orderDiscount || 0) || 0;
-        }
-      } catch (e) { }
-
-      let itemSummary = '';
-      try {
-        const itemsList = typeof o.items === 'string' ? JSON.parse(o.items || '[]') : (o.items || []);
-        if (Array.isArray(itemsList) && itemsList.length > 0) {
-          itemSummary = itemsList.map(item => `${item.qty || item.quantity || 1}x ${item.name}`).join(', ');
-        }
-      } catch (e) { }
-
-      const totalAmt = parseFloat(o.totalAmount) || 0;
-
-      // Find all discount edits/deletions logged in customer_ledger for this order
-      const discountEditRows = customerLedgerRows.filter(r => r.orderId === o.id && r.transactionType === 'DISCOUNT_EDIT');
-      const sumDiff = discountEditRows.reduce((sum, r) => sum + (r.debit || 0) - (r.credit || 0), 0);
-      const originalDiscount = Math.max(0, discount + sumDiff);
-      const netDebit = Math.max(0, totalAmt - sumDiff);
-
       if (filterType !== 'Payments') {
-        // 1. The Invoice Charge (Debit = Net Order Total)
+        const cleanRef = `${settings.invoicePrefix || '#'}${o.id}`;
         const orderDesc = `Order ${cleanRef}` + (o.isDeleted ? ' (Deleted)' : '');
-        let orderSummary = itemSummary;
-        if (originalDiscount > 0.005) {
-          orderSummary = orderSummary
-            ? `${orderSummary} (Discount: ${settings.currencySymbol || 'AED'} ${originalDiscount.toFixed(2)})`
-            : `Discount: ${settings.currencySymbol || 'AED'} ${originalDiscount.toFixed(2)}`;
-        }
+        let itemSummary = '';
+        try {
+          const itemsList = typeof o.items === 'string' ? JSON.parse(o.items || '[]') : (o.items || []);
+          if (Array.isArray(itemsList) && itemsList.length > 0) {
+            itemSummary = itemsList.map(item => `${item.qty || item.quantity || 1}x ${item.name}`).join(', ');
+          }
+        } catch (e) { }
 
+        let discount = 0;
+        try {
+          if (o.paymentBreakdown) {
+            const breakdown = typeof o.paymentBreakdown === 'string'
+              ? JSON.parse(o.paymentBreakdown)
+              : o.paymentBreakdown;
+            discount = parseFloat(breakdown.discount || breakdown.discountAmount || breakdown.orderDiscount || 0) || 0;
+          }
+        } catch (e) { }
+
+        const totalAmt = parseFloat(o.totalAmount) || 0;
+        const discountEditRows = customerLedgerRows.filter(r => r.orderId === o.id && r.transactionType === 'DISCOUNT_EDIT');
+        const sumDiff = discountEditRows.reduce((sum, r) => sum + (r.debit || 0) - (r.credit || 0), 0);
+        const originalDiscount = Math.max(0, discount + sumDiff);
+        const grossAmt = totalAmt + discount;
+
+        // 1. Order Creation (Debit) - ALWAYS shows Gross Amount!
         rows.push({
           date: o.createdAt,
           type: 'order',
           ref: cleanRef,
           description: orderDesc,
-          itemsSummary: orderSummary,
-          debit: netDebit,
+          itemsSummary: itemSummary,
+          debit: grossAmt,
           credit: 0,
           discountAmount: originalDiscount,
           status: o.isDeleted ? 'Deleted' : o.paymentStatus,
@@ -453,8 +444,26 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
           rawOrder: o
         });
 
-        // 2. Cancellation Reversal (Credit)
+        // 2. Initial Discount Row (Credit) - if originalDiscount > 0
+        if (originalDiscount > 0) {
+          rows.push({
+            date: o.createdAt,
+            type: 'discount',
+            ref: cleanRef,
+            description: 'Order Discount',
+            itemsSummary: `Discount given for Order ${cleanRef}`,
+            debit: 0,
+            credit: originalDiscount,
+            discountAmount: 0,
+            status: o.isDeleted ? 'Deleted' : 'Confirmed',
+            dueAmount: 0,
+            rawOrder: o
+          });
+        }
+
+        // 3. Cancellation Reversals
         if (o.isDeleted) {
+          // Revert Order Gross Amount (Credit)
           rows.push({
             date: o.updatedAt || o.createdAt,
             type: 'cancellation',
@@ -462,12 +471,29 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
             description: `Deleted (Order ${cleanRef} Reversed)`,
             itemsSummary: `Reason: ${o.deleteReason || 'Order Deleted'}`,
             debit: 0,
-            credit: parseFloat(o.totalAmount) || 0,
+            credit: grossAmt,
             discountAmount: 0,
             status: 'Deleted',
             dueAmount: 0,
             rawOrder: o
           });
+
+          // Revert current discount (Debit) - if discount > 0
+          if (discount > 0) {
+            rows.push({
+              date: o.updatedAt || o.createdAt,
+              type: 'discount_cancel',
+              ref: cleanRef,
+              description: 'Order Discount Deleted',
+              itemsSummary: `Discount reversed for Deleted Order ${cleanRef}`,
+              debit: discount,
+              credit: 0,
+              discountAmount: 0,
+              status: 'Deleted',
+              dueAmount: 0,
+              rawOrder: o
+            });
+          }
         }
       }
     });
@@ -1152,9 +1178,11 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
                                 ? <RotateCcw size={13} color="#F59E0B" />
                                 : row.type === 'opening_balance'
                                   ? <TrendingUp size={13} color="#7C3AED" />
-                                  : <Wallet size={13} color="#10B981" />
+                                  : row.type === 'discount' || row.type === 'discount_cancel'
+                                    ? <Percent size={13} color="#EF4444" />
+                                    : <Wallet size={13} color="#10B981" />
                           }
-                          {['order', 'deleted_order', 'cancellation', 'refund'].includes(row.type) ? (
+                          {['order', 'deleted_order', 'cancellation', 'refund', 'discount', 'discount_cancel'].includes(row.type) ? (
                             <span
                               className={`${styles.refText} ${styles.refLink}`}
                               onClick={() => {
