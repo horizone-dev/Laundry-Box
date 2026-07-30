@@ -710,13 +710,10 @@ export default function MainLayout() {
       ]
     },
     {
+      path: '/customers',
       label: 'Customers',
       icon: Users,
-      permissionKey: 'customers',
-      subItems: [
-        { path: '/customers', label: 'Customer List' },
-        { path: '/reports/customer-statement', label: 'Customer Statement' },
-      ]
+      permissionKey: 'customers'
     },
     { path: '/services', label: 'Services', icon: Layers, permissionKey: 'services' },
 

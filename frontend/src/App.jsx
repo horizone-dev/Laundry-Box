@@ -85,6 +85,8 @@ function App() {
           <Route path="accounts/:type" element={<Accounts />} />
           <Route path="settlement" element={<Settlement />} />
           <Route path="invoice/:id" element={<Invoice />} />
+          <Route path="customer-statement" element={<CustomerStatement />} />
+          <Route path="customer-statement/:customerId" element={<CustomerStatement />} />
           <Route path="overdue-statement/:customerId" element={<OverdueStatement />} />
           <Route path="activation" element={<Activation />} />
           <Route path="help" element={<HelpCenter />} />

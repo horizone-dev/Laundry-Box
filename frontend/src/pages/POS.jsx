@@ -367,15 +367,19 @@ export default function POS() {
           const nextNum = maxNum + 1;
           const formatted = String(nextNum).padStart(4, '0');
           setPendingOrderId(formatted);
+          return formatted;
         } else {
           setPendingOrderId('0001');
+          return '0001';
         }
       } catch (err) {
         console.error("Failed to fetch next order ID:", err);
         setPendingOrderId('0001');
+        return '0001';
       }
     } else {
       setPendingOrderId('0001');
+      return '0001';
     }
   };
 
@@ -416,7 +420,10 @@ export default function POS() {
 
       const checkRes = await checkCreditLimit(selectedCustomer.id, netIncrease, settings);
       if (checkRes.blocked) {
-        const generatedId = pendingOrderId || '0001';
+        let generatedId = pendingOrderId;
+        if (!generatedId) {
+          generatedId = await fetchNextOrderId();
+        }
         setPendingOrderId(generatedId);
 
         setCreditWarningDetails({
@@ -973,7 +980,10 @@ export default function POS() {
     }
     if (!settings.noModPayEnabled || !settings.enableNomod) return;
 
-    const orderId = pendingOrderId || '0001';
+    let orderId = pendingOrderId;
+    if (!orderId) {
+      orderId = await fetchNextOrderId();
+    }
     let linkId = `LNK-${Date.now().toString().slice(-4)}`;
     let checkoutUrl = '';
 
@@ -1071,7 +1081,10 @@ export default function POS() {
     if (!isOverridden && (await checkCreditLimitBeforeAction('completePayment'))) {
       return;
     }
-    const orderId = pendingOrderId || '0001';
+    let orderId = pendingOrderId;
+    if (!orderId) {
+      orderId = await fetchNextOrderId();
+    }
     const billNumber = `ORD-${Date.now().toString().slice(-6)}`;
     const combinedExpectedDelivery = expectedDeliveryDate ? `${expectedDeliveryDate} ${expectedDeliveryTime || '17:00'}` : '';
 
@@ -1751,7 +1764,10 @@ export default function POS() {
       return;
     }
 
-    const orderId = pendingOrderId || '0001';
+    let orderId = pendingOrderId;
+    if (!orderId) {
+      orderId = await fetchNextOrderId();
+    }
     const billNumber = `ORD-${Date.now().toString().slice(-6)}`;
     const combinedExpectedDelivery = expectedDeliveryDate ? `${expectedDeliveryDate} ${expectedDeliveryTime || '17:00'}` : '';
 
@@ -2147,444 +2163,7 @@ export default function POS() {
     }
   };
 
-  if (step === 'checkout') {
-    return (
-      <div className={styles.checkoutContainer}>
-        {/* Left: Order Summary */}
-        <div className={styles.summarySection}>
-          <div className={styles.summaryHeader}>
-            <h2>Order Summary</h2>
-            <Edit3 size={18} className={styles.clearCart} onClick={() => setStep('pos')} />
-          </div>
-          <div className={styles.summaryCard}>
-            <p style={{ fontSize: '0.85rem', color: '#64748B' }}>Ticket #{pendingOrderId} • Customer: {selectedCustomer ? selectedCustomer.name : 'Walk-in Customer'}</p>
-            {cart.map((item, idx) => (
-              <div key={idx} className={styles.cartItem}>
-                <div className={styles.cartItemIcon}>
-                  {(() => {
-                    const sObj = services.find(s => s.name === item.name);
-                    return sObj?.image ? (
-                      <img src={sObj.image} alt="" style={{ width: '20px', height: '20px', objectFit: 'contain', borderRadius: '4px' }} />
-                    ) : getIcon(sObj?.icon);
-                  })()}
-                </div>
-                <div className={styles.cartItemDetails}>
-                  <span className={styles.cartItemName}>{item.name}</span>
-                  <span className={styles.cartItemMeta}>
-                    {(() => {
-                      const treatments = item.type || '';
-                      const addonsList = (item.addons || []).join(' + ');
-                      const baseMeta = [treatments, addonsList].filter(Boolean).join(' + ').toUpperCase();
-                      return baseMeta + (item.deliveryMethod ? ` (${item.deliveryMethod.toUpperCase()})` : '');
-                    })()}
-                    {item.qty > 1 && (
-                      <>
-                        {' • '}
-                        {item.qty} × <CurrencySymbol size={12} /> {item.price.toFixed(2)}
-                      </>
-                    )}
-                  </span>
-                  {item.description && (
-                    <span style={{ fontSize: '0.75rem', color: '#DC2626', fontWeight: 600, marginTop: '0.15rem' }}>
-                      ⚠️ Damage Notes: {item.description}
-                    </span>
-                  )}
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span className={styles.cartItemTotal}><CurrencySymbol size={14} /> {(item.price * item.qty).toFixed(2)}</span>
-                </div>
-              </div>
-            ))}
 
-            <div style={{ marginTop: 'auto', borderTop: '1px solid #F1F5F9', paddingTop: '1rem' }}>
-              <div className={styles.cartRow}><span>Subtotal</span><span><CurrencySymbol size={14} /> {subtotal.toFixed(2)}</span></div>
-              <div className={styles.cartRow}><span>{settings.taxName || 'Tax'} ({settings.isTaxEnabled ? settings.taxRate : 0}%)</span><span><CurrencySymbol size={14} /> {tax.toFixed(2)}</span></div>
-              <div className={`${styles.cartRow} ${styles.totalRow}`}><span>Grand Total</span><span className={styles.totalValue}><CurrencySymbol size={16} /> {total.toFixed(2)}</span></div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Payment */}
-        <div className={styles.paymentSection}>
-          <div className={styles.amountGrid}>
-            <div className={styles.amountBox}>
-              <span className={styles.amountBoxLabel}>Amount Due</span>
-              <span className={styles.amountBoxValue}><CurrencySymbol size={16} /> {total.toFixed(2)}</span>
-            </div>
-            <div className={styles.amountBox}>
-              <span className={styles.amountBoxLabel}>Total Paid</span>
-              <span className={styles.amountBoxValue} style={{ color: '#10B981' }}><CurrencySymbol size={16} /> {totalPaidManual.toFixed(2)}</span>
-            </div>
-            <div className={`${styles.amountBox} ${remainingDue > 0 ? styles.amountBoxChange : ''}`}>
-              <span className={styles.amountBoxLabel}>Remaining Due</span>
-              <span className={styles.amountBoxValue} style={{ color: remainingDue > 0 ? '#EF4444' : '#10B981' }}><CurrencySymbol size={16} /> {remainingDue.toFixed(2)}</span>
-            </div>
-          </div>
-          
-          {appliedAdvanceUI > 0 && (
-            <div style={{ background: '#ECFDF5', border: '1px solid #34D399', borderRadius: '8px', padding: '0.75rem', marginTop: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: '#065F46', fontSize: '0.85rem', fontWeight: 600 }}>Advance Automatically Applied:</span>
-              <span style={{ color: '#059669', fontSize: '1.1rem', fontWeight: 800 }}>-<CurrencySymbol size={14} /> {appliedAdvanceUI.toFixed(2)}</span>
-            </div>
-          )}
-
-          {nomodLinkModal.show ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
-              <div style={{ background: '#F8FAFC', padding: '1.25rem', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
-                <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>PAYMENT AMOUNT (NOMOD)</span>
-                <h1 style={{ margin: '0.25rem 0 0 0', color: '#1E293B', fontSize: '2.25rem', fontWeight: 800 }}>
-                  {formatCurrency(nomodLinkModal.amount)}
-                </h1>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
-                <div style={{ padding: '12px', background: 'white', borderRadius: '12px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-                  <QRCodeCanvas 
-                    id="nomod-qr-canvas"
-                    value={nomodLinkModal.url}
-                    size={160}
-                    level="H"
-                  />
-                </div>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button
-                    type="button"
-                    className={styles.saveBtn}
-                    style={{ background: '#475569', color: 'white', padding: '0.35rem 0.75rem', fontSize: '0.8rem', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
-                    onClick={() => {
-                      const canvas = document.getElementById('nomod-qr-canvas');
-                      if (canvas) {
-                        if (window.electronAPI?.printHtml) {
-                          window.electronAPI.printHtml({
-                            html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
-                            css: '',
-                            printerName: settings.billingPrinter,
-                            silent: settings.silentPrinting !== false
-                          });
-                        } else {
-                          const win = window.open('', '', 'width=400,height=400');
-                          win.document.write(`<html><body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;"><img id="qr-img" src="${canvas.toDataURL()}" style="width:300px;height:300px;"/>
-                          <script>
-                            document.getElementById('qr-img').onload = function() {
-                              window.print();
-                              window.close();
-                            };
-                          </script>
-                          </body></html>`);
-                          win.document.close();
-                        }
-                      }
-                    }}
-                  >
-                    Print QR
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.saveBtn}
-                    style={{ background: '#475569', color: 'white', padding: '0.35rem 0.75rem', fontSize: '0.8rem', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
-                    onClick={() => {
-                      const canvas = document.getElementById('nomod-qr-canvas');
-                      if (canvas) {
-                        const a = document.createElement('a');
-                        a.download = `QR-${nomodLinkModal.linkId}.png`;
-                        a.href = canvas.toDataURL();
-                        a.click();
-                      }
-                    }}
-                  >
-                    Save QR
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569' }}>Nomod Checkout URL</label>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <input
-                    type="text"
-                    readOnly
-                    className={styles.inputField}
-                    value={nomodLinkModal.url}
-                    style={{ flex: 1, background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0.5rem', fontSize: '0.85rem' }}
-                  />
-                  <button
-                    type="button"
-                    className={styles.saveBtn}
-                    style={{ background: '#475569', color: 'white', padding: '0.5rem 1rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
-                    onClick={() => {
-                      navigator.clipboard.writeText(nomodLinkModal.url);
-                      alert("Payment Link copied to clipboard!");
-                    }}
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  className={styles.saveBtn}
-                  style={{ background: '#2563EB', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
-                  onClick={() => window.open(nomodLinkModal.url, '_blank')}
-                >
-                  Open Link
-                </button>
-                <button
-                  type="button"
-                  className={styles.saveBtn}
-                  style={{ background: '#10B981', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
-                  onClick={() => {
-                    const text = `Please pay ${formatCurrency(nomodLinkModal.amount)} for your laundry order using this link: ${nomodLinkModal.url}`;
-                    handleWhatsApp(selectedCustomer?.phone || '', text);
-                  }}
-                >
-                  WhatsApp
-                </button>
-                <button
-                  type="button"
-                  className={styles.saveBtn}
-                  style={{ background: '#4F46E5', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
-                  onClick={() => {
-                    const smsUrl = `sms:${selectedCustomer?.phone || ''}?body=${encodeURIComponent(`Please pay ${formatCurrency(nomodLinkModal.amount)} for your laundry order: ${nomodLinkModal.url}`)}`;
-                    window.open(smsUrl, '_blank');
-                  }}
-                >
-                  SMS
-                </button>
-                <button
-                  type="button"
-                  className={styles.saveBtn}
-                  style={{ background: '#EA580C', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
-                  onClick={() => {
-                    const emailUrl = `mailto:${selectedCustomer?.email || ''}?subject=Laundry Payment&body=Please pay ${formatCurrency(nomodLinkModal.amount)} using this link: ${nomodLinkModal.url}`;
-                    window.open(emailUrl, '_blank');
-                  }}
-                >
-                  Email
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem', borderTop: '1px solid #E2E8F0', paddingTop: '1.25rem' }}>
-                <button
-                  type="button"
-                  className={styles.secondaryBtn}
-                  style={{ flex: 1, padding: '0.85rem', border: '1px solid #CBD5E1', borderRadius: '8px', cursor: 'pointer', background: 'white' }}
-                  onClick={() => setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 })}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className={styles.completeBtn}
-                  style={{ flex: 1.5, background: '#10B981', color: 'white', padding: '0.85rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
-                  onClick={async () => {
-                    if (window.electronAPI?.dbQuery) {
-                      await window.electronAPI.dbQuery(
-                        `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
-                         VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?, ?)`,
-                        [
-                          nomodLinkModal.linkId,
-                          selectedCustomer ? selectedCustomer.id : 'Walk-in',
-                          selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
-                          `Order #${settings.invoicePrefix || ''}${nomodLinkModal.orderId}`,
-                          nomodLinkModal.amount,
-                          getLocalDateTime(),
-                          nomodLinkModal.url,
-                          nomodLinkModal.linkId
-                        ]
-                      );
-                    }
-                    
-                    setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 });
-                    handleCompletePayment(true, nomodLinkModal.linkId, nomodLinkModal.url);
-                  }}
-                >
-                  Confirm & Save
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <h3 className={styles.modalSectionTitle}>Multipayment Details (Click field to enter amount)</h3>
-            <div className={styles.multipaymentGrid} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
-              <div 
-                onClick={() => setActivePaymentField('cash')}
-                style={{
-                  background: activePaymentField === 'cash' ? '#EFF6FF' : 'white',
-                  border: activePaymentField === 'cash' ? '2px solid #2563EB' : '1px solid #E2E8F0',
-                  borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                  <Wallet size={14} /> Cash Amount
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                  <CurrencySymbol size={12} />
-                  <input 
-                    type="number" 
-                    placeholder="0.00" 
-                    value={cashAmount} 
-                    onChange={(e) => setCashAmount(e.target.value)} 
-                    onFocus={() => setActivePaymentField('cash')}
-                    style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
-                  />
-                </div>
-              </div>
-
-              <div 
-                onClick={() => setActivePaymentField('card')}
-                style={{
-                  background: activePaymentField === 'card' ? '#EFF6FF' : 'white',
-                  border: activePaymentField === 'card' ? '2px solid #2563EB' : '1px solid #E2E8F0',
-                  borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                  <CreditCard size={14} /> Card Amount
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                  <CurrencySymbol size={12} />
-                  <input 
-                    type="number" 
-                    placeholder="0.00" 
-                    value={cardAmount} 
-                    onChange={(e) => setCardAmount(e.target.value)} 
-                    onFocus={() => setActivePaymentField('card')}
-                    style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
-                  />
-                </div>
-              </div>
-
-              <div 
-                onClick={() => setActivePaymentField('bank')}
-                style={{
-                  background: activePaymentField === 'bank' ? '#EFF6FF' : 'white',
-                  border: activePaymentField === 'bank' ? '2px solid #2563EB' : '1px solid #E2E8F0',
-                  borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                  <Landmark size={14} /> Bank Transfer
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                  <CurrencySymbol size={12} />
-                  <input 
-                    type="number" 
-                    placeholder="0.00" 
-                    value={bankAmount} 
-                    onChange={(e) => setBankAmount(e.target.value)} 
-                    onFocus={() => setActivePaymentField('bank')}
-                    style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
-                  />
-                </div>
-              </div>
-
-              {settings.noModPayEnabled && settings.enableNomod && (
-                <div 
-                  onClick={() => setActivePaymentField('nomod')}
-                  style={{
-                    background: activePaymentField === 'nomod' ? '#EFF6FF' : 'white',
-                    border: activePaymentField === 'nomod' ? '2px solid #2563EB' : '1px solid #E2E8F0',
-                    borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                    <CreditCard size={14} /> Nomod Payment Link
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                    <CurrencySymbol size={12} />
-                    <input 
-                      type="number" 
-                      placeholder="0.00" 
-                      value={nomodAmount} 
-                      onChange={(e) => setNomodAmount(e.target.value)} 
-                      onFocus={() => setActivePaymentField('nomod')}
-                      style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-          )}
-
-          {(cardVal > 0 || upiVal > 0 || bankVal > 0) && settings.bankAccounts?.length > 0 && (
-            <div style={{ marginTop: '1rem' }}>
-              <h3 className={styles.modalSectionTitle}>Select Bank Account for Digital Payments</h3>
-              <div className={styles.inputWrapper} style={{ background: 'white', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.25rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Landmark size={18} color="#2563EB" />
-                <select
-                  className={styles.inputField}
-                  style={{ border: 'none', width: '100%', outline: 'none' }}
-                  value={selectedBank}
-                  onChange={(e) => setSelectedBank(e.target.value)}
-                >
-                  {settings.bankAccounts.filter(acc => acc.isActive !== false).map((acc, idx) => (
-                    <option key={idx} value={acc.id || acc.bankName}>{acc.bankName}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
-
-          <div className={styles.checkoutBottom}>
-            <div>
-              <h3 className={styles.modalSectionTitle}>Enter Amount for {activePaymentField.toUpperCase()}</h3>
-              <div className={styles.numpad}>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, '.', 0].map(n => (
-                  <button key={n} className={styles.numBtn} onClick={() => handleKeypadPress(n)}>{n}</button>
-                ))}
-                <button className={`${styles.numBtn} ${styles.numBtnAction}`} onClick={() => handleKeypadPress('clear')}><X size={24} /></button>
-                <button className={`${styles.numBtn} ${styles.numBtnSpecial}`} style={{ gridColumn: 'span 3', height: '48px' }} onClick={() => handleKeypadPress('exact')}>Exact Amount</button>
-              </div>
-            </div>
-
-            <div className={styles.checkoutActions}>
-              <div className={styles.checkoutOptions}>
-                <div className={styles.optionToggle} onClick={() => setPrintReceipt(!printReceipt)}>
-                  <div className={`${styles.switch} ${printReceipt ? styles.switchOn : ''}`}>
-                    <div className={styles.switchHandle}></div>
-                  </div>
-                  <div className={styles.optionToggleText}>
-                    <span className={styles.optionToggleLabel}>Print Receipt</span>
-                    <span className={styles.optionToggleSub}>Automatically print after payment</span>
-                  </div>
-                </div>
-              </div>
-
-              <button className={styles.completeBtn} onClick={() => handleCompletePayment(false)}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <Printer size={28} />
-                  Complete Payment & {printReceipt ? 'Print' : 'Finalize'} Receipt
-                </div>
-              </button>
-
-              {selectedCustomer && (
-                <button
-                  className={styles.waReceiptBtn}
-                  onClick={() => {
-                    let msg = '';
-                    if (settings.waCheckoutReceiptTemplate) {
-                      msg = settings.waCheckoutReceiptTemplate
-                        .replace(/{customerName}/g, selectedCustomer.name)
-                        .replace(/{total}/g, `${settings.currencySymbol || 'AED'} ${total.toFixed(2)}`)
-                        .replace(/{shopName}/g, settings.shopName || 'Laundry Box');
-                    } else {
-                      msg = `Hello ${selectedCustomer.name}! Your laundry order totaling ${total.toFixed(2)} has been received and is now being processed. Thank you for choosing us!`;
-                    }
-                    handleWhatsApp(selectedCustomer.phone, msg);
-                  }}
-                >
-                  <WhatsAppIcon size={24} /> Send WhatsApp Receipt
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className={styles.posContainer}>
@@ -3847,6 +3426,407 @@ export default function POS() {
         </div>
       )}
 
+      {/* Checkout Modal Overlay */}
+      {step === 'checkout' && (
+        <div className={styles.modalOverlay} onClick={() => setStep('pos')}>
+          <div className={styles.modal} style={{ width: '800px', maxWidth: '95vw', maxHeight: '95vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', background: '#F8FAFC', borderBottom: '1px solid #F1F5F9' }}>
+              <div className={styles.modalTitle} style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0F172A', margin: 0 }}>Complete Payment & Finalize Receipt</h2>
+                <p style={{ fontSize: '0.8rem', color: '#64748B', margin: 0, textTransform: 'none', letterSpacing: 'normal', fontWeight: 500 }}>Enter payment details to complete this order</p>
+              </div>
+              <button className={styles.modalCloseBtn} onClick={() => setStep('pos')} aria-label="Close modal">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className={styles.modalBody} style={{ padding: '1.5rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div className={styles.amountGrid} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>
+                <div className={styles.amountBox} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '1.25rem', background: 'white' }}>
+                  <span className={styles.amountBoxLabel} style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Amount Due</span>
+                  <span className={styles.amountBoxValue} style={{ fontSize: '1.5rem', fontWeight: 800, color: '#1E293B' }}><CurrencySymbol size={16} /> {total.toFixed(2)}</span>
+                </div>
+                <div className={styles.amountBox} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '1.25rem', background: 'white' }}>
+                  <span className={styles.amountBoxLabel} style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Total Paid</span>
+                  <span className={styles.amountBoxValue} style={{ fontSize: '1.5rem', fontWeight: 800, color: '#10B981' }}><CurrencySymbol size={16} /> {totalPaidManual.toFixed(2)}</span>
+                </div>
+                <div className={`${styles.amountBox} ${remainingDue > 0 ? styles.amountBoxChange : ''}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '1.25rem' }}>
+                  <span className={styles.amountBoxLabel} style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Remaining Due</span>
+                  <span className={styles.amountBoxValue} style={{ fontSize: '1.5rem', fontWeight: 800, color: remainingDue > 0 ? '#EF4444' : '#10B981' }}><CurrencySymbol size={16} /> {remainingDue.toFixed(2)}</span>
+                </div>
+              </div>
+
+              {appliedAdvanceUI > 0 && (
+                <div style={{ background: '#ECFDF5', border: '1px solid #34D399', borderRadius: '8px', padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#065F46', fontSize: '0.85rem', fontWeight: 600 }}>Advance Automatically Applied:</span>
+                  <span style={{ color: '#059669', fontSize: '1.1rem', fontWeight: 800 }}>-<CurrencySymbol size={14} /> {appliedAdvanceUI.toFixed(2)}</span>
+                </div>
+              )}
+
+              {nomodLinkModal.show ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
+                  <div style={{ background: '#F8FAFC', padding: '1.25rem', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+                    <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 800 }}>PAYMENT AMOUNT (NOMOD)</span>
+                    <h1 style={{ margin: '0.25rem 0 0 0', color: '#1E293B', fontSize: '2.25rem', fontWeight: 800 }}>
+                      {formatCurrency(nomodLinkModal.amount)}
+                    </h1>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
+                    <div style={{ padding: '12px', background: 'white', borderRadius: '12px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+                      <QRCodeCanvas 
+                        id="nomod-qr-canvas"
+                        value={nomodLinkModal.url}
+                        size={160}
+                        level="H"
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        type="button"
+                        className={styles.saveBtn}
+                        style={{ background: '#475569', color: 'white', padding: '0.35rem 0.75rem', fontSize: '0.8rem', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                        onClick={() => {
+                          const canvas = document.getElementById('nomod-qr-canvas');
+                          if (canvas) {
+                            if (window.electronAPI?.printHtml) {
+                              window.electronAPI.printHtml({
+                                html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
+                                css: '',
+                                printerName: settings.billingPrinter,
+                                silent: settings.silentPrinting !== false
+                              });
+                            } else {
+                              const win = window.open('', '', 'width=400,height=400');
+                              win.document.write(`<html><body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;"><img id="qr-img" src="${canvas.toDataURL()}" style="width:300px;height:300px;"/>
+                              <script>
+                                document.getElementById('qr-img').onload = function() {
+                                  window.print();
+                                  window.close();
+                                };
+                              </script>
+                              </body></html>`);
+                              win.document.close();
+                            }
+                          }
+                        }}
+                      >
+                        Print QR
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.saveBtn}
+                        style={{ background: '#475569', color: 'white', padding: '0.35rem 0.75rem', fontSize: '0.8rem', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                        onClick={() => {
+                          const canvas = document.getElementById('nomod-qr-canvas');
+                          if (canvas) {
+                            const a = document.createElement('a');
+                            a.download = `QR-${nomodLinkModal.linkId}.png`;
+                            a.href = canvas.toDataURL();
+                            a.click();
+                          }
+                        }}
+                      >
+                        Save QR
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569' }}>Nomod Checkout URL</label>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input
+                        type="text"
+                        readOnly
+                        className={styles.inputField}
+                        value={nomodLinkModal.url}
+                        style={{ flex: 1, background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0.5rem', fontSize: '0.85rem' }}
+                      />
+                      <button
+                        type="button"
+                        className={styles.saveBtn}
+                        style={{ background: '#475569', color: 'white', padding: '0.5rem 1rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                        onClick={() => {
+                          navigator.clipboard.writeText(nomodLinkModal.url);
+                          alert("Payment Link copied to clipboard!");
+                        }}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      className={styles.saveBtn}
+                      style={{ background: '#2563EB', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                      onClick={() => {
+                        if (window.electronAPI?.openExternal) {
+                          window.electronAPI.openExternal(nomodLinkModal.url);
+                        } else {
+                          window.open(nomodLinkModal.url, '_blank');
+                        }
+                      }}
+                    >
+                      Open Link
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.saveBtn}
+                      style={{ background: '#10B981', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                      onClick={() => {
+                        const text = `Please pay ${formatCurrency(nomodLinkModal.amount)} for your laundry order using this link: ${nomodLinkModal.url}`;
+                        handleWhatsApp(selectedCustomer?.phone || '', text);
+                      }}
+                    >
+                      WhatsApp
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.saveBtn}
+                      style={{ background: '#4F46E5', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                      onClick={() => {
+                        const smsUrl = `sms:${selectedCustomer?.phone || ''}?body=${encodeURIComponent(`Please pay ${formatCurrency(nomodLinkModal.amount)} for your laundry order: ${nomodLinkModal.url}`)}`;
+                        window.open(smsUrl, '_blank');
+                      }}
+                    >
+                      SMS
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.saveBtn}
+                      style={{ background: '#EA580C', color: 'white', padding: '0.75rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                      onClick={() => {
+                        const emailUrl = `mailto:${selectedCustomer?.email || ''}?subject=Laundry Payment&body=Please pay ${formatCurrency(nomodLinkModal.amount)} using this link: ${nomodLinkModal.url}`;
+                        window.open(emailUrl, '_blank');
+                      }}
+                    >
+                      Email
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem', borderTop: '1px solid #E2E8F0', paddingTop: '1.25rem' }}>
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      style={{ flex: 1, padding: '0.85rem', border: '1px solid #CBD5E1', borderRadius: '8px', cursor: 'pointer', background: 'white' }}
+                      onClick={() => setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 })}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.completeBtn}
+                      style={{ flex: 1.5, background: '#10B981', color: 'white', padding: '0.85rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                      onClick={async () => {
+                        if (window.electronAPI?.dbQuery) {
+                          await window.electronAPI.dbQuery(
+                            `INSERT INTO payment_links (id, customerId, customerName, description, amount, channel, date, status, url, checkoutId) 
+                             VALUES (?, ?, ?, ?, ?, 'Nomod', ?, 'Pending', ?, ?)`,
+                            [
+                              nomodLinkModal.linkId,
+                              selectedCustomer ? selectedCustomer.id : 'Walk-in',
+                              selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+                              `Order #${nomodLinkModal.orderId}`,
+                              nomodLinkModal.amount,
+                              getLocalDateTime(),
+                              nomodLinkModal.url,
+                              nomodLinkModal.linkId
+                            ]
+                          );
+                        }
+                        setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 });
+                        handleCompletePayment(true, nomodLinkModal.linkId, nomodLinkModal.url);
+                      }}
+                    >
+                      Confirm & Save
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <h3 className={styles.modalSectionTitle} style={{ marginBottom: '0.5rem' }}>Multipayment Details</h3>
+                  <div className={styles.multipaymentGrid} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1rem' }}>
+                    <div 
+                      onClick={() => setActivePaymentField('cash')}
+                      style={{
+                        background: activePaymentField === 'cash' ? '#EFF6FF' : 'white',
+                        border: activePaymentField === 'cash' ? '2px solid #2563EB' : '1px solid #E2E8F0',
+                        borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
+                        <Wallet size={14} /> Cash Amount
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
+                        <CurrencySymbol size={12} />
+                        <input 
+                          type="number" 
+                          placeholder="0.00" 
+                          value={cashAmount} 
+                          onChange={(e) => setCashAmount(e.target.value)} 
+                          onFocus={() => setActivePaymentField('cash')}
+                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
+                        />
+                      </div>
+                    </div>
+
+                    <div 
+                      onClick={() => setActivePaymentField('card')}
+                      style={{
+                        background: activePaymentField === 'card' ? '#EFF6FF' : 'white',
+                        border: activePaymentField === 'card' ? '2px solid #2563EB' : '1px solid #E2E8F0',
+                        borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
+                        <CreditCard size={14} /> Card Amount
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
+                        <CurrencySymbol size={12} />
+                        <input 
+                          type="number" 
+                          placeholder="0.00" 
+                          value={cardAmount} 
+                          onChange={(e) => setCardAmount(e.target.value)} 
+                          onFocus={() => setActivePaymentField('card')}
+                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
+                        />
+                      </div>
+                    </div>
+
+                    <div 
+                      onClick={() => setActivePaymentField('bank')}
+                      style={{
+                        background: activePaymentField === 'bank' ? '#EFF6FF' : 'white',
+                        border: activePaymentField === 'bank' ? '2px solid #2563EB' : '1px solid #E2E8F0',
+                        borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
+                        <Landmark size={14} /> Bank Transfer
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
+                        <CurrencySymbol size={12} />
+                        <input 
+                          type="number" 
+                          placeholder="0.00" 
+                          value={bankAmount} 
+                          onChange={(e) => setBankAmount(e.target.value)} 
+                          onFocus={() => setActivePaymentField('bank')}
+                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
+                        />
+                      </div>
+                    </div>
+
+                    {settings.noModPayEnabled && settings.enableNomod && (
+                      <div 
+                        onClick={() => setActivePaymentField('nomod')}
+                        style={{
+                          background: activePaymentField === 'nomod' ? '#EFF6FF' : 'white',
+                          border: activePaymentField === 'nomod' ? '2px solid #2563EB' : '1px solid #E2E8F0',
+                          borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem',
+                          gridColumn: 'span 3'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
+                          <CreditCard size={14} /> Nomod Payment Link
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
+                          <CurrencySymbol size={12} />
+                          <input 
+                            type="number" 
+                            placeholder="0.00" 
+                            value={nomodAmount} 
+                            onChange={(e) => setNomodAmount(e.target.value)} 
+                            onFocus={() => setActivePaymentField('nomod')}
+                            style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {(cardVal > 0 || upiVal > 0 || bankVal > 0) && settings.bankAccounts?.length > 0 && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <h3 className={styles.modalSectionTitle}>Select Bank Account for Digital Payments</h3>
+                  <div className={styles.inputWrapper} style={{ background: 'white', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.25rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Landmark size={18} color="#2563EB" />
+                    <select
+                      className={styles.inputField}
+                      style={{ border: 'none', width: '100%', outline: 'none' }}
+                      value={selectedBank}
+                      onChange={(e) => setSelectedBank(e.target.value)}
+                    >
+                      {settings.bankAccounts.filter(acc => acc.isActive !== false).map((acc, idx) => (
+                        <option key={idx} value={acc.id || acc.bankName}>{acc.bankName}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div className={styles.checkoutBottom} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '1.5rem', marginTop: '0.5rem' }}>
+                <div>
+                  <h3 className={styles.modalSectionTitle} style={{ marginBottom: '0.5rem' }}>Enter Amount for {activePaymentField.toUpperCase()}</h3>
+                  <div className={styles.numpad}>
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, '.', 0].map(n => (
+                      <button key={n} className={styles.numBtn} onClick={() => handleKeypadPress(n)}>{n}</button>
+                    ))}
+                    <button className={`${styles.numBtn} ${styles.numBtnAction}`} onClick={() => handleKeypadPress('clear')}><X size={24} /></button>
+                    <button className={`${styles.numBtn} ${styles.numBtnSpecial}`} style={{ gridColumn: 'span 3', height: '48px' }} onClick={() => handleKeypadPress('exact')}>Exact Amount</button>
+                  </div>
+                </div>
+
+                <div className={styles.checkoutActions} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: '0.75rem' }}>
+                  <div className={styles.checkoutOptions} style={{ margin: '0' }}>
+                    <div className={styles.optionToggle} onClick={() => setPrintReceipt(!printReceipt)}>
+                      <div className={`${styles.switch} ${printReceipt ? styles.switchOn : ''}`}>
+                        <div className={styles.switchHandle}></div>
+                      </div>
+                      <div className={styles.optionToggleText}>
+                        <span className={styles.optionToggleLabel}>Print Receipt</span>
+                        <span className={styles.optionToggleSub}>Automatically print after payment</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button className={styles.completeBtn} onClick={() => handleCompletePayment(false)} style={{ padding: '1rem', width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', justifyContent: 'center' }}>
+                      <Printer size={24} />
+                      <span style={{ fontSize: '1rem', fontWeight: 800 }}>Complete Payment & {printReceipt ? 'Print' : 'Finalize'} Receipt</span>
+                    </div>
+                  </button>
+
+                  {selectedCustomer && (
+                    <button
+                      className={styles.waReceiptBtn}
+                      onClick={() => {
+                        let msg = '';
+                        if (settings.waCheckoutReceiptTemplate) {
+                          msg = settings.waCheckoutReceiptTemplate
+                            .replace(/{customerName}/g, selectedCustomer.name)
+                            .replace(/{total}/g, `${settings.currencySymbol || 'AED'} ${total.toFixed(2)}`)
+                            .replace(/{shopName}/g, settings.shopName || 'Laundry Box');
+                        } else {
+                          msg = `Hello ${selectedCustomer.name}! Your laundry order totaling ${total.toFixed(2)} has been received and is now being processed. Thank you for choosing us!`;
+                        }
+                        handleWhatsApp(selectedCustomer.phone, msg);
+                      }}
+                      style={{ margin: 0, padding: '1rem', width: '100%' }}
+                    >
+                      <WhatsAppIcon size={24} /> Send WhatsApp Receipt
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

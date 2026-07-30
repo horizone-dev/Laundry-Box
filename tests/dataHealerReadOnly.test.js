@@ -9,6 +9,7 @@ db.exec(`
   CREATE TABLE payments (id TEXT PRIMARY KEY, customerId TEXT, orderId TEXT, amount REAL, method TEXT, status TEXT);
   CREATE TABLE advance_allocations (id TEXT PRIMARY KEY, paymentId TEXT, orderId TEXT, amountUsed REAL);
   CREATE TABLE deleted_orders (id TEXT PRIMARY KEY, customerId TEXT, refundStatus TEXT, returnStatus TEXT, paidAmount REAL, payments TEXT);
+  CREATE TABLE refunds (id TEXT PRIMARY KEY, customerId TEXT, orderId TEXT, amount REAL, createdAt TEXT, isSynced INTEGER, updatedAt TEXT);
 `);
 
 db.prepare('INSERT INTO customers (id, name, balance, advanceBalance, openingBalance) VALUES (?, ?, ?, ?, ?)').run('C1', 'Read Only Customer', 50, 0, 0);

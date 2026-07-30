@@ -15,6 +15,8 @@ function setup() {
     CREATE TABLE account_transactions (id TEXT PRIMARY KEY, shopId TEXT, accountType TEXT, type TEXT, category TEXT, amount REAL, description TEXT, date TEXT, isSynced INTEGER, updatedAt TEXT, icon TEXT, bankAccountId TEXT, createdBy TEXT, createdById TEXT, createdByRole TEXT);
     CREATE TABLE customer_ledger (id TEXT PRIMARY KEY, shopId TEXT, customerId TEXT, orderId TEXT, transactionType TEXT, debit REAL, credit REAL, balance REAL, description TEXT, createdAt TEXT);
     CREATE TABLE audit_logs (id TEXT PRIMARY KEY, event TEXT, details TEXT, userId TEXT, userRole TEXT, timestamp TEXT, device TEXT);
+    CREATE TABLE refunds (id TEXT PRIMARY KEY, customerId TEXT, orderId TEXT, amount REAL, createdAt TEXT, isSynced INTEGER, updatedAt TEXT);
+    CREATE TABLE settlement_discounts (id TEXT PRIMARY KEY, shopId TEXT, customerId TEXT, orderId TEXT, amount REAL, createdAt TEXT, updatedAt TEXT, paymentReference TEXT);
   `);
   return db;
 }
@@ -32,7 +34,7 @@ function setup() {
   });
 
   assert.equal(result.success, true);
-  assert.equal(db.prepare('SELECT dueAmount FROM orders WHERE id = ?').get('O1').dueAmount, 0);
+  assert.equal(db.prepare('SELECT dueAmount FROM orders WHERE id = ?').get('O1').dueAmount, 40);
   assert.equal(db.prepare('SELECT balance FROM customers WHERE id = ?').get('C1').balance, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM payments').get().count, 2);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE paymentReference = 'DISC-0000001'").get().count, 1);
@@ -329,12 +331,12 @@ function setup() {
 
   assert.equal(result.success, true);
   assert.equal(result.discountScope, 'settlement');
-  assert.equal(result.advanceCreated, 100);
-  assert.equal(db.prepare('SELECT dueAmount FROM orders WHERE id = ?').get('O1').dueAmount, 0);
+  assert.equal(result.advanceCreated, 0);
+  assert.equal(db.prepare('SELECT dueAmount FROM orders WHERE id = ?').get('O1').dueAmount, 800);
   assert.equal(db.prepare('SELECT balance FROM customers WHERE id = ?').get('C1').balance, -100);
   assert.equal(db.prepare('SELECT advanceBalance FROM customers WHERE id = ?').get('C1').advanceBalance, 100);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE method = 'Discount' AND discountScope = 'settlement'").get().count, 1);
-  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE method = 'Card' AND paymentReference LIKE 'ADV-%'").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE method = 'Card' AND paymentReference LIKE 'SET-%'").get().count, 1);
   db.close();
 }
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search, User, Download, Printer, FileText, Calendar,
   ChevronDown, ChevronRight, ArrowUpRight, ArrowDownRight,
@@ -15,8 +15,11 @@ import Pagination from '../components/Pagination';
 import CustomSelect from '../components/CustomSelect';
 import styles from './CustomerStatement.module.css';
 
-export default function CustomerStatement() {
-  const { customerId } = useParams();
+export default function CustomerStatement({ customerIdProp, selectedCustomerProp, onBackToInsight, onClose, hideHeader }) {
+  const { customerId: routeCustomerId } = useParams();
+  const customerId = customerIdProp || routeCustomerId;
+  const [searchParams] = useSearchParams();
+  const queryCustomerId = searchParams.get('customerId');
   const navigate = useNavigate();
   const { settings, formatDate } = useSettings();
   const formatDateTime = (dateVal) => {
@@ -33,10 +36,11 @@ export default function CustomerStatement() {
   const statementRequestRef = useRef(0);
 
   /* ─── State ──────────────────────────────────────── */
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(selectedCustomerProp ? selectedCustomerProp.name : '');
   const [customers, setCustomers] = useState([]);
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [selectedCustomer, setSelectedCustomer] = useState(selectedCustomerProp || null);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
 
   const [dateRange, setDateRange] = useState('All');
   const [dateFrom, setDateFrom] = useState('');
@@ -49,6 +53,7 @@ export default function CustomerStatement() {
   const [allocations, setAllocations] = useState([]);
   const [cancellations, setCancellations] = useState([]);
   const [refunds, setRefunds] = useState([]);
+  const [customerLedgerRows, setCustomerLedgerRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -166,6 +171,12 @@ export default function CustomerStatement() {
 
   /* ─── Load customer from URL or sessionStorage ── */
   useEffect(() => {
+    if (selectedCustomerProp) {
+      setSelectedCustomer(selectedCustomerProp);
+      setSearchTerm(selectedCustomerProp.name);
+      return;
+    }
+
     const saved = sessionStorage.getItem('customer_statement_filters');
     let savedCustomerId = null;
     if (saved) {
@@ -177,7 +188,7 @@ export default function CustomerStatement() {
       }
     }
 
-    const activeCustId = customerId || savedCustomerId;
+    const activeCustId = customerIdProp || customerId || queryCustomerId || savedCustomerId;
 
     if (activeCustId && window.electronAPI?.dbQuery) {
       const loadCustomer = async () => {
@@ -196,7 +207,7 @@ export default function CustomerStatement() {
       };
       loadCustomer();
     }
-  }, [customerId]);
+  }, [selectedCustomerProp, customerIdProp, customerId, queryCustomerId]);
 
   /* ─── Search customers ────────────────────────────── */
   useEffect(() => {
@@ -328,6 +339,11 @@ export default function CustomerStatement() {
         [customerId]
       );
 
+      const ledgerRes = await window.electronAPI.dbQuery(
+        `SELECT * FROM customer_ledger WHERE customerId = ? ORDER BY createdAt ASC`,
+        [customerId]
+      );
+
       if (requestId !== statementRequestRef.current) return;
 
       setOrders(ordersRes.success ? ordersRes.data : []);
@@ -335,6 +351,7 @@ export default function CustomerStatement() {
       setAllocations(allocationsRes.success ? allocationsRes.data : []);
       setCancellations(cancellationsRes.success ? cancellationsRes.data : []);
       setRefunds(refundsRes.success ? refundsRes.data : []);
+      setCustomerLedgerRows(ledgerRes.success ? ledgerRes.data : []);
     } catch (err) {
       if (requestId === statementRequestRef.current) {
         console.error('Statement fetch error:', err);
@@ -406,10 +423,21 @@ export default function CustomerStatement() {
 
       const totalAmt = parseFloat(o.totalAmount) || 0;
 
+      // Find all discount edits/deletions logged in customer_ledger for this order
+      const discountEditRows = customerLedgerRows.filter(r => r.orderId === o.id && r.transactionType === 'DISCOUNT_EDIT');
+      const sumDiff = discountEditRows.reduce((sum, r) => sum + (r.debit || 0) - (r.credit || 0), 0);
+      const originalDiscount = Math.max(0, discount + sumDiff);
+      const netDebit = Math.max(0, totalAmt - sumDiff);
+
       if (filterType !== 'Payments') {
         // 1. The Invoice Charge (Debit = Net Order Total)
         const orderDesc = `Order ${cleanRef}` + (o.isDeleted ? ' (Deleted)' : '');
-        const orderSummary = itemSummary;
+        let orderSummary = itemSummary;
+        if (originalDiscount > 0.005) {
+          orderSummary = orderSummary
+            ? `${orderSummary} (Discount: ${settings.currencySymbol || 'AED'} ${originalDiscount.toFixed(2)})`
+            : `Discount: ${settings.currencySymbol || 'AED'} ${originalDiscount.toFixed(2)}`;
+        }
 
         rows.push({
           date: o.createdAt,
@@ -417,9 +445,9 @@ export default function CustomerStatement() {
           ref: cleanRef,
           description: orderDesc,
           itemsSummary: orderSummary,
-          debit: totalAmt,
+          debit: netDebit,
           credit: 0,
-          discountAmount: discount,
+          discountAmount: originalDiscount,
           status: o.isDeleted ? 'Deleted' : o.paymentStatus,
           dueAmount: o.isDeleted ? 0 : o.dueAmount,
           rawOrder: o
@@ -434,7 +462,7 @@ export default function CustomerStatement() {
             description: `Deleted (Order ${cleanRef} Reversed)`,
             itemsSummary: `Reason: ${o.deleteReason || 'Order Deleted'}`,
             debit: 0,
-            credit: totalAmt,
+            credit: parseFloat(o.totalAmount) || 0,
             discountAmount: 0,
             status: 'Deleted',
             dueAmount: 0,
@@ -448,21 +476,43 @@ export default function CustomerStatement() {
     const statementPayments = payments;
     statementPayments.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto').forEach(p => {
       const discountScope = p.method === 'Discount' ? getDiscountScope(p) : 'order';
+      let amtVal = parseFloat(p.amount) || 0;
+      if (p.method === 'Discount' && discountScope === 'order') {
+        return;
+      }
+      if (p.method === 'Discount' && discountScope === 'settlement') {
+        const sumDiff = customerLedgerRows
+          .filter(r => {
+            if (r.transactionType !== 'DISCOUNT_EDIT') return false;
+            if (r.orderId && r.orderId !== '') return false;
+            if (r.description.includes('Ref: ') || r.description.includes('DISC-')) {
+              return r.description.includes(p.id) || (p.paymentReference && r.description.includes(p.paymentReference));
+            }
+            const match = r.description.match(/(?:reduced|increased) from ([\d.]+) to ([\d.]+)/);
+            if (match) {
+              const newAmt = parseFloat(match[2]) || 0;
+              if (Math.abs(newAmt - parseFloat(p.amount)) < 0.01) {
+                return true;
+              }
+            }
+            return false;
+          })
+          .reduce((sum, r) => sum + (parseFloat(r.debit) || 0) - (parseFloat(r.credit) || 0), 0);
+        amtVal = amtVal + sumDiff;
+      }
       const timestampKey = p.method === 'Discount' && discountScope === 'settlement'
         ? (p.createdAt || p.id)
         : (p.createdAt ? p.createdAt.substring(0, 19) : p.id);
       const referencePrefix = String(p.paymentReference || p.id || '').split('-')[0] || 'PAY';
       const isSettlementPayment = p.method !== 'Discount'
         && ['SET', 'ACC'].includes(referencePrefix);
+      const isReverse = amtVal < 0;
       const purposeKey = p.method === 'Discount'
         ? (discountScope === 'settlement'
-          ? (p.amount < 0 ? `reverse-settlement-discount:${p.id}` : 'settlement-discount')
-          : `discount:${p.paymentReference || p.id}`)
-        : `payment:${p.method || referencePrefix}`;
+          ? (isReverse ? `reverse-settlement-discount:${p.id}` : 'settlement-discount')
+          : (isReverse ? `reverse-discount:${p.id}` : `discount:${p.paymentReference || p.id}`))
+        : (isReverse ? `reverse-payment:${p.id}` : `payment:${p.method || referencePrefix}`);
       const key = `${timestampKey}:${purposeKey}`;
-      
-      const isReverseDiscount = p.method === 'Discount' && p.amount < 0;
-      const amtVal = parseFloat(p.amount) || 0;
 
       if (!groupedPaymentsMap[key]) {
         groupedPaymentsMap[key] = {
@@ -471,8 +521,8 @@ export default function CustomerStatement() {
           ref: getReceiptNumber(p),
           internalReference: p.paymentReference || p.id,
           description: `Payment – ${p.method || 'Cash'}`,
-          debit: isReverseDiscount ? Math.abs(amtVal) : 0,
-          credit: isReverseDiscount ? 0 : amtVal,
+          debit: isReverse ? Math.abs(amtVal) : 0,
+          credit: isReverse ? 0 : amtVal,
           discountAmount: 0,
           status: 'SUCCESS',
           dueAmount: 0,
@@ -485,7 +535,7 @@ export default function CustomerStatement() {
           receiptCount: 1
         };
       } else {
-        if (isReverseDiscount) {
+        if (isReverse) {
           groupedPaymentsMap[key].debit += Math.abs(amtVal);
         } else {
           groupedPaymentsMap[key].credit += amtVal;
@@ -509,10 +559,12 @@ export default function CustomerStatement() {
       let finalPaymentMethod = p.paymentMethod;
       if (p.paymentMethod === 'Discount') {
         if (p.debit > 0) {
-          description = 'Reverse Settlement Discount';
+          description = 'Discount Deleted';
         } else {
           description = p.discountScope === 'settlement' ? 'Settlement Discount' : 'Order Discount';
         }
+      } else if (p.debit > 0) {
+        description = `Reversed Payment – ${p.paymentMethod || 'Cash'}`;
       } else if (p.isSettlementPayment) {
         if (p.methods.length > 1) finalPaymentMethod = 'Multipayment';
         description = `Settlement Paid – ${finalPaymentMethod || 'Cash'}`;
@@ -525,12 +577,16 @@ export default function CustomerStatement() {
         itemsSummary = `Advance Consumed for Order ${cleanOrderRef}`;
       } else if (p.paymentMethod === 'Discount') {
         if (p.debit > 0) {
-          itemsSummary = `Reversed settlement discount for ${cleanOrderRef || 'settlement'}`;
+          itemsSummary = p.discountScope === 'settlement'
+            ? `Discount Deleted for ${cleanOrderRef || 'settlement'}`
+            : `Discount Deleted for ${cleanOrderRef || 'order'}`;
         } else {
           itemsSummary = p.discountScope === 'settlement'
             ? 'Settlement discount'
             : `Order discount for ${cleanOrderRef}`;
         }
+      } else if (p.debit > 0) {
+        itemsSummary = `Reversed payment for ${cleanOrderRef || 'account'}`;
       } else if (p.isSettlementPayment) {
         itemsSummary = 'Customer settlement';
       } else if (p.orderIds.length > 1) {
@@ -617,6 +673,26 @@ export default function CustomerStatement() {
       });
     }
 
+    // PUSH DISCOUNT EDITS/DELETIONS FROM LEDGER
+    if (filterType !== 'Payments') {
+      customerLedgerRows
+        .filter(r => r.transactionType === 'DISCOUNT_EDIT')
+        .forEach(r => {
+          const cleanOrderRef = r.orderId ? `${settings.invoicePrefix || '#'}${r.orderId}` : '';
+          rows.push({
+            date: r.createdAt,
+            type: 'discount_edit',
+            ref: r.orderId ? `${settings.invoicePrefix || '#'}${r.orderId}` : 'DISC-EDIT',
+            description: 'Discount Edited',
+            itemsSummary: r.description,
+            debit: r.debit || 0,
+            credit: r.credit || 0,
+            status: 'SUCCESS',
+            dueAmount: 0
+          });
+        });
+    }
+
      /* Sort chronologically (ascending) first to calculate running balance */
      rows.sort((a, b) => {
        if (a.type === 'opening_balance' && b.type !== 'opening_balance') return -1;
@@ -697,7 +773,7 @@ export default function CustomerStatement() {
 
     const computedPaid = allCustomerPayments.reduce((s, p) => s + (p.credit || 0), 0);
     return { filteredRows: finalRows, totalBalance: balance, totalPaid: computedPaid };
-  }, [orders, payments, allocations, cancellations, refunds, filterType, sortOrder, dateFrom, dateTo, dateRange, selectedCustomer]);
+  }, [orders, payments, allocations, cancellations, refunds, customerLedgerRows, filterType, sortOrder, dateFrom, dateTo, dateRange, selectedCustomer]);
 
   const paginatedLedgerRows = React.useMemo(() => {
     const startIndex = (currentPage - 1) * 20;
@@ -735,17 +811,80 @@ export default function CustomerStatement() {
     a.click();
   };
 
+  const shareStatement = () => {
+    if (!selectedCustomer) return;
+    if (!selectedCustomer.phone) {
+      alert('Customer phone number not found!');
+      return;
+    }
+    const origPhone = selectedCustomer.phone.toString();
+    const cleanPhone = origPhone.replace(/\D/g, '');
+    if (!cleanPhone) {
+      alert('Customer phone number not found!');
+      return;
+    }
+    let formattedPhone = cleanPhone;
+
+    // Prepend country code if original phone doesn't start with '+'
+    if (!origPhone.trim().startsWith('+')) {
+      const countryCode = settings.waCountryCode || '971';
+      const cleanCountryCode = countryCode.replace(/\D/g, '');
+      if (cleanCountryCode && !formattedPhone.startsWith(cleanCountryCode)) {
+        formattedPhone = cleanCountryCode + formattedPhone;
+      }
+    }
+
+    let message = '';
+    const totalDue = selectedCustomer.balance || 0;
+    if (settings.waStatementTemplate) {
+      message = settings.waStatementTemplate
+        .replace(/{customerName}/g, selectedCustomer.name)
+        .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${totalDue.toFixed(2)}`);
+    } else {
+      message = `Hello ${selectedCustomer.name}, your current outstanding balance is ${settings.currencySymbol || 'AED'} ${totalDue.toFixed(2)}. Please settle it at your earliest convenience. Thank you!`;
+    }
+
+    const url = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
+    if (window.electronAPI?.openExternal) {
+      window.electronAPI.openExternal(url);
+    } else {
+      window.open(url, '_blank');
+    }
+  };
+
   /* ─── Status badge helper ─────────────────────────── */
   // StatusBadge was removed since Status column was removed.
 
   /* ─── Render ──────────────────────────────────────── */
   return (
-    <div className={styles.page}>
+    <div className={styles.page} style={{ padding: '1rem', background: '#F8FAFC', minHeight: '100vh' }}>
 
       {/* ── Header ──────────────────────────────────── */}
-      <div className={styles.header}>
-        <div className={styles.headerInfo}>
-          <h1>Customer Statement</h1>
+      <div className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.75rem' }}>
+        <div className={styles.headerInfo} style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+          {selectedCustomer ? (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', background: '#E2E8F0', padding: '0.25rem', borderRadius: '10px' }}>
+              <button
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.45rem 1rem', borderRadius: '7px', border: 'none', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', background: 'transparent', color: '#475569' }}
+                onClick={() => {
+                  if (onBackToInsight) {
+                    onBackToInsight();
+                  } else {
+                    navigate(`/customers?insightId=${selectedCustomer.id}`);
+                  }
+                }}
+              >
+                📋 Customer Insight
+              </button>
+              <button
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.45rem 1rem', borderRadius: '7px', border: 'none', fontWeight: 800, fontSize: '0.85rem', cursor: 'pointer', background: 'white', color: 'var(--primary)', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}
+              >
+                📄 Customer Statement
+              </button>
+            </div>
+          ) : (
+            <h1>Customer Statement</h1>
+          )}
         </div>
 
         {selectedCustomer && (
@@ -753,45 +892,7 @@ export default function CustomerStatement() {
             <button
               className={styles.btnSecondary}
               style={{ background: '#10B981', color: 'white', border: '1px solid #10B981', display: 'flex', gap: '0.4rem', alignItems: 'center' }}
-              onClick={() => {
-                if (!selectedCustomer.phone) {
-                  alert('Customer phone number not found!');
-                  return;
-                }
-                const origPhone = selectedCustomer.phone.toString();
-                const cleanPhone = origPhone.replace(/\D/g, '');
-                if (!cleanPhone) {
-                  alert('Customer phone number not found!');
-                  return;
-                }
-                let formattedPhone = cleanPhone;
-
-                // Prepend country code if original phone doesn't start with '+'
-                if (!origPhone.trim().startsWith('+')) {
-                  const countryCode = settings.waCountryCode || '971';
-                  const cleanCountryCode = countryCode.replace(/\D/g, '');
-                  if (cleanCountryCode && !formattedPhone.startsWith(cleanCountryCode)) {
-                    formattedPhone = cleanCountryCode + formattedPhone;
-                  }
-                }
-
-                let message = '';
-                const totalDue = selectedCustomer.balance || 0;
-                if (settings.waStatementTemplate) {
-                  message = settings.waStatementTemplate
-                    .replace(/{customerName}/g, selectedCustomer.name)
-                    .replace(/{dueAmount}/g, `${settings.currencySymbol || 'AED'} ${totalDue.toFixed(2)}`);
-                } else {
-                  message = `Hello ${selectedCustomer.name}, your current outstanding balance is ${settings.currencySymbol || 'AED'} ${totalDue.toFixed(2)}. Please settle it at your earliest convenience. Thank you!`;
-                }
-
-                const url = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
-                if (window.electronAPI?.openExternal) {
-                  window.electronAPI.openExternal(url);
-                } else {
-                  window.open(url, '_blank');
-                }
-              }}
+              onClick={shareStatement}
             >
               Share Statement
             </button>
@@ -801,65 +902,107 @@ export default function CustomerStatement() {
             <button className={styles.btnPrimary} onClick={() => { if (window.appPrint) { window.appPrint(); } else { window.print(); } }}>
               <Printer size={16} /> Print / PDF
             </button>
+            {onClose && (
+              <button
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '50%', border: '1px solid #CBD5E1', background: 'white', cursor: 'pointer', transition: 'all 0.2s', marginLeft: '0.5rem' }}
+                onClick={onClose}
+              >
+                <X size={20} color="#64748B" />
+              </button>
+            )}
           </div>
         )}
       </div>
 
       {/* ── Customer Selector + Filters ─────────────── */}
-      <div className={styles.filterBar}>
+      {selectedCustomer && (
+        <div className={styles.filterBar} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
 
-        {/* Customer search */}
-        <div className={styles.customerSelector} ref={dropdownRef}>
-          <div
-            className={styles.selectorInput}
-            onClick={() => {
-              inputRef.current?.focus();
-              setShowDropdown(true);
-            }}
-          >
-            <User size={16} color="#94A3B8" />
-            {selectedCustomer ? (
-              <span className={styles.selectedName}>{selectedCustomer.name}</span>
-            ) : null}
-            <input
-              ref={inputRef}
-              type="text"
-              value={searchTerm}
-              onChange={e => { setSearchTerm(e.target.value); setShowDropdown(true); }}
-              placeholder={selectedCustomer ? 'Change customer…' : 'Search customer by name or phone…'}
-              className={styles.searchInput}
-            />
-            {selectedCustomer
-              ? <X size={14} color="#94A3B8" style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setSelectedCustomer(null); setSearchTerm(''); setOrders([]); setPayments([]); setAllocations([]); }} />
-              : <ChevronDown size={16} color="#94A3B8" />
-            }
-          </div>
-
-          {showDropdown && customers.length > 0 && (
-            <div className={styles.dropdown}>
-              {customers.map(c => (
-                <div key={c.id} className={styles.dropdownItem} onClick={() => {
-                  setSelectedCustomer(c);
-                  setSearchTerm(c.name);
-                  setShowDropdown(false);
-                }}>
-                  <div className={styles.dropdownAvatar}>{c.name.charAt(0).toUpperCase()}</div>
-                  <div>
-                    <div className={styles.dropdownName}>{c.name}</div>
-                    <div className={styles.dropdownPhone}>{c.phone}</div>
-                  </div>
-                  <span className={c.balance > 0.005 ? styles.balanceDue : styles.balanceOk}>
-                    {c.balance > 0.005 ? `Due: ` : c.balance < -0.005 ? 'Adv: ' : ''}
-                    {Math.abs(c.balance) > 0.005 && <><CurrencySymbol size={10} /> {Math.abs(c.balance).toFixed(2)}</>}
-                    {Math.abs(c.balance) <= 0.005 && 'Settled'}
-                  </span>
-                </div>
-              ))}
+        {/* Left Side: Customer Profile Card or search */}
+        {selectedCustomerProp || customerIdProp ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%)',
+              color: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 700,
+              fontSize: '1rem',
+              boxShadow: '0 4px 6px -1px rgba(59, 130, 246, 0.2)'
+            }}>
+              {selectedCustomer.name.charAt(0).toUpperCase()}
             </div>
-          )}
-        </div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '1.2rem', color: '#1E293B', fontWeight: 700, lineHeight: 1.2 }}>
+                {selectedCustomer.name}
+              </h2>
+              {selectedCustomer.phone && (
+                <span style={{ fontSize: '0.8rem', color: '#64748B', display: 'block', marginTop: '0.05rem' }}>
+                  📞 {selectedCustomer.phone}
+                </span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className={styles.customerSelector} ref={dropdownRef}>
+            <div
+              className={styles.selectorInput}
+              onClick={() => {
+                inputRef.current?.focus();
+                setShowDropdown(true);
+              }}
+            >
+              <User size={16} color="#94A3B8" />
+              {selectedCustomer ? (
+                <span className={styles.selectedName}>{selectedCustomer.name}</span>
+              ) : null}
+              <input
+                ref={inputRef}
+                type="text"
+                value={searchTerm}
+                onChange={e => { setSearchTerm(e.target.value); setShowDropdown(true); }}
+                placeholder={selectedCustomer ? 'Change customer…' : 'Search customer by name or phone…'}
+                className={styles.searchInput}
+              />
+              {selectedCustomer
+                ? <X size={14} color="#94A3B8" style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setSelectedCustomer(null); setSearchTerm(''); setOrders([]); setPayments([]); setAllocations([]); }} />
+                : <ChevronDown size={16} color="#94A3B8" />
+              }
+            </div>
 
-        {/* Date filters */}
+            {showDropdown && customers.length > 0 && (
+              <div className={styles.dropdown}>
+                {customers.map(c => (
+                  <div key={c.id} className={styles.dropdownItem} onClick={() => {
+                    setSelectedCustomer(c);
+                    setSearchTerm(c.name);
+                    setShowDropdown(false);
+                  }}>
+                    <div className={styles.dropdownAvatar}>{c.name.charAt(0).toUpperCase()}</div>
+                    <div>
+                      <div className={styles.dropdownName}>{c.name}</div>
+                      <div className={styles.dropdownPhone}>{c.phone}</div>
+                    </div>
+                    <span className={c.balance > 0.005 ? styles.balanceDue : styles.balanceOk}>
+                      {c.balance > 0.005 ? `Due: ` : c.balance < -0.005 ? 'Adv: ' : ''}
+                      {Math.abs(c.balance) > 0.005 && <><CurrencySymbol size={10} /> {Math.abs(c.balance).toFixed(2)}</>}
+                      {Math.abs(c.balance) <= 0.005 && 'Settled'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Right Side Filters Wrapper */}
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginLeft: 'auto', flexWrap: 'wrap' }}>
+
+          {/* Date filters */}
         <div className={styles.dateFilters}>
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
             <Calendar size={14} color="#94A3B8" style={{ position: 'absolute', left: '12px', zIndex: 10, pointerEvents: 'none' }} />
@@ -921,7 +1064,9 @@ export default function CustomerStatement() {
             Newest First
           </button>
         </div>
+        </div>
       </div>
+      )}
 
       {/* ── Empty State ─────────────────────────────── */}
       {!selectedCustomer && (

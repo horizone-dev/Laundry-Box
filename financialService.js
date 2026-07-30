@@ -1051,18 +1051,25 @@ function editDiscountReceipt(db, {
 
     const state = getFinanceState(db, payment.customerId);
     writeCustomerState(db, payment.customerId, state, timestamp);
+    const debitAmt = difference < 0 ? Math.abs(difference) : 0;
+    const creditAmt = difference > 0 ? difference : 0;
+    const descStr = difference < 0
+      ? `${getDiscountScope(payment) === 'settlement' ? 'Settlement' : 'Order'} discount (Ref: ${payment.paymentReference || payment.id}) reduced from ${oldAmount.toFixed(2)} to ${newAmount.toFixed(2)} (Difference: ${Math.abs(difference).toFixed(2)})`
+      : `${getDiscountScope(payment) === 'settlement' ? 'Settlement' : 'Order'} discount (Ref: ${payment.paymentReference || payment.id}) increased from ${oldAmount.toFixed(2)} to ${newAmount.toFixed(2)} (Difference: ${difference.toFixed(2)})`;
+
     db.prepare(`
       INSERT INTO customer_ledger
         (id, shopId, customerId, orderId, transactionType, debit, credit, balance, description, createdAt)
-      VALUES (?, ?, ?, ?, 'DISCOUNT_EDIT', 0, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, 'DISCOUNT_EDIT', ?, ?, ?, ?, ?)
     `).run(
       `CUST-DISC-EDIT-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
       payment.shopId || 'SHOP_01',
       payment.customerId,
       payment.orderId || null,
-      difference,
+      debitAmt,
+      creditAmt,
       state.balance,
-      `${getDiscountScope(payment) === 'settlement' ? 'Settlement' : 'Order'} discount edited from ${oldAmount} to ${newAmount}`,
+      descStr,
       timestamp
     );
     addAuditEvent(db, {

@@ -237,12 +237,8 @@ function createWindow() {
   });
 
   if (isDev) {
-    // DevTools is expensive to initialize and should not delay every normal
-    // local launch. Open it only when a developer explicitly asks for it.
-    if (process.env.OPEN_DEVTOOLS === '1') {
-      logStartup('Opening DevTools because OPEN_DEVTOOLS=1...');
-      mainWindow.webContents.openDevTools();
-    }
+    logStartup('Opening DevTools...');
+    mainWindow.webContents.openDevTools();
     logStartup('Loading development server URL: http://localhost:5173...');
     mainWindow.loadURL('http://localhost:5173').catch(err => {
       logStartup('Vite not ready, retrying in 2s...', err);
@@ -532,8 +528,8 @@ function checkCustomerCreditLimitRules(db, customerId, amountToAdd) {
 
   if (currentOutstanding >= creditLimit || newOutstanding > creditLimit) {
     const override = activeOverrides[customerId];
-    if (override && (Date.now() - override.timestamp < 1000 * 15) && Math.abs(override.amount - amountToAdd) < 0.05) {
-      return null; // Allowed!
+    if (override && (Date.now() - override.timestamp < 1000 * 60)) {
+      return null; // Allowed by verified Manager PIN override!
     }
     return 'CREDIT_LIMIT_EXCEEDED';
   }
@@ -569,6 +565,9 @@ function validateQueryCreditLimit(db, query, params) {
     const setMatch = cleanQuery.match(/UPDATE\s+orders\s+SET\s+(.+?)(?:\s+WHERE|$)/i);
     if (setMatch) {
       const setClause = setMatch[1];
+      if (setClause.toLowerCase().includes('paymentbreakdown')) {
+        return; // Discount adjustments/deletions on existing orders do not trigger credit limit blocks
+      }
       const dueAmount = getParamValue(setClause, 'dueAmount', params);
 
       if (dueAmount !== null) {
@@ -896,10 +895,11 @@ ipcMain.handle('db-query', (event, { query, params }) => {
     validateQueryCreditLimit(db, query, params || []);
 
     const stmt = db.prepare(query);
+    const queryParams = Array.isArray(params) && params.length > 0 ? params : [];
     if (query.trim().toUpperCase().startsWith('SELECT')) {
-      return { success: true, data: stmt.all(params || []) };
+      return { success: true, data: queryParams.length > 0 ? stmt.all(queryParams) : stmt.all() };
     } else {
-      const info = stmt.run(params || []);
+      const info = queryParams.length > 0 ? stmt.run(queryParams) : stmt.run();
       if (changesFinancialSourceData(query)) {
         refreshCustomerFinancialCaches(db);
       }

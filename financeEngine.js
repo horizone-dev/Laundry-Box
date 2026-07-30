@@ -102,11 +102,14 @@ function calculateCustomerFinancialState({
     0
   );
 
-  const usablePayments = allPayments.filter((payment) => {
-    if (!payment || !isSuccessfulPayment(payment)) return false;
-    if (SYNTHETIC_PAYMENT_METHODS.has(payment.method)) return false;
-    return true;
+  const returnedOrderIds = new Set();
+  liveOrders.forEach((order) => {
+    if (isDeletedOrder(order) && isReturnedDeletedOrder(order)) {
+      returnedOrderIds.add(order.id);
+    }
   });
+
+  const usablePayments = allPayments.filter((payment) => isUsablePayment(payment, returnedOrderIds));
   const paymentCredits = usablePayments.reduce(
     (sum, payment) => sum + toAmount(payment.amount),
     0

@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Search, UserPlus, Download, Calendar, MoreHorizontal,
-  TrendingUp, ChevronLeft, ChevronRight, X, Phone, MapPin, CreditCard, Wallet, DollarSign, Trash2, Users, Edit2, Lock,
-  Printer, AlertTriangle, Eye, ArrowUpDown, ChevronDown, Check, Percent, QrCode, Landmark, ShieldCheck, Layers
+  TrendingUp, ChevronLeft, ChevronRight, X, Phone, MapPin, CreditCard, Wallet, DollarSign, Trash2, Users, Edit2, Lock, Unlock,
+  Printer, AlertTriangle, Eye, ArrowUpDown, ChevronDown, Check, Percent, QrCode, Landmark, ShieldCheck, Layers, FileText
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import WhatsAppIcon from '../components/WhatsAppIcon';
 import Pagination from '../components/Pagination';
 import { useSettings } from '../store/SettingsContext';
@@ -16,6 +16,7 @@ import { getDiscountScope } from '../utils/discountScope';
 import styles from './Customers.module.css';
 import { checkCreditLimit } from '../utils/creditLimit';
 import InvoiceTemplate from '../components/InvoiceTemplate';
+import CustomerStatement from './CustomerStatement';
 
 function PaymentMethodSelect({ value, onChange, settings }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -175,6 +176,8 @@ export default function Customers() {
       setPaymentData(prev => ({ ...prev, discount: '' }));
     }
   }, [showPaymentModal]);
+  const [searchParams] = useSearchParams();
+  const insightIdFromUrl = searchParams.get('insightId');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchName, setSearchName] = useState('');
@@ -185,6 +188,14 @@ export default function Customers() {
     address: '',
     openingBalance: ''
   });
+  const [isOpeningBalanceUnlocked, setIsOpeningBalanceUnlocked] = useState(false);
+
+  useEffect(() => {
+    if (!showModal) {
+      setIsOpeningBalanceUnlocked(false);
+    }
+  }, [showModal]);
+
   const [showEditCreditLimitModal, setShowEditCreditLimitModal] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [editCreditLimitValue, setEditCreditLimitValue] = useState('0');
@@ -194,7 +205,7 @@ export default function Customers() {
   const [creditWarningDetails, setCreditWarningDetails] = useState(null);
 
   // ─── Customer Insight View States ──────────────────────────────────────────
-  const [viewMode, setViewMode] = useState('list'); // 'list' or 'insight'
+  const [viewMode, setViewMode] = useState('list'); // 'list', 'insight', 'statement'
   const [insightTab, setInsightTab] = useState('sales'); // 'sales', 'payments', 'returns'
   const [customerPayments, setCustomerPayments] = useState([]);
   const [customerDiscounts, setCustomerDiscounts] = useState([]);
@@ -370,7 +381,7 @@ export default function Customers() {
             if (res.success && res.data.length > 0) {
               const freshCust = res.data[0];
               setSelectedCustomer(freshCust);
-              if (viewMode === 'insight') {
+              if (viewMode === 'insight' || viewMode === 'statement') {
                 await handleViewCustomerInsight(freshCust);
               }
             }
@@ -415,6 +426,20 @@ export default function Customers() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (insightIdFromUrl && window.electronAPI?.dbQuery) {
+      window.electronAPI.dbQuery('SELECT * FROM customers WHERE id = ?', [insightIdFromUrl])
+        .then(res => {
+          if (res.success && res.data.length > 0) {
+            handleViewCustomerInsight(res.data[0]);
+          }
+        })
+        .catch(err => console.error("Failed to load customer insight from URL:", err));
+    }
+  }, [insightIdFromUrl]);
+
+
 
   useEffect(() => {
     const isAnyOpen = showModal || showBillsModal || showPaymentModal || showQuickSettleModal || showEditCreditLimitModal || selectedInvoiceForView;
@@ -731,7 +756,7 @@ export default function Customers() {
           await fetchCustomers();
           window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedCustomer.id } }));
 
-          if (viewMode === 'insight' && selectedCustomer) {
+          if ((viewMode === 'insight' || viewMode === 'statement') && selectedCustomer) {
             const freshCustRes = await window.electronAPI.dbQuery(
               "SELECT c.*, (SELECT IFNULL(SUM(totalAmount), 0) FROM orders WHERE customerId = c.id AND status NOT IN ('Cancelled', 'Deleted')) as totalSales FROM customers c WHERE c.id = ?",
               [selectedCustomer.id]
@@ -995,7 +1020,7 @@ export default function Customers() {
         await fetchCustomers();
         window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedCustomer.id } }));
 
-        if (viewMode === 'insight' && selectedCustomer) {
+        if ((viewMode === 'insight' || viewMode === 'statement') && selectedCustomer) {
           const freshCustRes = await window.electronAPI.dbQuery(
             "SELECT c.*, (SELECT IFNULL(SUM(totalAmount), 0) FROM orders WHERE customerId = c.id AND status NOT IN ('Cancelled', 'Deleted')) as totalSales FROM customers c WHERE c.id = ?",
             [selectedCustomer.id]
@@ -1143,6 +1168,8 @@ export default function Customers() {
       setShowDiscountEditModal(true);
     } else if (pinActionTarget === 'delete_order_discount' && selectedBillForDiscount) {
       handleDeleteOrderDiscount(selectedBillForDiscount);
+    } else if (pinActionTarget === 'unlock_opening_balance') {
+      setIsOpeningBalanceUnlocked(true);
     }
   };
 
@@ -1216,13 +1243,22 @@ export default function Customers() {
           remaining -= parseFloat(a.amountUsed) || 0;
         });
 
-        const txnQuery = await window.electronAPI.dbQuery(
-          `SELECT description FROM account_transactions WHERE id = ? OR id = ?`,
-          [`FIN-TXN-${p.id}`, `FIN-TXN-DISC-${p.id}`]
-        );
-        const txnDesc = txnQuery.success && txnQuery.data[0] ? txnQuery.data[0].description : '';
+        const refStr = String(p.paymentReference || p.id || '');
+        let isOpeningSettlement = refStr.startsWith('ACC-');
 
-        if (txnDesc.toLowerCase().includes('opening/account') || txnDesc.toLowerCase().includes('settlement discount via') || txnDesc.toLowerCase().includes('settlement discount -')) {
+        if (!isOpeningSettlement) {
+          const cleanTxnId = p.id.startsWith('RV-') ? p.id.replace('RV-', '') : p.id;
+          const txnQuery = await window.electronAPI.dbQuery(
+            `SELECT description FROM account_transactions WHERE id = ? OR id = ? OR id = ?`,
+            [`FIN-TXN-${cleanTxnId}`, `FIN-TXN-${p.id}`, `FIN-TXN-DISC-${p.id}`]
+          );
+          const txnDesc = txnQuery.success && txnQuery.data[0] ? txnQuery.data[0].description : '';
+          if (txnDesc.toLowerCase().includes('opening/account') || txnDesc.toLowerCase().includes('settlement discount via') || txnDesc.toLowerCase().includes('settlement discount -')) {
+            isOpeningSettlement = true;
+          }
+        }
+
+        if (isOpeningSettlement) {
           if (remaining > 0.005) {
             allocations.push({
               paymentId: p.id,
@@ -1404,7 +1440,29 @@ export default function Customers() {
       const paymentIdsForDeletion = [...new Set([...idsToDelete, ...autoPaymentIdsToDelete])];
       for (const id of paymentIdsForDeletion) {
         await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE paymentId = ?", [id]);
-        await window.electronAPI.dbQuery("DELETE FROM payments WHERE id = ?", [id]);
+        const pCheckRes = await window.electronAPI.dbQuery("SELECT * FROM payments WHERE id = ?", [id]);
+        if (pCheckRes.success && pCheckRes.data.length > 0 && pCheckRes.data[0].method === 'Discount') {
+          const pDisc = pCheckRes.data[0];
+          const revId = `DISC-REV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          await window.electronAPI.dbQuery("DELETE FROM payments WHERE id = ?", [id]);
+          await window.electronAPI.dbQuery(
+            `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference, discountScope)
+             VALUES (?, ?, ?, ?, ?, 'Discount', 'SUCCESS', ?, 0, ?, ?, ?)`,
+            [
+              revId,
+              selectedCustomer.id,
+              pDisc.orderId || null,
+              pDisc.shopId || DEFAULT_SHOP_ID,
+              -Math.abs(pDisc.amount || 0),
+              timestamp,
+              timestamp,
+              `DEL-${pDisc.paymentReference || pDisc.id}`,
+              pDisc.discountScope || (pDisc.orderId ? 'order' : 'settlement')
+            ]
+          );
+        } else {
+          await window.electronAPI.dbQuery("DELETE FROM payments WHERE id = ?", [id]);
+        }
       }
       for (const allocation of sourceAllocations) {
         await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE id = ?", [allocation.id]);
@@ -1436,6 +1494,7 @@ export default function Customers() {
         await handleViewCustomerInsight(updatedCustomerRes.data[0]);
       }
       fetchCustomers();
+      window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedCustomer.id } }));
       alert("Payment record deleted successfully!");
     } catch (err) {
       await window.electronAPI.dbQuery("ROLLBACK");
@@ -1490,6 +1549,7 @@ export default function Customers() {
           await handleViewCustomerInsight(updatedCustomerRes.data[0]);
         }
         fetchCustomers();
+        window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedCustomer.id } }));
         alert('Discount updated successfully!');
       } catch (err) {
         console.error('Edit discount error:', err);
@@ -1637,17 +1697,22 @@ export default function Customers() {
     try {
       setLoading(true);
       const timestamp = getLocalISOString();
-      const bill = selectedBillForDiscount;
+      const billItem = selectedBillForDiscount;
+      const bill = billItem.bill || billItem;
 
       let oldDisc = 0;
       let breakdownObj = {};
       try {
         if (bill.paymentBreakdown) {
           breakdownObj = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
-          oldDisc = parseFloat(breakdownObj.discount || breakdownObj.discountAmount || 0) || 0;
+          oldDisc = parseFloat(breakdownObj.discount || breakdownObj.discountAmount || breakdownObj.orderDiscount || breakdownObj.settlementDiscount || 0) || 0;
         }
       } catch (e) { }
+      if (oldDisc <= 0) {
+        oldDisc = parseFloat(bill.discount || bill.discountAmount || 0) || 0;
+      }
 
+      const targetCustId = bill.customerId || selectedCustomer?.id;
       const grossTotal = (bill.totalAmount || 0) + oldDisc;
       const newNetTotal = Math.max(0, grossTotal - newDisc);
       const newDue = Math.max(0, newNetTotal - (bill.paidAmount || 0));
@@ -1656,13 +1721,109 @@ export default function Customers() {
       breakdownObj.discount = newDisc;
       const newBreakdownStr = JSON.stringify(breakdownObj);
 
+      await window.electronAPI.dbQuery("BEGIN TRANSACTION");
+
       await window.electronAPI.dbQuery(
         `UPDATE orders SET totalAmount = ?, dueAmount = ?, paymentStatus = ?, paymentBreakdown = ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
         [newNetTotal, newDue, newPayStatus, newBreakdownStr, timestamp, bill.id]
       );
 
+      const diff = newDisc - oldDisc;
+      if (Math.abs(diff) > 0.005) {
+        const revId = `DISC-REV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        await window.electronAPI.dbQuery(
+          `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference, discountScope)
+           VALUES (?, ?, ?, ?, ?, 'Discount', 'SUCCESS', ?, 0, ?, ?, 'order')`,
+          [
+            revId,
+            targetCustId,
+            bill.id,
+            DEFAULT_SHOP_ID,
+            diff,
+            timestamp,
+            timestamp,
+            `EDIT-ORD-${bill.id}`,
+            'order'
+          ]
+        );
+        const debitAmt = diff < 0 ? Math.abs(diff) : 0;
+        const creditAmt = diff > 0 ? diff : 0;
+        const descStr = diff < 0
+          ? `Order #${bill.id} discount reduced from ${oldDisc.toFixed(2)} to ${newDisc.toFixed(2)} (Difference: ${Math.abs(diff).toFixed(2)})`
+          : `Order #${bill.id} discount increased from ${oldDisc.toFixed(2)} to ${newDisc.toFixed(2)} (Difference: ${diff.toFixed(2)})`;
+        
+        await window.electronAPI.dbQuery(
+          `INSERT INTO customer_ledger (id, shopId, customerId, orderId, transactionType, debit, credit, balance, description, createdAt) VALUES (?, ?, ?, ?, 'DISCOUNT_EDIT', ?, ?, ?, ?, ?)`,
+          [`CUST-DISC-EDIT-${Date.now()}-${Math.floor(Math.random() * 100000)}`, DEFAULT_SHOP_ID, targetCustId, bill.id, debitAmt, creditAmt, 0, descStr, timestamp]
+        );
+
+        // REDISTRIBUTE PAYMENTS
+        const orderPayRes = await window.electronAPI.dbQuery(
+          `SELECT * FROM payments WHERE orderId = ? AND method != 'Discount' LIMIT 1`,
+          [bill.id]
+        );
+        const orderPayment = orderPayRes.success && orderPayRes.data[0] ? orderPayRes.data[0] : null;
+
+        if (orderPayment) {
+          const unlinkPayRes = await window.electronAPI.dbQuery(
+            `SELECT * FROM payments WHERE customerId = ? AND orderId IS NULL AND createdAt = ? AND method != 'Discount' LIMIT 1`,
+            [targetCustId, orderPayment.createdAt]
+          );
+          const unlinkedPayment = unlinkPayRes.success && unlinkPayRes.data[0] ? unlinkPayRes.data[0] : null;
+
+          if (diff > 0) {
+            const excess = diff;
+            if (unlinkedPayment) {
+              await window.electronAPI.dbQuery(
+                `UPDATE payments SET amount = amount - ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
+                [excess, timestamp, orderPayment.id]
+              );
+              await window.electronAPI.dbQuery(
+                `UPDATE payments SET amount = amount + ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
+                [excess, timestamp, unlinkedPayment.id]
+              );
+            } else {
+              const newPayId = `RV-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 100)}`;
+              const newPayRef = `ADV-${Date.now().toString().slice(-6)}`;
+              await window.electronAPI.dbQuery(
+                `UPDATE payments SET amount = amount - ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
+                [excess, timestamp, orderPayment.id]
+              );
+              await window.electronAPI.dbQuery(
+                `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference)
+                 VALUES (?, ?, NULL, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?)`,
+                [newPayId, targetCustId, DEFAULT_SHOP_ID, excess, orderPayment.method, orderPayment.createdAt, timestamp, newPayRef]
+              );
+            }
+          } else {
+            const shortage = Math.abs(diff);
+            if (unlinkedPayment) {
+              const transferAmount = Math.min(shortage, unlinkedPayment.amount);
+              if (transferAmount > 0.005) {
+                await window.electronAPI.dbQuery(
+                  `UPDATE payments SET amount = amount + ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
+                  [transferAmount, timestamp, orderPayment.id]
+                );
+                await window.electronAPI.dbQuery(
+                  `UPDATE payments SET amount = amount - ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
+                  [transferAmount, timestamp, unlinkedPayment.id]
+                );
+                if (unlinkedPayment.amount - transferAmount <= 0.005) {
+                  await window.electronAPI.dbQuery(
+                    `DELETE FROM payments WHERE id = ?`,
+                    [unlinkedPayment.id]
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+
+      await window.electronAPI.dbQuery("COMMIT");
+
       if (window.electronAPI?.runDataHealer) {
-        await window.electronAPI.runDataHealer(selectedCustomer.id);
+        await window.electronAPI.runDataHealer(targetCustId);
       }
 
       setShowDiscountEditModal(false);
@@ -1670,12 +1831,13 @@ export default function Customers() {
 
       const freshCustRes = await window.electronAPI.dbQuery(
         "SELECT c.*, (SELECT IFNULL(SUM(totalAmount), 0) FROM orders WHERE customerId = c.id AND status NOT IN ('Cancelled', 'Deleted')) as totalSales FROM customers c WHERE c.id = ?",
-        [selectedCustomer.id]
+        [targetCustId]
       );
       if (freshCustRes.success && freshCustRes.data.length > 0) {
         await handleViewCustomerInsight(freshCustRes.data[0]);
       }
       fetchCustomers();
+      window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: targetCustId } }));
       alert("Discount updated successfully!");
     } catch (err) {
       console.error("Save discount edit error:", err);
@@ -1685,26 +1847,31 @@ export default function Customers() {
     }
   };
 
-  const handleDeleteOrderDiscount = async (bill) => {
-    if (!bill || !window.electronAPI?.dbQuery) return;
+  const handleDeleteOrderDiscount = async (billItem) => {
+    if (!billItem || !window.electronAPI?.dbQuery) return;
     if (!window.confirm("Are you sure you want to delete this discount? The order's due amount will increase.")) return;
 
     try {
       setLoading(true);
       const timestamp = getLocalISOString();
+      const bill = billItem.bill || billItem;
+      const targetCustId = bill.customerId || selectedCustomer?.id;
 
       let oldDisc = 0;
       let breakdownObj = {};
       try {
         if (bill.paymentBreakdown) {
           breakdownObj = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
-          oldDisc = parseFloat(breakdownObj.discount || breakdownObj.discountAmount || 0) || 0;
+          oldDisc = parseFloat(breakdownObj.discount || breakdownObj.discountAmount || breakdownObj.orderDiscount || breakdownObj.settlementDiscount || 0) || 0;
         }
       } catch (e) { }
+      if (oldDisc <= 0) {
+        oldDisc = parseFloat(bill.discount || bill.discountAmount || 0) || 0;
+      }
 
       const grossTotal = (bill.totalAmount || 0) + oldDisc;
       const newNetTotal = grossTotal;
-      const newDue = Math.max(0, newNetTotal - (bill.paidAmount || 0));
+      const newDue = Math.max(0, (bill.dueAmount || 0) + oldDisc);
       const newPayStatus = newDue <= 0 ? 'Paid' : ((bill.paidAmount || 0) > 0 ? 'Partial' : 'Credit');
 
       breakdownObj.discount = 0;
@@ -1725,26 +1892,86 @@ export default function Customers() {
       const datePrefix = `${payDate.getFullYear()}-${String(payDate.getMonth() + 1).padStart(2, '0')}-${String(payDate.getDate()).padStart(2, '0')}`;
       const txnRes = await window.electronAPI.dbQuery(
         "SELECT id FROM account_transactions WHERE category = 'Discount Given' AND amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
-        [oldDisc, `%${selectedCustomer.name}%`, `${datePrefix}%`]
+        [oldDisc, `%${selectedCustomer?.name || ''}%`, `${datePrefix}%`]
       );
       if (txnRes.success && txnRes.data.length > 0) {
         await window.electronAPI.dbQuery("DELETE FROM account_transactions WHERE id = ?", [txnRes.data[0].id]);
       }
 
+      if (oldDisc > 0.005) {
+        const revId = `DISC-REV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        await window.electronAPI.dbQuery(
+          `INSERT INTO payments (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference, discountScope)
+           VALUES (?, ?, ?, ?, ?, 'Discount', 'SUCCESS', ?, 0, ?, ?, 'order')`,
+          [
+            revId,
+            targetCustId,
+            bill.id,
+            DEFAULT_SHOP_ID,
+            -Math.abs(oldDisc),
+            timestamp,
+            timestamp,
+            `DEL-ORD-${bill.id}`,
+            'order'
+          ]
+        );
+        await window.electronAPI.dbQuery(
+          `INSERT INTO customer_ledger (id, shopId, customerId, orderId, transactionType, debit, credit, balance, description, createdAt) VALUES (?, ?, ?, ?, 'DISCOUNT_EDIT', ?, 0, 0, ?, ?)`,
+          [`CUST-DISC-EDIT-${Date.now()}-${Math.floor(Math.random() * 100000)}`, DEFAULT_SHOP_ID, targetCustId, bill.id, oldDisc, `Order #${bill.id} discount deleted (Reversed ${oldDisc.toFixed(2)})`, timestamp]
+        );
+
+        // REDISTRIBUTE PAYMENTS
+        const orderPayRes = await window.electronAPI.dbQuery(
+          `SELECT * FROM payments WHERE orderId = ? AND method != 'Discount' LIMIT 1`,
+          [bill.id]
+        );
+        const orderPayment = orderPayRes.success && orderPayRes.data[0] ? orderPayRes.data[0] : null;
+
+        if (orderPayment) {
+          const unlinkPayRes = await window.electronAPI.dbQuery(
+            `SELECT * FROM payments WHERE customerId = ? AND orderId IS NULL AND createdAt = ? AND method != 'Discount' LIMIT 1`,
+            [targetCustId, orderPayment.createdAt]
+          );
+          const unlinkedPayment = unlinkPayRes.success && unlinkPayRes.data[0] ? unlinkPayRes.data[0] : null;
+
+          const shortage = oldDisc;
+          if (unlinkedPayment) {
+            const transferAmount = Math.min(shortage, unlinkedPayment.amount);
+            if (transferAmount > 0.005) {
+              await window.electronAPI.dbQuery(
+                `UPDATE payments SET amount = amount + ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
+                [transferAmount, timestamp, orderPayment.id]
+              );
+              await window.electronAPI.dbQuery(
+                `UPDATE payments SET amount = amount - ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
+                [transferAmount, timestamp, unlinkedPayment.id]
+              );
+              if (unlinkedPayment.amount - transferAmount <= 0.005) {
+                await window.electronAPI.dbQuery(
+                  `DELETE FROM payments WHERE id = ?`,
+                  [unlinkedPayment.id]
+                );
+              }
+            }
+          }
+        }
+      }
+
       await window.electronAPI.dbQuery("COMMIT");
 
       if (window.electronAPI?.runDataHealer) {
-        await window.electronAPI.runDataHealer(selectedCustomer.id);
+        await window.electronAPI.runDataHealer(targetCustId);
       }
 
       const freshCustRes = await window.electronAPI.dbQuery(
         "SELECT c.*, (SELECT IFNULL(SUM(totalAmount), 0) FROM orders WHERE customerId = c.id AND status NOT IN ('Cancelled', 'Deleted')) as totalSales FROM customers c WHERE c.id = ?",
-        [selectedCustomer.id]
+        [targetCustId]
       );
       if (freshCustRes.success && freshCustRes.data.length > 0) {
         await handleViewCustomerInsight(freshCustRes.data[0]);
       }
       fetchCustomers();
+      window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: targetCustId } }));
       alert("Discount deleted successfully!");
     } catch (err) {
       await window.electronAPI.dbQuery("ROLLBACK");
@@ -1756,7 +1983,7 @@ export default function Customers() {
   };
 
 
-  const handleViewCustomerInsight = async (customer) => {
+  const handleViewCustomerInsight = async (customer, targetViewMode = 'insight') => {
     setLoading(true);
     if (window.electronAPI?.dbQuery) {
       try {
@@ -1883,15 +2110,6 @@ export default function Customers() {
 
         const getDiscountVal = (bill) => {
           if (!bill) return 0;
-          // A current order-base Quick Settlement stores its discount as a
-          // dedicated DISC receipt. That receipt is the source of truth and
-          // must be shown on the linked order, not as a separate settlement.
-          const receiptDiscount = discountPayments
-            .filter(p => p.orderId === bill.id && getDiscountScope(p) === 'order')
-            .reduce((sum, p) => sum + (p.amount || 0), 0);
-          if (receiptDiscount > 0) return receiptDiscount;
-          if (typeof bill.discount === 'number' && bill.discount > 0) return bill.discount;
-          if (typeof bill.discountAmount === 'number' && bill.discountAmount > 0) return bill.discountAmount;
           if (bill.paymentBreakdown) {
             try {
               const bd = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
@@ -1901,6 +2119,9 @@ export default function Customers() {
               }
             } catch (e) { }
           }
+          if (typeof bill.discount === 'number' && bill.discount > 0) return bill.discount;
+          if (typeof bill.discountAmount === 'number' && bill.discountAmount > 0) return bill.discountAmount;
+
           if (bill.items) {
             try {
               const itemsArr = typeof bill.items === 'string' ? JSON.parse(bill.items) : bill.items;
@@ -1919,11 +2140,13 @@ export default function Customers() {
         // Dedicated DISC receipts are the source of truth. Old order
         // paymentBreakdown values are a legacy fallback only when an order
         // has no corresponding discount receipt, avoiding double counting.
-        let totalDiscount = discountPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        let totalDiscount = discountPayments
+          .filter(p => (p.amount || 0) > 0)
+          .reduce((sum, p) => sum + (p.amount || 0), 0);
         bills.forEach(bill => {
           if (bill.status === 'Deleted' || bill.status === 'Cancelled') return;
           const hasDiscountReceipt = discountPayments.some(
-            p => p.orderId === bill.id
+            p => p.orderId === bill.id && (p.amount || 0) > 0
           );
           if (!hasDiscountReceipt) totalDiscount += getDiscountVal(bill);
         });
@@ -2052,7 +2275,7 @@ export default function Customers() {
           advanceUsed,
           availableAdvance
         });
-        setViewMode('insight');
+        setViewMode(targetViewMode);
         setInsightTab('sales');
       } catch (err) {
         console.error("Failed to fetch customer insight data:", err);
@@ -2341,7 +2564,44 @@ export default function Customers() {
         {/* Insight Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.75rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>📋 Customer Insight</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', background: '#E2E8F0', padding: '0.25rem', borderRadius: '10px' }}>
+              <button
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.45rem 1rem',
+                  borderRadius: '7px',
+                  border: 'none',
+                  fontWeight: 800,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  background: 'white',
+                  color: 'var(--primary)',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                }}
+              >
+                📋 Customer Insight
+              </button>
+              <button
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.45rem 1rem',
+                  borderRadius: '7px',
+                  border: 'none',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  background: 'transparent',
+                  color: '#475569'
+                }}
+                onClick={() => setViewMode('statement')}
+              >
+                📄 Customer Statement
+              </button>
+            </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <button
@@ -2781,7 +3041,6 @@ export default function Customers() {
                       <th style={{ background: '#F8FAFC' }}>Order Total</th>
                       <th style={{ background: '#F8FAFC' }}>Discount Given</th>
                       <th style={{ background: '#F8FAFC' }}>Net Payable</th>
-                      <th style={{ background: '#F8FAFC' }}>Pay Status</th>
                       <th style={{ background: '#F8FAFC', width: '100px', textAlign: 'center' }}>Actions</th>
                     </tr>
                   </thead>
@@ -2789,20 +3048,14 @@ export default function Customers() {
                     {(() => {
                       const getDiscountVal = (bill) => {
                         if (!bill) return 0;
-                        // Keep this tab aligned with Customer Statement: a
-                        // DISC receipt linked to an order is an order discount.
-                        const receiptDiscount = customerDiscounts
-                          .filter(p => p.orderId === bill.id)
-                          .reduce((sum, p) => sum + (p.amount || 0), 0);
-                        if (receiptDiscount > 0) return receiptDiscount;
-                        if (typeof bill.discount === 'number' && bill.discount > 0) return bill.discount;
-                        if (typeof bill.discountAmount === 'number' && bill.discountAmount > 0) return bill.discountAmount;
                         if (bill.paymentBreakdown) {
                           try {
                             const bd = typeof bill.paymentBreakdown === 'string' ? JSON.parse(bill.paymentBreakdown) : bill.paymentBreakdown;
                             if (bd) {
+                              if (bd.discount === 0 && bd.orderDiscount === undefined && bd.settlementDiscount === undefined) return 0;
                               const val = parseFloat(bd.orderDiscount || bd.discount || bd.discountAmount || bd.discount_amount || bd.discountValue || bd.settlementDiscount || 0);
                               if (!isNaN(val) && val > 0) return val;
+                              if (bd.discount === 0 || bd.orderDiscount === 0) return 0;
                             }
                           } catch (e) { }
                         }
@@ -2840,7 +3093,7 @@ export default function Customers() {
                       // in the linked order row above.
                       const groupedDiscountsMap = {};
                       customerDiscounts
-                        .filter(p => !p.orderId)
+                        .filter(p => !p.orderId && (p.amount || 0) > 0)
                         .forEach(p => {
                           const timestampKey = p.createdAt || p.id;
                           const key = `settlement_disc:${timestampKey}`;
@@ -2889,7 +3142,7 @@ export default function Customers() {
                       if (allDiscounts.length === 0) {
                         return (
                           <tr>
-                            <td colSpan="7" style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>
+                            <td colSpan="6" style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>
                               No discount records found for this customer.
                             </td>
                           </tr>
@@ -2909,18 +3162,6 @@ export default function Customers() {
                                 <CurrencySymbol size={13} /> {discVal.toFixed(2)}
                               </td>
                               <td style={{ fontWeight: 700 }}><CurrencySymbol size={13} /> {item.netPayable.toFixed(2)}</td>
-                              <td>
-                                <span style={{
-                                  padding: '0.2rem 0.5rem',
-                                  borderRadius: '4px',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 700,
-                                  background: (bill.dueAmount || 0) <= 0 ? '#DCFCE7' : '#FEF3C7',
-                                  color: (bill.dueAmount || 0) <= 0 ? '#15803D' : '#D97706'
-                                }}>
-                                  {item.status}
-                                </span>
-                              </td>
                               <td style={{ textAlign: 'center' }}>
                                 <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}>
                                   <button
@@ -2996,18 +3237,6 @@ export default function Customers() {
                                 <CurrencySymbol size={13} /> {item.discount.toFixed(2)}
                               </td>
                               <td>N/A</td>
-                              <td>
-                                <span style={{
-                                  padding: '0.2rem 0.5rem',
-                                  borderRadius: '4px',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 700,
-                                  background: '#FFEDD5',
-                                  color: '#C2410C'
-                                }}>
-                                  DELETED / REVERSED
-                                </span>
-                              </td>
                               <td style={{ textAlign: 'center', color: '#94A3B8' }}>—</td>
                             </tr>
                           );
@@ -3028,18 +3257,6 @@ export default function Customers() {
                                 <CurrencySymbol size={13} /> {item.discount.toFixed(2)}
                               </td>
                               <td>N/A</td>
-                              <td>
-                                <span style={{
-                                  padding: '0.2rem 0.5rem',
-                                  borderRadius: '4px',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 700,
-                                  background: '#DCFCE7',
-                                  color: '#15803D'
-                                }}>
-                                  APPLIED
-                                </span>
-                              </td>
                               <td style={{ textAlign: 'center' }}>
                                 <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}>
                                   <button
@@ -3811,6 +4028,21 @@ export default function Customers() {
     );
   }
 
+  if (viewMode === 'statement' && selectedCustomer) {
+    return (
+      <CustomerStatement
+        customerIdProp={selectedCustomer.id}
+        selectedCustomerProp={selectedCustomer}
+        onBackToInsight={() => setViewMode('insight')}
+        onClose={() => {
+          setViewMode('list');
+          setSelectedCustomer(null);
+        }}
+        hideHeader={false}
+      />
+    );
+  }
+
   return (
     <div className={styles.customersPage}>
       {/* Header */}
@@ -3974,9 +4206,16 @@ export default function Customers() {
                     <button
                       style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleViewCustomerInsight(customer); }}
-                      title="View Details"
+                      title="View Customer Insight"
                     >
                       <Eye size={18} />
+                    </button>
+                    <button
+                      style={{ background: 'none', border: 'none', color: '#8B5CF6', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleViewCustomerInsight(customer, 'statement'); }}
+                      title="View Customer Statement"
+                    >
+                      <FileText size={18} />
                     </button>
                     <button
                       style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
@@ -4102,15 +4341,45 @@ export default function Customers() {
                 </div>
 
                 <div className={styles.formGroup}>
-                  <label>Opening Balance <span style={{ fontSize: '0.75rem', fontWeight: 'normal', color: '#64748B' }}>(e.g. -500 for Advance, 500 for Due)</span></label>
-                  <div className={styles.inputWrapper}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    Opening Balance
+                    <span style={{ fontSize: '0.75rem', fontWeight: 'normal', color: '#64748B' }}>
+                      (e.g. -500 for Advance, 500 for Due)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!isOpeningBalanceUnlocked) {
+                          setPinActionTarget('unlock_opening_balance');
+                          setShowPinModal(true);
+                        } else {
+                          setIsOpeningBalanceUnlocked(false);
+                        }
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: isOpeningBalanceUnlocked ? '#10B981' : '#EF4444',
+                        cursor: 'pointer',
+                        padding: 0,
+                        display: 'inline-flex',
+                        alignItems: 'center'
+                      }}
+                      title={isOpeningBalanceUnlocked ? "Lock field" : "Unlock with PIN"}
+                    >
+                      {isOpeningBalanceUnlocked ? <Unlock size={14} /> : <Lock size={14} />}
+                    </button>
+                  </label>
+                  <div className={styles.inputWrapper} style={{ opacity: isOpeningBalanceUnlocked ? 1 : 0.7 }}>
                     <DollarSign size={18} />
                     <input
                       type="number"
                       step="0.01"
-                      placeholder="0.00 (- for Advance, + for Due)"
+                      placeholder={isOpeningBalanceUnlocked ? "0.00 (- for Advance, + for Due)" : "Click lock icon to unlock"}
                       value={formData.openingBalance}
                       onChange={(e) => setFormData({ ...formData, openingBalance: e.target.value })}
+                      readOnly={!isOpeningBalanceUnlocked}
+                      style={{ cursor: isOpeningBalanceUnlocked ? 'text' : 'not-allowed' }}
                     />
                   </div>
                 </div>
