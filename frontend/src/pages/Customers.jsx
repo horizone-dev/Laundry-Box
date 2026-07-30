@@ -3036,7 +3036,7 @@ export default function Customers() {
                 <table className={styles.customersTable} style={{ margin: 0, width: '100%' }}>
                   <thead>
                     <tr>
-                      <th style={{ background: '#F8FAFC' }}># Order</th>
+                      <th style={{ background: '#F8FAFC' }}># Order / Ref</th>
                       <th style={{ background: '#F8FAFC' }}>Date</th>
                       <th style={{ background: '#F8FAFC' }}>Order Total</th>
                       <th style={{ background: '#F8FAFC' }}>Discount Given</th>
@@ -3246,10 +3246,10 @@ export default function Customers() {
                           const isOrderDiscount = Boolean(p.orderId) && !isSettlementDiscount;
                           return (
                             <tr key={p.id}>
-                              <td style={{ color: '#64748B', fontStyle: 'italic' }}>
+                              <td style={{ fontWeight: 700 }}>
                                 {isOrderDiscount
-                                  ? `Order Discount #${settings.invoicePrefix || ''}${p.orderId}`
-                                  : (isSettlementDiscount ? 'Settlement Discount' : 'General Account')}
+                                  ? `${settings.invoicePrefix || ''}${p.orderId}`
+                                  : (isSettlementDiscount ? (p.paymentReference || p.id) : 'General Account')}
                               </td>
                               <td>{formatDate(p.createdAt)}</td>
                               <td>N/A</td>
