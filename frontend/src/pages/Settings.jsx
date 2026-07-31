@@ -49,6 +49,8 @@ export default function Settings() {
     setOriginalSettings
   } = useSettings();
 
+  const isCompactTemplate = settings?.invoiceTemplate === 'compact' || settings?.invoiceTemplate === 'compact 2';
+
   const [isApiKeyUnlocked, setIsApiKeyUnlocked] = useState(false);
   const [showApiKeyPinModal, setShowApiKeyPinModal] = useState(false);
   const [apiKeyPinValue, setApiKeyPinValue] = useState('');
@@ -933,7 +935,8 @@ export default function Settings() {
     ],
     subtotal: 32.5,
     tax: 2.6,
-    total: 35.1
+    total: 35.1,
+    expectedDeliveryDate: new Date(Date.now() + 86400000).toISOString()
   };
 
   const handleSaveAllChanges = async () => {
@@ -2137,6 +2140,9 @@ export default function Settings() {
                 </div>
               </div>
 
+              <div style={isCompactTemplate ? { display: 'flex', gap: '2rem', alignItems: 'flex-start', flexWrap: 'wrap', width: '100%' } : { display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+                <div style={isCompactTemplate ? { flex: '1 1 500px', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: '350px' } : { display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+
               {/* Visible Elements */}
               <div className={styles.card}>
                 <h2 className={styles.cardTitle}>Invoice Elements</h2>
@@ -2148,6 +2154,14 @@ export default function Settings() {
                     { label: 'Bilingual Text', sub: 'Headings in English & Arabic', key: 'invoiceShowBilingual' },
                     { label: 'Terms & Conditions', sub: 'Print note at bottom', key: 'invoiceShowTerms' },
                     { label: 'Bank Transfer Details', sub: 'Payment bank accounts', key: 'invoiceShowBankDetails' },
+                    ...(settings.invoiceTemplate === 'compact 2' ? [
+                      { label: 'Previous Balance', sub: 'Show customer statement balance', key: 'invoiceShowPrevBalance' },
+                      { label: 'Expected Delivery / Ready for Collection', sub: 'Show expected delivery date', key: 'invoiceShowDelivery' },
+                      { label: 'Website', sub: 'Show website URL in header', key: 'invoiceShowWebsite' },
+                      { label: 'Email', sub: 'Show email in header', key: 'invoiceShowEmail' },
+                    ] : [
+                      { label: 'Expected Delivery / Ready for Collection', sub: 'Show expected delivery date', key: 'invoiceShowDelivery' },
+                    ])
                   ].map(({ label, sub, key }) => (
                     <div className={styles.formGroup} key={key}>
                       <label>{label}</label>
@@ -2286,17 +2300,31 @@ export default function Settings() {
                 </div>
               </div>
 
-              {/* Live Preview */}
-              <div className={styles.card}>
-                <h3 style={{ marginBottom: '1rem', fontSize: '0.9rem', fontWeight: 800, color: '#64748B', letterSpacing: '0.5px' }}>LIVE PREVIEW</h3>
-                <div style={{ background: '#F1F5F9', padding: '2rem', borderRadius: '12px', display: 'flex', justifyContent: 'center', overflowY: 'auto', maxHeight: '600px' }}>
-                  <div style={{ transform: 'scale(0.72)', transformOrigin: 'top center', width: '140%', marginBottom: '-15%' }}>
-                    <InvoiceTemplate order={previewOrder} settings={settings} isPreview={true} />
-                  </div>
                 </div>
 
+                {/* Right Column / Bottom: Live Preview */}
+                {isCompactTemplate ? (
+                  <div style={{ flex: '0 0 420px', position: 'sticky', top: '1.5rem', minWidth: '350px', zIndex: 10 }}>
+                    <div className={styles.card} style={{ margin: 0 }}>
+                      <h3 style={{ marginBottom: '1rem', fontSize: '0.9rem', fontWeight: 800, color: '#64748B', letterSpacing: '0.5px' }}>LIVE PREVIEW</h3>
+                      <div style={{ background: '#F1F5F9', padding: '1.5rem 1rem', borderRadius: '12px', display: 'flex', justifyContent: 'center', overflow: 'visible' }}>
+                        <div style={{ transform: 'scale(0.82)', transformOrigin: 'top center', width: '122%', marginBottom: '-18%' }}>
+                          <InvoiceTemplate order={previewOrder} settings={settings} isPreview={true} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className={styles.card}>
+                    <h3 style={{ marginBottom: '1rem', fontSize: '0.9rem', fontWeight: 800, color: '#64748B', letterSpacing: '0.5px' }}>LIVE PREVIEW</h3>
+                    <div style={{ background: '#F1F5F9', padding: '2rem', borderRadius: '12px', display: 'flex', justifyContent: 'center', overflowY: 'auto', maxHeight: '600px' }}>
+                      <div style={{ transform: 'scale(0.72)', transformOrigin: 'top center', width: '140%', marginBottom: '-15%' }}>
+                        <InvoiceTemplate order={previewOrder} settings={settings} isPreview={true} />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-
             </div>
           )}
 

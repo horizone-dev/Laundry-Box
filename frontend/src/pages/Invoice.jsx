@@ -22,6 +22,7 @@ export default function Invoice() {
   const [pdfToast, setPdfToast] = useState(null);
   const [showFormatDropdown, setShowFormatDropdown] = useState(false);
   const invoiceRef = React.useRef();
+  const hasAutoPrintedRef = React.useRef(false);
 
   useEffect(() => {
     if (pdfToast) {
@@ -448,10 +449,10 @@ export default function Invoice() {
       let pageSizeArg = 'A5';
       if (printerType === 'tag') {
         pageSizeRule = 'size: 80mm auto;';
-        pageSizeArg = { width: 80000, height: 200000 };
+        pageSizeArg = { width: 80000, height: 600000 };
       } else if (printSize === 'thermal') {
         pageSizeRule = 'size: 80mm auto;';
-        pageSizeArg = { width: 80000, height: 200000 };
+        pageSizeArg = { width: 80000, height: 600000 };
       } else if (printSize === 'A5') {
         pageSizeRule = 'size: A5;';
         pageSizeArg = 'A5';
@@ -461,9 +462,9 @@ export default function Invoice() {
       } else {
         const isCompactTemplate = ['compact', 'compact 2'].includes(settings.invoiceTemplate);
         pageSizeRule = isCompactTemplate ? 'size: 80mm auto;' : 'size: A5;';
-        pageSizeArg = isCompactTemplate ? { width: 80000, height: 200000 } : 'A5';
+        pageSizeArg = isCompactTemplate ? { width: 80000, height: 600000 } : 'A5';
       }
-      const pageMargin = printerType === 'tag' ? '0' : '2mm';
+      const pageMargin = '0';
 
       const res = await electronAPI.printInvoice({
         html,
@@ -498,15 +499,19 @@ export default function Invoice() {
   // Auto-print or Auto-download if query param is set
   useEffect(() => {
     if (!settings) return; // Wait until settings are loaded from DB
-    const shouldPrint = searchParams.get('print') === 'force' || (searchParams.get('print') === 'true' && settings.autoPrint);
+    if (hasAutoPrintedRef.current) return; // Only trigger print/download once!
+    const printParam = searchParams.get('print');
+    const shouldPrint = printParam === 'force' || (printParam !== 'false' && (printParam === 'true' || settings.autoPrint));
     const shouldDownload = searchParams.get('download') === 'force';
     if (order) {
       if (shouldPrint) {
+        hasAutoPrintedRef.current = true;
         const timer = setTimeout(() => {
           executeNativePrint();
         }, 800);
         return () => clearTimeout(timer);
       } else if (shouldDownload) {
+        hasAutoPrintedRef.current = true;
         const timer = setTimeout(() => {
           generatePDF();
         }, 800);

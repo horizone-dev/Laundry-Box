@@ -1,7 +1,7 @@
 // Preset service templates with ultra-professional inline SVG icons
 export const PRESET_SERVICES = [
   {
-    name: 'Dishdash',
+    name: 'Kandura',
     nameAr: 'كندورة',
     category: 'Laundry',
     color1: '#3B82F6',
@@ -14,7 +14,7 @@ export const PRESET_SERVICES = [
     <path d="M38 20 Q50 25 62 20" stroke="white" stroke-width="3" fill="none"/>`
   },
   {
-    name: 'Ghutra',
+    name: 'Gatra',
     nameAr: 'غترة',
     category: 'Laundry',
     color1: '#EF4444',
@@ -34,7 +34,7 @@ export const PRESET_SERVICES = [
     <path d="M38 18 L50 36 L62 18" fill="none" stroke="white" stroke-width="3" stroke-linejoin="round"/>`
   },
   {
-    name: 'Sheela',
+    name: 'Shela',
     nameAr: 'شيلة',
     category: 'Laundry',
     color1: '#8B5CF6',
@@ -282,6 +282,24 @@ export const PRESET_SERVICES = [
     color2: '#1E293B',
     iconPath: `<path d="M26 28 H74 L78 68 C78 70, 76 72, 73 72 L55 72 L50 54 L45 72 L27 72 C24 72, 22 70, 22 68 Z" fill="none" stroke="white" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
     <path d="M26 38 H74" stroke="white" stroke-width="2.5"/>`
+  },
+  {
+    name: 'Curtain',
+    nameAr: 'ستارة',
+    category: 'Bedding',
+    color1: '#F43F5E',
+    color2: '#BE123C',
+    iconPath: `<rect x="20" y="20" width="60" height="60" rx="4" fill="none" stroke="white" stroke-width="3.5"/>
+    <path d="M34 20 C34 50, 20 65, 20 80 M66 20 C66 50, 80 65, 80 80" stroke="white" stroke-width="3.5" fill="none"/>
+    <path d="M20 50 H80" stroke="white" stroke-width="2" stroke-dasharray="4 4"/>`
+  },
+  {
+    name: 'Baniyan',
+    nameAr: 'فانيلة',
+    category: 'Laundry',
+    color1: '#94A3B8',
+    color2: '#475569',
+    iconPath: `<path d="M32 20 Q50 32 68 20 L72 44 L66 85 C66 87, 64 88, 62 88 L38 88 C36 88, 34 87, 34 85 L28 44 Z" fill="none" stroke="white" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>`
   },
   {
     name: 'Others',

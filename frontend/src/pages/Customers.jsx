@@ -2035,11 +2035,19 @@ export default function Customers() {
         const deletedBills = deletedBillsRes.success ? deletedBillsRes.data : [];
 
         const combinedReturns = [
-          ...bills.filter(b => b.status === 'Cancelled' || b.status === 'Deleted').map(b => ({
-            ...b,
-            isDeleted: true,
-            refundStatus: b.status === 'Deleted' ? (b.deletedAction || 'Deleted') : 'Cancelled'
-          })),
+          ...bills.filter(b => b.status === 'Cancelled' || b.status === 'Deleted').map(b => {
+            const dbRecord = deletedBills.find(db => db.id === b.id);
+            return {
+              ...b,
+              isDeleted: true,
+              paidAmount: dbRecord ? (dbRecord.paidAmount !== undefined ? dbRecord.paidAmount : b.paidAmount) : b.paidAmount,
+              refundStatus: dbRecord 
+                ? (dbRecord.refundStatus || dbRecord.returnStatus || 'Deleted')
+                : (b.status === 'Deleted' ? (b.deletedAction || 'Deleted') : 'Cancelled'),
+              refundMethod: dbRecord ? dbRecord.refundMethod : b.refundMethod,
+              returnedAt: dbRecord ? dbRecord.returnedAt : b.returnedAt
+            };
+          }),
           ...deletedBills.filter(db => !bills.some(b => b.id === db.id)).map(db => ({
             ...db,
             isDeleted: true,

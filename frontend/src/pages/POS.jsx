@@ -296,6 +296,12 @@ export default function POS() {
   const [nomodLinkModal, setNomodLinkModal] = useState({ show: false, url: '', linkId: '', amount: 0 });
   const [printReceipt, setPrintReceipt] = useState(settings.autoPrint !== undefined ? settings.autoPrint : true);
 
+  // Keep printReceipt in sync with settings — if settings change while POS is open,
+  // reset the toggle so the NEXT payment starts fresh from the new setting.
+  useEffect(() => {
+    setPrintReceipt(settings.autoPrint ?? false);
+  }, [settings.autoPrint]);
+
   useEffect(() => {
     const handleNomodSuccess = (e) => {
       const paidOrderId = e.detail?.orderId;
@@ -796,7 +802,7 @@ export default function POS() {
         price: finalPrice,
         type: joinedTypeName,
         types: actualTypes,
-        addons: activeSelectedAddons.map(a => a.name),
+        addons: activeSelectedAddons.map(a => ({ id: a.id, name: a.name, price: a.price || 0 })),
         qty: parseInt(serviceConfig.qty, 10) || 1,
         taxRate: selectedService.taxRate || settings.taxRate || 0,
         description: serviceConfig.description || '',
@@ -838,7 +844,7 @@ export default function POS() {
         price: finalPrice,
         type: joinedTypeName, // legacy fallback type string
         types: selectedTypes,  // new types array
-        addons: activeSelectedAddons.map(a => a.name),
+        addons: activeSelectedAddons.map(a => ({ id: a.id, name: a.name, price: a.price || 0 })),
         qty: parseInt(serviceConfig.qty, 10) || 1,
         taxRate: selectedService.taxRate || settings.taxRate || 0,
         description: serviceConfig.description || '',
@@ -902,7 +908,7 @@ export default function POS() {
 
     // Resolve addon IDs from names
     const resolvedAddonIds = addons
-      .filter(a => (item.addons || []).includes(a.name))
+      .filter(a => (item.addons || []).some(ia => (typeof ia === 'string' ? ia : ia.name) === a.name))
       .map(a => a.id);
 
     // Compute standard base + options price to detect custom overrides
@@ -1456,7 +1462,7 @@ export default function POS() {
             setExpectedDeliveryDate(getTomorrowDateString());
             setExpectedDeliveryTime('17:00');
             setSpecialInstructions('');
-            navigate(`/invoice/${editOrderId.replace('#', '')}${settings.autoPrint ? '?print=true' : ''}`);
+             navigate(`/invoice/${editOrderId.replace('#', '')}${printReceipt ? '?print=true' : '?print=false'}`);
             return;
           }
         }
@@ -1718,7 +1724,7 @@ export default function POS() {
         }
 
         setPendingOrderId(null);
-        navigate(`/invoice/${orderId.replace('#', '')}${settings.autoPrint ? '?print=true' : ''}`);
+         navigate(`/invoice/${orderId.replace('#', '')}${printReceipt ? '?print=true' : '?print=false'}`);
       } catch (err) {
         console.error("Failed to save order:", err);
         // If DB-level credit limit check blocked the order, show the override modal
@@ -3067,7 +3073,7 @@ export default function POS() {
       {/* Success Modal */}
       {showSuccessModal && lastOrderInfo && (
         <div className={styles.modalOverlay}>
-          {settings.autoPrint && (
+          {printReceipt && (
             <iframe 
               src={`#/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=true`} 
               style={{ display: 'none' }} 
@@ -3155,6 +3161,8 @@ export default function POS() {
                   onClick={() => {
                     setShowSuccessModal(false);
                     setSelectedCustomer(null);
+                    // Reset toggle to settings default for the next payment session
+                    setPrintReceipt(settings.autoPrint ?? false);
                   }}
                 >
                   Done & New Order

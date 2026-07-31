@@ -339,8 +339,9 @@ export default function ZReport() {
       itemsList.forEach(item => {
         if (item.addons && Array.isArray(item.addons)) {
           item.addons.forEach(addon => {
-            const addName = (addon.name || '').toLowerCase();
-            const addAmt = (addon.price || 0) * (item.qty || 1);
+            const isStr = typeof addon === 'string';
+            const addName = (isStr ? addon : addon?.name || '').toLowerCase();
+            const addAmt = (isStr ? 0 : addon?.price || 0) * (item.qty || 1);
             if (addName.includes('express')) {
               expressCharges += addAmt;
             } else if (addName.includes('delivery')) {

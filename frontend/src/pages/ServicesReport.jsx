@@ -153,11 +153,12 @@ export default function ServicesReport() {
             });
           }
 
-          // 4. Add-ons
+          // 4. Add-ons (handles both old string format and new {name, price} object format)
           if (item.addons && Array.isArray(item.addons)) {
             item.addons.forEach(addon => {
-              if (addon) {
-                addonMap[addon] = (addonMap[addon] || 0) + qty;
+              const addonName = typeof addon === 'string' ? addon : addon?.name;
+              if (addonName) {
+                addonMap[addonName] = (addonMap[addonName] || 0) + qty;
                 totalAddons += qty;
               }
             });

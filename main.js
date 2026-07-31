@@ -2467,13 +2467,11 @@ try {
   // Graceful fallback
 }
 
-ipcMain.handle('get-printers', async () => {
-  if (mainWindow) {
-    try {
-      return await mainWindow.webContents.getPrintersAsync();
-    } catch (err) {
-      console.error('Failed to get printers:', err);
-    }
+ipcMain.handle('get-printers', async (event) => {
+  try {
+    return await event.sender.getPrintersAsync();
+  } catch (err) {
+    console.error('Failed to get printers:', err);
   }
   return [];
 });
@@ -2552,7 +2550,7 @@ ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent, 
       printWin.webContents.print({
         silent: silent !== false,   // Respect user preference (defaults to true)
         printBackground: true,
-        margins: { marginType: 'printableArea' },
+        margins: { marginType: 'none' },
         scaleFactor: 100,
         pageSize: pageSize || 'A5', // Pass options custom size or string format
         deviceName: (printerName === 'System Default Printer' || !printerName) ? '' : printerName

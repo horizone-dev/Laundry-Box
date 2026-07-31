@@ -917,7 +917,7 @@ export default function Services({ defaultTab = 'list' }) {
                       setShowPresetLibrary(true);
                     }}
                   >
-                    <Sparkles size={16} /> Choose from Preset Item Library (28 Items)
+                    <Sparkles size={16} /> Choose from Preset Item Library ({PRESET_SERVICES.length} Items)
                   </button>
                 </div>
 

@@ -208,10 +208,12 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
 
   const isCompact = settings.invoiceTemplate === 'compact';
   const showLogo = settings.invoiceShowLogo !== false;
+  const hasLogo = showLogo && !!settings.logo;
   const showQrCode = settings.invoiceShowQrCode !== false;
   const showBilingual = settings.invoiceShowBilingual !== false;
   const showTerms = settings.invoiceShowTerms !== false;
   const showBankDetails = settings.invoiceShowBankDetails !== false;
+  const showDelivery = settings.invoiceShowDelivery !== false;
   const termsText = settings.invoiceTermsText || '';
 
   // ── Customization settings ──
@@ -233,7 +235,10 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
   ].filter(Boolean).join('، ');
 
 
-  const formatLabel = (en, ar) => showBilingual ? `${en} / ${ar}` : en;
+  const formatLabel = (en, ar) => {
+    const isCompactTemplate = settings.invoiceTemplate === 'compact' || settings.invoiceTemplate === 'compact 2' || settings.invoiceTemplate === 'horizon';
+    return showBilingual && !isCompactTemplate ? `${en} / ${ar}` : en;
+  };
 
   const formatExpectedDate = (rawDate) => {
     if (!rawDate) return '';
@@ -314,37 +319,49 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
 
 
         {/* 1. Brand Header */}
-        <div className={styles.horizonHeaderWrap}>
-          {showLogo && (
+        <div className={styles.horizonHeaderWrap} style={!hasLogo ? { justifyContent: 'center', textAlign: 'center' } : {}}>
+          {hasLogo && (
             <div className={styles.horizonLogoBox}>
-              {settings.logo ? (
-                <img src={settings.logo} alt="Logo" className={styles.horizonLogo} />
-              ) : (
-                <img src={defaultLogo} alt="Logo" className={styles.horizonLogo} onError={(e) => { e.target.style.display = 'none'; }} />
-              )}
+              <img src={settings.logo} alt="Logo" className={styles.horizonLogo} />
             </div>
           )}
-          <div className={styles.horizonHeader}>
+          <div className={styles.horizonHeader} style={!hasLogo ? { textAlign: 'center' } : {}}>
             <div className={styles.horizonBrandName}>{settings.companyName || 'HORIZON LAUNDRY'}</div>
-            {showBilingual && settings.companyNameAr && <div className={styles.horizonBrandNameAr} dir="rtl">{settings.companyNameAr}</div>}
-            {settings.email && <div className={styles.horizonBrandSubline}>{settings.email}</div>}
+            {showBilingual && settings.companyNameAr && (
+              <div className={styles.horizonBrandNameAr} style={!hasLogo ? { textAlign: 'center' } : {}} dir="rtl">
+                {settings.companyNameAr}
+              </div>
+            )}
+            {settings.email && settings.invoiceShowEmail !== false && (
+              <div className={styles.horizonBrandSubline}>{settings.email}</div>
+            )}
+            {settings.website && settings.invoiceShowWebsite !== false && (
+              <div className={styles.horizonBrandSubline} style={{ textTransform: 'none' }}>{settings.website}</div>
+            )}
             <div className={styles.horizonMetaLine}>
               {fullAddress || ''}
             </div>
             {showBilingual && fullAddressAr && (
-              <div className={styles.horizonMetaLine} dir="rtl">
+              <div className={styles.horizonMetaLine} style={!hasLogo ? { textAlign: 'center' } : {}} dir="rtl">
                 {fullAddressAr}
               </div>
             )}
-            <div className={styles.horizonMetaLine}>
-              {settings.phone && `Tel: ${settings.phone}`} {settings.trn && `| TRN: ${settings.trn}`}
-            </div>
+            {settings.phone && (
+              <div className={styles.horizonMetaLine}>
+                Tel: {settings.phone}{settings.alternatePhone ? ` / ${settings.alternatePhone}` : ''}
+              </div>
+            )}
+            {settings.trn && (
+              <div className={styles.horizonMetaLine}>
+                TRN: {settings.trn}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Double-bordered title block */}
         <div className={styles.horizonTitleBlock}>
-          <div className={styles.horizonTitleText}>{showBilingual ? `${docTitle} / ${docTitleAr}` : docTitle}</div>
+          <div className={styles.horizonTitleText}>{docTitle}</div>
         </div>
 
         {/* Metadata section */}
@@ -367,10 +384,10 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <span className={styles.horizonMetaValue}>{order.customerPhone}</span>
             </div>
           )}
-          {order.expectedDeliveryDate && (
-            <div className={styles.horizonMetaRow}>
-              <span className={styles.horizonMetaLabel}>EXP. DELIVERY:</span>
-              <span className={styles.horizonMetaValue} style={{ color: '#E11D48', fontWeight: 'bold' }}>{formatExpectedDate(order.expectedDeliveryDate)}</span>
+          {order.specialInstructions && (
+            <div className={styles.horizonMetaRow} style={{ color: '#DC2626', marginTop: '0.15rem' }}>
+              <span className={styles.horizonMetaLabel}>{formatLabel('NOTE', 'ملاحظة')}:</span>
+              <span className={styles.horizonMetaValue} style={{ fontWeight: 'bold' }}>{order.specialInstructions}</span>
             </div>
           )}
         </div>
@@ -379,16 +396,17 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
         <table className={styles.horizonItemsTable}>
           <thead>
             <tr>
-              <th style={{ textAlign: 'left' }}>{formatLabel('SERVICES', 'الخدمات')}</th>
-              <th style={{ textAlign: 'center', width: '15%' }}>{formatLabel('QTY', 'الكمية')}</th>
-              <th style={{ textAlign: 'right', width: '25%' }}>{formatLabel('TOTAL', 'المجموع')}</th>
+              <th style={{ textAlign: 'left' }}>SERVICES</th>
+              <th style={{ textAlign: 'center', width: '12%' }}>QTY</th>
+              <th style={{ textAlign: 'right', width: '18%' }}>PRICE</th>
+              <th style={{ textAlign: 'right', width: '20%' }}>TOTAL</th>
             </tr>
           </thead>
           <tbody>
             {items.map((item, idx) => {
               const lineTotal = (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0);
               const servicesText = item.types && item.types.length > 0 
-                ? item.types.map(t => t.name).join(' + ') 
+                ? item.types.map(t => `${t.name}${t.price > 0 ? ` (${t.price.toFixed(2)})` : ''}`).join(' + ') 
                 : (item.sub || item.category || '');
               return (
                 <tr key={idx}>
@@ -404,6 +422,19 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                         <span className={styles.horizonItemSubText}>
                           ◦ {servicesText}
                         </span>
+                      )}
+                      {item.addons && item.addons.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.05rem', margin: '0.1rem 0 0.15rem 0.6rem' }}>
+                          {item.addons.map((a, ai) => {
+                            const aName = typeof a === 'string' ? a : a?.name;
+                            const aPrice = typeof a === 'string' ? 0 : a?.price || 0;
+                            return (
+                              <span key={ai} className={styles.horizonItemSubText} style={{ color: '#2563EB', fontWeight: 'bold' }}>
+                                + {aName}{aPrice > 0 ? ` (${aPrice.toFixed(2)})` : ''}
+                              </span>
+                            );
+                          })}
+                        </div>
                       )}
                       {item.description && (
                         <span className={styles.horizonItemSubText} style={{ color: '#DC2626' }}>
@@ -422,17 +453,16 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                     />
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    {editMode ? (
-                      <EditableCell
-                        editing={editMode}
-                        value={item.price}
-                        onChange={(v) => updateItem(idx, 'price', v)}
-                        type="number"
-                        align="right"
-                      />
-                    ) : (
-                      lineTotal.toFixed(2)
-                    )}
+                    <EditableCell
+                      editing={editMode}
+                      value={item.price}
+                      onChange={(v) => updateItem(idx, 'price', v)}
+                      type="number"
+                      align="right"
+                    />
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    {lineTotal.toFixed(2)}
                   </td>
                 </tr>
               );
@@ -491,39 +521,38 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             </span>
           </div>
 
-          <div className={styles.horizonStatusRow}>
-            <span>{formatLabel('STATUS', 'الحالة')}:</span>
-            <span style={{ fontWeight: 800 }}>{invoiceStatus}</span>
-          </div>
+          {invoiceStatus === 'PAID' && (
+            <div className={styles.horizonStatusRow}>
+              <span>{formatLabel('STATUS', 'الحالة')}:</span>
+              <span style={{ fontWeight: 800 }}>{invoiceStatus}</span>
+            </div>
+          )}
         </div>
 
         {/* Customer Statement Box */}
-        <div className={styles.horizonStatementBox}>
-          <div className={styles.horizonBoxTitle}>{formatLabel('CUSTOMER STATEMENT', 'كشف الحساب')}</div>
-          <div className={styles.horizonBoxRow}>
-            <span>{formatLabel('Prev. Balance', 'الرصيد السابق')}:</span>
-            <span>{Math.abs(order.previousBalance || 0).toFixed(2)}</span>
+        {settings.invoiceShowPrevBalance !== false && (
+          <div className={styles.horizonStatementBox}>
+            <div className={styles.horizonBoxTitle}>{formatLabel('CUSTOMER STATEMENT', 'كشف الحساب')}</div>
+            <div className={styles.horizonBoxRow}>
+              <span>{formatLabel('Prev. Balance', 'الرصيد السابق')}:</span>
+              <span>{Math.abs(order.previousBalance || 0).toFixed(2)}</span>
+            </div>
+            <div className={styles.horizonBoxRow}>
+              <span>{formatLabel('New Balance', 'الرصيد الجديد')}:</span>
+              <span>{Math.abs(totalBalanceVal).toFixed(2)}</span>
+            </div>
           </div>
-          <div className={styles.horizonBoxRow}>
-            <span>{formatLabel('New Balance', 'الرصيد الجديد')}:</span>
-            <span>{Math.abs(totalBalanceVal).toFixed(2)}</span>
-          </div>
-        </div>
+        )}
 
         {/* Ready for Collection Box */}
-        {order.expectedDeliveryDate && (() => {
+        {showDelivery && order.expectedDeliveryDate && (() => {
           const parts = getExpectedDateAndTimeParts(order.expectedDeliveryDate);
           return (
             <div className={styles.horizonCollectionBox}>
               <div className={styles.horizonBoxTitle}>{formatLabel('READY FOR COLLECTION', 'جاهز للاستلام')}</div>
               <div className={styles.horizonCollectionDate}>
-                {parts.datePart}
+                {parts.datePart} {parts.timePart && `BY ${parts.timePart}`}
               </div>
-              {parts.timePart && (
-                <div className={styles.horizonCollectionTime}>
-                  BY {parts.timePart}
-                </div>
-              )}
             </div>
           );
         })()}
@@ -543,8 +572,10 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
         {/* Compliance QR corner */}
         {showQrCode && (
           <div className={styles.horizonQrContainer}>
+            <div className={styles.horizonTrackText} style={{ marginBottom: '0.35rem', textAlign: 'center', fontSize: '0.78rem', fontWeight: 800 }}>
+              Tracking Code: {order.id}
+            </div>
             <QRCodeSVG value={`https://hzl.io/t/${order.id}`} size={85} />
-            <div className={styles.horizonTrackText}>TRACK ORDER: hzl.io/t/{order.id}</div>
           </div>
         )}
 
@@ -635,7 +666,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
         <div className={styles.taxInvoiceTitleBlock}>
           <div className={styles.dividerLine} style={{ borderColor: accentColor }}></div>
           <div className={styles.titleTextContainer}>
-            <h1 style={{ color: accentColor }}>{showBilingual ? `${docTitle} / ${docTitleAr}` : docTitle}</h1>
+            <h1 style={{ color: accentColor }}>{showBilingual && !isCompact && !isCompact2 ? `${docTitle} / ${docTitleAr}` : docTitle}</h1>
           </div>
           <div className={styles.dividerLine} style={{ borderColor: accentColor }}></div>
         </div>
@@ -660,7 +691,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             <span className={styles.metaLabelEnAr}>Date & Time:</span>
             <span className={styles.metaValue} style={{ fontSize: '0.82rem' }}>{order.date}</span>
           </div>
-          {order.expectedDeliveryDate && (
+          {settings.invoiceShowDelivery !== false && order.expectedDeliveryDate && (
             <div className={styles.metaRow}>
               <span className={styles.metaLabelEnAr}>Exp. Delivery:</span>
               <span className={styles.metaValue} style={{ color: '#E11D48', fontWeight: 'bold' }}>{order.expectedDeliveryDate}</span>
@@ -683,11 +714,17 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <strong className={styles.customerVal}>{order.customerPhone}</strong>
             </div>
           )}
+          {isCompact && order.specialInstructions && (
+            <div className={styles.customerItem} style={{ gridColumn: 'span 2', marginTop: '0.15rem' }}>
+              <span className={styles.customerLabelEn}>{formatLabel('Note', 'ملاحظة')}:</span>
+              <strong className={styles.customerVal} style={{ color: '#DC2626' }}>{order.specialInstructions}</strong>
+            </div>
+          )}
         </div>
       </div>
 
       {/* 4b. Special Instructions */}
-      {order.specialInstructions && (
+      {order.specialInstructions && !isCompact && (
         <div className={styles.specialInstructionsBlock} style={{
           marginTop: '0.5rem',
           marginBottom: '0.75rem',
@@ -726,12 +763,18 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                 {/* Treatment / service types on one line */}
                 {typesList.length > 0 && (
                   <div className={styles.thermalItemTypes}>
-                    {typesList.map(t => t.name).join(' · ')}
+                    {typesList.map(t => `${t.name}${t.price > 0 ? ` (${t.price.toFixed(2)})` : ''}`).join(' · ')}
                   </div>
                 )}
                 {/* Add-ons inline — never letter-by-letter */}
                 {addonsList.length > 0 && (
-                  <div className={styles.thermalItemAddons}>+ {addonsList.join(', ')}</div>
+                  <div className={styles.thermalItemAddons}>
+                    + {addonsList.map(a => {
+                      const aName = typeof a === 'string' ? a : a?.name;
+                      const aPrice = typeof a === 'string' ? 0 : a?.price || 0;
+                      return `${aName}${aPrice > 0 ? ` (${aPrice.toFixed(2)})` : ''}`;
+                    }).join(', ')}
+                  </div>
                 )}
                 {/* Delivery method */}
                 {item.deliveryMethod && (
