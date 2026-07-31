@@ -537,9 +537,9 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
       const isReverse = amtVal < 0;
       const purposeKey = p.method === 'Discount'
         ? (discountScope === 'settlement'
-          ? (isReverse ? `reverse-settlement-discount:${refToUse}` : 'settlement-discount')
-          : (isReverse ? `reverse-discount:${refToUse}` : `discount:${refToUse}`))
-        : (isReverse ? `reverse-payment:${refToUse}` : `payment:${p.method || referencePrefix}`);
+          ? (isReverse ? `reverse-settlement-discount:${referencePrefix}` : 'settlement-discount')
+          : (isReverse ? `reverse-discount:${referencePrefix}` : `discount:${referencePrefix}`))
+        : (isReverse ? `reverse-payment:${referencePrefix}` : `payment:${p.method || referencePrefix}`);
       const key = `${timestampKey}:${purposeKey}`;
 
       if (!groupedPaymentsMap[key]) {
