@@ -1325,34 +1325,135 @@ export default function Settings() {
                       onChange={(e) => updateSettings({ cardCommission: e.target.value })}
                     />
                   </div>
-                  <div className={styles.formGroup}>
-                    <label>Card Default Account</label>
-                    <CustomSelect
-                      value={settings.cardDefaultAccountId || ''}
-                      onChange={(e) => updateSettings({ cardDefaultAccountId: e.target.value })}
-                      options={[
-                        { value: '', label: 'Select Account' },
-                        ...(settings.bankAccounts || []).map((acc) => ({
-                          value: acc.id,
-                          label: `${acc.bankName} (${acc.accountNumber})`
-                        }))
-                      ]}
-                    />
+                </div>
+              </div>
+
+              <div className={styles.card}>
+                <h2 className={styles.cardTitle}>Payment Methods & Default Accounts</h2>
+                <p style={{ fontSize: '0.8rem', color: '#64748B', marginBottom: '1rem' }}>
+                  Enable or disable payment methods and configure their default bank accounts. Disabled methods will not be shown during order creation or billing settlements.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  {/* Cash Method */}
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '0.75rem 1rem', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', minHeight: '120px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0F172A' }}>Cash Payment</div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '2px' }}>Accept cash payments at the counter.</div>
+                      </div>
+                      <label className={styles.switch}>
+                        <input
+                          type="checkbox"
+                          checked={settings.paymentMethodCashEnabled ?? true}
+                          onChange={(e) => updateSettings({ paymentMethodCashEnabled: e.target.checked })}
+                        />
+                        <span className={`${styles.slider} ${styles.round}`}></span>
+                      </label>
+                    </div>
                   </div>
-                  <div className={styles.formGroup}>
-                    <label>UPI Default Account</label>
-                    <CustomSelect
-                      value={settings.upiDefaultAccountId || ''}
-                      onChange={(e) => updateSettings({ upiDefaultAccountId: e.target.value })}
-                      options={[
-                        { value: '', label: 'Select Account' },
-                        ...(settings.bankAccounts || []).map((acc) => ({
-                          value: acc.id,
-                          label: `${acc.bankName} (${acc.accountNumber})`
-                        }))
-                      ]}
-                    />
+
+                  {/* Card Method */}
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '0.75rem 1rem', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', minHeight: '120px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0F172A' }}>Card Payment</div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '2px' }}>Accept debit/credit card transactions.</div>
+                      </div>
+                      <label className={styles.switch}>
+                        <input
+                          type="checkbox"
+                          checked={settings.paymentMethodCardEnabled ?? true}
+                          onChange={(e) => updateSettings({ paymentMethodCardEnabled: e.target.checked })}
+                        />
+                        <span className={`${styles.slider} ${styles.round}`}></span>
+                      </label>
+                    </div>
+                    {(settings.paymentMethodCardEnabled ?? true) && (
+                      <div className={styles.formGroup} style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'block' }}>Default Bank Account</label>
+                        <CustomSelect
+                          value={settings.cardDefaultAccountId || ''}
+                          onChange={(e) => updateSettings({ cardDefaultAccountId: e.target.value })}
+                          options={[
+                            { value: '', label: 'Select Account' },
+                            ...(settings.bankAccounts || []).map((acc) => ({
+                              value: acc.id,
+                              label: `${acc.bankName} (${acc.accountNumber})`
+                            }))
+                          ]}
+                        />
+                      </div>
+                    )}
                   </div>
+
+                  {/* UPI Method */}
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '0.75rem 1rem', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', minHeight: '120px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0F172A' }}>UPI / QR Payment</div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '2px' }}>Accept UPI payments using QR codes.</div>
+                      </div>
+                      <label className={styles.switch}>
+                        <input
+                          type="checkbox"
+                          checked={settings.paymentMethodUpiEnabled ?? true}
+                          onChange={(e) => updateSettings({ paymentMethodUpiEnabled: e.target.checked })}
+                        />
+                        <span className={`${styles.slider} ${styles.round}`}></span>
+                      </label>
+                    </div>
+                    {(settings.paymentMethodUpiEnabled ?? true) && (
+                      <div className={styles.formGroup} style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'block' }}>Default Bank Account</label>
+                        <CustomSelect
+                          value={settings.upiDefaultAccountId || ''}
+                          onChange={(e) => updateSettings({ upiDefaultAccountId: e.target.value })}
+                          options={[
+                            { value: '', label: 'Select Account' },
+                            ...(settings.bankAccounts || []).map((acc) => ({
+                              value: acc.id,
+                              label: `${acc.bankName} (${acc.accountNumber})`
+                            }))
+                          ]}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Bank Transfer Method */}
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '0.75rem 1rem', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', minHeight: '120px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0F172A' }}>Bank Transfer</div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '2px' }}>Accept direct bank transfer payments.</div>
+                      </div>
+                      <label className={styles.switch}>
+                        <input
+                          type="checkbox"
+                          checked={settings.paymentMethodBankEnabled ?? true}
+                          onChange={(e) => updateSettings({ paymentMethodBankEnabled: e.target.checked })}
+                        />
+                        <span className={`${styles.slider} ${styles.round}`}></span>
+                      </label>
+                    </div>
+                    {(settings.paymentMethodBankEnabled ?? true) && (
+                      <div className={styles.formGroup} style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'block' }}>Default Bank Account</label>
+                        <CustomSelect
+                          value={settings.defaultBankId || ''}
+                          onChange={(e) => updateSettings({ defaultBankId: e.target.value })}
+                          options={[
+                            { value: '', label: 'Select Account' },
+                            ...(settings.bankAccounts || []).map((acc) => ({
+                              value: acc.id,
+                              label: `${acc.bankName} (${acc.accountNumber})`
+                            }))
+                          ]}
+                        />
+                      </div>
+                    )}
+                  </div>
+
                 </div>
               </div>
 
@@ -1461,6 +1562,55 @@ export default function Settings() {
                         </div>
                       </div>
                     </>
+                  )}
+                </div>
+              </div>
+
+              <div className={styles.card} style={{ marginTop: '1.5rem' }}>
+                <h2 className={styles.cardTitle}>Z-Report Close Rules</h2>
+                <div className={styles.formGrid}>
+                  <div className={styles.formGroup} style={{ gridColumn: 'span 2' }}>
+                    <div className={styles.toggleWrapper} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0' }}>
+                      <div>
+                        <label style={{ fontWeight: 600, fontSize: '0.95rem' }}>Close Mode</label>
+                        <p style={{ fontSize: '0.8rem', color: '#64748B', margin: 0 }}>Choose whether to close Z-Reports manually or automatically at a scheduled time.</p>
+                      </div>
+                      <div style={{ display: 'flex', gap: '1rem' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
+                          <input
+                            type="radio"
+                            name="zReportAutoCloseEnabled"
+                            checked={!settings.zReportAutoCloseEnabled}
+                            onChange={() => updateSettings({ zReportAutoCloseEnabled: false })}
+                          />
+                          Manual Close
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
+                          <input
+                            type="radio"
+                            name="zReportAutoCloseEnabled"
+                            checked={!!settings.zReportAutoCloseEnabled}
+                            onChange={() => updateSettings({ zReportAutoCloseEnabled: true })}
+                          />
+                          Automatic Close
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {settings.zReportAutoCloseEnabled && (
+                    <div className={styles.formGroup}>
+                      <label>Auto-Close Time</label>
+                      <div className={styles.inputWrapper}>
+                        <Clock size={18} color="#94A3B8" />
+                        <input
+                          type="time"
+                          className={styles.inputField}
+                          value={settings.zReportAutoCloseTime || '23:59'}
+                          onChange={(e) => updateSettings({ zReportAutoCloseTime: e.target.value })}
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -2154,6 +2304,7 @@ export default function Settings() {
                     { label: 'Bilingual Text', sub: 'Headings in English & Arabic', key: 'invoiceShowBilingual' },
                     { label: 'Terms & Conditions', sub: 'Print note at bottom', key: 'invoiceShowTerms' },
                     { label: 'Bank Transfer Details', sub: 'Payment bank accounts', key: 'invoiceShowBankDetails' },
+                    { label: 'Treatment Prices', sub: 'Show prices of treatments on invoice', key: 'invoiceShowTreatmentPrice' },
                     ...(settings.invoiceTemplate === 'compact 2' ? [
                       { label: 'Previous Balance', sub: 'Show customer statement balance', key: 'invoiceShowPrevBalance' },
                       { label: 'Expected Delivery / Ready for Collection', sub: 'Show expected delivery date', key: 'invoiceShowDelivery' },
@@ -3466,6 +3617,30 @@ export default function Settings() {
                             ? 'One summary Z Report will be generated for the entire calendar business day.'
                             : 'Z Reports will be segmented and generated independently for each individual employee shift.'}
                         </p>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem', borderTop: '1px solid #E2E8F0', paddingTop: '1rem' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#334155' }}>Automatic Z-Report Closing</span>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: '#334155', fontWeight: 500 }}>
+                            <input
+                              type="checkbox"
+                              checked={settings.zReportAutoCloseEnabled}
+                              onChange={(e) => updateSettings({ zReportAutoCloseEnabled: e.target.checked })}
+                              style={{ cursor: 'pointer' }}
+                            />
+                            Enable Auto Close
+                          </label>
+                          {settings.zReportAutoCloseEnabled && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+                              <span style={{ fontSize: '0.8rem', color: '#475569' }}>Closing Time:</span>
+                              <input
+                                type="time"
+                                value={settings.zReportAutoCloseTime || '23:59'}
+                                onChange={(e) => updateSettings({ zReportAutoCloseTime: e.target.value })}
+                                style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #CBD5E1', fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </motion.div>
                   )}

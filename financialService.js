@@ -274,30 +274,7 @@ function settleCustomerBalance(db, {
           `).run(reference.paymentId, shopId, customerId, order.id, appliedAmount, timestamp, timestamp, reference.paymentReference);
         }
 
-        const accountTransactionId = reference.accountTransactionId;
-        db.prepare(`
-          INSERT INTO account_transactions
-            (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
-        `).run(
-          accountTransactionId,
-          shopId,
-          method === 'Discount' ? 'CASH' : getAccountType(method),
-          method === 'Discount' ? 'EXPENSE' : 'INCOME',
-          method === 'Discount' ? 'Discount Given' : 'Credit Settlement',
-          appliedAmount,
-          `${description} — Order ${order.id} via ${method}`,
-          timestamp.replace('T', ' ').substring(0, 19),
-          timestamp,
-          method === 'Discount' ? 'Percent' : 'DollarSign',
-          bankAccountId,
-          actor.name || actor.id || 'System',
-          actor.id || 'SYSTEM',
-          actor.role || 'system'
-        );
-
         paymentIds.push(reference.paymentId);
-        transactionIds.push(accountTransactionId);
         applied.push({ orderId: order.id, method, amount: appliedAmount, paymentId: reference.paymentId, discountScope: method === 'Discount' ? discountScope : null });
         order.paidAmount = newPaid;
         order.dueAmount = newDue;
@@ -334,28 +311,7 @@ function settleCustomerBalance(db, {
           VALUES (?, ?, ?, NULL, ?, ?, ?, ?)
         `).run(reference.paymentId, shopId, customerId, amount, timestamp, timestamp, reference.paymentReference);
       }
-      db.prepare(`
-        INSERT INTO account_transactions
-          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
-      `).run(
-        accountTransactionId,
-        shopId,
-        accountType,
-        transactionType,
-        category,
-        amount,
-        `${description} - ${receiptDescription} via ${method}`,
-        timestamp.replace('T', ' ').substring(0, 19),
-        timestamp,
-        icon,
-        bankAccountId,
-        actor.name || actor.id || 'System',
-        actor.id || 'SYSTEM',
-        actor.role || 'system'
-      );
       paymentIds.push(reference.paymentId);
-      transactionIds.push(accountTransactionId);
     };
 
     // A selected invoice gets an order discount attached to that order.
@@ -390,6 +346,29 @@ function settleCustomerBalance(db, {
     let accountPaymentApplied = 0;
     let advanceCreated = 0;
     normalisedSplits.forEach((split) => {
+      // Insert a single, unified transaction in account_transactions for the entire split amount
+      const reference = getNextFinanceReference(db, 'SET');
+      const accountTransactionId = reference.accountTransactionId;
+      
+      db.prepare(`
+        INSERT INTO account_transactions
+          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)
+        VALUES (?, ?, ?, 'INCOME', 'Credit Settlement', ?, ?, ?, 0, ?, 'DollarSign', ?, ?, ?, ?)
+      `).run(
+        accountTransactionId,
+        shopId,
+        getAccountType(split.method),
+        split.amount,
+        `${description} via ${split.method}`,
+        timestamp.replace('T', ' ').substring(0, 19),
+        timestamp,
+        split.bankAccountId,
+        actor.name || actor.id || 'System',
+        actor.id || 'SYSTEM',
+        actor.role || 'system'
+      );
+      transactionIds.push(accountTransactionId);
+
       let remaining = applyCredit(split.method, split.amount, split.bankAccountId);
       if (remaining <= EPSILON) return;
 
@@ -413,31 +392,12 @@ function settleCustomerBalance(db, {
       if (remaining <= EPSILON) return;
 
       const reference = getNextFinanceReference(db, 'ADV');
-      const accountTransactionId = reference.accountTransactionId;
       db.prepare(`
         INSERT INTO payments
           (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference)
         VALUES (?, ?, NULL, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?)
       `).run(reference.paymentId, customerId, shopId, remaining, split.method, timestamp, timestamp, reference.paymentReference);
-      db.prepare(`
-        INSERT INTO account_transactions
-          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)
-        VALUES (?, ?, ?, 'INCOME', 'Customer Advance', ?, ?, ?, 0, ?, 'DollarSign', ?, ?, ?, ?)
-      `).run(
-        accountTransactionId,
-        shopId,
-        getAccountType(split.method),
-        remaining,
-        `${description} — Customer advance via ${split.method}`,
-        timestamp.replace('T', ' ').substring(0, 19),
-        timestamp,
-        split.bankAccountId,
-        actor.name || actor.id || 'System',
-        actor.id || 'SYSTEM',
-        actor.role || 'system'
-      );
       paymentIds.push(reference.paymentId);
-      transactionIds.push(accountTransactionId);
       advanceCreated = roundCurrency(advanceCreated + remaining);
     });
 

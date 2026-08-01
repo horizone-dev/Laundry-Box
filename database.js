@@ -315,6 +315,33 @@ function initDB(appPath) {
       verifiedBy TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS z_reports (
+      id TEXT PRIMARY KEY,
+      startTime TEXT,
+      endTime TEXT,
+      businessDate TEXT,
+      openingFloat REAL,
+      actualCashCounted REAL,
+      expectedCash REAL,
+      cashDifference REAL,
+      cashWithdrawals REAL,
+      closedBy TEXT,
+      ordersCount INTEGER,
+      grossSales REAL,
+      netSales REAL,
+      vatCollected REAL,
+      grandTotal REAL,
+      totalCollected REAL,
+      cashSales REAL,
+      cardSales REAL,
+      bankTransfer REAL,
+      nomodSales REAL,
+      creditSales REAL,
+      partialPayments REAL,
+      otherPayments REAL,
+      detailsJson TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS payroll_employees (
       id TEXT PRIMARY KEY,
       name TEXT,
@@ -1942,12 +1969,12 @@ function unwindOrderPayments(connection, {
 
   if (convertToAdvance) {
     // System Auto rows only represent the use of an existing advance. Removing
-    // their allocations makes the original advance available again.
-    connection.prepare("DELETE FROM payments WHERE orderId = ? AND method IN ('System Auto', 'Advance', 'Refund Advance')").run(orderId);
-    connection.prepare("DELETE FROM payments WHERE orderId = ? AND method = 'Discount' AND (discountScope IS NULL OR discountScope != 'settlement')").run(orderId);
+    // their allocations makes the original advance available again. Update instead of delete.
+    connection.prepare("UPDATE payments SET amount = 0, isSynced = 0, updatedAt = ? WHERE orderId = ? AND method IN ('System Auto', 'Advance', 'Refund Advance')").run(timestamp, orderId);
+    connection.prepare("UPDATE payments SET amount = 0, isSynced = 0, updatedAt = ? WHERE orderId = ? AND method = 'Discount' AND (discountScope IS NULL OR discountScope != 'settlement')").run(timestamp, orderId);
     
     if (discountAction === 'delete') {
-      connection.prepare("DELETE FROM payments WHERE orderId = ? AND method = 'Discount' AND discountScope = 'settlement'").run(orderId);
+      connection.prepare("UPDATE payments SET amount = 0, isSynced = 0, updatedAt = ? WHERE orderId = ? AND method = 'Discount' AND discountScope = 'settlement'").run(timestamp, orderId);
     } else {
       connection.prepare("UPDATE payments SET orderId = NULL, isSynced = 0, updatedAt = ? WHERE orderId = ? AND method = 'Discount' AND discountScope = 'settlement'").run(timestamp, orderId);
     }
@@ -1988,7 +2015,7 @@ function unwindOrderPayments(connection, {
       if (!source) return;
       const remaining = (Number(source.amount) || 0) - (Number(allocation.amountUsed) || 0);
       if (remaining <= 0.005) {
-        connection.prepare('DELETE FROM payments WHERE id = ?').run(source.id);
+        connection.prepare('UPDATE payments SET amount = 0, isSynced = 0, updatedAt = ? WHERE id = ?').run(timestamp, source.id);
       } else {
         connection.prepare('UPDATE payments SET amount = ?, isSynced = 0, updatedAt = ? WHERE id = ?')
           .run(remaining, timestamp, source.id);
@@ -1996,8 +2023,8 @@ function unwindOrderPayments(connection, {
     });
 
     // Do NOT delete the direct payments! Keep them for the ledger trace.
-    // Only delete synthetic allocation rows.
-    connection.prepare("DELETE FROM payments WHERE orderId = ? AND method IN ('System Auto', 'Advance', 'Refund Advance')").run(orderId);
+    // Only delete synthetic allocation rows. Update synthetic payments instead of delete.
+    connection.prepare("UPDATE payments SET amount = 0, isSynced = 0, updatedAt = ? WHERE orderId = ? AND method IN ('System Auto', 'Advance', 'Refund Advance')").run(timestamp, orderId);
     connection.prepare('DELETE FROM advance_allocations WHERE orderId = ?').run(orderId);
   }
 

@@ -1269,12 +1269,12 @@ export default function Settlement() {
                   }}
                 >
                   {[
-                    { id: 'Cash', label: 'Cash', icon: <Wallet size={16} /> },
-                    { id: 'Card', label: 'Card', icon: <CreditCard size={16} /> },
-                    { id: 'UPI', label: 'UPI', icon: <QrCode size={16} /> },
-                    ...(settings.noModPayEnabled && settings.enableNomod ? [{ id: 'Nomod', label: 'Nomod', icon: <CreditCard size={16} /> }] : []),
-                    { id: 'Multipayment', label: 'Split', icon: <Layers size={16} /> }
-                  ].map(method => {
+                    { id: 'Cash', label: 'Cash', icon: <Wallet size={16} />, enabled: settings.paymentMethodCashEnabled ?? true },
+                    { id: 'Card', label: 'Card', icon: <CreditCard size={16} />, enabled: settings.paymentMethodCardEnabled ?? true },
+                    { id: 'UPI', label: 'UPI', icon: <QrCode size={16} />, enabled: settings.paymentMethodUpiEnabled ?? true },
+                    ...(settings.noModPayEnabled && settings.enableNomod ? [{ id: 'Nomod', label: 'Nomod', icon: <CreditCard size={16} />, enabled: true }] : []),
+                    { id: 'Multipayment', label: 'Split', icon: <Layers size={16} />, enabled: true }
+                  ].filter(m => m.enabled).map(method => {
                     const isSelected = paymentMethod === method.id;
                     
                     return (
@@ -1297,73 +1297,34 @@ export default function Settlement() {
               {paymentMethod === 'Multipayment' && (
                 <div className={styles.modalInputGroup} style={{ marginTop: '0.1rem', gap: '0.25rem' }}>
                   <label style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-sub)', textTransform: 'uppercase' }}>Split Breakdown</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.5rem' }}>
-                    
-                    {/* Cash split */}
-                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.35rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '0.1rem', background: '#F8FAFC' }}>
-                      <span style={{ color: '#475569', fontSize: '0.65rem', fontWeight: 700 }}>Cash</span>
-                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '0.85rem', fontWeight: 700, color: '#1E293B' }}>
-                        <span style={{ marginRight: '0.1rem' }}><CurrencySymbol size={9} /></span>
-                        <input 
-                          type="number" 
-                          placeholder="0.00" 
-                          step="0.01"
-                          value={cashAmount} 
-                          onChange={(e) => setCashAmount(e.target.value)} 
-                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700, fontSize: '0.85rem' }}
-                        />
+                  {(() => {
+                    const enabledSplits = [
+                      { label: 'Cash', value: cashAmount, setter: setCashAmount, enabled: settings.paymentMethodCashEnabled ?? true },
+                      { label: 'Card', value: cardAmount, setter: setCardAmount, enabled: settings.paymentMethodCardEnabled ?? true },
+                      { label: 'UPI', value: upiAmount, setter: setUpiAmount, enabled: settings.paymentMethodUpiEnabled ?? true },
+                      { label: 'Bank', value: bankAmount, setter: setBankAmount, enabled: settings.paymentMethodBankEnabled ?? true },
+                    ].filter(s => s.enabled);
+                    return (
+                      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${enabledSplits.length}, 1fr)`, gap: '0.5rem' }}>
+                        {enabledSplits.map((splitItem, idx) => (
+                          <div key={idx} style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.35rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '0.1rem', background: '#F8FAFC' }}>
+                            <span style={{ color: '#475569', fontSize: '0.65rem', fontWeight: 700 }}>{splitItem.label}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', fontSize: '0.85rem', fontWeight: 700, color: '#1E293B' }}>
+                              <span style={{ marginRight: '0.1rem' }}><CurrencySymbol size={9} /></span>
+                              <input 
+                                type="number" 
+                                placeholder="0.00" 
+                                step="0.01"
+                                value={splitItem.value} 
+                                onChange={(e) => splitItem.setter(e.target.value)} 
+                                style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700, fontSize: '0.85rem' }}
+                              />
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-
-                    {/* Card split */}
-                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.35rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '0.1rem', background: '#F8FAFC' }}>
-                      <span style={{ color: '#475569', fontSize: '0.65rem', fontWeight: 700 }}>Card</span>
-                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '0.85rem', fontWeight: 700, color: '#1E293B' }}>
-                        <span style={{ marginRight: '0.1rem' }}><CurrencySymbol size={9} /></span>
-                        <input 
-                          type="number" 
-                          placeholder="0.00" 
-                          step="0.01"
-                          value={cardAmount} 
-                          onChange={(e) => setCardAmount(e.target.value)} 
-                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700, fontSize: '0.85rem' }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* UPI split */}
-                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.35rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '0.1rem', background: '#F8FAFC' }}>
-                      <span style={{ color: '#475569', fontSize: '0.65rem', fontWeight: 700 }}>UPI</span>
-                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '0.85rem', fontWeight: 700, color: '#1E293B' }}>
-                        <span style={{ marginRight: '0.1rem' }}><CurrencySymbol size={9} /></span>
-                        <input 
-                          type="number" 
-                          placeholder="0.00" 
-                          step="0.01"
-                          value={upiAmount} 
-                          onChange={(e) => setUpiAmount(e.target.value)} 
-                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700, fontSize: '0.85rem' }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Bank split */}
-                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.35rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '0.1rem', background: '#F8FAFC' }}>
-                      <span style={{ color: '#475569', fontSize: '0.65rem', fontWeight: 700 }}>Bank</span>
-                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '0.85rem', fontWeight: 700, color: '#1E293B' }}>
-                        <span style={{ marginRight: '0.1rem' }}><CurrencySymbol size={9} /></span>
-                        <input 
-                          type="number" 
-                          placeholder="0.00" 
-                          step="0.01"
-                          value={bankAmount} 
-                          onChange={(e) => setBankAmount(e.target.value)} 
-                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontWeight: 700, fontSize: '0.85rem' }}
-                        />
-                      </div>
-                    </div>
-
-                  </div>
+                    );
+                  })()}
                 </div>
               )}
 

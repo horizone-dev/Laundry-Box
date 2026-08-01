@@ -1154,3 +1154,232 @@
   border-color: var(--primary);
   background: white;
 }
+
+/* Premium Z-Report History Styling */
+.historyCard {
+  background: white;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  overflow: hidden;
+  margin-top: 1.5rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.historyTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  text-align: left;
+}
+
+.historyTable th {
+  background: #f8fafc;
+  padding: 1rem 1.25rem;
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.historyRow {
+  transition: background-color 0.2s, transform 0.15s;
+}
+
+.historyRow:hover {
+  background-color: #f8fafc;
+  cursor: pointer;
+}
+
+.historyRow td {
+  padding: 1rem 1.25rem;
+  font-size: 0.85rem;
+  color: #334155;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.badgeSuccess {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.badgeWarning {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.badgeDanger {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.viewBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.9rem;
+  background: #eff6ff;
+  color: #2563eb;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.viewBtn:hover {
+  background: #2563eb;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+}
+
+/* Core Layout Classes */
+.reportLayout {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.gridTwoCols {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+@media (max-width: 768px) {
+  .gridTwoCols {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+/* Section Header Typography */
+.sectionTitle {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Table Stylings */
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  color: #334155;
+}
+
+.dataTable th {
+  font-weight: 700;
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  color: #475569;
+  border-bottom: 1px solid #e2e8f0;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+}
+
+.dataTable td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.highlightRow {
+  background-color: #f8fafc;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.grandTotalRow {
+  background-color: #eff6ff;
+  font-weight: 800;
+  color: #1e3a8a;
+  font-size: 0.9rem;
+}
+
+.successRow {
+  background-color: #ecfdf5;
+  color: #065f46;
+}
+
+.warningRow {
+  background-color: #fffbeb;
+  color: #92400e;
+}
+
+.dangerRow {
+  background-color: #fef2f2;
+  color: #991b1b;
+}
+
+/* Metadata Info Grid */
+.metaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 1.25rem;
+}
+
+.metaLabel {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 0.15rem;
+  letter-spacing: 0.02em;
+}
+
+.metaVal {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+/* Stats Lists */
+.statsList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.statLine {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  color: #475569;
+  font-weight: 500;
+  border-bottom: 1px dashed #f1f5f9;
+  padding-bottom: 0.4rem;
+}
+
+.statLine:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.statLine strong {
+  font-weight: 700;
+  color: #0f172a;
+}

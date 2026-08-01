@@ -405,8 +405,9 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           <tbody>
             {items.map((item, idx) => {
               const lineTotal = (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0);
+              const showTreatmentPrice = settings?.invoiceShowTreatmentPrice !== false;
               const servicesText = item.types && item.types.length > 0 
-                ? item.types.map(t => `${t.name}${t.price > 0 ? ` (${t.price.toFixed(2)})` : ''}`).join(' + ') 
+                ? item.types.map(t => `${t.name}${showTreatmentPrice && t.price > 0 ? ` (${t.price.toFixed(2)})` : ''}`).join(' + ') 
                 : (item.sub || item.category || '');
               return (
                 <tr key={idx}>
@@ -760,10 +761,12 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <div key={idx} className={styles.thermalItem}>
                 {/* Service name — wraps naturally */}
                 <div className={styles.thermalItemName}>{item.name}</div>
-                {/* Treatment / service types on one line */}
                 {typesList.length > 0 && (
                   <div className={styles.thermalItemTypes}>
-                    {typesList.map(t => `${t.name}${t.price > 0 ? ` (${t.price.toFixed(2)})` : ''}`).join(' · ')}
+                    {(() => {
+                      const showTreatmentPrice = settings?.invoiceShowTreatmentPrice !== false;
+                      return typesList.map(t => `${t.name}${showTreatmentPrice && t.price > 0 ? ` (${t.price.toFixed(2)})` : ''}`).join(' · ');
+                    })()}
                   </div>
                 )}
                 {/* Add-ons inline — never letter-by-letter */}

@@ -3655,106 +3655,47 @@ export default function POS() {
               ) : (
                 <div>
                   <h3 className={styles.modalSectionTitle} style={{ marginBottom: '0.5rem' }}>Multipayment Details</h3>
-                  <div className={styles.multipaymentGrid} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1rem' }}>
-                    <div 
-                      onClick={() => setActivePaymentField('cash')}
-                      style={{
-                        background: activePaymentField === 'cash' ? '#EFF6FF' : 'white',
-                        border: activePaymentField === 'cash' ? '2px solid #2563EB' : '1px solid #E2E8F0',
-                        borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                        <Wallet size={14} /> Cash Amount
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                        <CurrencySymbol size={12} />
-                        <input 
-                          type="number" 
-                          placeholder="0.00" 
-                          value={cashAmount} 
-                          onChange={(e) => setCashAmount(e.target.value)} 
-                          onFocus={() => setActivePaymentField('cash')}
-                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
-                        />
-                      </div>
-                    </div>
+                  {(() => {
+                    const checkoutFieldsList = [
+                      { id: 'cash', label: 'Cash Amount', icon: <Wallet size={14} />, value: cashAmount, setter: setCashAmount, enabled: settings.paymentMethodCashEnabled ?? true },
+                      { id: 'card', label: 'Card Amount', icon: <CreditCard size={14} />, value: cardAmount, setter: setCardAmount, enabled: settings.paymentMethodCardEnabled ?? true },
+                      { id: 'upi', label: 'UPI / QR Amount', icon: <QrCode size={14} />, value: upiAmount, setter: setUpiAmount, enabled: settings.paymentMethodUpiEnabled ?? true },
+                      { id: 'bank', label: 'Bank Transfer', icon: <Landmark size={14} />, value: bankAmount, setter: setBankAmount, enabled: settings.paymentMethodBankEnabled ?? true },
+                      { id: 'nomod', label: 'Nomod Payment Link', icon: <CreditCard size={14} />, value: nomodAmount, setter: setNomodAmount, enabled: settings.noModPayEnabled && settings.enableNomod }
+                    ].filter(m => m.enabled);
 
-                    <div 
-                      onClick={() => setActivePaymentField('card')}
-                      style={{
-                        background: activePaymentField === 'card' ? '#EFF6FF' : 'white',
-                        border: activePaymentField === 'card' ? '2px solid #2563EB' : '1px solid #E2E8F0',
-                        borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                        <CreditCard size={14} /> Card Amount
+                    return (
+                      <div className={styles.multipaymentGrid} style={{ display: 'grid', gridTemplateColumns: checkoutFieldsList.length > 3 ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1rem' }}>
+                        {checkoutFieldsList.map((fld) => (
+                          <div 
+                            key={fld.id}
+                            onClick={() => setActivePaymentField(fld.id)}
+                            style={{
+                              background: activePaymentField === fld.id ? '#EFF6FF' : 'white',
+                              border: activePaymentField === fld.id ? '2px solid #2563EB' : '1px solid #E2E8F0',
+                              borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem',
+                              gridColumn: fld.id === 'nomod' && checkoutFieldsList.length % 3 !== 0 && checkoutFieldsList.length % 4 !== 0 ? 'span 2' : 'span 1'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
+                              {fld.icon} {fld.label}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
+                              <CurrencySymbol size={12} />
+                              <input 
+                                type="number" 
+                                placeholder="0.00" 
+                                value={fld.value} 
+                                onChange={(e) => fld.setter(e.target.value)} 
+                                onFocus={() => setActivePaymentField(fld.id)}
+                                style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
+                              />
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                        <CurrencySymbol size={12} />
-                        <input 
-                          type="number" 
-                          placeholder="0.00" 
-                          value={cardAmount} 
-                          onChange={(e) => setCardAmount(e.target.value)} 
-                          onFocus={() => setActivePaymentField('card')}
-                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
-                        />
-                      </div>
-                    </div>
-
-                    <div 
-                      onClick={() => setActivePaymentField('bank')}
-                      style={{
-                        background: activePaymentField === 'bank' ? '#EFF6FF' : 'white',
-                        border: activePaymentField === 'bank' ? '2px solid #2563EB' : '1px solid #E2E8F0',
-                        borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                        <Landmark size={14} /> Bank Transfer
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                        <CurrencySymbol size={12} />
-                        <input 
-                          type="number" 
-                          placeholder="0.00" 
-                          value={bankAmount} 
-                          onChange={(e) => setBankAmount(e.target.value)} 
-                          onFocus={() => setActivePaymentField('bank')}
-                          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
-                        />
-                      </div>
-                    </div>
-
-                    {settings.noModPayEnabled && settings.enableNomod && (
-                      <div 
-                        onClick={() => setActivePaymentField('nomod')}
-                        style={{
-                          background: activePaymentField === 'nomod' ? '#EFF6FF' : 'white',
-                          border: activePaymentField === 'nomod' ? '2px solid #2563EB' : '1px solid #E2E8F0',
-                          borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem',
-                          gridColumn: 'span 3'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
-                          <CreditCard size={14} /> Nomod Payment Link
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                          <CurrencySymbol size={12} />
-                          <input 
-                            type="number" 
-                            placeholder="0.00" 
-                            value={nomodAmount} 
-                            onChange={(e) => setNomodAmount(e.target.value)} 
-                            onFocus={() => setActivePaymentField('nomod')}
-                            style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                    );
+                  })()}
                 </div>
               )}
 

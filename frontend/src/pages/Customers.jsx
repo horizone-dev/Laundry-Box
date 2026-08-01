@@ -33,14 +33,15 @@ function PaymentMethodSelect({ value, onChange, settings }) {
   }, []);
 
   const methods = [
-    { id: 'Cash', label: 'Cash Payment', icon: <Wallet size={16} color="#10B981" />, badgeBg: '#ECFDF5' },
-    { id: 'Card', label: 'Card Payment', icon: <CreditCard size={16} color="#2563EB" />, badgeBg: '#EFF6FF' },
-    { id: 'Bank', label: 'Bank Transfer', icon: <Landmark size={16} color="#4F46E5" />, badgeBg: '#EEF2FF' },
-    { id: 'Nomod', label: 'Nomod Pay (Link)', icon: <ShieldCheck size={16} color="#059669" />, badgeBg: '#D1FAE5' },
-    { id: 'Multipayment', label: 'Multipayment (Split)', icon: <Layers size={16} color="#F59E0B" />, badgeBg: '#FEF3C7' },
-  ];
+    { id: 'Cash', label: 'Cash Payment', icon: <Wallet size={16} color="#10B981" />, badgeBg: '#ECFDF5', enabled: settings?.paymentMethodCashEnabled ?? true },
+    { id: 'Card', label: 'Card Payment', icon: <CreditCard size={16} color="#2563EB" />, badgeBg: '#EFF6FF', enabled: settings?.paymentMethodCardEnabled ?? true },
+    { id: 'UPI', label: 'UPI / QR Payment', icon: <QrCode size={16} color="#06B6D4" />, badgeBg: '#ECFEFF', enabled: settings?.paymentMethodUpiEnabled ?? true },
+    { id: 'Bank', label: 'Bank Transfer', icon: <Landmark size={16} color="#4F46E5" />, badgeBg: '#EEF2FF', enabled: settings?.paymentMethodBankEnabled ?? true },
+    { id: 'Nomod', label: 'Nomod Pay (Link)', icon: <ShieldCheck size={16} color="#059669" />, badgeBg: '#D1FAE5', enabled: settings?.noModPayEnabled && settings?.enableNomod },
+    { id: 'Multipayment', label: 'Multipayment (Split)', icon: <Layers size={16} color="#F59E0B" />, badgeBg: '#FEF3C7', enabled: true },
+  ].filter(m => m.enabled);
 
-  const current = methods.find(m => m.id === value) || methods[0];
+  const current = methods.find(m => m.id === value) || methods[0] || { id: 'Cash', label: 'Cash Payment', icon: <Wallet size={16} color="#10B981" />, badgeBg: '#ECFDF5' };
 
   return (
     <div ref={dropdownRef} style={{ position: 'relative', width: '100%' }}>
@@ -208,6 +209,130 @@ export default function Customers() {
   const [viewMode, setViewMode] = useState('list'); // 'list', 'insight', 'statement'
   const [insightTab, setInsightTab] = useState('sales'); // 'sales', 'payments', 'returns'
   const [customerPayments, setCustomerPayments] = useState([]);
+  const [rawPayments, setRawPayments] = useState([]);
+  const [editSelectedBank, setEditSelectedBank] = useState('');
+  const [toastMessage, setToastMessage] = useState(null);
+  const [showAlertReason, setShowAlertReason] = useState(false);
+
+  useEffect(() => {
+    if (toastMessage) {
+      setShowAlertReason(false);
+      const timer = setTimeout(() => {
+        setToastMessage(null);
+      }, 7000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
+  const getRefundedOrderForPayment = (pay) => {
+    const checkOrderId = (orderId) => {
+      if (!orderId) return null;
+      return customerReturns.find(ret => String(ret.id) === String(orderId)) || null;
+    };
+
+    if (pay.orderId) {
+      const ref = checkOrderId(pay.orderId);
+      if (ref) return ref;
+    }
+
+    if (pay.paymentIds && pay.paymentIds.length > 0) {
+      for (const pId of pay.paymentIds) {
+        const origPay = rawPayments.find(p => String(p.id) === String(pId));
+        if (origPay && origPay.orderId) {
+          const ref = checkOrderId(origPay.orderId);
+          if (ref) return ref;
+        }
+      }
+    }
+    return null;
+  };
+
+  const handleEditPaymentClick = async (e, pay) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const refundedOrder = getRefundedOrderForPayment(pay);
+    if (refundedOrder) {
+      const reasonQuery = await window.electronAPI.dbQuery(
+        "SELECT reason FROM cancellations WHERE orderId = ? ORDER BY createdAt DESC LIMIT 1",
+        [refundedOrder.id]
+      );
+      const deleteReason = reasonQuery.success && reasonQuery.data.length > 0
+        ? reasonQuery.data[0].reason
+        : 'No reason provided';
+
+      const msg = `This payment cannot be edited because it is linked to Order #${settings.invoicePrefix || ''}${refundedOrder.id} which has been refunded.`;
+      setToastMessage(prev => (prev && prev.msg === msg) ? null : { msg, reason: deleteReason });
+      return;
+    }
+
+    if (isAdvanceAllocation(pay)) {
+      setToastMessage({ msg: "This is an advance amount already applied to an order. It cannot be edited as a normal payment." });
+      return;
+    }
+    if (pay.isSettlementGroup) {
+      setToastMessage({ msg: "This is a grouped settlement payment. Editing it directly is restricted to maintain account integrity." });
+      return;
+    }
+    if (pay.method === 'Multipayment') {
+      setToastMessage({ msg: "This is a split/multipayment. Editing it directly is restricted. Please delete and re-record if needed." });
+      return;
+    }
+
+    setSelectedPaymentForAction(pay);
+    setEditPaymentMethod(pay.method || 'Cash');
+    setEditPaymentAmount(pay.amount ? pay.amount.toString() : '');
+
+    let existingBankId = '';
+    const datePrefix = pay.createdAt ? pay.createdAt.substring(0, 10) : '';
+    const txnRes = await window.electronAPI.dbQuery(
+      "SELECT bankAccountId FROM account_transactions WHERE amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
+      [pay.amount, `%${selectedCustomer?.name || ''}%`, `${datePrefix}%`]
+    );
+    if (txnRes.success && txnRes.data.length > 0) {
+      existingBankId = txnRes.data[0].bankAccountId || '';
+    }
+    
+    const defaultBankForMethod = pay.method === 'Card'
+      ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || '')
+      : (pay.method === 'UPI'
+        ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || '')
+        : (settings.defaultBankId || settings.bankAccounts?.[0]?.id || ''));
+
+    setEditSelectedBank(existingBankId || defaultBankForMethod);
+    setPinActionTarget('edit_payment');
+    setShowPinModal(true);
+  };
+
+  const handleDeletePaymentClick = async (e, pay) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const refundedOrder = getRefundedOrderForPayment(pay);
+    if (refundedOrder) {
+      const reasonQuery = await window.electronAPI.dbQuery(
+        "SELECT reason FROM cancellations WHERE orderId = ? ORDER BY createdAt DESC LIMIT 1",
+        [refundedOrder.id]
+      );
+      const deleteReason = reasonQuery.success && reasonQuery.data.length > 0
+        ? reasonQuery.data[0].reason
+        : 'No reason provided';
+
+      const msg = `This payment cannot be deleted because it is linked to Order #${settings.invoicePrefix || ''}${refundedOrder.id} which has been refunded.`;
+      setToastMessage(prev => (prev && prev.msg === msg) ? null : { msg, reason: deleteReason });
+      return;
+    }
+
+    if (isAdvanceAllocation(pay)) {
+      setToastMessage({ msg: "This is an advance amount already applied to an order. It cannot be deleted directly." });
+      return;
+    }
+
+    setSelectedPaymentForAction(pay);
+    setPinActionTarget('delete_payment');
+    setShowPinModal(true);
+  };
+
   const [customerDiscounts, setCustomerDiscounts] = useState([]);
   const [customerDeletedDiscounts, setCustomerDeletedDiscounts] = useState([]);
   const [customerDeletedBills, setCustomerDeletedBills] = useState([]);
@@ -802,36 +927,7 @@ export default function Customers() {
               [newNetTotal, newDue, newPayStatus, JSON.stringify(breakdownObj), timestamp, targetBill.id]
             );
 
-            // Record discount in account_transactions
-            const discountTxnId = `TXN-${Date.now()}-Discount`;
-            const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
-            const creatorName = currentUser.name || currentUser.username || 'System';
-            const creatorId = currentUser.id || 'SYSTEM';
-            const creatorRole = currentUser.role || 'system';
-            const _nowC = new Date();
-            const txnTimestamp = `${_nowC.getFullYear()}-${String(_nowC.getMonth() + 1).padStart(2, '0')}-${String(_nowC.getDate()).padStart(2, '0')} ${String(_nowC.getHours()).padStart(2, '0')}:${String(_nowC.getMinutes()).padStart(2, '0')}`;
-
-            await window.electronAPI.dbQuery(
-              `INSERT INTO account_transactions 
-               (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
-              [
-                discountTxnId,
-                DEFAULT_SHOP_ID,
-                'CASH',
-                'EXPENSE',
-                'Discount Given',
-                discountAmt,
-                `Discount given to ${selectedCustomer.name} during payment`,
-                txnTimestamp,
-                timestamp,
-                'Percent',
-                null,
-                creatorName,
-                creatorId,
-                creatorRole
-              ]
-            );
+            // Discount is not entered in account_transactions
           }
         }
 
@@ -1195,7 +1291,24 @@ export default function Customers() {
 
   const handleViewPaymentDetails = async (pay) => {
     if (!pay) return;
-    setSelectedPaymentForAction(pay);
+
+    let bankName = pay.bankName || '';
+    if (!bankName && ['Card', 'UPI', 'Bank', 'Bank Transfer'].includes(pay.method)) {
+      const datePrefix = pay.createdAt ? pay.createdAt.substring(0, 10) : '';
+      const txnRes = await window.electronAPI.dbQuery(
+        "SELECT bankAccountId FROM account_transactions WHERE amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
+        [pay.amount, `%${selectedCustomer?.name || ''}%`, `${datePrefix}%`]
+      );
+      if (txnRes.success && txnRes.data.length > 0) {
+        const bankId = txnRes.data[0].bankAccountId;
+        const bankAcc = settings.bankAccounts?.find(acc => acc.id === bankId || acc.bankName === bankId);
+        if (bankAcc) {
+          bankName = bankAcc.bankName;
+        }
+      }
+    }
+
+    setSelectedPaymentForAction({ ...pay, bankName });
     setShowPaymentViewModal(true);
     setSelectedPaymentAllocations([]);
 
@@ -1216,11 +1329,27 @@ export default function Customers() {
         let remaining = amt;
 
         if (p.orderId) {
+          let isRefunded = false;
+          let refundStatusText = '';
+          const ordQuery = await window.electronAPI.dbQuery(
+            `SELECT status FROM orders WHERE id = ?`, [p.orderId]
+          );
+          const delQuery = await window.electronAPI.dbQuery(
+            `SELECT refundStatus FROM deleted_orders WHERE id = ?`, [p.orderId]
+          );
+          if (delQuery.success && delQuery.data.length > 0) {
+            isRefunded = true;
+            refundStatusText = delQuery.data[0].refundStatus || 'Refunded';
+          } else if (ordQuery.success && ordQuery.data[0] && (ordQuery.data[0].status === 'Cancelled' || ordQuery.data[0].status === 'Deleted')) {
+            isRefunded = true;
+            refundStatusText = 'Cancelled';
+          }
+
           allocations.push({
             paymentId: p.id,
-            target: `Order #${p.orderId}`,
+            target: isRefunded ? `Order #${p.orderId} (Deleted & ${refundStatusText})` : `Order #${p.orderId}`,
             amount: amt,
-            type: 'Order Payment',
+            type: isRefunded ? 'Order Payment (Refunded)' : 'Order Payment',
             date: p.createdAt
           });
           remaining = 0;
@@ -1232,16 +1361,33 @@ export default function Customers() {
           [p.id]
         );
         const allocList = allocQuery.success ? allocQuery.data : [];
-        allocList.forEach(a => {
+        
+        for (const a of allocList) {
+          let allocRefunded = false;
+          let allocRefundStatusText = '';
+          const ordQuery = await window.electronAPI.dbQuery(
+            `SELECT status FROM orders WHERE id = ?`, [a.orderId]
+          );
+          const delQuery = await window.electronAPI.dbQuery(
+            `SELECT refundStatus FROM deleted_orders WHERE id = ?`, [a.orderId]
+          );
+          if (delQuery.success && delQuery.data.length > 0) {
+            allocRefunded = true;
+            allocRefundStatusText = delQuery.data[0].refundStatus || 'Refunded';
+          } else if (ordQuery.success && ordQuery.data[0] && (ordQuery.data[0].status === 'Cancelled' || ordQuery.data[0].status === 'Deleted')) {
+            allocRefunded = true;
+            allocRefundStatusText = 'Cancelled';
+          }
+
           allocations.push({
             paymentId: p.id,
-            target: `Order #${a.orderId}`,
+            target: allocRefunded ? `Order #${a.orderId} (Deleted & ${allocRefundStatusText})` : `Order #${a.orderId}`,
             amount: parseFloat(a.amountUsed) || 0,
-            type: 'Advance Allocation',
+            type: allocRefunded ? 'Advance Allocation (Reversed)' : 'Advance Allocation',
             date: a.createdAt
           });
           remaining -= parseFloat(a.amountUsed) || 0;
-        });
+        }
 
         const refStr = String(p.paymentReference || p.id || '');
         let isOpeningSettlement = refStr.startsWith('ACC-');
@@ -1484,17 +1630,77 @@ export default function Customers() {
         await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE id = ?", [allocation.id]);
       }
 
-      // 5. Delete matching account transactions for each deleted payment amount
+      // 5. Insert balancing reversal account transactions for each deleted payment amount instead of deleting original entries
       const payDate = new Date(payment.createdAt);
       const datePrefix = `${payDate.getFullYear()}-${String(payDate.getMonth() + 1).padStart(2, '0')}-${String(payDate.getDate()).padStart(2, '0')} ${String(payDate.getHours()).padStart(2, '0')}:${String(payDate.getMinutes()).padStart(2, '0')}`;
 
+      const _nowC = new Date();
+      const txnTimestamp = `${_nowC.getFullYear()}-${String(_nowC.getMonth() + 1).padStart(2, '0')}-${String(_nowC.getDate()).padStart(2, '0')} ${String(_nowC.getHours()).padStart(2, '0')}:${String(_nowC.getMinutes()).padStart(2, '0')}`;
+
       for (const pDel of paymentsToDelete) {
         const txnRes = await window.electronAPI.dbQuery(
-          "SELECT id FROM account_transactions WHERE amount = ? AND (description LIKE ? OR description LIKE ? OR date LIKE ?) LIMIT 1",
+          "SELECT * FROM account_transactions WHERE amount = ? AND (description LIKE ? OR description LIKE ? OR date LIKE ?) LIMIT 1",
           [pDel.amount, `%${selectedCustomer.name}%`, `%${pDel.orderId}%`, `${datePrefix.substring(0, 10)}%`]
         );
         if (txnRes.success && txnRes.data.length > 0) {
-          await window.electronAPI.dbQuery("DELETE FROM account_transactions WHERE id = ?", [txnRes.data[0].id]);
+          const origTxn = txnRes.data[0];
+          const revTxnId = `TXN-REV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+          const creatorName = currentUser.name || currentUser.username || 'System';
+          const creatorId = currentUser.id || 'SYSTEM';
+          const creatorRole = currentUser.role || 'system';
+
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              revTxnId,
+              origTxn.shopId || DEFAULT_SHOP_ID,
+              origTxn.accountType || ((pDel.method === 'Bank' || pDel.method === 'Card' || pDel.method === 'UPI') ? 'BANK' : 'CASH'),
+              origTxn.type === 'INCOME' ? 'EXPENSE' : 'INCOME',
+              'Payment Cancellation',
+              pDel.amount,
+              `Deleted: Payment ${getReceiptNumber(pDel)} for ${selectedCustomer.name}`,
+              txnTimestamp,
+              0,
+              timestamp,
+              'Trash2',
+              origTxn.bankAccountId || null,
+              creatorName,
+              creatorId,
+              creatorRole
+            ]
+          );
+        } else {
+          const revTxnId = `TXN-REV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+          const creatorName = currentUser.name || currentUser.username || 'System';
+          const creatorId = currentUser.id || 'SYSTEM';
+          const creatorRole = currentUser.role || 'system';
+
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              revTxnId,
+              DEFAULT_SHOP_ID,
+              (pDel.method === 'Bank' || pDel.method === 'Card' || pDel.method === 'UPI') ? 'BANK' : 'CASH',
+              'EXPENSE',
+              'Payment Cancellation',
+              pDel.amount,
+              `Deleted: Payment ${getReceiptNumber(pDel)} for ${selectedCustomer.name}`,
+              txnTimestamp,
+              0,
+              timestamp,
+              'Trash2',
+              null,
+              creatorName,
+              creatorId,
+              creatorRole
+            ]
+          );
         }
       }
 
@@ -1653,27 +1859,121 @@ export default function Customers() {
         }
       }
 
-      // 4. Update account_transactions table
+      // 4. Record accounting correction trail instead of directly updating the original transaction
       const payDate = new Date(payment.createdAt);
       const datePrefix = `${payDate.getFullYear()}-${String(payDate.getMonth() + 1).padStart(2, '0')}-${String(payDate.getDate()).padStart(2, '0')} ${String(payDate.getHours()).padStart(2, '0')}:${String(payDate.getMinutes()).padStart(2, '0')}`;
 
       const txnRes = await window.electronAPI.dbQuery(
-        "SELECT id FROM account_transactions WHERE amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
+        "SELECT * FROM account_transactions WHERE amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
         [oldAmount, `%${selectedCustomer.name}%`, `${datePrefix.substring(0, 10)}%`]
       );
 
-      if (txnRes.success && txnRes.data.length > 0) {
-        const txnId = txnRes.data[0].id;
-        const newAccountType = (newMethod === 'Bank' || newMethod === 'Card' || newMethod === 'UPI') ? 'BANK' : 'CASH';
-        const mappedBankId = newMethod === 'Card'
-          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
-          : (newMethod === 'UPI'
-            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
-            : (newMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null));
+      const oldAccountType = (oldMethod === 'Bank' || oldMethod === 'Card' || oldMethod === 'UPI') ? 'BANK' : 'CASH';
+      const newAccountType = (newMethod === 'Bank' || newMethod === 'Card' || newMethod === 'UPI') ? 'BANK' : 'CASH';
+      const mappedBankId = (newMethod === 'Card' || newMethod === 'UPI' || newMethod === 'Bank')
+        ? (editSelectedBank || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null)
+        : null;
 
+      const origTxn = (txnRes.success && txnRes.data.length > 0) ? txnRes.data[0] : null;
+      const oldBankAccountId = origTxn ? origTxn.bankAccountId : null;
+
+      const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+      const creatorName = currentUser.name || currentUser.username || 'System';
+      const creatorId = currentUser.id || 'SYSTEM';
+      const creatorRole = currentUser.role || 'system';
+
+      const _nowC = new Date();
+      const txnTimestamp = `${_nowC.getFullYear()}-${String(_nowC.getMonth() + 1).padStart(2, '0')}-${String(_nowC.getDate()).padStart(2, '0')} ${String(_nowC.getHours()).padStart(2, '0')}:${String(_nowC.getMinutes()).padStart(2, '0')}`;
+
+      const normalizeBankId = (val) => (val === '' || val === null || val === undefined) ? null : val;
+      const isBankChange = (['Card', 'UPI', 'Bank'].includes(oldMethod) || ['Card', 'UPI', 'Bank'].includes(newMethod)) && (normalizeBankId(oldBankAccountId) !== normalizeBankId(mappedBankId));
+
+      if (oldMethod === newMethod && !isBankChange) {
+        // If payment method and bank account are the same, record only the difference as an adjustment row
+        const diffAmount = newAmount - oldAmount;
+        if (Math.abs(diffAmount) > 0.005) {
+          const adjTxnId = `TXN-ADJ-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const isIncrease = diffAmount > 0;
+          const finalAmount = Math.abs(diffAmount);
+          const adjType = isIncrease ? 'INCOME' : 'EXPENSE';
+          const adjCategory = isIncrease ? 'Credit Settlement' : 'Payment Correction';
+          const adjDesc = isIncrease 
+            ? `Adjustment (Increase): Edited payment ${getReceiptNumber(payment)} for ${selectedCustomer.name}`
+            : `Adjustment (Decrease): Edited payment ${getReceiptNumber(payment)} for ${selectedCustomer.name}`;
+
+          await window.electronAPI.dbQuery(
+            `INSERT INTO account_transactions 
+             (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              adjTxnId,
+              origTxn?.shopId || DEFAULT_SHOP_ID,
+              newAccountType,
+              adjType,
+              adjCategory,
+              finalAmount,
+              adjDesc,
+              txnTimestamp,
+              0,
+              timestamp,
+              isIncrease ? 'DollarSign' : 'ArrowUpDown',
+              mappedBankId,
+              creatorName,
+              creatorId,
+              creatorRole
+            ]
+          );
+        }
+      } else {
+        // If payment method changed, do a full reversal of the old method and post the new method
+        // A. Reversal Expense for Old Payment Details
+        const revTxnId = `TXN-REV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         await window.electronAPI.dbQuery(
-          "UPDATE account_transactions SET amount = ?, accountType = ?, description = ?, bankAccountId = ?, isSynced = 0, updatedAt = ? WHERE id = ?",
-          [newAmount, newAccountType, `Settlement from ${selectedCustomer.name} (${newMethod})`, mappedBankId, timestamp, txnId]
+          `INSERT INTO account_transactions 
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            revTxnId,
+            origTxn?.shopId || DEFAULT_SHOP_ID,
+            oldAccountType,
+            'EXPENSE',
+            'Payment Correction',
+            oldAmount,
+            `Reversal (Edit): Converted ${oldMethod} to ${newMethod} for payment ${getReceiptNumber(payment)}`,
+            txnTimestamp,
+            0,
+            timestamp,
+            'ArrowUpDown',
+            oldBankAccountId,
+            creatorName,
+            creatorId,
+            creatorRole
+          ]
+        );
+
+        // B. New Income for New Payment Details
+        const newTxnId = `TXN-NEW-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        await window.electronAPI.dbQuery(
+          `INSERT INTO account_transactions 
+           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            newTxnId,
+            origTxn?.shopId || DEFAULT_SHOP_ID,
+            newAccountType,
+            'INCOME',
+            'Credit Settlement',
+            newAmount,
+            `Settlement (Edited): ${newMethod} payment ${getReceiptNumber(payment)} for ${selectedCustomer.name}`,
+            txnTimestamp,
+            0,
+            timestamp,
+            'DollarSign',
+            mappedBankId,
+            creatorName,
+            creatorId,
+            creatorRole
+          ]
         );
       }
 
@@ -2068,6 +2368,7 @@ export default function Customers() {
           [activeCustomer.id]
         );
         let payments = paymentsRes.success ? paymentsRes.data : [];
+        setRawPayments(payments);
         const discountPayments = payments.filter(p => p.method === 'Discount');
         setCustomerDiscounts(discountPayments);
         // Find all references that have been deleted/reversed
@@ -2141,7 +2442,28 @@ export default function Customers() {
 
         // Sort by createdAt DESC to keep order correct
         processedPayments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        setCustomerPayments(processedPayments);
+
+        // Enrich payments with their bank name
+        const enrichedProcessedPayments = [];
+        for (const p of processedPayments) {
+          let bankName = '';
+          if (['Card', 'UPI', 'Bank', 'Bank Transfer'].includes(p.method)) {
+            const datePrefix = p.createdAt ? p.createdAt.substring(0, 10) : '';
+            const txnRes = await window.electronAPI.dbQuery(
+              "SELECT bankAccountId FROM account_transactions WHERE amount = ? AND (description LIKE ? OR date LIKE ?) LIMIT 1",
+              [p.amount, `%${activeCustomer.name}%`, `${datePrefix}%`]
+            );
+            if (txnRes.success && txnRes.data.length > 0) {
+              const bankId = txnRes.data[0].bankAccountId;
+              const bankAcc = settings.bankAccounts?.find(acc => acc.id === bankId || acc.bankName === bankId);
+              if (bankAcc) {
+                bankName = bankAcc.bankName;
+              }
+            }
+          }
+          enrichedProcessedPayments.push({ ...p, bankName });
+        }
+        setCustomerPayments(enrichedProcessedPayments);
 
         const totalSales = bills.filter(b => b.status !== 'Cancelled' && b.status !== 'Deleted').reduce((sum, b) => sum + (b.totalAmount || 0), 0);
         const salesReturn = bills.filter(b => b.status === 'Cancelled' || b.status === 'Deleted').reduce((sum, b) => sum + (b.totalAmount || 0), 0) +
@@ -2905,7 +3227,14 @@ export default function Customers() {
                         <td style={{ fontWeight: 700 }} title={formatPaymentId(pay)}>{formatPaymentId(pay)}</td>
                         <td>{formatDate(pay.createdAt)}</td>
                         <td><CurrencySymbol size={13} /> {(pay.amount || 0).toFixed(2)}</td>
-                        <td style={{ fontWeight: 600 }}>{getPaymentMethodLabel(pay)}</td>
+                        <td style={{ fontWeight: 600 }}>
+                          {getPaymentMethodLabel(pay)}
+                          {pay.bankName && (
+                            <span style={{ fontSize: '0.72rem', color: '#64748B', fontWeight: 500, display: 'block', marginTop: '2px' }}>
+                              ({pay.bankName})
+                            </span>
+                          )}
+                        </td>
                         <td>
                           <span className={styles.statusPaid} style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', background: '#DCFCE7', color: '#15803D', fontSize: '0.75rem', fontWeight: 700 }}>SUCCESS</span>
                         </td>
@@ -2921,34 +3250,20 @@ export default function Customers() {
                             >
                               <Eye size={16} />
                             </button>
-                            {pay.method !== 'Multipayment' && !pay.isSettlementGroup && !isAdvanceAllocation(pay) && (
-                              <button
-                                style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
-                                onClick={(e) => {
-                                  e.preventDefault(); e.stopPropagation();
-                                  setSelectedPaymentForAction(pay);
-                                  setEditPaymentMethod(pay.method || 'Cash');
-                                  setEditPaymentAmount(pay.amount ? pay.amount.toString() : '');
-                                  setPinActionTarget('edit_payment');
-                                  setShowPinModal(true);
-                                }}
-                                title="Edit Payment"
-                              >
-                                <Edit2 size={16} />
-                              </button>
-                            )}
-                            {!isAdvanceAllocation(pay) && <button
+                            <button
+                              style={{ background: 'none', border: 'none', color: 'var(--warning)', cursor: 'pointer' }}
+                              onClick={(e) => handleEditPaymentClick(e, pay)}
+                              title="Edit Payment"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button
                               style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}
-                              onClick={(e) => {
-                                e.preventDefault(); e.stopPropagation();
-                                setSelectedPaymentForAction(pay);
-                                setPinActionTarget('delete_payment');
-                                setShowPinModal(true);
-                              }}
+                              onClick={(e) => handleDeletePaymentClick(e, pay)}
                               title="Delete Payment"
                             >
                               <Trash2 size={16} />
-                            </button>}
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -3429,7 +3744,7 @@ export default function Customers() {
                     </tr>
                     <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
                       <td style={{ padding: '0.85rem 0.5rem', color: '#64748B', fontWeight: 600 }}>Method</td>
-                      <td style={{ padding: '0.85rem 0.5rem' }}>
+                      <td style={{ padding: '0.85rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <span style={{
                           padding: '0.25rem 0.6rem',
                           borderRadius: '6px',
@@ -3441,6 +3756,11 @@ export default function Customers() {
                         }}>
                           {getPaymentMethodLabel(selectedPaymentForAction)}
                         </span>
+                        {selectedPaymentForAction.bankName && (
+                          <span style={{ fontWeight: 700, color: '#475569', fontSize: '0.85rem' }}>
+                            ({selectedPaymentForAction.bankName})
+                          </span>
+                        )}
                       </td>
                     </tr>
                     <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
@@ -3540,14 +3860,40 @@ export default function Customers() {
                   />
                 </div>
                 {selectedPaymentForAction.method !== 'Discount' && (
-                <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
-                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem', display: 'block' }}>Payment Method</label>
-                  <PaymentMethodSelect
-                    value={editPaymentMethod}
-                    onChange={(method) => setEditPaymentMethod(method)}
-                    settings={settings}
-                  />
-                </div>
+                  <>
+                  <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem', display: 'block' }}>Payment Method</label>
+                    <PaymentMethodSelect
+                      value={editPaymentMethod}
+                      onChange={(method) => {
+                        setEditPaymentMethod(method);
+                        const defaultBankForMethod = method === 'Card'
+                          ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || '')
+                          : (method === 'UPI'
+                            ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || '')
+                            : (settings.defaultBankId || settings.bankAccounts?.[0]?.id || ''));
+                        setEditSelectedBank(defaultBankForMethod);
+                      }}
+                      settings={settings}
+                    />
+                  </div>
+                  {['Card', 'UPI', 'Bank'].includes(editPaymentMethod) && settings.bankAccounts?.length > 0 && (
+                  <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem', display: 'block' }}>Select Bank Account</label>
+                    <select
+                      style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem', background: 'white' }}
+                      value={editSelectedBank}
+                      onChange={(e) => setEditSelectedBank(e.target.value)}
+                    >
+                      {settings.bankAccounts.filter(acc => acc.isActive !== false).map((acc, idx) => (
+                        <option key={idx} value={acc.id || acc.bankName}>
+                          {acc.bankName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  )}
+                  </>
                 )}
                 </>}
               </div>
@@ -4001,6 +4347,67 @@ export default function Customers() {
               </form>
             </div>
           </div>
+        )}
+
+        {toastMessage && (
+          <>
+            <style>{`
+              @keyframes toastSlideIn {
+                0% { transform: translateX(120%) scale(0.9); opacity: 0; }
+                70% { transform: translateX(-10px) scale(1.02); opacity: 1; }
+                100% { transform: translateX(0) scale(1); opacity: 1; }
+              }
+            `}</style>
+            <div style={{
+              position: 'fixed',
+              top: '24px',
+              right: '24px',
+              background: 'rgba(15, 23, 42, 0.95)',
+              backdropFilter: 'blur(8px)',
+              color: 'white',
+              padding: '1rem 1.5rem',
+              borderRadius: '12px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '12px',
+              zIndex: 9999999,
+              fontFamily: "'Inter', sans-serif",
+              width: '380px',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderLeft: '5px solid #EF4444',
+              animation: 'toastSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards'
+            }}>
+              <AlertTriangle size={20} color="#EF4444" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+                <span style={{ fontWeight: 700, fontSize: '0.92rem', letterSpacing: '-0.01em' }}>Restriction Alert</span>
+                <span style={{ fontSize: '0.78rem', opacity: 0.85, marginTop: '2px', fontWeight: 400, lineHeight: 1.4 }}>
+                  {typeof toastMessage === 'string' ? toastMessage : toastMessage.msg}
+                </span>
+                {toastMessage.reason && (
+                  <div style={{ marginTop: '6px' }}>
+                    <button 
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAlertReason(r => !r); }}
+                      style={{ background: 'none', border: 'none', color: '#60A5FA', padding: 0, fontSize: '0.75rem', cursor: 'pointer', textDecoration: 'underline', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '3px' }}
+                    >
+                      {showAlertReason ? 'Hide Deletion Reason' : 'Show Deletion Reason'}
+                    </button>
+                    {showAlertReason && (
+                      <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#CBD5E1', background: 'rgba(255,255,255,0.08)', padding: '6px 8px', borderRadius: '4px', fontStyle: 'italic', borderLeft: '2px solid #60A5FA', lineHeight: 1.35 }}>
+                        "{toastMessage.reason}"
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <button 
+                onClick={() => setToastMessage(null)}
+                style={{ background: 'none', border: 'none', color: 'white', opacity: 0.6, cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', marginTop: '2px' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </>
         )}
       </div>
     );
@@ -4873,7 +5280,7 @@ export default function Customers() {
                     </tr>
                     <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
                       <td style={{ padding: '0.85rem 0.5rem', color: '#64748B', fontWeight: 600 }}>Method</td>
-                      <td style={{ padding: '0.85rem 0.5rem' }}>
+                      <td style={{ padding: '0.85rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <span style={{
                           padding: '0.25rem 0.6rem',
                           borderRadius: '6px',
@@ -4885,6 +5292,11 @@ export default function Customers() {
                         }}>
                           {getPaymentMethodLabel(selectedPaymentForAction)}
                         </span>
+                        {selectedPaymentForAction.bankName && (
+                          <span style={{ fontWeight: 700, color: '#475569', fontSize: '0.85rem' }}>
+                            ({selectedPaymentForAction.bankName})
+                          </span>
+                        )}
                       </td>
                     </tr>
                     <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
@@ -4983,15 +5395,40 @@ export default function Customers() {
                 <label>Payment Method</label>
                 <select
                   value={editPaymentMethod}
-                  onChange={(e) => setEditPaymentMethod(e.target.value)}
+                  onChange={(e) => {
+                    const method = e.target.value;
+                    setEditPaymentMethod(method);
+                    const defaultBankForMethod = method === 'Card'
+                      ? (settings.cardDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || '')
+                      : (method === 'UPI'
+                        ? (settings.upiDefaultAccountId || settings.defaultBankId || settings.bankAccounts?.[0]?.id || '')
+                        : (settings.defaultBankId || settings.bankAccounts?.[0]?.id || ''));
+                    setEditSelectedBank(defaultBankForMethod);
+                  }}
                   style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem' }}
                 >
-                  <option value="Cash">Cash</option>
-                  <option value="Card">Card</option>
-                  <option value="UPI">UPI</option>
-                  <option value="Bank">Bank Transfer</option>
+                  {(settings.paymentMethodCashEnabled !== false) && <option value="Cash">Cash</option>}
+                  {(settings.paymentMethodCardEnabled !== false) && <option value="Card">Card</option>}
+                  {(settings.paymentMethodUpiEnabled !== false) && <option value="UPI">UPI</option>}
+                  {(settings.paymentMethodBankEnabled !== false) && <option value="Bank">Bank Transfer</option>}
                 </select>
               </div>
+              {['Card', 'UPI', 'Bank'].includes(editPaymentMethod) && settings.bankAccounts?.length > 0 && (
+              <div className={styles.formGroup} style={{ marginTop: '1rem' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem', display: 'block' }}>Select Bank Account</label>
+                <select
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '1rem', background: 'white' }}
+                  value={editSelectedBank}
+                  onChange={(e) => setEditSelectedBank(e.target.value)}
+                >
+                  {settings.bankAccounts.filter(acc => acc.isActive !== false).map((acc, idx) => (
+                    <option key={idx} value={acc.id || acc.bankName}>
+                      {acc.bankName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              )}
               </>}
             </div>
             <div className={styles.modalActions} style={{ padding: '1rem 1.5rem', background: '#F8FAFC', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
@@ -5165,6 +5602,67 @@ export default function Customers() {
             </div>
           </div>
         </div>
+      )}
+
+      {toastMessage && (
+        <>
+          <style>{`
+            @keyframes toastSlideIn {
+              0% { transform: translateX(120%) scale(0.9); opacity: 0; }
+              70% { transform: translateX(-10px) scale(1.02); opacity: 1; }
+              100% { transform: translateX(0) scale(1); opacity: 1; }
+            }
+          `}</style>
+          <div style={{
+            position: 'fixed',
+            top: '24px',
+            right: '24px',
+            background: 'rgba(15, 23, 42, 0.95)',
+            backdropFilter: 'blur(8px)',
+            color: 'white',
+            padding: '1rem 1.5rem',
+            borderRadius: '12px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px',
+            zIndex: 9999999,
+            fontFamily: "'Inter', sans-serif",
+            width: '380px',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderLeft: '5px solid #EF4444',
+            animation: 'toastSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards'
+          }}>
+            <AlertTriangle size={20} color="#EF4444" style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+              <span style={{ fontWeight: 700, fontSize: '0.92rem', letterSpacing: '-0.01em' }}>Restriction Alert</span>
+              <span style={{ fontSize: '0.78rem', opacity: 0.85, marginTop: '2px', fontWeight: 400, lineHeight: 1.4 }}>
+                {typeof toastMessage === 'string' ? toastMessage : toastMessage.msg}
+              </span>
+              {toastMessage.reason && (
+                <div style={{ marginTop: '6px' }}>
+                  <button 
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAlertReason(r => !r); }}
+                    style={{ background: 'none', border: 'none', color: '#60A5FA', padding: 0, fontSize: '0.75rem', cursor: 'pointer', textDecoration: 'underline', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '3px' }}
+                  >
+                    {showAlertReason ? 'Hide Deletion Reason' : 'Show Deletion Reason'}
+                  </button>
+                  {showAlertReason && (
+                    <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#CBD5E1', background: 'rgba(255,255,255,0.08)', padding: '6px 8px', borderRadius: '4px', fontStyle: 'italic', borderLeft: '2px solid #60A5FA', lineHeight: 1.35 }}>
+                      "{toastMessage.reason}"
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <button 
+              onClick={() => setToastMessage(null)}
+              style={{ background: 'none', border: 'none', color: 'white', opacity: 0.6, cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', marginTop: '2px' }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </>
       )}
 
     </div>

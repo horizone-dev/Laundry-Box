@@ -13,6 +13,7 @@ import Expenses from './pages/Expenses';
 import TaxReport from './pages/TaxReport';
 import DailyTaxReport from './pages/DailyTaxReport';
 import ZReport from './pages/ZReport';
+import ZReportHistory from './pages/ZReportHistory';
 
 import CreditOverridesReport from './pages/CreditOverridesReport';
 import FinancialIntegrity from './pages/FinancialIntegrity';
@@ -31,6 +32,7 @@ import HelpCenter from './pages/HelpCenter';
 import Activation from './pages/Activation';
 import Workflow from './pages/Workflow';
 import { SettingsProvider } from './store/SettingsContext';
+import ZReportAutoCloseScheduler from './components/ZReportAutoCloseScheduler';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = React.useState(
@@ -39,6 +41,7 @@ function App() {
 
   return (
     <SettingsProvider>
+      <ZReportAutoCloseScheduler />
       <HashRouter>
       <Routes>
         <Route path="/login" element={<Login onLogin={setIsAuthenticated} />} />
@@ -75,11 +78,11 @@ function App() {
             <Route path="tax" element={<TaxReport />} />
             <Route path="daily-tax" element={<DailyTaxReport />} />
             <Route path="z-report" element={<ZReport />} />
+            <Route path="z-report-history" element={<ZReportHistory />} />
             <Route path="credit-overrides" element={<CreditOverridesReport />} />
             <Route path="financial-integrity" element={<FinancialIntegrity />} />
             <Route path="nomod-history" element={<NomodHistory />} />
           </Route>
-          <Route path="expenses" element={<Expenses />} />
           <Route path="settings" element={<Settings />} />
           <Route path="users" element={<Users />} />
           <Route path="accounts/:type" element={<Accounts />} />

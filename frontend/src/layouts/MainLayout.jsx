@@ -36,14 +36,15 @@ function PaymentMethodSelect({ value, onChange, settings }) {
   }, []);
 
   const methods = [
-    { id: 'Cash', label: 'Cash Payment', icon: <Wallet size={16} color="#10B981" />, badgeBg: '#ECFDF5' },
-    { id: 'Card', label: 'Card Payment', icon: <CreditCard size={16} color="#2563EB" />, badgeBg: '#EFF6FF' },
-    { id: 'Bank', label: 'Bank Transfer', icon: <Landmark size={16} color="#4F46E5" />, badgeBg: '#EEF2FF' },
-    { id: 'Nomod', label: 'Nomod Pay (Link)', icon: <ShieldCheck size={16} color="#059669" />, badgeBg: '#D1FAE5' },
-    { id: 'Multipayment', label: 'Multipayment (Split)', icon: <Layers size={16} color="#F59E0B" />, badgeBg: '#FEF3C7' },
-  ];
+    { id: 'Cash', label: 'Cash Payment', icon: <Wallet size={16} color="#10B981" />, badgeBg: '#ECFDF5', enabled: settings?.paymentMethodCashEnabled ?? true },
+    { id: 'Card', label: 'Card Payment', icon: <CreditCard size={16} color="#2563EB" />, badgeBg: '#EFF6FF', enabled: settings?.paymentMethodCardEnabled ?? true },
+    { id: 'UPI', label: 'UPI / QR Payment', icon: <QrCode size={16} color="#06B6D4" />, badgeBg: '#ECFEFF', enabled: settings?.paymentMethodUpiEnabled ?? true },
+    { id: 'Bank', label: 'Bank Transfer', icon: <Landmark size={16} color="#4F46E5" />, badgeBg: '#EEF2FF', enabled: settings?.paymentMethodBankEnabled ?? true },
+    { id: 'Nomod', label: 'Nomod Pay (Link)', icon: <ShieldCheck size={16} color="#059669" />, badgeBg: '#D1FAE5', enabled: settings?.noModPayEnabled && settings?.enableNomod },
+    { id: 'Multipayment', label: 'Multipayment (Split)', icon: <Layers size={16} color="#F59E0B" />, badgeBg: '#FEF3C7', enabled: true },
+  ].filter(m => m.enabled);
 
-  const current = methods.find(m => m.id === value) || methods[0];
+  const current = methods.find(m => m.id === value) || methods[0] || { id: 'Cash', label: 'Cash Payment', icon: <Wallet size={16} color="#10B981" />, badgeBg: '#ECFDF5' };
 
   return (
     <div ref={dropdownRef} style={{ position: 'relative', width: '100%' }}>
@@ -727,6 +728,7 @@ export default function MainLayout() {
         { path: '/reports/tax', label: 'Tax Statements' },
         { path: '/reports/daily-tax', label: 'Daily Tax Report' },
         { path: '/reports/z-report', label: 'Z Report (Day Close)' },
+        { path: '/reports/z-report-history', label: 'Z Report History' },
         { path: '/reports/credit-overrides', label: 'Credit Overrides' },
         { path: '/reports/nomod-history', label: 'Nomod History' },
       ]
@@ -1090,7 +1092,7 @@ const timestamp = getLocalISOString();
         const selectedCustomerName = selectedSettleTarget.type === 'customer'
           ? selectedSettleTarget.data.name
           : selectedSettleTarget.data.customerName;
-        const bankAccountId = settings.bankAccounts?.find((account) => account.bankName === selectedBank || account.id === selectedBank)?.id || selectedBank || null;
+        const bankAccountId = settings.bankAccounts?.find((account) => account.bankName === selectedBank || account.id === selectedBank)?.id || selectedBank || settings.defaultBankId || settings.bankAccounts?.[0]?.id || null;
         const result = await window.electronAPI.settleCustomerBalance({
           customerId,
           orderId: selectedOrderId,
@@ -1432,6 +1434,7 @@ const timestamp = getLocalISOString();
         subItems: item.subItems.filter(sub => {
           if (sub.path === '/workflow' && !settings.workflowEnabled) return false;
           if (sub.path === '/reports/z-report' && !settings.zReportEnabled) return false;
+          if (sub.path === '/reports/z-report-history' && !settings.zReportEnabled) return false;
           if (sub.path === '/reports/nomod-history' && (!settings.noModPayEnabled || !settings.paymentHistoryEnabled)) return false;
           if (sub.path === '/accounts/gateway' && !settings.noModPayEnabled) return false;
 

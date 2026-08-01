@@ -66,35 +66,38 @@ export default function ZReport() {
   const [allDeletedOrders, setAllDeletedOrders] = useState([]);
 
   // Reconciliation inputs
-  const [openingFloat, setOpeningFloat] = useState(() => {
-    const stored = localStorage.getItem(`opening_float_${selectedDate}`);
-    return stored ? parseFloat(stored) : 200;
-  });
-  const [actualCashCounted, setActualCashCounted] = useState(() => {
-    const stored = localStorage.getItem(`actual_cash_${selectedDate}`);
-    return stored ? parseFloat(stored) : 200;
-  });
-  const [cashWithdrawals, setCashWithdrawals] = useState(() => {
-    const stored = localStorage.getItem(`cash_withdrawal_${selectedDate}`);
-    return stored ? parseFloat(stored) : 0;
-  });
+  const [openingFloat, setOpeningFloat] = useState(200);
+  const [actualCashCounted, setActualCashCounted] = useState(200);
+  const [cashWithdrawals, setCashWithdrawals] = useState(0);
 
   // Day Close Status
-  const [isDayClosed, setIsDayClosed] = useState(() => localStorage.getItem(`day_close_status_${selectedDate}`) === 'CLOSED');
+  const [isDayClosed, setIsDayClosed] = useState(false);
   const [showManagerPinModal, setShowManagerPinModal] = useState(false);
+  const [showReopenChoiceModal, setShowReopenChoiceModal] = useState(false);
+  const [showCloseReconcileModal, setShowCloseReconcileModal] = useState(false);
+  const [closeActualCash, setCloseActualCash] = useState(200);
+  const [closeWithdrawals, setCloseWithdrawals] = useState(0);
+  const [closeType, setCloseType] = useState('Day Close');
+  const [reopenTime, setReopenTime] = useState('');
+  const [latestClosedReportId, setLatestClosedReportId] = useState(null);
   const [managerPinInput, setManagerPinInput] = useState('');
   const [managerPinError, setManagerPinError] = useState('');
 
-  // Sync state with selectedDate
+  const [historicalData, setHistoricalData] = useState(null);
+  const [activeSessionStartTime, setActiveSessionStartTime] = useState('1970-01-01 00:00:00');
+
+  // Sync state with selectedDate and active session views
   useEffect(() => {
-    setIsDayClosed(localStorage.getItem(`day_close_status_${selectedDate}`) === 'CLOSED');
-    const storedFloat = localStorage.getItem(`opening_float_${selectedDate}`);
-    setOpeningFloat(storedFloat ? parseFloat(storedFloat) : 200);
-    const storedCash = localStorage.getItem(`actual_cash_${selectedDate}`);
-    setActualCashCounted(storedCash ? parseFloat(storedCash) : 200);
-    const storedWithdrawal = localStorage.getItem(`cash_withdrawal_${selectedDate}`);
-    setCashWithdrawals(storedWithdrawal ? parseFloat(storedWithdrawal) : 0);
-  }, [selectedDate]);
+    const isViewingActive = localStorage.getItem(`view_active_session_${selectedDate}`) === 'true';
+    if (isViewingActive || !isDayClosed) {
+      const storedFloat = localStorage.getItem(`opening_float_active`);
+      setOpeningFloat(storedFloat ? parseFloat(storedFloat) : 200);
+      const storedCash = localStorage.getItem(`actual_cash_active`);
+      setActualCashCounted(storedCash ? parseFloat(storedCash) : 200);
+      const storedWithdrawal = localStorage.getItem(`cash_withdrawal_active`);
+      setCashWithdrawals(storedWithdrawal ? parseFloat(storedWithdrawal) : 0);
+    }
+  }, [selectedDate, isDayClosed]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -102,32 +105,117 @@ export default function ZReport() {
         setIsExportOpen(false);
       }
     };
+    
+    const handleAutoClosed = (e) => {
+      if (e.detail?.date === selectedDate) {
+        fetchZReportData();
+      }
+    };
+
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    window.addEventListener('zreport-autoclosed', handleAutoClosed);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('zreport-autoclosed', handleAutoClosed);
+    };
+  }, [selectedDate]);
 
   // Fetch data
   const fetchZReportData = async () => {
     if (!window.electronAPI?.dbQuery) return;
     try {
       setLoading(true);
-      const dateParam = `${selectedDate}%`;
+      setHistoricalData(null);
 
+      // Check if a report is already closed for the selectedDate in database
+      const closedRes = await window.electronAPI.dbQuery(
+        `SELECT * FROM z_reports WHERE businessDate = ? ORDER BY endTime DESC`, [selectedDate]
+      );
+
+      const hasClosedReports = closedRes.success && closedRes.data && closedRes.data.length > 0;
+      const isViewingActive = localStorage.getItem(`view_active_session_${selectedDate}`) === 'true';
+
+      if (hasClosedReports && !isViewingActive) {
+        const closedRep = closedRes.data[0];
+        const details = JSON.parse(closedRep.detailsJson || '{}');
+        setHistoricalData(details);
+        setOrders(details.orders || []);
+        setExpenses(details.expenses || []);
+        setTransactions(details.transactions || []);
+        setAllDeletedOrders(details.allDeletedOrders || []);
+        setNewCustomersCount(details.newCustomersCount || 0);
+        setReturningCustomersCount(details.returningCustomersCount || 0);
+        setCreditCustomersCount(details.creditCustomersCount || 0);
+        setVipCustomersCount(details.vipCustomersCount || 0);
+        setTopCustomer(details.topCustomer || { name: 'N/A', amount: 0 });
+        setTotalCustomersCount(details.totalCustomersCount || 0);
+        
+        setOpeningFloat(closedRep.openingFloat);
+        setActualCashCounted(closedRep.actualCashCounted);
+        setCashWithdrawals(closedRep.cashWithdrawals);
+        setLatestClosedReportId(closedRep.id);
+        setIsDayClosed(true);
+        setLoading(false);
+        return;
+      }
+
+      // If not closed, check if selectedDate is today
+      const todayStr = new Date().toISOString().split('T')[0];
+      if (selectedDate !== todayStr && !isViewingActive) {
+        // Selected a past date with no closed Z-report
+        setIsDayClosed(false);
+        setOrders([]);
+        setExpenses([]);
+        setTransactions([]);
+        setAllDeletedOrders([]);
+        setLoading(false);
+        return;
+      }
+
+      // If it's today and not closed, calculate active session
+      let startTime = localStorage.getItem('active_session_start_time');
+      if (!startTime) {
+        const lastReportRes = await window.electronAPI.dbQuery(
+          `SELECT endTime FROM z_reports ORDER BY endTime DESC LIMIT 1`, []
+        );
+        startTime = '1970-01-01 00:00:00';
+        if (lastReportRes.success && lastReportRes.data && lastReportRes.data.length > 0) {
+          startTime = lastReportRes.data[0].endTime;
+        }
+      }
+      setActiveSessionStartTime(startTime);
+      const endTime = new Date().toISOString();
+
+      // Load active values from localStorage
+      const activeFloat = localStorage.getItem(`opening_float_active`);
+      setOpeningFloat(activeFloat ? parseFloat(activeFloat) : 200);
+      const activeCash = localStorage.getItem(`actual_cash_active`);
+      setActualCashCounted(activeCash ? parseFloat(activeCash) : 200);
+      const activeWithdrawal = localStorage.getItem(`cash_withdrawal_active`);
+      setCashWithdrawals(activeWithdrawal ? parseFloat(activeWithdrawal) : 0);
+
+      // Query database with session time bounds
+
+      // Query database with session time bounds
       // 1. Orders
       const ordersRes = await window.electronAPI.dbQuery(
-        `SELECT * FROM orders WHERE createdAt LIKE ? AND COALESCE(status, '') NOT IN ('Deleted', 'Cancelled')`, [dateParam]
+        `SELECT * FROM orders WHERE createdAt >= ? AND createdAt <= ? AND COALESCE(status, '') NOT IN ('Deleted', 'Cancelled')`, [startTime, endTime]
       );
       // 2. Expenses
       const expensesRes = await window.electronAPI.dbQuery(
-        `SELECT * FROM expenses WHERE date LIKE ?`, [dateParam]
+        `SELECT * FROM expenses WHERE date = ?`, [selectedDate]
       );
       // 3. Transactions
       const txnsRes = await window.electronAPI.dbQuery(
-        `SELECT * FROM account_transactions WHERE date LIKE ?`, [dateParam]
+        `SELECT * FROM account_transactions WHERE date >= ? AND date <= ?`, [startTime, endTime]
+      );
+      // 3b. Payments (for discounts)
+      const paymentsRes = await window.electronAPI.dbQuery(
+        `SELECT * FROM payments WHERE createdAt >= ? AND createdAt <= ?`, [startTime, endTime]
       );
       // 4. Deleted orders
       const deletedRes = await window.electronAPI.dbQuery(
-        `SELECT * FROM deleted_orders WHERE deletedAt LIKE ?`, [dateParam]
+        `SELECT * FROM deleted_orders WHERE deletedAt >= ? AND deletedAt <= ?`, [startTime, endTime]
       );
       // 5. All Customers (for segments)
       const custsRes = await window.electronAPI.dbQuery(
@@ -138,14 +226,15 @@ export default function ZReport() {
       if (expensesRes.success) setExpenses(expensesRes.data);
       if (txnsRes.success) setTransactions(txnsRes.data);
       if (deletedRes.success) setAllDeletedOrders(deletedRes.data);
+      window.activeSessionPayments = paymentsRes.success ? paymentsRes.data : [];
       if (custsRes.success) {
         setAllCustomersData(custsRes.data);
         setTotalCustomersCount(custsRes.data.length);
       }
 
-      // New customers count today (proxy using updatedAt/createdAt check)
+      // New customers count today
       const newCustsRes = await window.electronAPI.dbQuery(
-        `SELECT COUNT(*) as count FROM customers WHERE updatedAt LIKE ?`, [dateParam]
+        `SELECT COUNT(*) as count FROM customers WHERE createdAt >= ? AND createdAt <= ?`, [startTime, endTime]
       );
       if (newCustsRes.success && newCustsRes.data.length > 0) {
         setNewCustomersCount(newCustsRes.data[0].count);
@@ -156,11 +245,11 @@ export default function ZReport() {
         `SELECT c.name, SUM(o.totalAmount) as totalSpent 
          FROM orders o
          JOIN customers c ON o.customerId = c.id
-         WHERE o.createdAt LIKE ? AND COALESCE(o.status, '') NOT IN ('Deleted', 'Cancelled')
+         WHERE o.createdAt >= ? AND o.createdAt <= ? AND COALESCE(o.status, '') NOT IN ('Deleted', 'Cancelled')
          GROUP BY o.customerId
          ORDER BY totalSpent DESC
          LIMIT 1`,
-        [dateParam]
+        [startTime, endTime]
       );
       if (topCustRes.success && topCustRes.data.length > 0) {
         setTopCustomer({
@@ -171,6 +260,7 @@ export default function ZReport() {
         setTopCustomer({ name: 'N/A', amount: 0 });
       }
 
+      setIsDayClosed(false);
     } catch (err) {
       console.error("Z Report data fetch error:", err);
     } finally {
@@ -226,29 +316,18 @@ export default function ZReport() {
 
   // Perform Calculations
   const metrics = useMemo(() => {
+    if (historicalData && historicalData.metrics) {
+      return historicalData.metrics;
+    }
     const activeOrders = orders.filter(o => !['Deleted', 'Cancelled'].includes(o.status));
 
     // 1. Business Hours
-    let earliestTime = null;
-    let latestTime = null;
-    const checkTime = (dateStr) => {
-      if (!dateStr) return;
-      const t = new Date(dateStr).getTime();
-      if (!isNaN(t)) {
-        if (earliestTime === null || t < earliestTime) earliestTime = t;
-        if (latestTime === null || t > latestTime) latestTime = t;
-      }
-    };
-    activeOrders.forEach(o => checkTime(o.createdAt));
-    transactions.forEach(t => checkTime(t.date));
-    expenses.forEach(e => checkTime(e.date));
-
-    const storeOpening = earliestTime ? new Date(earliestTime) : null;
-    const storeClosing = latestTime ? new Date(latestTime) : null;
+    const storeOpening = activeSessionStartTime ? new Date(activeSessionStartTime) : null;
+    const storeClosing = new Date();
 
     let durationStr = "N/A";
     if (storeOpening && storeClosing) {
-      const diffMs = storeClosing - storeOpening;
+      const diffMs = Math.max(0, storeClosing - storeOpening);
       const diffHours = Math.floor(diffMs / 3600000);
       const diffMins = Math.floor((diffMs % 3600000) / 60000);
       durationStr = `${diffHours}h ${diffMins}m`;
@@ -317,14 +396,22 @@ export default function ZReport() {
     const avgOrderValue = totalOrders > 0 ? activeOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0) / totalOrders : 0;
 
     // 3. Financial Totals
+    const payments = window.activeSessionPayments || [];
     let grossSales = 0;
     let deliveryCharges = 0;
     let expressCharges = 0;
     let additionalCharges = 0;
-    let totalDiscount = 0;
-    let couponDiscounts = 0;
-    let manualDiscounts = 0;
     let vatCollected = 0;
+
+    const orderDiscounts = payments
+      .filter(p => p.method?.toLowerCase() === 'discount' && p.discountScope !== 'settlement')
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+    const settleDiscounts = payments
+      .filter(p => p.method?.toLowerCase() === 'discount' && p.discountScope === 'settlement')
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+    const totalDiscount = orderDiscounts + settleDiscounts;
 
     activeOrders.forEach(o => {
       let itemsList = [];
@@ -352,18 +439,9 @@ export default function ZReport() {
           });
         }
       });
-
-      // Split discounts
-      const oDiscount = Math.max(0, subtotal - (o.totalAmount - (settings.taxMethod === 'inclusive' ? 0 : calculateOrderTax(o))));
-      totalDiscount += oDiscount;
-      if (o.specialInstructions?.toLowerCase().includes('coupon') || o.specialInstructions?.toLowerCase().includes('promo')) {
-        couponDiscounts += oDiscount;
-      } else {
-        manualDiscounts += oDiscount;
-      }
     });
 
-    const netSales = grossSales + additionalCharges + deliveryCharges + expressCharges - totalDiscount;
+    const netSales = grossSales + additionalCharges + deliveryCharges + expressCharges - orderDiscounts;
     const grandTotal = netSales + vatCollected;
 
     // 4. Payment Breakdown
@@ -393,7 +471,9 @@ export default function ZReport() {
         cashSales += parseFloat(breakdown.cash || 0);
         cardSales += parseFloat(breakdown.card || 0);
         bankTransfer += parseFloat(breakdown.bank || 0);
-        nomodSales += parseFloat(breakdown.nomod || 0);
+        if (status === 'paid') {
+          nomodSales += parseFloat(breakdown.nomod || 0);
+        }
         creditSales += due;
       } else {
         if (status === 'credit') {
@@ -405,7 +485,11 @@ export default function ZReport() {
           if (method === 'cash') cashSales += paid;
           else if (method === 'card') cardSales += paid;
           else if (method === 'bank') bankTransfer += paid;
-          else if (method === 'nomod') nomodSales += paid;
+          else if (method === 'nomod') {
+            if (status === 'paid') {
+              nomodSales += paid;
+            }
+          }
           else if (method === 'discount') {
             // Exclude checkout discounts from payments
           }
@@ -511,9 +595,9 @@ export default function ZReport() {
       deliveryCharges,
       expressCharges,
       additionalCharges,
+      orderDiscounts,
+      settleDiscounts,
       totalDiscount,
-      couponDiscounts,
-      manualDiscounts,
       vatCollected,
       netSales,
       grandTotal,
@@ -548,7 +632,7 @@ export default function ZReport() {
       garmentSummary
     };
 
-  }, [orders, expenses, transactions, allCustomersData, allDeletedOrders, openingFloat, actualCashCounted, cashWithdrawals, selectedDate, settings]);
+  }, [orders, expenses, transactions, allCustomersData, allDeletedOrders, openingFloat, actualCashCounted, cashWithdrawals, selectedDate, settings, historicalData]);
 
   const handlePrint = () => {
     window.print();
@@ -598,6 +682,27 @@ export default function ZReport() {
         </div>
 
         <div className={styles.headerActions}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#F1F5F9', padding: '0.4rem 0.75rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 600, color: '#475569', border: '1px solid #E2E8F0' }}>
+            <Clock size={14} />
+            <span>Close Mode:</span>
+            <select
+              value={settings.zReportAutoCloseEnabled ? 'auto' : 'manual'}
+              onChange={(e) => updateSettings({ zReportAutoCloseEnabled: e.target.value === 'auto' })}
+              style={{ background: 'transparent', border: 'none', fontWeight: 700, color: 'var(--primary)', cursor: 'pointer', outline: 'none', paddingRight: '0.25rem' }}
+            >
+              <option value="manual">Manual</option>
+              <option value="auto">Auto</option>
+            </select>
+            {settings.zReportAutoCloseEnabled && (
+              <input
+                type="time"
+                value={settings.zReportAutoCloseTime || '23:59'}
+                onChange={(e) => updateSettings({ zReportAutoCloseTime: e.target.value })}
+                style={{ background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '4px', padding: '1px 3px', fontWeight: 700, fontSize: '0.75rem', color: '#1E293B', outline: 'none' }}
+              />
+            )}
+          </div>
+
           <div className={styles.datePicker}>
             <Calendar size={16} />
             <input
@@ -605,10 +710,19 @@ export default function ZReport() {
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
               className={styles.dateInput}
+              disabled
             />
           </div>
           <button className={styles.iconBtn} onClick={fetchZReportData} title="Refresh Data">
             <RefreshCw size={16} />
+          </button>
+
+          <button 
+            style={{ background: isDayClosed ? '#64748B' : '#DC2626', color: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', borderRadius: '8px', border: 'none', fontWeight: 700, cursor: 'pointer', fontSize: '0.85rem' }}
+            onClick={() => setShowManagerPinModal(true)}
+          >
+            {isDayClosed ? <Unlock size={14} /> : <Lock size={14} />}
+            <span>{isDayClosed ? 'Reopen Business Day' : 'Lock & Close Business Day'}</span>
           </button>
 
           <div ref={exportDropdownRef} style={{ position: 'relative', display: 'inline-block' }}>
@@ -654,7 +768,7 @@ export default function ZReport() {
               </div>
               <div>
                 <span className={styles.metaLabel}>Report Type</span>
-                <span className={styles.metaVal}>Daily Z Close</span>
+                <span className={styles.metaVal}>{isDayClosed ? (historicalData?.closingType || 'Day Close') : 'Active Session'}</span>
               </div>
               <div>
                 <span className={styles.metaLabel}>POS Terminal</span>
@@ -690,65 +804,7 @@ export default function ZReport() {
             </div>
           </div>
 
-          {/* 3. KPI Cards Grid */}
-          <div className={styles.kpiGrid}>
-            <div className={styles.kpiCard}>
-              <Box size={20} color="#2563EB" />
-              <div>
-                <span className={styles.kpiLabel}>Total Orders</span>
-                <span className={styles.kpiValue}>{metrics.totalOrders}</span>
-              </div>
-            </div>
-            <div className={styles.kpiCard}>
-              <DollarSign size={20} color="#059669" />
-              <div>
-                <span className={styles.kpiLabel}>Gross Sales</span>
-                <span className={styles.kpiValue}><CurrencySymbol /> {metrics.grossSales.toFixed(2)}</span>
-              </div>
-            </div>
-            <div className={styles.kpiCard}>
-              <TrendingUp size={20} color="#10B981" />
-              <div>
-                <span className={styles.kpiLabel}>Net Sales</span>
-                <span className={styles.kpiValue}><CurrencySymbol /> {metrics.netSales.toFixed(2)}</span>
-              </div>
-            </div>
-            <div className={styles.kpiCard}>
-              <Receipt size={20} color="#4F46E5" />
-              <div>
-                <span className={styles.kpiLabel}>Grand Total</span>
-                <span className={styles.kpiValue}><CurrencySymbol /> {metrics.grandTotal.toFixed(2)}</span>
-              </div>
-            </div>
-            <div className={styles.kpiCard}>
-              <CheckSquare size={20} color="#059669" />
-              <div>
-                <span className={styles.kpiLabel}>Total Collected</span>
-                <span className={styles.kpiValue}><CurrencySymbol /> {metrics.totalCollected.toFixed(2)}</span>
-              </div>
-            </div>
-            <div className={styles.kpiCard}>
-              <AlertTriangle size={20} color="#DC2626" />
-              <div>
-                <span className={styles.kpiLabel}>Outstanding Credit</span>
-                <span className={styles.kpiValue} style={{ color: '#DC2626' }}><CurrencySymbol /> {metrics.creditSales.toFixed(2)}</span>
-              </div>
-            </div>
-            <div className={styles.kpiCard}>
-              <Shirt size={20} color="#D97706" />
-              <div>
-                <span className={styles.kpiLabel}>Total Pieces</span>
-                <span className={styles.kpiValue}>{metrics.totalPieces}</span>
-              </div>
-            </div>
-            <div className={styles.kpiCard}>
-              <UserPlus size={20} color="#7C3AED" />
-              <div>
-                <span className={styles.kpiLabel}>New Customers</span>
-                <span className={styles.kpiValue}>{newCustomersCount}</span>
-              </div>
-            </div>
-          </div>
+
 
           {/* 4. Revenue Summary & Tax */}
           <div className={styles.gridTwoCols}>
@@ -819,11 +875,13 @@ export default function ZReport() {
                     <td className="text-right"><CurrencySymbol /> {metrics.bankTransfer.toFixed(2)}</td>
                     <td className="text-right">{metrics.totalCollected > 0 ? ((metrics.bankTransfer/metrics.totalCollected)*100).toFixed(1) : 0}%</td>
                   </tr>
-                  <tr>
-                    <td>Nomod Payments</td>
-                    <td className="text-right"><CurrencySymbol /> {metrics.nomodSales.toFixed(2)}</td>
-                    <td className="text-right">{metrics.totalCollected > 0 ? ((metrics.nomodSales/metrics.totalCollected)*100).toFixed(1) : 0}%</td>
-                  </tr>
+                  {settings.enableNomod && (
+                    <tr>
+                      <td>Nomod Payments</td>
+                      <td className="text-right"><CurrencySymbol /> {metrics.nomodSales.toFixed(2)}</td>
+                      <td className="text-right">{metrics.totalCollected > 0 ? ((metrics.nomodSales/metrics.totalCollected)*100).toFixed(1) : 0}%</td>
+                    </tr>
+                  )}
                   <tr>
                     <td>On Account / Credit sales</td>
                     <td className="text-right"><CurrencySymbol /> {metrics.creditSales.toFixed(2)}</td>
@@ -839,24 +897,69 @@ export default function ZReport() {
             </div>
           </div>
 
-          {/* 6. Cash Drawer Reconciliation & Credit Summary */}
+          {/* 6. Financial Flow & Cash Drawer Reconciliation */}
           <div className={styles.gridTwoCols}>
+            {/* Left: Financial Flow Reconciliation */}
+            <div className={styles.sectionCard}>
+              <h3 className={styles.sectionTitle}><ShieldCheck size={16} /> Financial Flow Reconciliation</h3>
+              <div className={styles.flowWrapper}>
+                <div className={styles.flowNode}>
+                  <span>Gross Sales</span>
+                  <strong><CurrencySymbol /> {metrics.grossSales.toFixed(2)}</strong>
+                </div>
+                <div className={styles.flowArrow}>↓</div>
+                <div className={styles.flowNode} style={{ color: '#DC2626' }}>
+                  <span>Discounts</span>
+                  <strong>- <CurrencySymbol /> {metrics.totalDiscount.toFixed(2)}</strong>
+                </div>
+                <div className={styles.flowArrow}>↓</div>
+                <div className={styles.flowNode} style={{ color: '#10B981' }}>
+                  <span>Net Sales</span>
+                  <strong><CurrencySymbol /> {metrics.netSales.toFixed(2)}</strong>
+                </div>
+                <div className={styles.flowArrow}>↓</div>
+                <div className={styles.flowNode}>
+                  <span>VAT Collected</span>
+                  <strong>+ <CurrencySymbol /> {metrics.vatCollected.toFixed(2)}</strong>
+                </div>
+                <div className={styles.flowArrow}>↓</div>
+                <div className={styles.flowNode} style={{ background: '#EFF6FF', border: '1px solid #BFDBFE' }}>
+                  <span>Grand Total (Net + VAT)</span>
+                  <strong><CurrencySymbol /> {metrics.grandTotal.toFixed(2)}</strong>
+                </div>
+                <div className={styles.flowArrow}>↓</div>
+                <div className={styles.flowNode} style={{ background: '#ECFDF5', border: '1px solid #A7F3D0' }}>
+                  <span>Collected Amount</span>
+                  <strong><CurrencySymbol /> {metrics.totalCollected.toFixed(2)}</strong>
+                </div>
+                <div className={styles.flowArrow}>↓</div>
+                <div className={styles.flowNode} style={{ color: '#DC2626' }}>
+                  <span>Pending Balance (On Account)</span>
+                  <strong><CurrencySymbol /> {metrics.creditSales.toFixed(2)}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Cash Drawer Reconciliation */}
             <div className={styles.sectionCard}>
               <h3 className={styles.sectionTitle}><CheckSquare size={16} /> Cash Drawer Reconciliation</h3>
               
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                 <span className={styles.metaLabel}>Opening Drawer Float</span>
-                <input 
-                  type="number" 
-                  value={openingFloat} 
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value) || 0;
-                    setOpeningFloat(val);
-                    localStorage.setItem(`opening_float_${selectedDate}`, val);
-                  }}
-                  className={styles.reconcileInput}
-                  disabled={isDayClosed}
-                />
+                {isDayClosed ? (
+                  <strong style={{ fontSize: '1rem', color: '#1F2937' }}><CurrencySymbol /> {openingFloat.toFixed(2)}</strong>
+                ) : (
+                  <input 
+                    type="number" 
+                    value={openingFloat} 
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0;
+                      setOpeningFloat(val);
+                      localStorage.setItem(`opening_float_active`, val);
+                    }}
+                    className={styles.reconcileInput}
+                  />
+                )}
               </div>
 
               <table className={styles.dataTable} style={{ marginBottom: '1rem' }}>
@@ -884,19 +987,24 @@ export default function ZReport() {
                   
                   <tr style={{ color: '#DC2626' }}>
                     <td>(-) Cash Withdrawals / Drops</td>
-                    <td className="text-right" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.25rem' }}>
-                      - <CurrencySymbol />
-                      <input 
-                        type="number" 
-                        value={cashWithdrawals} 
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setCashWithdrawals(val);
-                          localStorage.setItem(`cash_withdrawal_${selectedDate}`, val);
-                        }}
-                        className={styles.reconcileInputCompact}
-                        disabled={isDayClosed}
-                      />
+                    <td className="text-right">
+                      {isDayClosed ? (
+                        <strong>- <CurrencySymbol /> {cashWithdrawals.toFixed(2)}</strong>
+                      ) : (
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.25rem' }}>
+                          - <CurrencySymbol />
+                          <input 
+                            type="number" 
+                            value={cashWithdrawals} 
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setCashWithdrawals(val);
+                              localStorage.setItem(`cash_withdrawal_active`, val);
+                            }}
+                            className={styles.reconcileInputCompact}
+                          />
+                        </div>
+                      )}
                     </td>
                   </tr>
 
@@ -907,19 +1015,24 @@ export default function ZReport() {
 
                   <tr>
                     <td>Actual Cash Counted</td>
-                    <td className="text-right" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.25rem' }}>
-                      <CurrencySymbol />
-                      <input 
-                        type="number" 
-                        value={actualCashCounted} 
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setActualCashCounted(val);
-                          localStorage.setItem(`actual_cash_${selectedDate}`, val);
-                        }}
-                        className={styles.reconcileInputCompact}
-                        disabled={isDayClosed}
-                      />
+                    <td className="text-right">
+                      {isDayClosed ? (
+                        <strong><CurrencySymbol /> {actualCashCounted.toFixed(2)}</strong>
+                      ) : (
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.25rem' }}>
+                          <CurrencySymbol />
+                          <input 
+                            type="number" 
+                            value={actualCashCounted} 
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setActualCashCounted(val);
+                              localStorage.setItem(`actual_cash_active`, val);
+                            }}
+                            className={styles.reconcileInputCompact}
+                          />
+                        </div>
+                      )}
                     </td>
                   </tr>
 
@@ -941,36 +1054,9 @@ export default function ZReport() {
                 </span>
               </div>
             </div>
-
-            {/* 7. Credit Summary */}
-            <div className={styles.sectionCard}>
-              <h3 className={styles.sectionTitle}><CreditCard size={16} /> Credit Ledger Summary</h3>
-              <table className={styles.dataTable}>
-                <tbody>
-                  <tr>
-                    <td>Opening Credit Outstanding</td>
-                    <td className="text-right"><CurrencySymbol /> {metrics.openingOutstanding.toFixed(2)}</td>
-                  </tr>
-                  <tr>
-                    <td>(+) Today's Credit Sales</td>
-                    <td className="text-right"><CurrencySymbol /> {metrics.todayCreditSales.toFixed(2)}</td>
-                  </tr>
-                  <tr style={{ color: '#059669' }}>
-                    <td>(-) Today's Credit Collections</td>
-                    <td className="text-right">- <CurrencySymbol /> {metrics.todayCreditSettled.toFixed(2)}</td>
-                  </tr>
-                  <tr style={{ color: '#059669' }}>
-                    <td>(-) Today's Credit Returns / Cancellations</td>
-                    <td className="text-right">- <CurrencySymbol /> {metrics.todayCreditReturned.toFixed(2)}</td>
-                  </tr>
-                  <tr className={styles.highlightRow}>
-                    <td>Closing Credit Outstanding</td>
-                    <td className="text-right"><CurrencySymbol /> {metrics.closingOutstanding.toFixed(2)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
           </div>
+
+
 
           {/* 8. Operational Summaries */}
           <div className={styles.gridTwoCols}>
@@ -981,9 +1067,6 @@ export default function ZReport() {
                 <div className={styles.statLine}><span>Delivered</span><strong>{metrics.deliveredOrders}</strong></div>
                 <div className={styles.statLine}><span>Pending Delivery</span><strong>{metrics.pendingOrders}</strong></div>
                 <div className={styles.statLine}><span>Cancelled Today</span><strong>{metrics.cancelledOrders}</strong></div>
-                <div className={styles.statLine}><span>Average Ticket Size</span><strong><CurrencySymbol /> {metrics.avgOrderValue.toFixed(2)}</strong></div>
-                <div className={styles.statLine}><span>Highest Bill Value</span><strong><CurrencySymbol /> {metrics.highestInvoice.toFixed(2)}</strong></div>
-                <div className={styles.statLine}><span>Lowest Bill Value</span><strong><CurrencySymbol /> {metrics.lowestInvoice.toFixed(2)}</strong></div>
               </div>
             </div>
 
@@ -993,9 +1076,6 @@ export default function ZReport() {
                 <div className={styles.statLine}><span>New Registrations</span><strong>{newCustomersCount}</strong></div>
                 <div className={styles.statLine}><span>Returning Customers</span><strong>{metrics.returningCustomers}</strong></div>
                 <div className={styles.statLine}><span>Active Credit Accounts</span><strong>{metrics.creditCustomers}</strong></div>
-                <div className={styles.statLine}><span>VIP Customer Count</span><strong>{metrics.vipCustomers}</strong></div>
-                <div className={styles.statLine}><span>Average Customer Spend</span><strong><CurrencySymbol /> {metrics.avgCustSpend.toFixed(2)}</strong></div>
-                <div className={styles.statLine}><span>Top Spender</span><strong>{topCustomer.name} (<CurrencySymbol />{topCustomer.amount.toFixed(2)})</strong></div>
               </div>
             </div>
           </div>
@@ -1060,81 +1140,84 @@ export default function ZReport() {
             </div>
           </div>
 
-          {/* 12. Employee performance & Expenses */}
-          <div className={styles.gridTwoCols}>
-            <div className={styles.sectionCard}>
-              <h3 className={styles.sectionTitle}>Staff Performance Metrics</h3>
-              <table className={styles.dataTable}>
-                <thead>
-                  <tr>
-                    <th>Cashier/Operator</th>
-                    <th className="text-right">Tickets</th>
-                    <th className="text-right">Sales Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.keys(metrics.employeePerf).length === 0 ? (
-                    <tr><td colSpan="3" className="text-center">No employee activities logged today</td></tr>
-                  ) : (
-                    Object.entries(metrics.employeePerf).map(([emp, data]) => (
-                      <tr key={emp}>
-                        <td>{emp}</td>
-                        <td className="text-right">{data.orders}</td>
-                        <td className="text-right"><CurrencySymbol /> {data.revenue.toFixed(2)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className={styles.sectionCard}>
-              <h3 className={styles.sectionTitle}>Store Expenses summary</h3>
-              <table className={styles.dataTable}>
-                <thead>
-                  <tr>
-                    <th>Expense Category</th>
-                    <th className="text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expenses.length === 0 ? (
-                    <tr><td colSpan="2" className="text-center">No expenses logged today</td></tr>
-                  ) : (
-                    expenses.map((exp, idx) => (
-                      <tr key={idx}>
-                        <td>{exp.title} ({exp.category || 'Other'})</td>
-                        <td className="text-right"><CurrencySymbol /> {(exp.amount || 0).toFixed(2)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+          {/* 12. Store Expenses */}
+          <div className={styles.sectionCard}>
+            <h3 className={styles.sectionTitle}>Store Expenses summary</h3>
+            <table className={styles.dataTable}>
+              <thead>
+                <tr>
+                  <th>Expense Category</th>
+                  <th className="text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {expenses.length === 0 ? (
+                  <tr><td colSpan="2" className="text-center">No expenses logged today</td></tr>
+                ) : (
+                  expenses.map((exp, idx) => (
+                    <tr key={idx}>
+                      <td>{exp.title} ({exp.category || 'Other'})</td>
+                      <td className="text-right"><CurrencySymbol /> {(exp.amount || 0).toFixed(2)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
 
-          {/* 14. Discounts & Refunds */}
+          {/* 14. Discount Diagnostics (Full Width) */}
+          <div className={styles.sectionCard} style={{ marginBottom: '1.5rem' }}>
+            <h3 className={styles.sectionTitle}>Discount Diagnostics</h3>
+            <table className={styles.dataTable}>
+              <tbody>
+                <tr>
+                  <td>Order Discount</td>
+                  <td className="text-right"><CurrencySymbol /> {(metrics.orderDiscounts || 0).toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td>Settle Discount</td>
+                  <td className="text-right"><CurrencySymbol /> {(metrics.settleDiscounts || 0).toFixed(2)}</td>
+                </tr>
+                <tr className={styles.highlightRow}>
+                  <td>Total Discounts</td>
+                  <td className="text-right"><CurrencySymbol /> {(metrics.totalDiscount || 0).toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* 15. Credit Ledger & Refund Diagnostics Grid */}
           <div className={styles.gridTwoCols}>
+            {/* Left: Credit Ledger Summary */}
             <div className={styles.sectionCard}>
-              <h3 className={styles.sectionTitle}>Discount Diagnostics</h3>
+              <h3 className={styles.sectionTitle}><CreditCard size={16} /> Credit Ledger Summary</h3>
               <table className={styles.dataTable}>
                 <tbody>
                   <tr>
-                    <td>Coupon / Promo Codes</td>
-                    <td className="text-right"><CurrencySymbol /> {metrics.couponDiscounts.toFixed(2)}</td>
+                    <td>Opening Credit Outstanding</td>
+                    <td className="text-right"><CurrencySymbol /> {(metrics.openingOutstanding || 0).toFixed(2)}</td>
                   </tr>
                   <tr>
-                    <td>Manual POS Discounts</td>
-                    <td className="text-right"><CurrencySymbol /> {metrics.manualDiscounts.toFixed(2)}</td>
+                    <td>(+) Today's Credit Sales</td>
+                    <td className="text-right"><CurrencySymbol /> {(metrics.todayCreditSales || 0).toFixed(2)}</td>
+                  </tr>
+                  <tr style={{ color: '#059669' }}>
+                    <td>(-) Today's Credit Collections</td>
+                    <td className="text-right">- <CurrencySymbol /> {(metrics.todayCreditSettled || 0).toFixed(2)}</td>
+                  </tr>
+                  <tr style={{ color: '#059669' }}>
+                    <td>(-) Today's Credit Returns / Cancellations</td>
+                    <td className="text-right">- <CurrencySymbol /> {(metrics.todayCreditReturned || 0).toFixed(2)}</td>
                   </tr>
                   <tr className={styles.highlightRow}>
-                    <td>Total Discounts</td>
-                    <td className="text-right"><CurrencySymbol /> {metrics.totalDiscount.toFixed(2)}</td>
+                    <td>Closing Credit Outstanding</td>
+                    <td className="text-right"><CurrencySymbol /> {(metrics.closingOutstanding || 0).toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
 
+            {/* Right: Refund & Returns Diagnostics */}
             <div className={styles.sectionCard}>
               <h3 className={styles.sectionTitle}>Refund & Returns Diagnostics</h3>
               <table className={styles.dataTable}>
@@ -1145,88 +1228,14 @@ export default function ZReport() {
                   </tr>
                   <tr>
                     <td>Total Amount Refunded</td>
-                    <td className="text-right"><CurrencySymbol /> {metrics.refundAmount.toFixed(2)}</td>
+                    <td className="text-right"><CurrencySymbol /> {(metrics.refundAmount || 0).toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
 
-          {/* 17. Financial Flow Reconciliation */}
-          <div className={styles.sectionCard}>
-            <h3 className={styles.sectionTitle}><ShieldCheck size={16} /> Financial Flow Reconciliation</h3>
-            <div className={styles.flowWrapper}>
-              <div className={styles.flowNode}>
-                <span>Gross Sales</span>
-                <strong><CurrencySymbol /> {metrics.grossSales.toFixed(2)}</strong>
-              </div>
-              <div className={styles.flowArrow}>↓</div>
-              <div className={styles.flowNode} style={{ color: '#DC2626' }}>
-                <span>Discounts</span>
-                <strong>- <CurrencySymbol /> {metrics.totalDiscount.toFixed(2)}</strong>
-              </div>
-              <div className={styles.flowArrow}>↓</div>
-              <div className={styles.flowNode} style={{ color: '#10B981' }}>
-                <span>Net Sales</span>
-                <strong><CurrencySymbol /> {metrics.netSales.toFixed(2)}</strong>
-              </div>
-              <div className={styles.flowArrow}>↓</div>
-              <div className={styles.flowNode}>
-                <span>VAT Collected</span>
-                <strong>+ <CurrencySymbol /> {metrics.vatCollected.toFixed(2)}</strong>
-              </div>
-              <div className={styles.flowArrow}>↓</div>
-              <div className={styles.flowNode} style={{ background: '#EFF6FF', border: '1px solid #BFDBFE' }}>
-                <span>Grand Total (Net + VAT)</span>
-                <strong><CurrencySymbol /> {metrics.grandTotal.toFixed(2)}</strong>
-              </div>
-              <div className={styles.flowArrow}>↓</div>
-              <div className={styles.flowNode} style={{ background: '#ECFDF5', border: '1px solid #A7F3D0' }}>
-                <span>Collected Amount</span>
-                <strong><CurrencySymbol /> {metrics.totalCollected.toFixed(2)}</strong>
-              </div>
-              <div className={styles.flowArrow}>↓</div>
-              <div className={styles.flowNode} style={{ color: '#DC2626' }}>
-                <span>Pending Balance (On Account)</span>
-                <strong><CurrencySymbol /> {metrics.creditSales.toFixed(2)}</strong>
-              </div>
-            </div>
-          </div>
 
-          {/* 18. Audit Information */}
-          <div className={styles.sectionCard}>
-            <h3 className={styles.sectionTitle}>Audit Log Metadata</h3>
-            <div className={styles.metaGrid}>
-              <div>
-                <span className={styles.metaLabel}>Device Name</span>
-                <span className={styles.metaVal}>POS-Terminal-01</span>
-              </div>
-              <div>
-                <span className={styles.metaLabel}>Software Version</span>
-                <span className={styles.metaVal}>v3.4.1</span>
-              </div>
-              <div>
-                <span className={styles.metaLabel}>Database Version</span>
-                <span className={styles.metaVal}>SQLite 3.39</span>
-              </div>
-              <div>
-                <span className={styles.metaLabel}>Backup Status</span>
-                <span className={styles.metaVal} style={{ color: '#10B981', fontWeight: 800 }}>Synced (Cloud)</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Day Close Manager Override Action Button */}
-          <div className={`${styles.actionRow} no-print`} style={{ display: 'flex', justifyContent: 'center', marginTop: '1.5rem', gap: '1rem' }}>
-            <button 
-              className={styles.closeDayBtn} 
-              style={{ background: isDayClosed ? '#64748B' : '#DC2626', color: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', fontWeight: 700, cursor: 'pointer' }}
-              onClick={() => setShowManagerPinModal(true)}
-            >
-              {isDayClosed ? <Unlock size={16} /> : <Lock size={16} />}
-              <span>{isDayClosed ? 'Reopen Business Day' : 'Lock & Close Business Day (Z Report)'}</span>
-            </button>
-          </div>
 
           {/* Print specific thermal footer */}
           <div className="print-only" style={{ marginTop: '2rem', textAlign: 'center', fontSize: '0.75rem', color: '#94A3B8', borderTop: '1px dashed #E2E8F0', paddingTop: '1rem' }}>
@@ -1280,18 +1289,21 @@ export default function ZReport() {
               </button>
               <button 
                 className={styles.confirmBtn} 
-                onClick={() => {
+                onClick={async () => {
                   if (managerPinInput === (settings.orderDeletePin || '0000')) {
                     setShowManagerPinModal(false);
                     setManagerPinInput('');
                     if (!isDayClosed) {
-                      localStorage.setItem(`day_close_status_${selectedDate}`, 'CLOSED');
-                      setIsDayClosed(true);
-                      alert(`Business Day ${formatDate(selectedDate)} closed and locked successfully!`);
+                      setCloseActualCash(actualCashCounted);
+                      setCloseWithdrawals(cashWithdrawals);
+                      setCloseType('Day Close');
+                      setShowCloseReconcileModal(true);
                     } else {
-                      localStorage.removeItem(`day_close_status_${selectedDate}`);
-                      setIsDayClosed(false);
-                      alert(`Business Day ${formatDate(selectedDate)} unlocked.`);
+                      const now = new Date();
+                      const tzOffset = now.getTimezoneOffset() * 60000;
+                      const localIso = new Date(now.getTime() - tzOffset).toISOString().slice(0, 16);
+                      setReopenTime(localIso);
+                      setShowReopenChoiceModal(true);
                     }
                   } else {
                     setManagerPinError('Incorrect PIN code.');
@@ -1299,6 +1311,270 @@ export default function ZReport() {
                 }}
               >
                 Verify PIN
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Z-Report Reopen Mode Choice Modal */}
+      {showReopenChoiceModal && (
+        <div className={styles.modalOverlay} style={{ zIndex: 10000 }}>
+          <div className={styles.modalContainer} style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h3>Z-Report Actions</h3>
+              <button className={styles.closeModalBtn} onClick={() => setShowReopenChoiceModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className={styles.modalBody} style={{ padding: '2rem 1.5rem', textAlign: 'center' }}>
+              <Lock size={40} color="#3B82F6" style={{ margin: '0 auto 1.5rem auto' }} />
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0F172A', marginBottom: '0.5rem' }}>Select Z-Report Open Method</h2>
+              <p style={{ fontSize: '0.85rem', color: '#64748B', lineHeight: 1.5, marginBottom: '1.5rem' }}>
+                Would you like to resume and modify the last closed session, or start a brand new Z-report session (keeping the previous one in History)?
+              </p>
+
+              <div style={{ marginBottom: '1.5rem', textAlign: 'left' }}>
+                <label style={{ fontWeight: 600, fontSize: '0.85rem', color: '#475569', display: 'block', marginBottom: '0.25rem' }}>Confirm Reopen Date & Time</label>
+                <input
+                  type="datetime-local"
+                  value={reopenTime}
+                  onChange={(e) => setReopenTime(e.target.value)}
+                  className={styles.reconcileInput}
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <button
+                  onClick={async () => {
+                    if (latestClosedReportId) {
+                      // Fetch details first to restore cash drawer inputs
+                      const repRes = await window.electronAPI.dbQuery(
+                        `SELECT * FROM z_reports WHERE id = ?`, [latestClosedReportId]
+                      );
+                      if (repRes.success && repRes.data.length > 0) {
+                        const rep = repRes.data[0];
+                        localStorage.setItem(`opening_float_active`, rep.openingFloat);
+                        localStorage.setItem(`actual_cash_active`, rep.actualCashCounted);
+                        localStorage.setItem(`cash_withdrawal_active`, rep.cashWithdrawals);
+                      }
+                      
+                      if (reopenTime) {
+                        localStorage.setItem('active_session_start_time', new Date(reopenTime).toISOString());
+                      }
+
+                      // Delete report from DB so it's resumed as active
+                      const deleteRes = await window.electronAPI.dbQuery(
+                        `DELETE FROM z_reports WHERE id = ?`, [latestClosedReportId]
+                      );
+                      if (deleteRes.success) {
+                        localStorage.removeItem(`view_active_session_${selectedDate}`);
+                        setShowReopenChoiceModal(false);
+                        setIsDayClosed(false);
+                        alert("Session reopened and resumed successfully!");
+                        fetchZReportData();
+                      } else {
+                        alert("Failed to resume session: " + deleteRes.error);
+                      }
+                    }
+                  }}
+                  style={{
+                    padding: '0.85rem',
+                    background: '#EFF6FF',
+                    color: '#2563EB',
+                    border: '1px solid #BFDBFE',
+                    borderRadius: '10px',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  Resume Last Session (Reopen & Edit)
+                </button>
+
+                <button
+                  onClick={async () => {
+                    // Start new session
+                    localStorage.setItem(`opening_float_active`, '200');
+                    localStorage.setItem(`actual_cash_active`, '200');
+                    localStorage.setItem(`cash_withdrawal_active`, '0');
+                    localStorage.setItem(`view_active_session_${selectedDate}`, 'true');
+                    
+                    if (reopenTime) {
+                      localStorage.setItem('active_session_start_time', new Date(reopenTime).toISOString());
+                    }
+
+                    setShowReopenChoiceModal(false);
+                    setIsDayClosed(false);
+                    alert("New active Z-report session started!");
+                    fetchZReportData();
+                  }}
+                  style={{
+                    padding: '0.85rem',
+                    background: '#2563EB',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    boxShadow: '0 4px 6px -1px rgba(37, 99, 235, 0.2)'
+                  }}
+                >
+                  Start New Session (Lock Previous)
+                </button>
+              </div>
+            </div>
+            <div className={styles.modalFooter} style={{ background: '#F8FAFC', padding: '1rem' }}>
+              <button className={styles.cancelBtn} onClick={() => setShowReopenChoiceModal(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Z-Report Close Reconciliation Modal */}
+      {showCloseReconcileModal && (
+        <div className={styles.modalOverlay} style={{ zIndex: 10000 }}>
+          <div className={styles.modalContainer} style={{ maxWidth: '440px' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h3>Reconcile Cash Drawer & Close Day</h3>
+              <button className={styles.closeModalBtn} onClick={() => setShowCloseReconcileModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className={styles.modalBody} style={{ padding: '1.5rem' }}>
+              <div style={{ background: '#F8FAFC', borderRadius: '8px', padding: '1rem', border: '1px solid #E2E8F0', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+                  <span>Opening Float:</span>
+                  <strong><CurrencySymbol /> {openingFloat.toFixed(2)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+                  <span>Expected Cash:</span>
+                  <strong><CurrencySymbol /> {metrics.expectedCash.toFixed(2)}</strong>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                  <label style={{ fontWeight: 600, fontSize: '0.85rem', color: '#475569', display: 'block', marginBottom: '0.25rem' }}>Closing Type</label>
+                  <select
+                    value={closeType}
+                    onChange={(e) => setCloseType(e.target.value)}
+                    className={styles.reconcileInput}
+                    style={{ width: '100%', padding: '0.375rem 0.5rem', boxSizing: 'border-box' }}
+                  >
+                    <option value="Day Close">Day Close (End of Day)</option>
+                    <option value="Shift Close">Shift Close (End of Shift)</option>
+                  </select>
+                </div>
+
+                <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                  <label style={{ fontWeight: 600, fontSize: '0.85rem', color: '#475569', display: 'block', marginBottom: '0.25rem' }}>(-) Cash Withdrawals / Drops</label>
+                  <input
+                    type="number"
+                    value={closeWithdrawals}
+                    onChange={(e) => setCloseWithdrawals(parseFloat(e.target.value) || 0)}
+                    className={styles.reconcileInput}
+                    style={{ textAlign: 'left' }}
+                  />
+                </div>
+
+                <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                  <label style={{ fontWeight: 600, fontSize: '0.85rem', color: '#475569', display: 'block', marginBottom: '0.25rem' }}>Actual Cash Counted</label>
+                  <input
+                    type="number"
+                    value={closeActualCash}
+                    onChange={(e) => setCloseActualCash(parseFloat(e.target.value) || 0)}
+                    className={styles.reconcileInput}
+                    style={{ textAlign: 'left' }}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className={styles.modalFooter}>
+              <button className={styles.cancelBtn} onClick={() => setShowCloseReconcileModal(false)}>
+                Cancel
+              </button>
+              <button
+                className={styles.confirmBtn}
+                style={{ background: '#DC2626', color: 'white' }}
+                onClick={async () => {
+                  const finalExpected = openingFloat + metrics.cashSales + metrics.cashCreditCollections + metrics.cashAdvancePayments + metrics.cashInTrans - metrics.cashRefunds - metrics.cashExpenses - closeWithdrawals;
+                  const finalDiff = closeActualCash - finalExpected;
+
+                  // Update metrics object with final reconciled values to store in detailsJson
+                  const finalMetrics = {
+                    ...metrics,
+                    expectedCash: finalExpected,
+                    cashDifference: finalDiff,
+                    cashWithdrawals: closeWithdrawals,
+                    actualCashCounted: closeActualCash
+                  };
+
+                  const endTimeVal = new Date().toISOString();
+                  const insertRes = await window.electronAPI.dbQuery(
+                    `INSERT INTO z_reports (id, startTime, endTime, businessDate, openingFloat, actualCashCounted, expectedCash, cashDifference, cashWithdrawals, closedBy, ordersCount, grossSales, netSales, vatCollected, grandTotal, totalCollected, cashSales, cardSales, bankTransfer, nomodSales, creditSales, partialPayments, otherPayments, detailsJson)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                      `ZR-${Date.now()}`,
+                      activeSessionStartTime,
+                      endTimeVal,
+                      selectedDate,
+                      openingFloat,
+                      closeActualCash,
+                      finalExpected,
+                      finalDiff,
+                      closeWithdrawals,
+                      user.name || 'Manager',
+                      metrics.totalOrders,
+                      metrics.grossSales,
+                      metrics.netSales,
+                      metrics.vatCollected,
+                      metrics.grandTotal,
+                      metrics.totalCollected,
+                      metrics.cashSales,
+                      metrics.cardSales,
+                      metrics.bankTransfer,
+                      metrics.nomodSales,
+                      metrics.creditSales,
+                      metrics.partialPayments,
+                      metrics.otherPayments,
+                      JSON.stringify({
+                        metrics: finalMetrics,
+                        closingType: closeType,
+                        newCustomersCount,
+                        returningCustomersCount,
+                        creditCustomersCount,
+                        vipCustomersCount,
+                        topCustomer,
+                        totalCustomersCount,
+                        expenses,
+                        orders,
+                        transactions,
+                        allDeletedOrders
+                      })
+                    ]
+                  );
+
+                  if (insertRes.success) {
+                    setIsDayClosed(true);
+                    localStorage.removeItem(`opening_float_active`);
+                    localStorage.removeItem(`actual_cash_active`);
+                    localStorage.removeItem(`cash_withdrawal_active`);
+                    localStorage.removeItem(`view_active_session_${selectedDate}`);
+                    setShowCloseReconcileModal(false);
+                    alert(`Business Day ${formatDate(selectedDate)} closed and locked successfully!`);
+                    fetchZReportData();
+                  } else {
+                    alert("Failed to save Z Report: " + insertRes.error);
+                  }
+                }}
+              >
+                Confirm & Lock Z-Report
               </button>
             </div>
           </div>
