@@ -102,13 +102,14 @@ function writeCustomerState(db, customerId, state, timestamp) {
 }
 
 function addAuditEvent(db, { event, details, actor, timestamp }) {
+  const detailsStr = typeof details === 'string' ? details : JSON.stringify(details || {});
   db.prepare(`
     INSERT INTO audit_logs (id, event, details, userId, userRole, timestamp, device)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     `AUDIT-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
     event,
-    JSON.stringify(details),
+    detailsStr,
     actor?.id || actor?.name || 'System',
     actor?.role || 'system',
     timestamp,
@@ -311,6 +312,28 @@ function settleCustomerBalance(db, {
           VALUES (?, ?, ?, NULL, ?, ?, ?, ?)
         `).run(reference.paymentId, shopId, customerId, amount, timestamp, timestamp, reference.paymentReference);
       }
+
+      db.prepare(`
+        INSERT INTO account_transactions
+          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+      `).run(
+        accountTransactionId,
+        shopId,
+        accountType,
+        transactionType,
+        category,
+        amount,
+        `${receiptDescription} — Customer ${customerId}`,
+        timestamp.replace('T', ' ').substring(0, 19),
+        timestamp,
+        icon,
+        bankAccountId,
+        actor.name || actor.id || 'System',
+        actor.id || 'SYSTEM',
+        actor.role || 'system'
+      );
+      transactionIds.push(accountTransactionId);
       paymentIds.push(reference.paymentId);
     };
 
@@ -347,8 +370,7 @@ function settleCustomerBalance(db, {
     let advanceCreated = 0;
     normalisedSplits.forEach((split) => {
       // Insert a single, unified transaction in account_transactions for the entire split amount
-      const reference = getNextFinanceReference(db, 'SET');
-      const accountTransactionId = reference.accountTransactionId;
+      const accountTransactionId = `FIN-TXN-SET-${Date.now()}-${Math.floor(Math.random() * 100000)}-${split.method}`;
       
       db.prepare(`
         INSERT INTO account_transactions
@@ -391,13 +413,13 @@ function settleCustomerBalance(db, {
 
       if (remaining <= EPSILON) return;
 
-      const reference = getNextFinanceReference(db, 'ADV');
+      const advReference = getNextFinanceReference(db, 'ADV');
       db.prepare(`
         INSERT INTO payments
           (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference)
         VALUES (?, ?, NULL, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?)
-      `).run(reference.paymentId, customerId, shopId, remaining, split.method, timestamp, timestamp, reference.paymentReference);
-      paymentIds.push(reference.paymentId);
+      `).run(advReference.paymentId, customerId, shopId, remaining, split.method, timestamp, timestamp, advReference.paymentReference);
+      paymentIds.push(advReference.paymentId);
       advanceCreated = roundCurrency(advanceCreated + remaining);
     });
 

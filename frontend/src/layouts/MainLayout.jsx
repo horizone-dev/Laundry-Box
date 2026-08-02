@@ -340,10 +340,14 @@ export default function MainLayout() {
         const selectedPrinter = options.printerName || (isTag ? tagPrinter : billingPrinter);
 
         if (!selectedPrinter) {
-          alert(isTag
-            ? "No default tag printer is selected. Please configure it in settings under the Printers tab."
-            : "No default printer is selected. Please configure a default printer in settings under the Printers tab."
-          );
+          if (!options.silent) {
+            alert(isTag
+              ? "No default tag printer is selected. Please configure it in settings under the Printers tab."
+              : "No default printer is selected. Please configure a default printer in settings under the Printers tab."
+            );
+          } else {
+            console.warn("Silent appPrint skipped: No printer selected.");
+          }
           return;
         }
 

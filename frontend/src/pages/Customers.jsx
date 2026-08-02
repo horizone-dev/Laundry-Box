@@ -1127,7 +1127,7 @@ export default function Customers() {
         }
       } catch (err) {
         console.error("Payment error:", err);
-        alert("Payment failed. Please check console for details.");
+        alert("Payment failed: " + err.message);
       }
     }
   };
@@ -1448,7 +1448,21 @@ export default function Customers() {
 
     setLoading(true);
     const timestamp = getLocalISOString();
-    const idsToDelete = payment.paymentIds && payment.paymentIds.length > 0 ? [...payment.paymentIds] : [payment.id];
+    let idsToDelete = payment.paymentIds && payment.paymentIds.length > 0 ? [...payment.paymentIds] : [payment.id];
+    const timePrefix = payment.createdAt ? String(payment.createdAt).substring(0, 19) : '';
+    if (timePrefix && selectedCustomer?.id) {
+      const sameTimeRes = await window.electronAPI.dbQuery(
+        "SELECT id FROM payments WHERE customerId = ? AND createdAt LIKE ? AND method != 'System Auto' AND method != 'Discount'",
+        [selectedCustomer.id, `${timePrefix}%`]
+      );
+      if (sameTimeRes.success && sameTimeRes.data.length > 0) {
+        sameTimeRes.data.forEach(p => {
+          if (!idsToDelete.includes(p.id)) {
+            idsToDelete.push(p.id);
+          }
+        });
+      }
+    }
     const totalAmount = payment.amount || 0;
 
     try {
@@ -2388,23 +2402,17 @@ export default function Customers() {
           && !isAdvanceAllocation(p)
           && !String(p.paymentReference || '').startsWith('DEL-')
           && !deletedRefs.has(p.paymentReference || p.id)
+          && !deletedRefs.has(p.id)
         ));
 
-        // A customer makes one Quick Settle payment, even when the accounting
-        // engine applies it to several places (orders, opening due or advance).
-        // Those rows share the exact settlement timestamp, so show their total
-        // as one customer-facing receipt. Other payment types remain separate.
+        // Group split payment records created in the same transaction timestamp
+        // so that a multi-method or multi-order payment is shown and deleted as ONE single entry.
         const groupedMap = {};
         payments.forEach(p => {
-          const timestampKey = p.createdAt || p.id;
+          const timestampKey = p.createdAt ? String(p.createdAt).substring(0, 19) : p.id;
           const referencePrefix = String(p.paymentReference || p.id || '').split('-')[0] || 'PAY';
-          const isSettlementReceipt = ['SET', 'ACC', 'ADV'].includes(referencePrefix);
-          const purposeKey = isSettlementReceipt
-            ? `settlement:${timestampKey}`
-            : (p.orderId
-              ? `order:${p.orderId}`
-              : `account:${referencePrefix}:${p.paymentReference || p.id}`);
-          const key = `${timestampKey}:${purposeKey}`;
+          const isSettlementReceipt = ['SET', 'ACC', 'ADV', 'QPY', 'RV', 'PAY'].includes(referencePrefix);
+          const key = `payment_event:${timestampKey}`;
 
           if (!groupedMap[key]) {
             groupedMap[key] = {
@@ -2419,7 +2427,9 @@ export default function Customers() {
             if (!groupedMap[key].methodsList.includes(p.method)) {
               groupedMap[key].methodsList.push(p.method);
             }
-            groupedMap[key].paymentIds.push(p.id);
+            if (!groupedMap[key].paymentIds.includes(p.id)) {
+              groupedMap[key].paymentIds.push(p.id);
+            }
           }
         });
 
@@ -2434,9 +2444,7 @@ export default function Customers() {
             method: finalMethod,
             amount: p.totalAmount,
             // A grouped settlement is safe to view or delete as one event.
-            // Editing only one of its underlying allocation rows would make
-            // its shown total disagree with the accounting records.
-            isSettlementGroup: Boolean(p.isSettlementGroup && p.paymentIds.length > 1)
+            isSettlementGroup: Boolean(p.paymentIds.length > 1)
           };
         });
 
@@ -3008,7 +3016,7 @@ export default function Customers() {
 
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '0.5rem 0' }}>
                 <span style={{ color: '#64748B', fontWeight: 600 }}>Total Discount</span>
-                <span style={{ fontWeight: 700, color: '#1E293B' }}>{(selectedCustomerStats.totalDiscount || 0).toFixed(2)}</span>
+                <span style={{ fontWeight: 800, color: '#EA580C' }}>{(selectedCustomerStats.totalDiscount || 0).toFixed(2)}</span>
               </div>
             </div>
 
@@ -3229,11 +3237,6 @@ export default function Customers() {
                         <td><CurrencySymbol size={13} /> {(pay.amount || 0).toFixed(2)}</td>
                         <td style={{ fontWeight: 600 }}>
                           {getPaymentMethodLabel(pay)}
-                          {pay.bankName && (
-                            <span style={{ fontSize: '0.72rem', color: '#64748B', fontWeight: 500, display: 'block', marginTop: '2px' }}>
-                              ({pay.bankName})
-                            </span>
-                          )}
                         </td>
                         <td>
                           <span className={styles.statusPaid} style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', background: '#DCFCE7', color: '#15803D', fontSize: '0.75rem', fontWeight: 700 }}>SUCCESS</span>
@@ -3451,7 +3454,7 @@ export default function Customers() {
                               <td style={{ fontWeight: 700 }}>{settings.invoicePrefix || ''}{bill.id}</td>
                               <td>{formatDate(bill.createdAt)}</td>
                               <td><CurrencySymbol size={13} /> {item.orderTotal.toFixed(2)}</td>
-                              <td style={{ fontWeight: 800, color: 'var(--danger)' }}>
+                              <td style={{ fontWeight: 800, color: '#EA580C' }}>
                                 <CurrencySymbol size={13} /> {discVal.toFixed(2)}
                               </td>
                               <td style={{ fontWeight: 700 }}><CurrencySymbol size={13} /> {item.netPayable.toFixed(2)}</td>
@@ -3526,7 +3529,7 @@ export default function Customers() {
                               </td>
                               <td>{formatDate(p.createdAt || p.deletedAt)}</td>
                               <td>N/A</td>
-                              <td style={{ fontWeight: 800, color: '#9A3412' }}>
+                              <td style={{ fontWeight: 800, color: '#EA580C' }}>
                                 <CurrencySymbol size={13} /> {item.discount.toFixed(2)}
                               </td>
                               <td>N/A</td>
@@ -3546,7 +3549,7 @@ export default function Customers() {
                               </td>
                               <td>{formatDate(p.createdAt)}</td>
                               <td>N/A</td>
-                              <td style={{ fontWeight: 800, color: 'var(--danger)' }}>
+                              <td style={{ fontWeight: 800, color: '#EA580C' }}>
                                 <CurrencySymbol size={13} /> {item.discount.toFixed(2)}
                               </td>
                               <td>N/A</td>
@@ -3699,9 +3702,36 @@ export default function Customers() {
         {selectedInvoiceForView && (
           <div className={styles.modalOverlay} style={{ zIndex: 10000 }}>
             <div className={styles.modal} style={{ maxWidth: '800px', width: '95%', maxHeight: '90vh', overflowY: 'auto', padding: 0 }} onClick={(e) => e.stopPropagation()}>
-              <div className={styles.modalHeader} style={{ position: 'sticky', top: 0, background: 'white', zIndex: 10, padding: '1.25rem 1.5rem', borderBottom: '1px solid #E2E8F0' }}>
-                <div>
-                  <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E293B' }}>Invoice #{settings.invoicePrefix || ''}{selectedInvoiceForView.id}</h2>
+              <div className={styles.modalHeader} style={{ position: 'sticky', top: 0, background: 'white', zIndex: 10, padding: '1.25rem 1.5rem', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E293B', margin: 0 }}>Invoice #{settings.invoicePrefix || ''}{selectedInvoiceForView.id}</h2>
+                  <button
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      padding: '0.5rem 1.1rem',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: 'var(--primary)',
+                      color: 'white',
+                      fontWeight: 700,
+                      fontSize: '0.88rem',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)',
+                      transition: 'all 0.2s'
+                    }}
+                    onClick={async () => {
+                      if (window.appPrint) {
+                        await window.appPrint();
+                      } else {
+                        window.print();
+                      }
+                    }}
+                    title="Print Invoice"
+                  >
+                    <Printer size={16} /> Print
+                  </button>
                 </div>
                 <X size={24} className={styles.closeBtn} onClick={() => setSelectedInvoiceForView(null)} />
               </div>

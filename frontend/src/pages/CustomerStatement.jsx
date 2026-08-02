@@ -526,20 +526,18 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
           .reduce((sum, r) => sum + (parseFloat(r.debit) || 0) - (parseFloat(r.credit) || 0), 0);
         amtVal = amtVal + sumDiff;
       }
-      const timestampKey = p.method === 'Discount' && discountScope === 'settlement'
-        ? (p.createdAt || p.id)
-        : (p.createdAt ? p.createdAt.substring(0, 19) : p.id);
+      const timestampKey = p.createdAt ? String(p.createdAt).substring(0, 19) : p.id;
       const cleanRef = String(p.paymentReference || p.id || '');
       const refToUse = cleanRef.startsWith('DEL-') ? cleanRef.substring(4) : cleanRef;
       const referencePrefix = refToUse.split('-')[0] || 'PAY';
       const isSettlementPayment = p.method !== 'Discount'
-        && ['SET', 'ACC', 'ADV'].includes(referencePrefix);
+        && ['SET', 'ACC', 'ADV', 'QPY', 'RV', 'PAY'].includes(referencePrefix);
       const isReverse = amtVal < 0;
       const purposeKey = p.method === 'Discount'
         ? (discountScope === 'settlement'
-          ? (isReverse ? `reverse-settlement-discount:${referencePrefix}` : 'settlement-discount')
-          : (isReverse ? `reverse-discount:${referencePrefix}` : `discount:${referencePrefix}`))
-        : (isReverse ? `reverse-payment:${referencePrefix}` : `payment:${p.method || referencePrefix}`);
+          ? (isReverse ? `reverse-settlement-discount:${timestampKey}` : 'settlement-discount')
+          : (isReverse ? `reverse-discount:${timestampKey}` : `discount:${referencePrefix}`))
+        : (isReverse ? `reverse-payment:${timestampKey}` : `payment:${p.method || referencePrefix}`);
       const key = `${timestampKey}:${purposeKey}`;
 
       if (!groupedPaymentsMap[key]) {
@@ -614,7 +612,11 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
             : `Order discount for ${cleanOrderRef}`;
         }
       } else if (p.debit > 0) {
-        itemsSummary = `Reversed payment for ${cleanOrderRef || 'account'}`;
+        if (p.isSettlementPayment) {
+          itemsSummary = 'Reversed customer settlement';
+        } else {
+          itemsSummary = `Reversed payment for ${cleanOrderRef || 'account'}`;
+        }
       } else if (p.isSettlementPayment) {
         itemsSummary = 'Customer settlement';
       } else if (p.orderIds.length > 1) {
@@ -1180,8 +1182,8 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
                                 ? <RotateCcw size={13} color="#F59E0B" />
                                 : row.type === 'opening_balance'
                                   ? <TrendingUp size={13} color="#7C3AED" />
-                                  : row.type === 'discount' || row.type === 'discount_cancel'
-                                    ? <Percent size={13} color="#EF4444" />
+                                  : row.type === 'discount' || row.type === 'discount_cancel' || row.paymentMethod === 'Discount'
+                                    ? <Percent size={13} color="#EA580C" />
                                     : <Wallet size={13} color="#10B981" />
                           }
                           {['order', 'deleted_order', 'cancellation', 'refund', 'discount', 'discount_cancel'].includes(row.type) ? (
@@ -1207,10 +1209,10 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
                           <div className={styles.descSub}>{row.itemsSummary}</div>
                         )}
                       </td>
-                      <td className={`${styles.numCol} ${styles.debitCell}`}>
+                      <td className={`${styles.numCol} ${styles.debitCell}`} style={(row.type === 'discount' || row.type === 'discount_cancel' || row.paymentMethod === 'Discount') ? { color: '#EA580C', fontWeight: 800 } : {}}>
                         {row.debit > 0 ? <><CurrencySymbol size={11} /> {row.debit.toFixed(2)}</> : <span className={styles.dash}>—</span>}
                       </td>
-                      <td className={`${styles.numCol} ${styles.creditCell}`}>
+                      <td className={`${styles.numCol} ${styles.creditCell}`} style={(row.type === 'discount' || row.type === 'discount_cancel' || row.paymentMethod === 'Discount') ? { color: '#EA580C', fontWeight: 800 } : {}}>
                         {row.credit > 0 ? <><CurrencySymbol size={11} /> {row.credit.toFixed(2)}</> : <span className={styles.dash}>—</span>}
                       </td>
                       <td className={`${styles.numCol} ${row.runningBalance < 0 ? styles.balanceAdvNum : row.runningBalance > 0 ? styles.balanceDueNum : styles.balanceZero}`}>

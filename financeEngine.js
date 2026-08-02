@@ -60,9 +60,10 @@ function parsePaymentSnapshot(value) {
   }
 }
 
-function isUsablePayment(payment) {
+function isUsablePayment(payment, returnedOrderIds = new Set()) {
   if (!payment || !isSuccessfulPayment(payment)) return false;
   if (SYNTHETIC_PAYMENT_METHODS.has(payment.method)) return false;
+  if (payment.orderId && returnedOrderIds.has(payment.orderId)) return false;
   return true;
 }
 
@@ -103,7 +104,7 @@ function calculateCustomerFinancialState({
     }
   });
 
-  const usablePayments = allPayments.filter((payment) => isUsablePayment(payment));
+  const usablePayments = allPayments.filter((payment) => isUsablePayment(payment, returnedOrderIds));
   const paymentCredits = usablePayments.reduce(
     (sum, payment) => sum + toAmount(payment.amount),
     0

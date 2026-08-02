@@ -423,11 +423,17 @@ export default function Invoice() {
     if (electronAPI?.printInvoice && order) {
       const printerName = printerType === 'tag' ? settings.tagPrinter : settings.billingPrinter;
 
+      const isAutoPrint = searchParams.get('print') === 'true' || forceSilent === true;
+
       if (!printerName) {
-        alert(printerType === 'tag'
-          ? "No default tag printer selected. Configure it in Settings → Printers."
-          : "No default printer selected. Configure it in Settings → Printers."
-        );
+        if (!isAutoPrint) {
+          alert(printerType === 'tag'
+            ? "No default tag printer selected. Configure it in Settings → Printers."
+            : "No default printer selected. Configure it in Settings → Printers."
+          );
+        } else {
+          console.warn("Silent auto-print skipped: No default printer selected in Settings.");
+        }
         return;
       }
 

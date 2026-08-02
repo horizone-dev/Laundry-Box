@@ -3073,7 +3073,7 @@ export default function POS() {
       {/* Success Modal */}
       {showSuccessModal && lastOrderInfo && (
         <div className={styles.modalOverlay}>
-          {printReceipt && (
+          {printReceipt && settings.billingPrinter && (
             <iframe 
               src={`#/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=true`} 
               style={{ display: 'none' }} 
