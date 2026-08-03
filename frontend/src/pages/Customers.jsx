@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Search, UserPlus, Download, Calendar, MoreHorizontal,
   TrendingUp, ChevronLeft, ChevronRight, X, Phone, MapPin, CreditCard, Wallet, DollarSign, Trash2, Users, Edit2, Lock, Unlock,
-  Printer, AlertTriangle, Eye, ArrowUpDown, ChevronDown, Check, Percent, QrCode, Landmark, ShieldCheck, Layers, FileText
+  Printer, AlertTriangle, AlertCircle, Eye, ArrowUpDown, ChevronDown, Check, Percent, QrCode, Landmark, ShieldCheck, Layers, FileText
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import WhatsAppIcon from '../components/WhatsAppIcon';
@@ -2383,14 +2383,23 @@ export default function Customers() {
         );
         let payments = paymentsRes.success ? paymentsRes.data : [];
         setRawPayments(payments);
-        const discountPayments = payments.filter(p => p.method === 'Discount');
-        setCustomerDiscounts(discountPayments);
+
         // Find all references that have been deleted/reversed
         const deletedRefs = new Set(
           payments
             .filter(p => String(p.paymentReference || '').startsWith('DEL-'))
             .map(p => String(p.paymentReference || '').substring(4))
         );
+
+        // Active discount payments excluding deleted/reversed ones
+        const discountPayments = payments.filter(p => (
+          p.method === 'Discount'
+          && (p.amount || 0) > 0
+          && !String(p.paymentReference || '').startsWith('DEL-')
+          && !deletedRefs.has(p.paymentReference || p.id)
+          && !deletedRefs.has(p.id)
+        ));
+        setCustomerDiscounts(discountPayments);
 
         // Payments tab shows only amounts actually received from the customer.
         // An Advance row linked to an order is merely the later application of
@@ -3387,9 +3396,20 @@ export default function Customers() {
                       // Settlement discounts have no invoice of their own and
                       // remain standalone. Order discounts are already shown
                       // in the linked order row above.
+                      const renderDeletedRefs = new Set(
+                        (rawPayments || [])
+                          .filter(p => String(p.paymentReference || '').startsWith('DEL-'))
+                          .map(p => String(p.paymentReference || '').substring(4))
+                      );
                       const groupedDiscountsMap = {};
                       customerDiscounts
-                        .filter(p => !p.orderId && (p.amount || 0) > 0)
+                        .filter(p => (
+                          !p.orderId
+                          && (p.amount || 0) > 0
+                          && !String(p.paymentReference || '').startsWith('DEL-')
+                          && !renderDeletedRefs.has(p.paymentReference || p.id)
+                          && !renderDeletedRefs.has(p.id)
+                        ))
                         .forEach(p => {
                           const timestampKey = p.createdAt || p.id;
                           const key = `settlement_disc:${timestampKey}`;

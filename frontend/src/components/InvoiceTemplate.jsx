@@ -224,6 +224,18 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
   const docTitleAr = settings.invoiceDocTitleAr || 'فاتورة ضريبية';
   const footerTagline = settings.invoiceFooterTagline || '';
 
+  // ── Dynamic company name font size (scales down to a minimum font size, then wraps to second row) ──
+  const getCompanyNameFontSize = (name = '', baseRem) => {
+    const len = (name || '').length;
+    if (len <= 12) return baseRem;
+    if (len <= 18) return baseRem * 0.85;
+    return baseRem * 0.75; // Minimum font size is 75% of base
+  };
+  // base sizes per template (in rem numbers)
+  const horizonNameFontSize = `${getCompanyNameFontSize(settings.companyName, 1.25)}rem`;
+  const thermalNameFontSize = `${getCompanyNameFontSize(settings.companyName, 0.9)}rem`;
+  const standardNameFontSize = `${getCompanyNameFontSize(settings.companyName, 1.15)}rem`;
+
   const fullAddress = [
     settings.address,
     [settings.city, settings.emirate, settings.country].filter(Boolean).join(', ')
@@ -326,7 +338,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             </div>
           )}
           <div className={styles.horizonHeader} style={!hasLogo ? { textAlign: 'center' } : {}}>
-            <div className={styles.horizonBrandName}>{settings.companyName || 'HORIZON LAUNDRY'}</div>
+            <div className={styles.horizonBrandName} style={{ fontSize: horizonNameFontSize, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: '1.2' }}>{settings.companyName || 'HORIZON LAUNDRY'}</div>
             {showBilingual && settings.companyNameAr && (
               <div className={styles.horizonBrandNameAr} style={!hasLogo ? { textAlign: 'center' } : {}} dir="rtl">
                 {settings.companyNameAr}
@@ -361,7 +373,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
 
         {/* Double-bordered title block */}
         <div className={styles.horizonTitleBlock}>
-          <div className={styles.horizonTitleText}>{docTitle}</div>
+          <div className={styles.horizonTitleText} style={{ fontSize: `${getCompanyNameFontSize(settings.companyName, 1.15)}rem`, whiteSpace: 'nowrap' }}>{docTitle}</div>
         </div>
 
         {/* Metadata section */}
@@ -429,9 +441,10 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                           {item.addons.map((a, ai) => {
                             const aName = typeof a === 'string' ? a : a?.name;
                             const aPrice = typeof a === 'string' ? 0 : a?.price || 0;
+                            const showAddonPrice = settings?.invoiceShowAddonPrice !== false;
                             return (
                               <span key={ai} className={styles.horizonItemSubText} style={{ color: '#2563EB', fontWeight: 'bold' }}>
-                                + {aName}{aPrice > 0 ? ` (${aPrice.toFixed(2)})` : ''}
+                                + {aName}{showAddonPrice && aPrice > 0 ? ` (${aPrice.toFixed(2)})` : ''}
                               </span>
                             );
                           })}
@@ -576,7 +589,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             <div className={styles.horizonTrackText} style={{ marginBottom: '0.35rem', textAlign: 'center', fontSize: '0.78rem', fontWeight: 800 }}>
               Tracking Code: {order.id}
             </div>
-            <QRCodeSVG value={`https://hzl.io/t/${order.id}`} size={85} />
+            <QRCodeSVG className="qr-code-svg" value={`https://hzl.io/t/${order.id}`} size={85} />
           </div>
         )}
 
@@ -617,7 +630,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             </div>
           )}
           <div className={styles.thermalCompanyBlock}>
-            <div className={styles.thermalCompanyName}>{settings.companyName || 'Laundry Box'}</div>
+            <div className={styles.thermalCompanyName} style={{ fontSize: thermalNameFontSize, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: '1.2' }}>{settings.companyName || 'Laundry Box'}</div>
             {showBilingual && settings.companyNameAr && (
               <div className={styles.thermalCompanyNameAr} dir="rtl">{settings.companyNameAr}</div>
             )}
@@ -630,7 +643,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           </div>
           {showQrCode && (
             <div className={styles.thermalQrCorner}>
-              <QRCodeSVG value={`https://hzl.io/t/${order.id}`} size={48} />
+              <QRCodeSVG className="qr-code-svg" value={`https://hzl.io/t/${order.id}`} size={48} />
             </div>
           )}
         </div>
@@ -645,7 +658,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               )
             )}
             <div className={styles.companyInfoEn}>
-              <h2>{settings.companyName || 'Laundry Box'}</h2>
+              <h2 style={{ fontSize: standardNameFontSize, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: '1.2' }}>{settings.companyName || 'Laundry Box'}</h2>
               <p className={styles.companyAddress}>{fullAddress || 'Address not set'}</p>
               {settings.phone && <p className={styles.companyContact}>Tel: {settings.phone}</p>}
               {settings.email && <p className={styles.companyContact}>Email: {settings.email}</p>}
@@ -667,7 +680,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
         <div className={styles.taxInvoiceTitleBlock}>
           <div className={styles.dividerLine} style={{ borderColor: accentColor }}></div>
           <div className={styles.titleTextContainer}>
-            <h1 style={{ color: accentColor }}>{showBilingual && !isCompact && !isCompact2 ? `${docTitle} / ${docTitleAr}` : docTitle}</h1>
+            <h1 style={{ color: accentColor, fontSize: `${getCompanyNameFontSize(settings.companyName, 1.25)}rem`, whiteSpace: 'nowrap' }}>{showBilingual && !isCompact && !isCompact2 ? `${docTitle} / ${docTitleAr}` : docTitle}</h1>
           </div>
           <div className={styles.dividerLine} style={{ borderColor: accentColor }}></div>
         </div>
@@ -775,7 +788,8 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                     + {addonsList.map(a => {
                       const aName = typeof a === 'string' ? a : a?.name;
                       const aPrice = typeof a === 'string' ? 0 : a?.price || 0;
-                      return `${aName}${aPrice > 0 ? ` (${aPrice.toFixed(2)})` : ''}`;
+                      const showAddonPrice = settings?.invoiceShowAddonPrice !== false;
+                      return `${aName}${showAddonPrice && aPrice > 0 ? ` (${aPrice.toFixed(2)})` : ''}`;
                     }).join(', ')}
                   </div>
                 )}
@@ -896,11 +910,16 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                 <td>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
                     {item.addons && item.addons.length > 0 ? (
-                      item.addons.map((a, ai) => (
-                        <div key={ai} style={{ fontSize: '0.72rem', color: '#2563EB', fontWeight: 700, lineHeight: 1.4 }}>
-                          + {a}
-                        </div>
-                      ))
+                      item.addons.map((a, ai) => {
+                        const aName = typeof a === 'string' ? a : a?.name;
+                        const aPrice = typeof a === 'string' ? 0 : a?.price || 0;
+                        const showAddonPrice = settings?.invoiceShowAddonPrice !== false;
+                        return (
+                          <div key={ai} style={{ fontSize: '0.72rem', color: '#2563EB', fontWeight: 700, lineHeight: 1.4 }}>
+                            + {aName}{showAddonPrice && aPrice > 0 ? ` (${aPrice.toFixed(2)})` : ''}
+                          </div>
+                        );
+                      })
                     ) : (
                       <span style={{ color: '#94A3B8', fontSize: '0.75rem' }}>-</span>
                     )}
@@ -922,13 +941,14 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                         const typesList = item.types && item.types.length > 0
                           ? item.types
                           : item.sub
-                            ? item.sub.split(' + ').map(n => ({ name: n }))
+                            ? item.sub.split(' + ').map(n => ({ name: n, price: 0 }))
                             : [];
+                        const showTreatmentPrice = settings?.invoiceShowTreatmentPrice !== false;
                         return typesList.length > 0 ? (
                           <div>
                             {typesList.map((t, ti) => (
                               <div key={ti} style={{ fontSize: '0.75rem', color: '#1E293B', fontWeight: 600, lineHeight: 1.4 }} className={styles.itemServiceType}>
-                                {t.name}
+                                {t.name}{showTreatmentPrice && t.price > 0 ? ` (${t.price.toFixed(2)})` : ''}
                               </div>
                             ))}
                           </div>
@@ -1099,7 +1119,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               {showQrCode && (
                 <div className={styles.complianceQrBox}>
                   <div className={styles.qrWrapper}>
-                    <QRCodeSVG value={`https://hzl.io/t/${order.id}`} size={85} />
+                    <QRCodeSVG className="qr-code-svg" value={`https://hzl.io/t/${order.id}`} size={85} />
                   </div>
                 </div>
               )}

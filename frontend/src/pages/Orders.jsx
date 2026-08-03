@@ -5,7 +5,7 @@ import {
   X, Printer, CreditCard, Wallet, User, History, QrCode, Phone, DollarSign, Truck, Trash2, AlertTriangle, Info, Lock, Edit3, Layers,
   RefreshCw, Send, MoreVertical, ExternalLink, Download
 } from 'lucide-react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import WhatsAppIcon from '../components/WhatsAppIcon';
 import Pagination from '../components/Pagination';
@@ -42,6 +42,7 @@ const STATUS_COLORS = {
 
 export default function Orders() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const querySearch = searchParams.get('search') || '';
   const { settings, formatDate } = useSettings();
@@ -292,11 +293,20 @@ export default function Orders() {
     return () => window.removeEventListener('nomod-payment-success', handleNomodSuccess);
   }, [nomodLinkModal]);
 
+  const handleCloseOrderModal = () => {
+    setSelectedOrder(null);
+    if (searchParams.has('openOrder')) {
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete('openOrder');
+      navigate(`/orders${newParams.toString() ? '?' + newParams.toString() : ''}`, { replace: true });
+    }
+  };
+
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setShowModal(false);
-        setSelectedOrder(null);
+        handleCloseOrderModal();
         setShowPayModal(false);
         setShowPinModal(false);
         setPinValue('');
@@ -309,7 +319,7 @@ export default function Orders() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [searchParams]);
 
   useEffect(() => {
     const isAnyOpen = selectedOrder || showStatusModal || showPayModal || showPinModal || showCreditWarning || showManagerPinModal;
@@ -462,6 +472,40 @@ export default function Orders() {
   useEffect(() => {
     setSearchTerm(querySearch);
   }, [querySearch]);
+
+  useEffect(() => {
+    const openOrderId = searchParams.get('openOrder') || location.state?.openOrder || sessionStorage.getItem('openOrderIdOnReturn');
+    if (!openOrderId) return;
+
+    sessionStorage.removeItem('openOrderIdOnReturn');
+
+    const cleanOpenId = openOrderId.toString().replace('#', '').trim().toLowerCase();
+
+    const foundInList = orders.find(o => {
+      const cleanId = (o.id || '').toString().replace('#', '').trim().toLowerCase();
+      const cleanBill = (o.billNumber || '').toString().replace('#', '').trim().toLowerCase();
+      return cleanId === cleanOpenId || cleanBill === cleanOpenId;
+    });
+
+    if (foundInList) {
+      setSelectedOrder(foundInList);
+    } else if (window.electronAPI?.dbQuery) {
+      window.electronAPI.dbQuery(
+        `SELECT orders.*, customers.name as customerName, customers.phone as customerPhone
+         FROM orders
+         LEFT JOIN customers ON orders.customerId = customers.id
+         WHERE orders.id = ? OR orders.billNumber = ? OR orders.id = ? OR orders.billNumber = ?`,
+        [openOrderId, openOrderId, cleanOpenId, cleanOpenId]
+      ).then(res => {
+        const rows = res.results || res.data || [];
+        if (res.success && rows.length > 0) {
+          setSelectedOrder(rows[0]);
+        }
+      }).catch(err => {
+        console.error("Failed to load openOrder from DB:", err);
+      });
+    }
+  }, [searchParams, location.state, orders]);
 
   useEffect(() => {
     fetchOrders();
@@ -822,8 +866,12 @@ export default function Orders() {
   };
 
   const handlePrint = (orderId) => {
-    // Navigate to invoice page which handles printing
-    navigate(`/invoice/${encodeURIComponent(orderId)}`);
+    const cleanId = orderId ? orderId.toString().replace('#', '') : '';
+    sessionStorage.setItem('openOrderIdOnReturn', cleanId);
+    // Navigate to invoice page with print=true and fromOrders=true
+    navigate(`/invoice/${encodeURIComponent(cleanId)}?print=true&fromOrders=true`, {
+      state: { fromOrders: true, openOrder: cleanId }
+    });
   };
 
   const handleDownloadPDF = (orderId) => {
@@ -1689,7 +1737,7 @@ export default function Orders() {
           <div className={styles.detailsModal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div className={styles.headerLeft}>
-                <button className={styles.backBtn} onClick={() => setSelectedOrder(null)}>
+                <button className={styles.backBtn} onClick={handleCloseOrderModal}>
                   <ChevronLeft size={20} />
                 </button>
                 <div>

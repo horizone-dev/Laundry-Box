@@ -6,13 +6,14 @@ export default function ZReportAutoCloseScheduler() {
   const { settings } = useSettings();
 
   useEffect(() => {
-    if (!window.electronAPI?.dbQuery || !settings || !settings.zReportAutoCloseEnabled) {
+    if (!window.electronAPI?.dbQuery || !settings || !settings.zReportAutoCloseEnabled || settings.zReportClosingType === 'Shift Close') {
       return;
     }
 
     const checkAndAutoClose = async () => {
       try {
-        const todayStr = new Date().toISOString().split('T')[0];
+        const nowForBusinessDate = new Date();
+        const todayStr = `${nowForBusinessDate.getFullYear()}-${String(nowForBusinessDate.getMonth() + 1).padStart(2, '0')}-${String(nowForBusinessDate.getDate()).padStart(2, '0')}`;
         
         // 1. Check if today is already closed
         const todayClosedRes = await window.electronAPI.dbQuery(

@@ -8,7 +8,7 @@ const staffSchema = new mongoose.Schema({
   phone: { type: String, unique: true, sparse: true },
   password: { type: String },
   pin: { type: String, required: true, unique: true },
-  role: { type: String, enum: ['super_admin', 'manager', 'cashier'], default: 'cashier' },
+  role: { type: String, enum: ['super_admin', 'admin', 'manager', 'cashier'], default: 'cashier' },
   branchId: { type: String },
 }, { 
   timestamps: true,

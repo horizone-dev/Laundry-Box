@@ -402,7 +402,7 @@
 }
 
 .companyInfoEn h2 {
-  font-size: 1.4rem;
+  font-size: 1.15rem;
   font-weight: 800;
   color: #0F172A;
   margin: 0 0 0.4rem;
@@ -438,7 +438,7 @@
 }
 
 .companySideAr h2 {
-  font-size: 1.4rem;
+  font-size: 1.15rem;
   font-weight: 800;
   color: #0F172A;
   margin: 0 0 0.4rem;
@@ -861,7 +861,7 @@
 }
 
 .companyInfoCompact h2 {
-  font-size: 1.05rem;
+  font-size: 0.9rem;
   font-weight: 800;
   color: #0F172A;
   margin: 0 0 0.15rem 0;
@@ -1195,7 +1195,7 @@
     margin: 0.1rem 0 !important;
   }
   .titleTextContainer h1 {
-    font-size: 0.95rem !important;
+    font-size: 1.15rem !important;
     letter-spacing: 0.5px !important;
   }
   .trnCenteredBlock {
@@ -1452,14 +1452,14 @@
   gap: 0.1rem;
 }
 .thermalCompanyName {
-  font-size: 1rem;
+  font-size: 0.9rem;
   font-weight: 900;
   color: #000;
   letter-spacing: 0.5px;
   line-height: 1.2;
 }
 .thermalCompanyNameAr {
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 800;
   color: #000;
   line-height: 1.3;
@@ -1772,7 +1772,7 @@
 }
 
 .horizonBrandName {
-  font-size: 1.75rem;
+  font-size: 1.25rem;
   font-weight: 900;
   letter-spacing: 1px;
   text-transform: uppercase;
@@ -1780,7 +1780,7 @@
 }
 
 .horizonBrandNameAr {
-  font-size: 1.45rem;
+  font-size: 1.05rem;
   font-weight: 700;
   margin-top: 0.1rem;
 }
@@ -1810,9 +1810,9 @@
 }
 
 .horizonTitleText {
-  font-size: 1.2rem;
+  font-size: 1.15rem;
   font-weight: 800;
-  letter-spacing: 3px;
+  letter-spacing: 2px;
   text-transform: uppercase;
   color: #000000;
 }

@@ -67,6 +67,10 @@ exports.signup = async (req, res) => {
   try {
     const { shopId, name, phone, password, pin, userId, role } = req.body;
 
+    if (role === 'super_admin') {
+      return res.status(400).json({ error: 'Assigning the Super Admin role is not allowed.' });
+    }
+
     if (!isMongoConnected()) {
       await initLocalDb();
       const users = loadLocalUsers();
@@ -266,6 +270,21 @@ exports.getUsers = async (req, res) => {
 exports.updateUser = async (req, res) => {
   try {
     const { name, phone, role, password, pin } = req.body;
+
+    if (role === 'super_admin') {
+      let currentRole = '';
+      if (!isMongoConnected()) {
+        const users = loadLocalUsers();
+        const userObj = users.find(u => u._id === req.params.id);
+        if (userObj) currentRole = userObj.role;
+      } else {
+        const userObj = await User.findById(req.params.id);
+        if (userObj) currentRole = userObj.role;
+      }
+      if (currentRole !== 'super_admin') {
+        return res.status(400).json({ error: 'Assigning the Super Admin role is not allowed.' });
+      }
+    }
 
     if (!isMongoConnected()) {
       await initLocalDb();

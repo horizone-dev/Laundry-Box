@@ -500,7 +500,13 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
 
     const groupedPaymentsMap = {};
     const statementPayments = payments;
+    const seenDelRefs = new Set();
     statementPayments.filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto').forEach(p => {
+      const cleanRef = String(p.paymentReference || p.id || '');
+      if (cleanRef.startsWith('DEL-')) {
+        if (seenDelRefs.has(cleanRef)) return;
+        seenDelRefs.add(cleanRef);
+      }
       const discountScope = p.method === 'Discount' ? getDiscountScope(p) : 'order';
       let amtVal = parseFloat(p.amount) || 0;
       if (p.method === 'Discount' && discountScope === 'order') {
@@ -527,7 +533,6 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
         amtVal = amtVal + sumDiff;
       }
       const timestampKey = p.createdAt ? String(p.createdAt).substring(0, 19) : p.id;
-      const cleanRef = String(p.paymentReference || p.id || '');
       const refToUse = cleanRef.startsWith('DEL-') ? cleanRef.substring(4) : cleanRef;
       const referencePrefix = refToUse.split('-')[0] || 'PAY';
       const isSettlementPayment = p.method !== 'Discount'
@@ -813,8 +818,11 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
   /* ─── KPIs ────────────────────────────────────────── */
   const totalBilled = orders.filter(o => !o.isDeleted).reduce((s, o) => s + (o.totalAmount || 0), 0);
   const totalPaid = ledgerRows.totalPaid || 0;
+  // The visible statement and its KPIs must share one ledger source. Customer
+  // balance caches can refresh independently after a payment, briefly showing
+  // totals that disagree with the rows below.
   const outstanding = Math.max(0, ledgerRows.totalBalance || 0);
-  const advanceCredit = ledgerRows.totalBalance < 0 ? Math.abs(ledgerRows.totalBalance) : 0;
+  const advanceCredit = Math.max(0, -(ledgerRows.totalBalance || 0));
   const orderCount = orders.filter(o => !o.isDeleted).length;
 
   /* ─── Export CSV ──────────────────────────────────── */

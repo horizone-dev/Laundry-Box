@@ -56,6 +56,18 @@ export default function Settings() {
   const [apiKeyPinValue, setApiKeyPinValue] = useState('');
   const [apiKeyPinError, setApiKeyPinError] = useState('');
 
+  const verifySettingsPin = async (pin) => {
+    try {
+      if (window.electronAPI?.verifySettingsPin) {
+        return await window.electronAPI.verifySettingsPin(pin);
+      }
+      const response = await authApi.verifyManagerPin(pin);
+      return { success: response.data.valid };
+    } catch (error) {
+      return { success: false, error: 'PIN verification failed. Please try again.' };
+    }
+  };
+
   const handleVerifyPinForApiKey = async () => {
     setApiKeyPinError('');
     if (!apiKeyPinValue) {
@@ -63,35 +75,14 @@ export default function Settings() {
       return;
     }
     try {
-      const configuredPin = settings.orderDeletePin || '0000';
-      if (apiKeyPinValue === configuredPin) {
+      const pinResult = await verifySettingsPin(apiKeyPinValue);
+      if (pinResult?.success) {
         setIsApiKeyUnlocked(true);
         setShowApiKeyPinModal(false);
         setApiKeyPinValue('');
         return;
       }
-      
-      let isValid = false;
-      if (window.electronAPI?.verifyManagerPin) {
-        const userRole = user.role ? (user.role === 'super_admin' ? 'Super Admin' : user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ')) : 'Staff';
-        const userId = `${userRole}: ${user.name || user.username || 'User'}`;
-        const res = await window.electronAPI.verifyManagerPin({
-          pin: apiKeyPinValue,
-          userId
-        });
-        isValid = res && res.success;
-      } else {
-        const verifyRes = await authApi.verifyManagerPin(apiKeyPinValue);
-        isValid = verifyRes.data.valid;
-      }
-
-      if (isValid) {
-        setIsApiKeyUnlocked(true);
-        setShowApiKeyPinModal(false);
-        setApiKeyPinValue('');
-      } else {
-        setApiKeyPinError("Invalid Manager PIN!");
-      }
+      setApiKeyPinError(pinResult?.error || "Invalid Manager PIN!");
     } catch (err) {
       if (err.response && (err.response.status === 401 || err.response.status === 403)) {
         setApiKeyPinError("Invalid Manager PIN!");
@@ -600,6 +591,8 @@ export default function Settings() {
         invoiceShowTerms: true,
         invoiceShowBankDetails: true,
         invoiceShowBilingual: true,
+        invoiceShowTreatmentPrice: true,
+        invoiceShowAddonPrice: true,
         invoiceTermsText: '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.'
       };
     }
@@ -883,7 +876,7 @@ export default function Settings() {
       if (toReset.workflowStatuses) summaryList.push('Order Workflow Stages: Restored default 10 statuses');
       if (toReset.presetDamageNotes) summaryList.push('Damage Notes: Restored default 6 templates');
       if (toReset.companyInfo) summaryList.push('Company & Shop Info: Cleared details');
-      if (toReset.taxSettings) summaryList.push('Tax & UAE Compliance: Restored 5% VAT exclusive');
+      if (toReset.taxSettings) summaryList.push('Tax & UAE Compliance: Restored 5% VAT inclusive');
       if (toReset.billTemplates) summaryList.push('Bill Templates & Terms: Restored standard invoice template');
       if (toReset.waTemplates) summaryList.push('WhatsApp Templates: Restored default message formats');
       if (toReset.printers) summaryList.push('Printers Configuration: Cleared tag and billing printers');
@@ -958,7 +951,7 @@ export default function Settings() {
 
     if (window.electronAPI?.dbQuery) {
       for (const item of loggedKeys) {
-        const prev = originalSettings[item.key];
+        const prev = originalSettings?.[item.key];
         const curr = settings[item.key];
         if (prev !== curr) {
           const prevValStr = typeof prev === 'boolean' ? (prev ? 'ON' : 'OFF') : String(prev || '');
@@ -992,7 +985,7 @@ export default function Settings() {
         </div>
         <div className={styles.headerActions}>
           <button className={styles.saveBtn} onClick={handleSaveAllChanges}>
-            <CheckCircle size={18} /> Save All Changes
+            <CheckCircle size={18} /> Confirm Changes
           </button>
         </div>
       </div>
@@ -2305,6 +2298,7 @@ export default function Settings() {
                     { label: 'Terms & Conditions', sub: 'Print note at bottom', key: 'invoiceShowTerms' },
                     { label: 'Bank Transfer Details', sub: 'Payment bank accounts', key: 'invoiceShowBankDetails' },
                     { label: 'Treatment Prices', sub: 'Show prices of treatments on invoice', key: 'invoiceShowTreatmentPrice' },
+                    { label: 'Add-on Prices', sub: 'Show prices of add-ons on invoice', key: 'invoiceShowAddonPrice' },
                     ...(settings.invoiceTemplate === 'compact 2' ? [
                       { label: 'Previous Balance', sub: 'Show customer statement balance', key: 'invoiceShowPrevBalance' },
                       { label: 'Expected Delivery / Ready for Collection', sub: 'Show expected delivery date', key: 'invoiceShowDelivery' },
@@ -3020,6 +3014,26 @@ export default function Settings() {
                       onClick={() => updateSettings({ autoPrint: !settings.autoPrint })}
                     >
                       <div className={styles.switchHandle}></div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #F1F5F9', paddingTop: '1.25rem' }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>POS Auto Print Copies</h4>
+                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Number of receipt copies to print automatically on POS order completion (POS only)</p>
+                    </div>
+                    <div style={{ width: '160px' }}>
+                      <CustomSelect
+                        value={String(settings.autoPrintCopies || 1)}
+                        onChange={(e) => updateSettings({ autoPrintCopies: parseInt(e.target.value, 10) || 1 })}
+                        options={[
+                          { value: '1', label: '1 Copy' },
+                          { value: '2', label: '2 Copies' },
+                          { value: '3', label: '3 Copies' },
+                          { value: '4', label: '4 Copies' },
+                          { value: '5', label: '5 Copies' }
+                        ]}
+                      />
                     </div>
                   </div>
 
@@ -3838,7 +3852,7 @@ export default function Settings() {
                 <button
                   className={styles.secondaryBtn}
                   style={{ flex: 1 }}
-                  onClick={() => {
+                  onClick={async () => {
                     setShowPinModal(false);
                     setEnteredPin('');
                     setPinError('');
@@ -3849,15 +3863,15 @@ export default function Settings() {
                 <button
                   className={styles.primaryBtn}
                   style={{ flex: 1 }}
-                  onClick={() => {
-                    const correctPin = settings.orderDeletePin || '0000';
-                    if (enteredPin === correctPin) {
+                  onClick={async () => {
+                    const result = await verifySettingsPin(enteredPin);
+                    if (result?.success) {
                       setIsCreditLimitUnlocked(true);
                       setShowPinModal(false);
                       setEnteredPin('');
                       setPinError('');
                     } else {
-                      setPinError('Incorrect PIN! Access Denied.');
+                      setPinError(result?.error || 'Incorrect PIN! Access Denied.');
                     }
                   }}
                 >
@@ -3916,7 +3930,7 @@ export default function Settings() {
                 <button
                   className={styles.secondaryBtn}
                   style={{ flex: 1 }}
-                  onClick={() => {
+                  onClick={async () => {
                     setShowResetPinModal(false);
                     setEnteredResetPin('');
                     setResetPinError('');
@@ -3927,9 +3941,9 @@ export default function Settings() {
                 <button
                   className={styles.primaryBtn}
                   style={{ flex: 1, background: '#DC2626' }}
-                  onClick={() => {
-                    const correctPin = settings.orderDeletePin || '0000';
-                    if (enteredResetPin === correctPin) {
+                  onClick={async () => {
+                    const result = await verifySettingsPin(enteredResetPin);
+                    if (result?.success) {
                       setShowResetPinModal(false);
                       setEnteredResetPin('');
                       setResetPinError('');
@@ -3946,7 +3960,7 @@ export default function Settings() {
                         }
                       }
                     } else {
-                      setResetPinError('Incorrect PIN! Access Denied.');
+                      setResetPinError(result?.error || 'Incorrect PIN! Access Denied.');
                     }
                   }}
                 >

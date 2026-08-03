@@ -963,7 +963,10 @@ export default function Services({ defaultTab = 'list' }) {
                   <div className={styles.pricingGridTitle}>Service Types & Pricing</div>
                   {types.map(type => {
                     const isChecked = selectedTypesList.includes(type.id);
-                    const typePrice = typePricingMap[type.id] !== undefined ? typePricingMap[type.id] : '';
+                    const rawVal = typePricingMap[type.id];
+                    const typePrice = (rawVal !== undefined && rawVal !== null && rawVal !== '' && parseFloat(rawVal) !== 0)
+                      ? String(rawVal)
+                      : '';
                     return (
                       <div key={type.id} className={styles.pricingGridRow}>
                         <label className={styles.gridCheckLabel}>
@@ -986,15 +989,17 @@ export default function Services({ defaultTab = 'list' }) {
                           <div className={styles.gridPriceInputWrapper}>
                             <span className={styles.gridCurrency}>{settings.currencySymbol || 'AED'}</span>
                             <input
-                              type="number"
-                              step="0.01"
+                              type="text"
+                              inputMode="decimal"
                               required
                               placeholder="0.00"
                               className={styles.gridPriceInput}
                               value={typePrice}
                               onChange={(e) => {
                                 const val = e.target.value;
-                                setTypePricingMap(prev => ({ ...prev, [type.id]: val }));
+                                if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                                  setTypePricingMap(prev => ({ ...prev, [type.id]: val }));
+                                }
                               }}
                             />
                           </div>

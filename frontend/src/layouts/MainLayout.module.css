@@ -22,7 +22,8 @@
   white-space: nowrap;
 }
 
-.sidebar:hover {
+.sidebar:hover,
+.sidebar.pinned {
   width: var(--sidebar-width);
   padding: 1.5rem 1.25rem;
 }
@@ -39,18 +40,26 @@
 
 .sidebar:hover .sidebarText,
 .sidebar:hover .chevron,
-.sidebar:hover .trialStatusSidebar {
+.sidebar:hover .trialStatusSidebar,
+.sidebar.pinned .sidebarText,
+.sidebar.pinned .chevron,
+.sidebar.pinned .trialStatusSidebar {
   display: inline-block !important;
   opacity: 1;
   pointer-events: auto;
   transition: opacity 0.3s ease;
 }
 
-.sidebar:hover .subMenu {
+.sidebar:hover .subMenu,
+.sidebar.pinned .subMenu {
   display: flex !important;
   opacity: 1;
   pointer-events: auto;
   transition: opacity 0.3s ease;
+}
+
+.sidebar:not(:hover):not(.pinned) .subMenu {
+  display: none;
 }
 
 .logo {
@@ -70,6 +79,32 @@
   color: #FFFFFF;
   text-transform: uppercase;
   letter-spacing: 1px;
+  width: 100%;
+}
+
+.pinBtn {
+  background: none;
+  border: none;
+  color: #94A3B8;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.pinBtn:hover {
+  color: #FFFFFF;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.pinBtnActive {
+  color: #60A5FA !important;
+  background-color: rgba(37, 99, 235, 0.25);
 }
 
 .logoImg {
@@ -96,7 +131,7 @@
 .logoText {
   white-space: normal !important;
   line-height: 1.25 !important;
-  font-size: 1rem !important;
+  font-size: 1rem;
   word-break: break-word !important;
   max-width: 170px !important;
 }

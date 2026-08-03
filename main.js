@@ -169,6 +169,7 @@ function createWindow() {
       contextIsolation: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
+      devTools: isDev,
       preload: preloadPath
     }
   });
@@ -233,6 +234,7 @@ function createWindow() {
   // Show window once it is fully ready
   mainWindow.once('ready-to-show', () => {
     logStartup('BrowserWindow: ready-to-show event fired. Displaying main window.');
+    mainWindow.maximize();
     mainWindow.show();
   });
 
@@ -604,6 +606,36 @@ function validateQueryCreditLimit(db, query, params) {
     }
   }
 }
+
+const settingsPinAttempts = new Map();
+
+ipcMain.handle('verify-settings-pin', (event, { pin }) => {
+  const senderId = event.sender.id;
+  const attempt = settingsPinAttempts.get(senderId) || { failures: 0, lockedUntil: 0 };
+  const now = Date.now();
+  if (attempt.lockedUntil > now) {
+    return { success: false, error: 'Too many attempts. Please wait before trying again.' };
+  }
+
+  try {
+    const row = getDB().prepare('SELECT settings FROM shops LIMIT 1').get();
+    const settings = row?.settings ? JSON.parse(row.settings) : {};
+    if (String(pin) === String(settings.orderDeletePin || '0000')) {
+      settingsPinAttempts.delete(senderId);
+      return { success: true };
+    }
+  } catch (err) {
+    console.error('verify-settings-pin error:', err);
+    return { success: false, error: 'Unable to verify PIN.' };
+  }
+
+  const failures = attempt.failures + 1;
+  settingsPinAttempts.set(senderId, {
+    failures,
+    lockedUntil: failures >= 5 ? now + (5 * 60 * 1000) : 0
+  });
+  return { success: false, error: failures >= 5 ? 'Too many attempts. Please wait 5 minutes.' : 'Incorrect PIN! Access Denied.' };
+});
 
 ipcMain.handle('verify-manager-pin', async (event, { pin, customerId, customerName, orderId, creditLimit, outstandingBalance, orderAmount, exceededAmount, userId }) => {
   try {
@@ -2548,7 +2580,7 @@ ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent, 
 
     const result = await new Promise((resolve) => {
       printWin.webContents.print({
-        silent: silent !== false,   // Respect user preference (defaults to true)
+        silent: silent === true,   // Only suppress dialog when explicitly told to print silently
         printBackground: true,
         margins: { marginType: 'none' },
         scaleFactor: 100,

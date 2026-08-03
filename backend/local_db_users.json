@@ -1,5 +1,16 @@
 [
   {
+    "_id": "local_admin_default",
+    "name": "admin",
+    "phone": "+971000000000",
+    "userId": "admin",
+    "password": "$2b$10$8dZeMh.sHEa2X932AMUlzuAYFTYjwiN9aO1pPG3zvbAdGGGGs7DRC",
+    "pin": "$2b$10$GHWXrdVSdpWDWml9QNC1Wu5PSwE6gwA8L9laH3UlS1WmNSnxI05sO",
+    "role": "admin",
+    "shopId": "SHOP_01",
+    "createdAt": "2026-08-03T12:00:00.000Z"
+  },
+  {
     "_id": "local_admin_1",
     "name": "Horizon inc",
     "phone": "+9710588851680",

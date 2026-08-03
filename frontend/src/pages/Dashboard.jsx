@@ -444,10 +444,12 @@ export default function Dashboard() {
 
   // Get current user role
   let role = 'Manager';
+  let showFinancials = false;
   try {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
     if (user.role) {
       role = user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ');
+      showFinancials = user.role === 'admin' || user.role === 'super_admin';
     }
   } catch (e) {}
   const getLateOrdersCount = () => {
@@ -493,63 +495,69 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Top Metrics Grid (6 cards) ────────────────────── */}
-      <div className={styles.statsGrid}>
-        <KPIItem title="Today Revenue" value={<><CurrencySymbol size={16} /> {stats.revenue.toFixed(2)}</>} trend={stats.revenueTrend.val} isUp={stats.revenueTrend.isUp} icon={<DollarSign size={20} />} iconBg="#ECFDF4" iconColor="#10B981" />
+      {/* ── Top Metrics Grid ────────────────────── */}
+      <div className={styles.statsGrid} style={{ gridTemplateColumns: showFinancials ? 'repeat(6, 1fr)' : 'repeat(4, 1fr)' }}>
+        {showFinancials && (
+          <KPIItem title="Today Revenue" value={<><CurrencySymbol size={16} /> {stats.revenue.toFixed(2)}</>} trend={stats.revenueTrend.val} isUp={stats.revenueTrend.isUp} icon={<DollarSign size={20} />} iconBg="#ECFDF4" iconColor="#10B981" />
+        )}
         <KPIItem title="Orders Today" value={stats.ordersCount} trend={stats.ordersTrend.val} isUp={stats.ordersTrend.isUp} icon={<ShoppingBag size={20} />} iconBg="#EFF6FF" iconColor="#3B82F6" />
         <KPIItem title="Pending Orders" value={stats.pendingCount} trend={stats.pendingTrend.val} isUp={!stats.pendingTrend.isUp} icon={<Clock size={20} />} iconBg="#FFF7ED" iconColor="#F97316" />
         <KPIItem title="Out for Delivery" value={stats.outForDeliveryCount} trend={stats.deliveryTrend.val} isUp={stats.deliveryTrend.isUp} icon={<Truck size={20} />} iconBg="#F5F3FF" iconColor="#8B5CF6" />
         <KPIItem title="Completed Today" value={stats.completedTodayCount} trend={stats.completedTrend.val} isUp={stats.completedTrend.isUp} icon={<CheckCircle size={20} />} iconBg="#ECFDF5" iconColor="#10B981" />
-        <KPIItem title="Due Amount" value={<><CurrencySymbol size={16} /> {stats.dueAmount.toFixed(2)}</>} trend={stats.dueTrend.val} isUp={!stats.dueTrend.isUp} icon={<AlertCircle size={20} />} iconBg="#FEF2F2" iconColor="#EF4444" />
+        {showFinancials && (
+          <KPIItem title="Due Amount" value={<><CurrencySymbol size={16} /> {stats.dueAmount.toFixed(2)}</>} trend={stats.dueTrend.val} isUp={!stats.dueTrend.isUp} icon={<AlertCircle size={20} />} iconBg="#FEF2F2" iconColor="#EF4444" />
+        )}
       </div>
 
       {/* ── Middle Row ────────────────────────────────────── */}
-      <div className={styles.middleRow}>
+      <div className={styles.middleRow} style={{ gridTemplateColumns: showFinancials ? '2fr 1fr' : '1fr' }}>
         
         {/* Left: Revenue Trend */}
-        <div className={`${styles.card} ${styles.chartCard}`}>
-          <div className={styles.cardHeader}>
-            <h3>Revenue Trend</h3>
-            <div className={styles.cardSelect}>
-              <span>Last 7 Days</span>
+        {showFinancials && (
+          <div className={`${styles.card} ${styles.chartCard}`}>
+            <div className={styles.cardHeader}>
+              <h3>Revenue Trend</h3>
+              <div className={styles.cardSelect}>
+                <span>Last 7 Days</span>
+              </div>
+            </div>
+            <div style={{ width: '100%', height: 210 }}>
+              <ResponsiveContainer>
+                <AreaChart data={revenueData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.15}/>
+                      <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 600 }} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 600 }} />
+                  <Tooltip />
+                  <Area type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            <div className={styles.chartDetails}>
+              <div className={styles.chartStat}>
+                <span className={styles.statLabel}>Total Revenue</span>
+                <strong className={styles.statVal}><CurrencySymbol size={14} /> {revenueData.reduce((s, r) => s + r.revenue, 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>
+              </div>
+              <div className={styles.chartStat}>
+                <span className={styles.statLabel}>Average per Day</span>
+                <strong className={styles.statVal}><CurrencySymbol size={14} /> {(revenueData.reduce((s, r) => s + r.revenue, 0) / 7).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>
+              </div>
+              <div className={styles.chartStat}>
+                <span className={styles.statLabel}>Best Day</span>
+                <strong className={styles.statVal}>{[...revenueData].sort((a,b) => b.revenue - a.revenue)[0]?.name || 'N/A'}</strong>
+              </div>
+              <div className={styles.chartStat}>
+                <span className={styles.statLabel}>Growth</span>
+                <strong className={`${styles.statVal} ${revenueGrowth.isUp ? styles.upText : styles.downText}`}>{revenueGrowth.val}</strong>
+              </div>
             </div>
           </div>
-          <div style={{ width: '100%', height: 210 }}>
-            <ResponsiveContainer>
-              <AreaChart data={revenueData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.15}/>
-                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 600 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 600 }} />
-                <Tooltip />
-                <Area type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-          <div className={styles.chartDetails}>
-            <div className={styles.chartStat}>
-              <span className={styles.statLabel}>Total Revenue</span>
-              <strong className={styles.statVal}><CurrencySymbol size={14} /> {revenueData.reduce((s, r) => s + r.revenue, 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>
-            </div>
-            <div className={styles.chartStat}>
-              <span className={styles.statLabel}>Average per Day</span>
-              <strong className={styles.statVal}><CurrencySymbol size={14} /> {(revenueData.reduce((s, r) => s + r.revenue, 0) / 7).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>
-            </div>
-            <div className={styles.chartStat}>
-              <span className={styles.statLabel}>Best Day</span>
-              <strong className={styles.statVal}>{[...revenueData].sort((a,b) => b.revenue - a.revenue)[0]?.name || 'N/A'}</strong>
-            </div>
-            <div className={styles.chartStat}>
-              <span className={styles.statLabel}>Growth</span>
-              <strong className={`${styles.statVal} ${revenueGrowth.isUp ? styles.upText : styles.downText}`}>{revenueGrowth.val}</strong>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Center: Order Status Overview */}
         <div className={`${styles.card} ${styles.donutCard}`}>
@@ -608,15 +616,21 @@ export default function Dashboard() {
             <button className={styles.actionBtn} onClick={() => navigate('/orders/expected-delivery')}>
               <Truck size={18} /> Today Delivery List
             </button>
-            <button className={styles.actionBtn} onClick={() => navigate('/reports/customer-statement')}>
-              <FileText size={18} /> Account Statement
-            </button>
-            <button className={styles.actionBtn} onClick={() => navigate('/expenses')}>
-              <DollarSign size={18} /> Add Expense
-            </button>
-            <button className={styles.actionBtn} onClick={() => navigate('/settlement')}>
-              <CheckCircle size={18} /> Settle Payment
-            </button>
+            {showFinancials && (
+              <button className={styles.actionBtn} onClick={() => navigate('/reports/customer-statement')}>
+                <FileText size={18} /> Account Statement
+              </button>
+            )}
+            {showFinancials && (
+              <button className={styles.actionBtn} onClick={() => navigate('/expenses')}>
+                <DollarSign size={18} /> Add Expense
+              </button>
+            )}
+            {showFinancials && (
+              <button className={styles.actionBtn} onClick={() => navigate('/settlement')}>
+                <CheckCircle size={18} /> Settle Payment
+              </button>
+            )}
             <button className={styles.actionBtn} onClick={() => navigate('/orders')}>
               <Printer size={18} /> Print Invoice
             </button>
@@ -680,29 +694,31 @@ export default function Dashboard() {
         <div className={styles.rightColumn}>
           
           {/* Recent Payments */}
-          <div className={`${styles.card} ${styles.paymentsCard}`}>
-            <div className={styles.cardHeader}>
-              <h3>Recent Payments</h3>
-              <span className={styles.viewAllBtn} onClick={() => navigate('/settlement')}>View all</span>
-            </div>
-            <div className={styles.paymentsList}>
-              {recentPayments.map((p, idx) => (
-                <div key={idx} className={styles.paymentItem}>
-                  <div>
-                    <span className={styles.paymentRef}>{p.ref}</span>
-                    <span className={styles.paymentMethod}>{p.method}</span>
+          {showFinancials && (
+            <div className={`${styles.card} ${styles.paymentsCard}`}>
+              <div className={styles.cardHeader}>
+                <h3>Recent Payments</h3>
+                <span className={styles.viewAllBtn} onClick={() => navigate('/settlement')}>View all</span>
+              </div>
+              <div className={styles.paymentsList}>
+                {recentPayments.map((p, idx) => (
+                  <div key={idx} className={styles.paymentItem}>
+                    <div>
+                      <span className={styles.paymentRef}>{p.ref}</span>
+                      <span className={styles.paymentMethod}>{p.method}</span>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className={styles.paymentAmount}><CurrencySymbol size={11} /> {p.amount.toFixed(2)}</div>
+                      <span className={styles.paymentTime}>{p.timeLabel}</span>
+                    </div>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div className={styles.paymentAmount}><CurrencySymbol size={11} /> {p.amount.toFixed(2)}</div>
-                    <span className={styles.paymentTime}>{p.timeLabel}</span>
-                  </div>
-                </div>
-              ))}
-              {recentPayments.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '1rem', color: '#64748B', fontSize: '0.8rem' }}>No recent payments.</div>
-              )}
+                ))}
+                {recentPayments.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: '1rem', color: '#64748B', fontSize: '0.8rem' }}>No recent payments.</div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Top Services */}
           <div className={`${styles.card} ${styles.servicesCard}`}>

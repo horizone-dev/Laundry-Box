@@ -19,8 +19,9 @@ const Users = () => {
   
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
   const isSuperAdmin = user.role === 'super_admin';
+  const isAdmin = user.role === 'admin';
   const isManager = user.role === 'manager';
-  const isAuthorized = isSuperAdmin || isManager;
+  const isAuthorized = isSuperAdmin || isAdmin || isManager;
 
   useEffect(() => {
     if (!isAuthorized) {
@@ -97,12 +98,21 @@ const Users = () => {
   };
 
   const handleDelete = async (id) => {
+    if (id === user._id) {
+      alert("You cannot delete your own account while logged in!");
+      return;
+    }
+    if (users.length <= 1) {
+      alert("You cannot delete the last remaining user in the system!");
+      return;
+    }
     if (window.confirm('Are you sure you want to delete this user?')) {
       try {
         await axios.delete(`${AUTH_API}/users/${id}`);
         setUsers(users.filter(u => u._id !== id));
       } catch (err) {
-        alert("Failed to delete user");
+        const errorMsg = err.response?.data?.error || "Failed to delete user";
+        alert(errorMsg);
       }
     }
   };
@@ -277,7 +287,7 @@ const Users = () => {
                       <td className={styles.lastActive}>{formatDate(user.createdAt)}</td>
                       <td>
                         <div className={styles.userControl}>
-                          {(isSuperAdmin || (isManager && user.role !== 'super_admin')) && (
+                          {(isSuperAdmin || isAdmin || (isManager && user.role !== 'super_admin' && user.role !== 'admin')) && (
                             <div className={styles.controlDropdown}>
                               <button className={styles.actionBtn} onClick={() => openEdit(user)} title="Settings">
                                 <Settings size={16} />
@@ -302,7 +312,7 @@ const Users = () => {
         ) : (
           <div className={styles.rolesGrid}>
             {roles.filter(r => {
-              if (isSuperAdmin) return r.slug !== 'super_admin'; // Super Admin can see Manager and Cashier
+              if (isSuperAdmin || isAdmin) return r.slug !== 'super_admin'; // Super Admin & Admin can see Admin, Manager and Cashier
               if (isManager) return r.slug === 'cashier'; // Manager can ONLY see Cashier
               return false;
             }).map(role => (
@@ -328,9 +338,11 @@ const Users = () => {
                       <UserCheck size={14} />
                       {users.filter(u => u.role === role.slug).length} Users
                     </span>
-                    <button className={styles.editRoleBtn} onClick={() => openPermissions(role)}>
-                      Configure
-                    </button>
+                    {((isSuperAdmin || isAdmin) || (isManager && role.slug !== 'super_admin' && role.slug !== 'admin' && role.slug !== 'manager')) && (
+                      <button className={styles.editRoleBtn} onClick={() => openPermissions(role)}>
+                        Configure
+                      </button>
+                    )}
                   </div>
               </div>
             ))}
@@ -401,7 +413,7 @@ const Users = () => {
                   value={formData.role}
                   onChange={(e) => setFormData({...formData, role: e.target.value})}
                 >
-                  {isSuperAdmin && <option value="super_admin">Super Admin</option>}
+                  {(isSuperAdmin || isAdmin) && <option value="admin">Admin</option>}
                   <option value="manager">Manager</option>
                   <option value="cashier">Cashier</option>
                 </select>

@@ -24,6 +24,17 @@ function initLocalRoles() {
         }
       },
       { 
+        _id: 'role_admin',
+        name: 'Admin', 
+        slug: 'admin', 
+        isSystem: true,
+        permissions: {
+          dashboard: true, pos: true, orders: true, customers: true, 
+          services: true, reports: true, expenses: true, accounts: true, 
+          settings: true, users: true 
+        }
+      },
+      { 
         _id: 'role_manager',
         name: 'Manager', 
         slug: 'manager', 
@@ -66,6 +77,16 @@ exports.getRoles = async (req, res) => {
         { 
           name: 'Super Admin', 
           slug: 'super_admin', 
+          isSystem: true,
+          permissions: {
+            dashboard: true, pos: true, orders: true, customers: true, 
+            services: true, reports: true, expenses: true, accounts: true, 
+            settings: true, users: true 
+          }
+        },
+        { 
+          name: 'Admin', 
+          slug: 'admin', 
           isSystem: true,
           permissions: {
             dashboard: true, pos: true, orders: true, customers: true, 

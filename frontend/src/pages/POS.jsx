@@ -294,12 +294,12 @@ export default function POS() {
   const [nomodAmount, setNomodAmount] = useState('');
   const [activePaymentField, setActivePaymentField] = useState('cash'); // 'cash' | 'card' | 'upi' | 'bank' | 'nomod'
   const [nomodLinkModal, setNomodLinkModal] = useState({ show: false, url: '', linkId: '', amount: 0 });
-  const [printReceipt, setPrintReceipt] = useState(settings.autoPrint !== undefined ? settings.autoPrint : true);
+  const [printReceipt, setPrintReceipt] = useState(!!settings.autoPrint);
 
   // Keep printReceipt in sync with settings — if settings change while POS is open,
   // reset the toggle so the NEXT payment starts fresh from the new setting.
   useEffect(() => {
-    setPrintReceipt(settings.autoPrint ?? false);
+    setPrintReceipt(!!settings.autoPrint);
   }, [settings.autoPrint]);
 
   useEffect(() => {
@@ -311,7 +311,7 @@ export default function POS() {
         setCart([]);
         setSelectedCustomer(null);
         setSpecialInstructions('');
-        navigate(`/invoice/${paidOrderId}${settings.autoPrint ? '?print=true' : ''}`);
+        navigate(`/invoice/${paidOrderId}${printReceipt ? '?print=true&isPos=true' : '?print=false'}`);
       }
     };
     window.addEventListener('nomod-payment-success', handleNomodSuccess);
@@ -1462,7 +1462,7 @@ export default function POS() {
             setExpectedDeliveryDate(getTomorrowDateString());
             setExpectedDeliveryTime('17:00');
             setSpecialInstructions('');
-             navigate(`/invoice/${editOrderId.replace('#', '')}${printReceipt ? '?print=true' : '?print=false'}`);
+             navigate(`/invoice/${editOrderId.replace('#', '')}${printReceipt ? '?print=true&isPos=true' : '?print=false'}`);
             return;
           }
         }
@@ -1724,7 +1724,7 @@ export default function POS() {
         }
 
         setPendingOrderId(null);
-         navigate(`/invoice/${orderId.replace('#', '')}${printReceipt ? '?print=true' : '?print=false'}`);
+         navigate(`/invoice/${orderId.replace('#', '')}${printReceipt ? '?print=true&isPos=true' : '?print=false'}`);
       } catch (err) {
         console.error("Failed to save order:", err);
         // If DB-level credit limit check blocked the order, show the override modal
@@ -3075,7 +3075,7 @@ export default function POS() {
         <div className={styles.modalOverlay}>
           {printReceipt && settings.billingPrinter && (
             <iframe 
-              src={`#/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=true`} 
+              src={`#/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=true&isPos=true`} 
               style={{ display: 'none' }} 
               title="Silent Print Frame"
             />
@@ -3151,7 +3151,7 @@ export default function POS() {
                 <button
                   className={styles.printSuccessBtn}
                   onClick={() => {
-                    navigate(`/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=force`);
+                    navigate(`/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=force&isPos=true`);
                   }}
                 >
                   <Printer size={20} /> Print Receipt
@@ -3162,7 +3162,7 @@ export default function POS() {
                     setShowSuccessModal(false);
                     setSelectedCustomer(null);
                     // Reset toggle to settings default for the next payment session
-                    setPrintReceipt(settings.autoPrint ?? false);
+                    setPrintReceipt(!!settings.autoPrint);
                   }}
                 >
                   Done & New Order

@@ -126,7 +126,7 @@ export default function Settlement() {
     const handleNomodSuccess = (e) => {
       const { customerId } = e.detail || {};
       if (selectedCustomer && (selectedCustomer.id === customerId || customerId === 'all')) {
-        fetchCustomerDetails(selectedCustomer.id);
+        fetchCustomerSpecificData(selectedCustomer);
         if (typeof fetchCustomers === 'function') {
           fetchCustomers();
         }
@@ -1631,7 +1631,8 @@ export default function Settlement() {
                   setNomodLinkModal({ show: false, url: '', linkId: '', amount: 0 });
                   alert("Nomod payment link saved successfully. The system will verify status automatically in the background.");
                   if (selectedCustomer?.id) {
-                    fetchCustomerDetails(selectedCustomer.id);
+                    fetchCustomerSpecificData(selectedCustomer);
+                    fetchCustomers();
                   }
                 }}
               >

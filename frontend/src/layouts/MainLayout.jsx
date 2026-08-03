@@ -297,8 +297,21 @@ export default function MainLayout() {
           ? document.querySelector('.printing-tags') || document.querySelector('[class*="dressTag"]') || document.querySelector('[class*="tagCard"]')
           : document.querySelector('[class*="invoiceCard"]') || document.querySelector('[class*="thermalHeader"]')?.closest('[class*="invoiceCard"], [class*="invoice"]');
 
+        const isThermalInvoice = !isTag && printTarget && (
+          ['compact', 'compact 2', 'horizon'].includes(settings?.invoiceTemplate) ||
+          settings?.receiptPrintSize === 'thermal' ||
+          /template_(horizon|compact)/.test(String(printTarget?.className || ''))
+        );
+
         // Fallback: use whole body if no specific target found
         const sourceEl = printTarget || document.body;
+
+        // Use a standard tall page size for thermal invoices to avoid cut-off,
+        // or grow larger if the rendered content requires it.
+        const thermalHeightMicrons = Math.max(
+          600000,
+          Math.ceil(sourceEl.getBoundingClientRect().height * 264.583 + 5000)
+        );
 
         // ── 2. Deep clone the target element ──
         const clone = sourceEl.cloneNode(true);
@@ -329,7 +342,8 @@ export default function MainLayout() {
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           body, * { color: #000 !important; background-color: transparent !important; box-shadow: none !important; }
           .thermalTotalBold span, .thermalGrandTotal span { color: #000 !important; font-weight: 900 !important; }
-          svg { display: none !important; }
+          svg:not(.qr-code-svg) { display: none !important; }
+          ${isThermalInvoice || isTag ? '@page { size: 80mm auto; margin: 0; } body { width: 80mm !important; margin: 0 !important; padding: 0 !important; }' : ''}
         `;
 
         const html = clone.outerHTML || `<div>${clone.innerHTML}</div>`;
@@ -355,7 +369,8 @@ export default function MainLayout() {
           html,
           css,
           printerName: selectedPrinter,
-          silent: true
+          silent: true,
+          pageSize: (isThermalInvoice || isTag) ? { width: 80000, height: thermalHeightMicrons } : 'A5'
         });
 
         if (res && !res.success) {
@@ -369,7 +384,7 @@ export default function MainLayout() {
     return () => {
       delete window.appPrint;
     };
-  }, []);
+  }, [settings]);
 
   // Scroll to top when route changes
   useEffect(() => {
@@ -574,10 +589,6 @@ export default function MainLayout() {
     try {
       u = JSON.parse(sessionStorage.getItem('user') || '{}');
       let normalized = false;
-      if (u.role === 'admin') {
-        u.role = 'super_admin';
-        normalized = true;
-      }
       if (u.role === 'staff') {
         u.role = 'cashier';
         normalized = true;
@@ -597,10 +608,6 @@ export default function MainLayout() {
       try {
         u = JSON.parse(sessionStorage.getItem('user') || '{}');
         let normalized = false;
-        if (u.role === 'admin') {
-          u.role = 'super_admin';
-          normalized = true;
-        }
         if (u.role === 'staff') {
           u.role = 'cashier';
           normalized = true;
@@ -720,6 +727,16 @@ export default function MainLayout() {
       icon: Users,
       permissionKey: 'customers'
     },
+    {
+      label: 'Accounts',
+      icon: Wallet,
+      permissionKey: 'accounts',
+      subItems: [
+        { path: '/accounts/cash', label: 'Cash Account' },
+        { path: '/accounts/bank', label: 'Bank Account' },
+        { path: '/accounts/gateway', label: 'Payment Link' },
+      ]
+    },
     { path: '/services', label: 'Services', icon: Layers, permissionKey: 'services' },
 
     {
@@ -738,22 +755,12 @@ export default function MainLayout() {
       ]
     },
     {
-      label: 'Accounts',
-      icon: Wallet,
-      permissionKey: 'accounts',
-      subItems: [
-        { path: '/accounts/cash', label: 'Cash Account' },
-        { path: '/accounts/bank', label: 'Bank Account' },
-        { path: '/accounts/gateway', label: 'Payment Link' },
-      ]
-    },
-    {
       label: 'User & Roles',
       icon: Users,
-      roleOnly: ['super_admin', 'manager'],
+      roleOnly: ['super_admin', 'admin', 'manager'],
       subItems: [
         { path: '/users', label: 'Manage Users' },
-        { path: '/users?tab=roles', label: 'Permissions', roleOnly: ['super_admin', 'manager'] },
+        { path: '/users?tab=roles', label: 'Permissions', roleOnly: ['super_admin', 'admin', 'manager'] },
       ]
     },
     {
@@ -766,7 +773,7 @@ export default function MainLayout() {
       path: '/settings',
       label: 'Settings',
       icon: Settings,
-      roleOnly: ['super_admin', 'manager']
+      roleOnly: ['super_admin', 'admin', 'manager']
     },
   ];
 

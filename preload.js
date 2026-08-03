@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateStatus: (callback) => ipcRenderer.on('update-status', callback),
   offUpdateStatus: (callback) => ipcRenderer.off('update-status', callback),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  verifySettingsPin: (pin) => ipcRenderer.invoke('verify-settings-pin', { pin }),
   verifyManagerPin: (options) => ipcRenderer.invoke('verify-manager-pin', options),
   logOverrideRejection: (options) => ipcRenderer.invoke('log-override-rejection', options),
   requestRefocus: () => ipcRenderer.send('request-refocus'),

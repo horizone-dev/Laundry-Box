@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, X, Printer, Send, FileText, Tag, RefreshCw, AlertCircle } from 'lucide-react';
 import { useSettings } from '../store/SettingsContext';
 import InvoiceTemplate from '../components/InvoiceTemplate';
@@ -13,6 +13,7 @@ export default function Invoice() {
   const electronAPI = window.electronAPI || window.parent?.electronAPI;
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { settings, formatDate, originalSettings } = useSettings();
   const [order, setOrder] = useState(null);
@@ -23,6 +24,17 @@ export default function Invoice() {
   const [showFormatDropdown, setShowFormatDropdown] = useState(false);
   const invoiceRef = React.useRef();
   const hasAutoPrintedRef = React.useRef(false);
+
+  const handleBack = () => {
+    const fromOrders = searchParams.get('fromOrders') === 'true' || location.state?.fromOrders;
+    const orderIdToOpen = searchParams.get('openOrder') || location.state?.openOrder || (order?.id || id);
+    if (fromOrders && orderIdToOpen) {
+      const cleanOrderId = orderIdToOpen.toString().replace('#', '');
+      navigate(`/orders?openOrder=${encodeURIComponent(cleanOrderId)}`);
+    } else {
+      navigate(-1);
+    }
+  };
 
   useEffect(() => {
     if (pdfToast) {
@@ -421,21 +433,9 @@ export default function Invoice() {
 
   const executeNativePrint = async (forceSilent = null, printerType = 'billing') => {
     if (electronAPI?.printInvoice && order) {
-      const printerName = printerType === 'tag' ? settings.tagPrinter : settings.billingPrinter;
+      const printerName = (printerType === 'tag' ? settings.tagPrinter : settings.billingPrinter) || '';
 
-      const isAutoPrint = searchParams.get('print') === 'true' || forceSilent === true;
-
-      if (!printerName) {
-        if (!isAutoPrint) {
-          alert(printerType === 'tag'
-            ? "No default tag printer selected. Configure it in Settings → Printers."
-            : "No default printer selected. Configure it in Settings → Printers."
-          );
-        } else {
-          console.warn("Silent auto-print skipped: No default printer selected in Settings.");
-        }
-        return;
-      }
+      const isAutoPrint = searchParams.get('print') === 'true' || searchParams.get('print') === 'force' || forceSilent === true;
 
       let html = '';
       if (printerType === 'tag') {
@@ -481,46 +481,65 @@ export default function Invoice() {
           @page { margin: ${pageMargin}; ${pageSizeRule} }
         `,
         printerName,
-        silent: settings.silentPrinting !== false,
+        silent: !!printerName,   // Always silent when a printer is configured; show dialog only when no printer set
         pageSize: pageSizeArg
       });
 
-      if (res && !res.success) {
-        alert("Printing failed: " + (res.error || "Printer is offline or unavailable."));
+      if (res && res.success) {
+        setPdfToast({
+          success: true,
+          title: printerType === 'tag' ? 'Tags Sent to Printer' : 'Receipt Sent to Printer',
+          message: `Order #${order.id} invoice sent to ${printerName || 'System Printer'}`
+        });
+      } else if (res && !res.success) {
+        console.warn("Electron printInvoice failed, falling back to window.print():", res.error);
+        setPdfToast({
+          success: false,
+          title: 'Printing Failed',
+          message: res.error || 'Printer hardware error'
+        });
+        window.print();
       }
 
     } else if (window.appPrint) {
       await window.appPrint({
-        printerName: printerType === 'tag' ? settings.tagPrinter : settings.billingPrinter,
+        printerName: (printerType === 'tag' ? settings.tagPrinter : settings.billingPrinter) || '',
         silent: true,
         printerType
+      });
+      setPdfToast({
+        success: true,
+        title: 'Printing Started',
+        message: `Order #${order?.id} invoice sent to printer`
       });
     } else {
       window.print();
     }
   };
 
-
-
   // Auto-print or Auto-download if query param is set
   useEffect(() => {
-    if (!settings) return; // Wait until settings are loaded from DB
+    if (!settings || !settings.isLoaded) return; // Wait until settings are loaded from DB
     if (hasAutoPrintedRef.current) return; // Only trigger print/download once!
     const printParam = searchParams.get('print');
-    const shouldPrint = printParam === 'force' || (printParam !== 'false' && (printParam === 'true' || settings.autoPrint));
+    const isPos = searchParams.get('isPos') === 'true';
+    const shouldPrint = printParam === 'force' || printParam === 'true' || (printParam !== 'false' && settings.autoPrint);
     const shouldDownload = searchParams.get('download') === 'force';
     if (order) {
       if (shouldPrint) {
         hasAutoPrintedRef.current = true;
-        const timer = setTimeout(() => {
-          executeNativePrint();
-        }, 800);
+        const copies = isPos ? Math.max(1, parseInt(settings.autoPrintCopies || 1, 10)) : 1;
+        const timer = setTimeout(async () => {
+          for (let i = 0; i < copies; i++) {
+            await executeNativePrint();
+          }
+        }, 500);
         return () => clearTimeout(timer);
       } else if (shouldDownload) {
         hasAutoPrintedRef.current = true;
         const timer = setTimeout(() => {
           generatePDF();
-        }, 800);
+        }, 500);
         return () => clearTimeout(timer);
       }
     }
@@ -768,7 +787,7 @@ export default function Invoice() {
       <div className={styles.invoicePage} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '50vh', gap: '1rem' }}>
         <h2 style={{ color: '#DC2626' }}>Loading Failed</h2>
         <p style={{ color: '#64748B' }}>{errorMsg}</p>
-        <button className="btn btn-primary" onClick={() => navigate(-1)}>Go Back</button>
+        <button className="btn btn-primary" onClick={handleBack}>Go Back</button>
       </div>
     );
   }
@@ -779,7 +798,7 @@ export default function Invoice() {
     <div className={styles.invoicePage}>
       {/* Top Bar */}
       <div className={styles.topBar}>
-        <div className={styles.backBtn} onClick={() => navigate(-1)}>
+        <div className={styles.backBtn} onClick={handleBack}>
           <ArrowLeft size={20} />
           <span>Back</span>
         </div>
@@ -1020,7 +1039,7 @@ export default function Invoice() {
             )}
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontWeight: 700, fontSize: '0.92rem', letterSpacing: '-0.01em' }}>
-                {pdfToast.success ? 'Invoice PDF Saved' : 'Download Failed'}
+                {pdfToast.title || (pdfToast.success ? 'Invoice PDF Saved' : 'Download Failed')}
               </span>
               <span style={{ fontSize: '0.78rem', opacity: 0.85, marginTop: '2px', wordBreak: 'break-all', fontWeight: 400 }}>
                 {pdfToast.message}
