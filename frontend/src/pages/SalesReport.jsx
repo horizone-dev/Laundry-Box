@@ -96,7 +96,7 @@ export default function SalesReport() {
   const navigate = useNavigate();
 
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
-  const isAuthorized = user.role === 'super_admin' || user.role === 'manager';
+  const isAuthorized = user.role === 'super_admin' || user.role === 'admin' || user.role === 'manager';
 
   useEffect(() => {
     if (!isAuthorized) navigate('/');

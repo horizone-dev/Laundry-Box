@@ -87,7 +87,7 @@ export default function FinancialIntegrity() {
   const navigate = useNavigate();
   const { settings } = useSettings();
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
-  const isAuthorized = user.role === 'super_admin' || user.role === 'manager';
+  const isAuthorized = user.role === 'super_admin' || user.role === 'admin' || user.role === 'manager';
   const [audit, setAudit] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
