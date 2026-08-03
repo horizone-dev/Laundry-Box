@@ -5,7 +5,7 @@ import {
   BarChart3, Zap, Plus, Search, Bell, HelpCircle, LifeBuoy, Wifi, WifiOff, RefreshCw, Activity, LogOut, Wallet,
   DollarSign, X, CheckCircle, CreditCard, ShoppingBag, Trash2, Building2, Hash, FileText,
   AlertTriangle, ShieldCheck, Clock, Package, Truck, Phone, Cpu, Lock, Share2, Download, Send, Printer,
-  QrCode, Landmark, Check, ChevronDown
+  QrCode, Landmark, Check, ChevronDown, Pin
 } from 'lucide-react';
 import axios from 'axios';
 import WhatsAppIcon from '../components/WhatsAppIcon';
@@ -130,6 +130,17 @@ function PaymentMethodSelect({ value, onChange, settings }) {
 
 export default function MainLayout() {
   const { settings, updateSettings, isSettingsDirty, setIsSettingsDirty, originalSettings, setOriginalSettings } = useSettings();
+  const [pinned, setPinned] = useState(() => {
+    return localStorage.getItem('sidebar-pinned') === 'true';
+  });
+
+  const togglePin = (e) => {
+    e.stopPropagation();
+    const nextPinned = !pinned;
+    setPinned(nextPinned);
+    localStorage.setItem('sidebar-pinned', String(nextPinned));
+  };
+
   const settingsRef = useRef(settings);
   useEffect(() => {
     settingsRef.current = settings;
@@ -1461,7 +1472,7 @@ const timestamp = getLocalISOString();
   return (
     <div className={styles.layout}>
       {/* Sidebar */}
-      <aside className={styles.sidebar}>
+      <aside className={`${styles.sidebar} ${pinned ? styles.pinned : ''}`}>
         <div className={styles.logo} onClick={handleLogoClick}>
           <div className={styles.logoBrand}>
             {settings.logo ? (
@@ -1470,6 +1481,9 @@ const timestamp = getLocalISOString();
               <Layers color="#2563EB" size={24} />
             )}
             <span className={`${styles.sidebarText} ${styles.logoText}`}>{settings.companyName.toUpperCase()}</span>
+            <button className={`${styles.pinBtn} ${pinned ? styles.pinBtnActive : ''}`} onClick={togglePin}>
+              <Pin size={16} />
+            </button>
           </div>
         </div>
 
