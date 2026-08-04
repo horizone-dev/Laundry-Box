@@ -1,4 +1,4 @@
-﻿import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { DEFAULT_SHOP_ID } from '../constants';
 
 const SettingsContext = createContext();
@@ -51,8 +51,8 @@ export function SettingsProvider({ children }) {
     },
     bankAccounts: [],
     defaultBankId: '',
-    autoBackupPath: '',
-    autoBackupInterval: 60,
+    autoBackupPath: 'C:\\LMS-Backup',
+    autoBackupInterval: 3600,
     lastBackupTime: '',
     language: 'English',
     dateFormat: 'DD/MM/YYYY',
@@ -185,11 +185,16 @@ export function SettingsProvider({ children }) {
           const shopSettings = typeof shop.settings === 'string' ? JSON.parse(shop.settings) : shop.settings;
 
           let defaultBackupPath = shopSettings?.autoBackupPath || '';
-          if (!defaultBackupPath && electronAPI?.getDesktopPath) {
-            try {
-              defaultBackupPath = await electronAPI.getDesktopPath();
-            } catch (err) {
-              console.error("Failed to get desktop path:", err);
+          if (!defaultBackupPath) {
+            const isWin = navigator.userAgent.toLowerCase().includes('win');
+            if (isWin) {
+              defaultBackupPath = 'C:\\LMS-Backup';
+            } else if (electronAPI?.getDesktopPath) {
+              try {
+                defaultBackupPath = await electronAPI.getDesktopPath();
+              } catch (err) {
+                console.error("Failed to get desktop path:", err);
+              }
             }
           }
 
@@ -237,7 +242,7 @@ export function SettingsProvider({ children }) {
             bankAccounts: shopSettings?.bankAccounts || [],
             defaultBankId: shopSettings?.defaultBankId || '',
             autoBackupPath: defaultBackupPath,
-            autoBackupInterval: shopSettings?.autoBackupInterval ?? 60,
+            autoBackupInterval: shopSettings?.autoBackupInterval ?? 3600,
             lastBackupTime: shopSettings?.lastBackupTime || '',
             language: shopSettings?.language || 'English',
             dateFormat: shopSettings?.dateFormat || 'DD/MM/YYYY',

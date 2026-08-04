@@ -2346,14 +2346,9 @@ function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'ref
       timestamp: now,
       discountAction
     });
-    const discountReversalId = discountAction === 'delete' ? recordOrderDiscountReversal(db, {
-      orderId,
-      shopId,
-      billNumber: order.billNumber,
-      amount: discountCredit,
-      actor: deletedBy,
-      timestamp: now
-    }) : null;
+    // Discounts adjust the customer's invoice only. They must never create a
+    // Cash/Bank ledger movement when an order is deleted.
+    const discountReversalId = null;
 
     let customerState = null;
     if (customerId && customerId !== 'Walk-in') {

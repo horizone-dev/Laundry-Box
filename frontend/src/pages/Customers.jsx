@@ -895,6 +895,11 @@ export default function Customers() {
           return;
         }
 
+        // Never fall back to renderer-side balance/payment writes. They can
+        // partially succeed and leave Insight, Statement and Quick Settle on
+        // different totals. The main-process financial service is required.
+        throw new Error('Financial settlement service is unavailable. Payment was not posted.');
+
         if (discountAmt > 0) {
           let targetBill = selectedBillForPayment;
           if (!targetBill) {
@@ -1448,7 +1453,13 @@ export default function Customers() {
 
     setLoading(true);
     const timestamp = getLocalISOString();
-    let idsToDelete = payment.paymentIds && payment.paymentIds.length > 0 ? [...payment.paymentIds] : [payment.id];
+    const deletingDiscountOnly = payment.method === 'Discount';
+    // A settlement group can contain its tender receipts as well as a discount
+    // receipt.  Removing the customer's money must never silently remove the
+    // discount as well: they are two different financial actions.
+    let idsToDelete = payment.paymentIds && payment.paymentIds.length > 0
+      ? [...payment.paymentIds]
+      : [payment.id];
     const timePrefix = payment.createdAt ? String(payment.createdAt).substring(0, 19) : '';
     if (timePrefix && selectedCustomer?.id) {
       const sameTimeRes = await window.electronAPI.dbQuery(
@@ -1475,34 +1486,9 @@ export default function Customers() {
       );
       let paymentsToDelete = pToDelRes.success ? pToDelRes.data : [];
 
-      // Find any associated discount payments for the same orderId and same timestamp
-      const discountIds = [];
-      const discountPayments = [];
-      for (const pDel of paymentsToDelete) {
-        if (pDel.orderId) {
-          const timePrefix = pDel.createdAt ? pDel.createdAt.substring(0, 19) : '';
-          let query = "SELECT id, amount, method, orderId, createdAt, paymentReference FROM payments WHERE orderId = ? AND method = 'Discount'";
-          let params = [pDel.orderId];
-          if (timePrefix) {
-            query += " AND createdAt LIKE ?";
-            params.push(`${timePrefix}%`);
-          }
-          const discRes = await window.electronAPI.dbQuery(query, params);
-          if (discRes.success && discRes.data.length > 0) {
-            discRes.data.forEach(dp => {
-              if (!idsToDelete.includes(dp.id) && !discountIds.includes(dp.id)) {
-                discountIds.push(dp.id);
-                discountPayments.push(dp);
-              }
-            });
-          }
-        }
-      }
-
-      // Merge the discount payments into the deletion lists
-      if (discountIds.length > 0) {
-        idsToDelete.push(...discountIds);
-        paymentsToDelete = [...paymentsToDelete, ...discountPayments];
+      if (!deletingDiscountOnly) {
+        paymentsToDelete = paymentsToDelete.filter((row) => row.method !== 'Discount');
+        idsToDelete = paymentsToDelete.map((row) => row.id);
       }
 
       // One customer settlement may be allocated to several orders.  Keep the
@@ -1649,7 +1635,10 @@ export default function Customers() {
         await window.electronAPI.dbQuery("DELETE FROM advance_allocations WHERE id = ?", [allocation.id]);
       }
 
-      // 5. Insert balancing reversal account transactions for each deleted payment amount instead of deleting original entries
+      // 5. Reverse the actual account receipt exactly once.  A customer
+      // settlement has several payment rows because it is allocated to several
+      // invoices/opening due, but it has only one bank/cash receipt.  Reversing
+      // every allocation caused Bank and Cash to move by unrelated amounts.
       const payDate = new Date(payment.createdAt);
       const datePrefix = `${payDate.getFullYear()}-${String(payDate.getMonth() + 1).padStart(2, '0')}-${String(payDate.getDate()).padStart(2, '0')} ${String(payDate.getHours()).padStart(2, '0')}:${String(payDate.getMinutes()).padStart(2, '0')}`;
 
@@ -1657,10 +1646,37 @@ export default function Customers() {
       // other account entry, including seconds for correct ordering.
       const txnTimestamp = timestamp.replace('T', ' ').substring(0, 19);
 
-      for (const pDel of paymentsToDelete) {
+      const ledgerPayments = paymentsToDelete.filter((row) => row.method !== 'Discount');
+      const ledgerGroups = isCustomerSettlementEvent
+        ? [{
+            amount: ledgerPayments.reduce((sum, row) => sum + (Number(row.amount) || 0), 0),
+            method: payment.method || ledgerPayments[0]?.method || 'Cash',
+            paymentId: ledgerPayments.length === 1 ? ledgerPayments[0]?.id : null
+          }]
+        : ledgerPayments.map((row) => ({
+            amount: Number(row.amount) || 0,
+            method: row.method || 'Cash',
+            orderId: row.orderId,
+            paymentId: row.id
+          }));
+
+      for (const pDel of ledgerGroups) {
+        if (pDel.amount <= 0) continue;
         const txnRes = await window.electronAPI.dbQuery(
-          "SELECT * FROM account_transactions WHERE amount = ? AND (description LIKE ? OR description LIKE ? OR date LIKE ?) LIMIT 1",
-          [pDel.amount, `%${selectedCustomer.name}%`, `%${pDel.orderId}%`, `${datePrefix.substring(0, 10)}%`]
+          `SELECT * FROM account_transactions
+           WHERE type = 'INCOME'
+             AND category IN ('Credit Settlement', 'Sales Settlement')
+             AND ABS(IFNULL(amount, 0) - ?) < 0.01
+             AND description LIKE ?
+             AND date LIKE ?
+           ORDER BY CASE WHEN description LIKE ? THEN 0 ELSE 1 END,
+                    updatedAt DESC, rowid DESC LIMIT 1`,
+          [
+            pDel.amount,
+            `%${selectedCustomer.name}%`,
+            `${datePrefix.substring(0, 10)}%`,
+            pDel.paymentId ? `%${pDel.paymentId}%` : ''
+          ]
         );
         if (txnRes.success && txnRes.data.length > 0) {
           const origTxn = txnRes.data[0];

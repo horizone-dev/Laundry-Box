@@ -3284,7 +3284,7 @@ export default function Settings() {
                         <div className={styles.formGroup} style={{ marginBottom: '1.25rem', maxWidth: '320px' }}>
                           <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#1E293B', display: 'block', marginBottom: '0.5rem' }}>Auto-Backup Interval</label>
                           <CustomSelect
-                            value={settings.autoBackupInterval ?? 60}
+                            value={settings.autoBackupInterval ?? 3600}
                             onChange={(e) => updateSettings({ autoBackupInterval: parseInt(e.target.value) })}
                             options={[
                               { value: 60, label: 'Every 1 Minute' },

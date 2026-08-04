@@ -321,6 +321,8 @@ function settleCustomerBalance(db, {
         `).run(reference.paymentId, shopId, customerId, amount, timestamp, timestamp, reference.paymentReference);
       }
 
+      // Discounts are price adjustments, never cash/bank movements.
+      if (method !== 'Discount') {
       db.prepare(`
         INSERT INTO account_transactions
           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)
@@ -342,6 +344,7 @@ function settleCustomerBalance(db, {
         actor.role || 'system'
       );
       transactionIds.push(accountTransactionId);
+      }
       paymentIds.push(reference.paymentId);
     };
 
@@ -609,6 +612,8 @@ function settleOrderPayment(db, {
           (id, customerId, orderId, shopId, amount, method, status, createdAt, isSynced, updatedAt, paymentReference, discountScope)
         VALUES (?, ?, ?, ?, ?, ?, 'SUCCESS', ?, 0, ?, ?, ?)
       `).run(reference.paymentId, order.customerId || 'Walk-in', order.id, shopId, amount, method, timestamp, timestamp, reference.paymentReference, discountScope);
+      // Discounts belong to the customer statement, not the cash/bank ledger.
+      if (method !== 'Discount') {
       db.prepare(`
         INSERT INTO account_transactions
           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)
@@ -629,8 +634,9 @@ function settleOrderPayment(db, {
         actor.id || 'SYSTEM',
         actor.role || 'system'
       );
+      }
       receipts.push({ paymentId: reference.paymentId, method, amount, discountScope });
-      transactionIds.push(reference.accountTransactionId);
+      if (method !== 'Discount') transactionIds.push(reference.accountTransactionId);
       if (method === 'Discount') {
         paymentBreakdown.orderDiscount = roundCurrency(toAmount(paymentBreakdown.orderDiscount) + amount);
       } else {
@@ -803,7 +809,9 @@ function reclassifyPaidOrderForEdit(db, {
       WHERE category = 'Discount Given'
         AND (description LIKE ? OR description LIKE ?)
     `).run(`%Order ${order.id} via Discount%`, `Discount for Order ${order.id}%`);
-    survivingDiscounts.forEach((payment) => {
+    // Do not recreate the legacy cash expense rows. The receipt above is the
+    // complete discount audit trail.
+    if (false) survivingDiscounts.forEach((payment) => {
       db.prepare(`
         INSERT OR REPLACE INTO account_transactions
           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)

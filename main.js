@@ -1161,29 +1161,18 @@ ipcMain.handle('get-paginated-transactions', (event, { currentPage, pageSize, se
     const params = [];
 
     // Exclude system auto-allocated transactions (same as frontend)
-    conditions.push("description NOT LIKE '%System Auto%'");
-    conditions.push("category != 'System Auto'");
+    conditions.push("COALESCE(description, '') NOT LIKE '%System Auto%'");
+    conditions.push("COALESCE(category, '') != 'System Auto'");
     // Account Settlement rows are allocation details (for example, an opening
     // balance portion). The parent customer payment is already recorded as a
     // settlement receipt, so do not show the allocation a second time.
-    conditions.push("category != 'Account Settlement'");
+    conditions.push("COALESCE(category, '') != 'Account Settlement'");
     // Discounts are pricing adjustments, not cash/bank movement. They belong
     // to the order/customer statement, never the Accounts ledger.
-    conditions.push("category NOT IN ('Discount Given', 'Discount Reversal')");
-    // When a receipt was used entirely to clear an opening/account due, its
-    // matching Credit Settlement row is only the parent allocation wrapper.
-    // Hide that wrapper too. Genuine advances and payments with a remaining
-    // order/settlement amount do not have an equal opening-due allocation and
-    // remain visible.
-    conditions.push(`NOT (
-      category = 'Credit Settlement' AND EXISTS (
-        SELECT 1 FROM account_transactions AS opening_txn
-        WHERE opening_txn.category = 'Account Settlement'
-          AND SUBSTR(opening_txn.date, 1, 19) = SUBSTR(account_transactions.date, 1, 19)
-          AND opening_txn.accountType = account_transactions.accountType
-          AND ABS(IFNULL(opening_txn.amount, 0) - IFNULL(account_transactions.amount, 0)) < 0.01
-      )
-    )`);
+    conditions.push("COALESCE(category, '') NOT IN ('Discount Given', 'Discount Reversal')");
+    // The Account Settlement line is an allocation and is hidden above. Its
+    // parent Credit Settlement is the real money received and must always be
+    // shown, even when the full receipt cleared an opening/account due.
 
     // Account type filter
     if (accountType === 'CASH') {

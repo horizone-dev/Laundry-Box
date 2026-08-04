@@ -54,6 +54,7 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
   const [cancellations, setCancellations] = useState([]);
   const [refunds, setRefunds] = useState([]);
   const [customerLedgerRows, setCustomerLedgerRows] = useState([]);
+  const [canonicalBalance, setCanonicalBalance] = useState(null);
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -284,6 +285,12 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
     }
     setLoading(true);
     try {
+      const stateRes = window.electronAPI?.getCustomerFinancialState
+        ? await window.electronAPI.getCustomerFinancialState(customerId)
+        : null;
+      if (requestId === statementRequestRef.current) {
+        setCanonicalBalance(stateRes?.success ? Number(stateRes.data?.balance || 0) : null);
+      }
       /* Build date conditions on the UNION wrapper */
       let orderQuery = `
         SELECT * FROM (
@@ -821,8 +828,13 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
   // The visible statement and its KPIs must share one ledger source. Customer
   // balance caches can refresh independently after a payment, briefly showing
   // totals that disagree with the rows below.
-  const outstanding = Math.max(0, ledgerRows.totalBalance || 0);
-  const advanceCredit = Math.max(0, -(ledgerRows.totalBalance || 0));
+  // For All Time, use the same canonical calculation as Customer Insight and
+  // Quick Settle. A filtered statement still shows its period running balance.
+  const statementBalance = dateRange === 'All' && canonicalBalance !== null
+    ? canonicalBalance
+    : (ledgerRows.totalBalance || 0);
+  const outstanding = Math.max(0, statementBalance);
+  const advanceCredit = Math.max(0, -statementBalance);
   const orderCount = orders.filter(o => !o.isDeleted).length;
 
   /* ─── Export CSV ──────────────────────────────────── */

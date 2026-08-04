@@ -391,13 +391,25 @@ export default function Accounts() {
         }
 
         // Fetch Orders for Refund Dropdown
-        const orderRes = await window.electronAPI.dbQuery("SELECT * FROM orders WHERE paymentStatus IN ('Paid', 'Partially Paid') ORDER BY createdAt DESC", []);
+        const orderRes = await window.electronAPI.dbQuery(
+          `SELECT * FROM orders
+           WHERE paymentStatus IN ('Paid', 'Partial', 'Partially Paid')
+             AND COALESCE(status, '') NOT IN ('Deleted', 'Cancelled')
+           ORDER BY createdAt DESC`,
+          []
+        );
         if (orderRes.success) {
           setDbOrders(orderRes.data);
         }
 
         // Outstanding receivables
-        const recRes = await window.electronAPI.dbQuery("SELECT SUM(dueAmount) as total FROM orders WHERE paymentStatus != 'Paid'", []);
+        const recRes = await window.electronAPI.dbQuery(
+          `SELECT COALESCE(SUM(dueAmount), 0) AS total
+           FROM orders
+           WHERE COALESCE(status, '') NOT IN ('Deleted', 'Cancelled')
+             AND COALESCE(dueAmount, 0) > 0`,
+          []
+        );
         if (recRes.success && recRes.data[0]?.total !== null) {
           setReceivablesTotal(recRes.data[0].total);
         }
@@ -480,9 +492,17 @@ export default function Accounts() {
   };
 
   /* ─── Balance Calculations ────────────────────────── */
-  // A discount changes an invoice value, not money held in an account.
+  // A discount changes an invoice value, not money held in an account.  An
+  // Account Settlement row is likewise only an allocation detail for the
+  // parent Credit Settlement receipt.  Counting it here made the balance card
+  // include money that the Payments list deliberately hides, so an "All Time"
+  // list could total 1,000 while the card showed 1,165.
   const accountBalanceTransactions = useMemo(
-    () => transactions.filter(t => !['Discount Given', 'Discount Reversal'].includes(t.category)),
+    () => transactions.filter(t => ![
+      'Discount Given',
+      'Discount Reversal',
+      'Account Settlement'
+    ].includes(t.category)),
     [transactions]
   );
   const cashTxns = useMemo(() => accountBalanceTransactions.filter(t => t.accountType === 'CASH'), [accountBalanceTransactions]);
@@ -1652,7 +1672,12 @@ export default function Accounts() {
                           // Only include rows that are the "positive" side (INCOME for settlements, EXPENSE for cancellations) for method breakdown
                           .filter(r => isCancellation ? r.type === 'EXPENSE' : r.type === 'INCOME')
                           .map(r => {
-                            const m = (r.description || '').match(/via ([^\s]+)$/) || (r.description || '').match(/\(([^)]+)\)$/) || (r.description || '').match(/– ([^\s]+) \(/);
+                            const description = String(r.description || '');
+                            // Supports both normal receipts ("via UPI") and
+                            // the audited reversal format ("– UPI for …").
+                            const m = description.match(/\bvia\s+([^\s]+)/i)
+                              || description.match(/[–-]\s*([^\s]+)\s+for\s+/i)
+                              || description.match(/\(([^)]+)\)$/);
                             return { method: m ? m[1].replace('(Deleted)', '').trim() : 'Cash', amount: r.amount };
                           });
                         const uniqueMethods = [...new Set(methodsInfo.map(m => m.method))];

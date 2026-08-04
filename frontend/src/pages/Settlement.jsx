@@ -43,6 +43,9 @@ export default function Settlement() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('Outstanding'); // All | Outstanding | Advance | Paid
+  // `customers.balance` is a display cache. Use the canonical source-record
+  // calculation for the amount shown and prefilled in Quick Settle.
+  const [canonicalBalance, setCanonicalBalance] = useState(null);
   const [workspaceTab, setWorkspaceTab] = useState('pending'); // pending | history
   const [loading, setLoading] = useState(false);
   const [globalData, setGlobalData] = useState({ pending: [], history: [], advances: [] });
@@ -205,6 +208,10 @@ export default function Settlement() {
   }, [selectedCustomer]);
 
   useEffect(() => {
+    setCanonicalBalance(null);
+  }, [selectedCustomer?.id]);
+
+  useEffect(() => {
     const handleDbUpdate = async (e) => {
       const detail = e?.detail || e;
       const updatedCustId = detail?.customerId;
@@ -319,6 +326,10 @@ export default function Settlement() {
       try {
         setLoading(true);
         const customerId = customer.id;
+        const stateRes = window.electronAPI?.getCustomerFinancialState
+          ? await window.electronAPI.getCustomerFinancialState(customerId)
+          : null;
+        setCanonicalBalance(stateRes?.success ? Number(stateRes.data?.balance || 0) : null);
         
         const pendingRes = await window.electronAPI.dbQuery(
           "SELECT * FROM orders WHERE customerId = ? AND id IS NOT NULL AND id != '' AND dueAmount > 0 AND status NOT IN ('Cancelled', 'Deleted') ORDER BY createdAt DESC",
@@ -571,6 +582,10 @@ export default function Settlement() {
           return;
         }
 
+        // Do not use the legacy renderer-side settlement fallback: it writes
+        // orders, payments, account rows and cached balance separately.
+        throw new Error('Financial settlement service is unavailable. Settlement was not posted.');
+
         // Process each split payment sequentially
         // Process each split payment sequentially
         for (const split of splits) {
@@ -785,8 +800,10 @@ export default function Settlement() {
     }
   };
 
-  const displayDue = selectedCustomer ? Math.max(0, Number(selectedCustomer.balance) || 0) : 0;
-  const currentNetBalance = selectedCustomer ? (Number(selectedCustomer.balance) || 0) : 0;
+  const currentNetBalance = selectedCustomer
+    ? (canonicalBalance ?? (Number(selectedCustomer.balance) || 0))
+    : 0;
+  const displayDue = Math.max(0, currentNetBalance);
   const simulatedNewBalance = currentNetBalance - (parseFloat(paymentAmount) || 0) - (parseFloat(discountAmount || 0) || 0);
 
   const paginatedPending = React.useMemo(() => {
