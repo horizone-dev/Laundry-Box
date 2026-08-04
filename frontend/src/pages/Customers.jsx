@@ -261,7 +261,7 @@ export default function Customers() {
         ? reasonQuery.data[0].reason
         : 'No reason provided';
 
-      const msg = `This payment cannot be edited because it is linked to Order #${settings.invoicePrefix || ''}${refundedOrder.id} which has been refunded.`;
+      const msg = `This payment cannot be edited because it is linked to Invoice No. #${settings.invoicePrefix || ''}${refundedOrder.id} which has been refunded.`;
       setToastMessage(prev => (prev && prev.msg === msg) ? null : { msg, reason: deleteReason });
       return;
     }
@@ -318,7 +318,7 @@ export default function Customers() {
         ? reasonQuery.data[0].reason
         : 'No reason provided';
 
-      const msg = `This payment cannot be deleted because it is linked to Order #${settings.invoicePrefix || ''}${refundedOrder.id} which has been refunded.`;
+      const msg = `This payment cannot be deleted because it is linked to Invoice No. #${settings.invoicePrefix || ''}${refundedOrder.id} which has been refunded.`;
       setToastMessage(prev => (prev && prev.msg === msg) ? null : { msg, reason: deleteReason });
       return;
     }
@@ -1277,7 +1277,7 @@ export default function Customers() {
   const getPaymentSourceInfo = (pay) => {
     if (!pay) return '';
     if (pay.orderId) {
-      return `Linked to active Order #${pay.orderId}`;
+      return `Linked to active Invoice No. #${pay.orderId}`;
     }
     // Check if it was originally part of a deleted order
     const origOrder = customerDeletedBills.find(db => {
@@ -1289,7 +1289,7 @@ export default function Customers() {
       }
     });
     if (origOrder) {
-      return `Moved to Customer Advance (Originally applied to Order #${origOrder.id}, which was deleted)`;
+      return `Moved to Customer Advance (Originally applied to Invoice No. #${origOrder.id}, which was deleted)`;
     }
     return 'General Account / Standalone';
   };
@@ -1352,7 +1352,7 @@ export default function Customers() {
 
           allocations.push({
             paymentId: p.id,
-            target: isRefunded ? `Order #${p.orderId} (Deleted & ${refundStatusText})` : `Order #${p.orderId}`,
+            target: isRefunded ? `Invoice No. #${p.orderId} (Deleted & ${refundStatusText})` : `Invoice No. #${p.orderId}`,
             amount: amt,
             type: isRefunded ? 'Order Payment (Refunded)' : 'Order Payment',
             date: p.createdAt
@@ -1386,7 +1386,7 @@ export default function Customers() {
 
           allocations.push({
             paymentId: p.id,
-            target: allocRefunded ? `Order #${a.orderId} (Deleted & ${allocRefundStatusText})` : `Order #${a.orderId}`,
+            target: allocRefunded ? `Invoice No. #${a.orderId} (Deleted & ${allocRefundStatusText})` : `Invoice No. #${a.orderId}`,
             amount: parseFloat(a.amountUsed) || 0,
             type: allocRefunded ? 'Advance Allocation (Reversed)' : 'Advance Allocation',
             date: a.createdAt
@@ -2105,8 +2105,8 @@ export default function Customers() {
         const debitAmt = diff < 0 ? Math.abs(diff) : 0;
         const creditAmt = diff > 0 ? diff : 0;
         const descStr = diff < 0
-          ? `Order #${bill.id} discount reduced from ${oldDisc.toFixed(2)} to ${newDisc.toFixed(2)} (Difference: ${Math.abs(diff).toFixed(2)})`
-          : `Order #${bill.id} discount increased from ${oldDisc.toFixed(2)} to ${newDisc.toFixed(2)} (Difference: ${diff.toFixed(2)})`;
+          ? `Invoice No. #${bill.id} discount reduced from ${oldDisc.toFixed(2)} to ${newDisc.toFixed(2)} (Difference: ${Math.abs(diff).toFixed(2)})`
+          : `Invoice No. #${bill.id} discount increased from ${oldDisc.toFixed(2)} to ${newDisc.toFixed(2)} (Difference: ${diff.toFixed(2)})`;
         
         await window.electronAPI.dbQuery(
           `INSERT INTO customer_ledger (id, shopId, customerId, orderId, transactionType, debit, credit, balance, description, createdAt) VALUES (?, ?, ?, ?, 'DISCOUNT_EDIT', ?, ?, ?, ?, ?)`,
@@ -2273,7 +2273,7 @@ export default function Customers() {
         );
         await window.electronAPI.dbQuery(
           `INSERT INTO customer_ledger (id, shopId, customerId, orderId, transactionType, debit, credit, balance, description, createdAt) VALUES (?, ?, ?, ?, 'DISCOUNT_EDIT', ?, 0, 0, ?, ?)`,
-          [`CUST-DISC-EDIT-${Date.now()}-${Math.floor(Math.random() * 100000)}`, DEFAULT_SHOP_ID, targetCustId, bill.id, oldDisc, `Order #${bill.id} discount deleted (Reversed ${oldDisc.toFixed(2)})`, timestamp]
+          [`CUST-DISC-EDIT-${Date.now()}-${Math.floor(Math.random() * 100000)}`, DEFAULT_SHOP_ID, targetCustId, bill.id, oldDisc, `Invoice No. #${bill.id} discount deleted (Reversed ${oldDisc.toFixed(2)})`, timestamp]
         );
 
         // REDISTRIBUTE PAYMENTS
@@ -3118,7 +3118,7 @@ export default function Customers() {
                 <table className={styles.customersTable} style={{ margin: 0, width: '100%' }}>
                   <thead>
                     <tr>
-                      <th style={{ background: '#F8FAFC', textAlign: 'center' }}># Order</th>
+                      <th style={{ background: '#F8FAFC', textAlign: 'center' }}>Invoice No.</th>
                       <th style={{ background: '#F8FAFC', textAlign: 'center' }}>Date</th>
                       <th style={{ background: '#F8FAFC', textAlign: 'center' }}>Net Amount</th>
                       <th style={{ background: '#F8FAFC', textAlign: 'center' }}>Pay Mode</th>
@@ -3321,7 +3321,7 @@ export default function Customers() {
                 <table className={styles.customersTable} style={{ margin: 0, width: '100%' }}>
                   <thead>
                     <tr>
-                      <th style={{ background: '#F8FAFC' }}># Order</th>
+                      <th style={{ background: '#F8FAFC' }}>Invoice No.</th>
                       <th style={{ background: '#F8FAFC' }}>Date</th>
                       <th style={{ background: '#F8FAFC' }}>Net Amount</th>
                       <th style={{ background: '#F8FAFC' }}>Paid Amount</th>
@@ -3372,7 +3372,7 @@ export default function Customers() {
                 <table className={styles.customersTable} style={{ margin: 0, width: '100%' }}>
                   <thead>
                     <tr>
-                      <th style={{ background: '#F8FAFC' }}># Order / Ref</th>
+                      <th style={{ background: '#F8FAFC' }}>Invoice No. / Ref</th>
                       <th style={{ background: '#F8FAFC' }}>Date</th>
                       <th style={{ background: '#F8FAFC' }}>Order Total</th>
                       <th style={{ background: '#F8FAFC' }}>Discount Given</th>
@@ -3576,7 +3576,7 @@ export default function Customers() {
                           return (
                             <tr key={p.id} style={{ background: '#FFF7ED' }}>
                               <td style={{ color: '#9A3412', fontWeight: 700 }}>
-                                Deleted Order #{settings.invoicePrefix || ''}{p.deletedOrderId}
+                                Deleted Invoice No. #{settings.invoicePrefix || ''}{p.deletedOrderId}
                               </td>
                               <td>{formatDate(p.createdAt || p.deletedAt)}</td>
                               <td>N/A</td>
@@ -3924,7 +3924,7 @@ export default function Customers() {
               <div className={styles.modalContent} style={{ padding: '1.25rem 1.5rem' }}>
                 {isAdvanceAllocation(selectedPaymentForAction) ? (
                   <div style={{ padding: '0.85rem', borderRadius: '8px', background: '#EFF6FF', color: '#1E40AF', fontSize: '0.9rem', lineHeight: 1.5 }}>
-                    ₹{(Number(selectedPaymentForAction.amount) || 0).toFixed(2)} from the customer's existing advance was applied to Order #{settings.invoicePrefix || ''}{selectedPaymentForAction.orderId}. This is not a new cash payment and cannot be edited here.
+                    ₹{(Number(selectedPaymentForAction.amount) || 0).toFixed(2)} from the customer's existing advance was applied to Invoice No. #{settings.invoicePrefix || ''}{selectedPaymentForAction.orderId}. This is not a new cash payment and cannot be edited here.
                   </div>
                 ) : <>
                 <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
@@ -4003,7 +4003,7 @@ export default function Customers() {
               <div className={styles.modalHeader} style={{ background: '#F8FAFC', paddingBottom: '1.25rem' }}>
                 <div>
                   <h2 style={{ color: '#0F172A', fontSize: '1.15rem' }}>Edit Order Discount</h2>
-                  <p style={{ fontSize: '0.8rem', color: '#64748B' }}>Order #{settings.invoicePrefix || ''}{selectedBillForDiscount.id}</p>
+                  <p style={{ fontSize: '0.8rem', color: '#64748B' }}>Invoice No. #{settings.invoicePrefix || ''}{selectedBillForDiscount.id}</p>
                 </div>
                 <X size={22} className={styles.closeBtn} onClick={() => setShowDiscountEditModal(false)} />
               </div>
@@ -4890,7 +4890,7 @@ export default function Customers() {
               <table className={styles.customersTable}>
                 <thead>
                   <tr>
-                    <th>Invoice/Order ID</th>
+                    <th>Invoice No.</th>
                     <th>Date</th>
                     <th>Total</th>
                     <th>Paid</th>
@@ -5458,7 +5458,7 @@ export default function Customers() {
             <div className={styles.modalContent} style={{ padding: '1.5rem' }}>
               {isAdvanceAllocation(selectedPaymentForAction) ? (
                 <div style={{ padding: '0.85rem', borderRadius: '8px', background: '#EFF6FF', color: '#1E40AF', fontSize: '0.9rem', lineHeight: 1.5 }}>
-                  ₹{(Number(selectedPaymentForAction.amount) || 0).toFixed(2)} from the customer's existing advance was applied to Order #{settings.invoicePrefix || ''}{selectedPaymentForAction.orderId}. This is not a new cash payment and cannot be edited here.
+                  ₹{(Number(selectedPaymentForAction.amount) || 0).toFixed(2)} from the customer's existing advance was applied to Invoice No. #{settings.invoicePrefix || ''}{selectedPaymentForAction.orderId}. This is not a new cash payment and cannot be edited here.
                 </div>
               ) : <>
               <div className={styles.formGroup} style={{ marginBottom: '1rem' }}>
@@ -5598,7 +5598,7 @@ export default function Customers() {
                   <Trash2 size={20} /> Authorize Order Deletion
                 </h2>
                 <p style={{ color: '#991B1B', fontSize: '0.8rem', margin: '0.25rem 0 0 0' }}>
-                  Order #{settings.invoicePrefix || ''}{orderToDelete.id}
+                  Invoice No. #{settings.invoicePrefix || ''}{orderToDelete.id}
                 </p>
               </div>
               <X size={22} className={styles.closeBtn} onClick={() => { setShowOrderDeletePinModal(false); setOrderToDelete(null); }} />

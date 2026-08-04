@@ -44,8 +44,24 @@ assert.equal(state({
 assert.equal(state({
   orders: [{ id: 'D1', status: 'Deleted', totalAmount: 100, paidAmount: 100, deletedAction: 'refund' }],
   payments: [{ id: 'P1', orderId: 'D1', amount: 100, method: 'Card', status: 'SUCCESS' }],
-  deletedOrders: [{ id: 'D1', refundStatus: 'Returned', paidAmount: 100 }]
+  deletedOrders: [{ id: 'D1', refundStatus: 'Returned', paidAmount: 100 }],
+  refunds: [{ id: 'R1', orderId: 'D1', amount: 100, refundMethod: 'Cash' }]
 }).balance, 0);
+
+// A cash refund for a returned order is a cash-account expense, but it must
+// not create a second customer due after the cancelled order/receipt pair has
+// already been excluded from the customer balance.
+assert.equal(state({
+  orders: [
+    { id: 'O1', status: 'Confirmed', totalAmount: 1510 },
+    { id: 'D1', status: 'Deleted', totalAmount: 100, paidAmount: 100, deletedAction: 'refund' }
+  ],
+  payments: [
+    { id: 'ADV-1', orderId: null, amount: 40, method: 'Cash', status: 'SUCCESS' },
+    { id: 'P1', orderId: 'D1', amount: 100, method: 'Card', status: 'SUCCESS' }
+  ],
+  refunds: [{ id: 'R1', orderId: 'D1', amount: 100, refundMethod: 'Cash' }]
+}).balance, 1470);
 
 // A converted deleted order keeps the moved receipt as one customer advance.
 assert.equal(state({

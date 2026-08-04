@@ -283,7 +283,7 @@ export default function DeletedOrders() {
   const totalVoidedAmount = filteredOrders.reduce((s, o) => s + (o.totalAmount || 0), 0);
   // Export CSV
   const exportCSV = () => {
-    const headers = ['Deletion Date', 'Order ID', 'Invoice/Order No.', 'Customer', 'Phone', 'Items', 'Approved By', 'Original Payment Status', 'Paid Amount', 'Refund/Return Status', 'Voided Amount'];
+    const headers = ['Deletion Date', 'Invoice No.', 'Invoice/Order No.', 'Customer', 'Phone', 'Items', 'Approved By', 'Original Payment Status', 'Paid Amount', 'Refund/Return Status', 'Voided Amount'];
     const rows = filteredOrders.map(o => {
       let items = '';
       try {
@@ -456,7 +456,7 @@ export default function DeletedOrders() {
             <thead>
               <tr>
                 <th>Deletion Date</th>
-                <th>Order Ref</th>
+                <th>Invoice No.</th>
                 <th>Customer</th>
                 <th>Items Summary</th>
                 <th>Approved By</th>

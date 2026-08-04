@@ -1597,7 +1597,7 @@ export default function Orders() {
 
           <thead>
             <tr>
-              <th>{t('orderId', settings.language)}</th>
+              <th>Invoice No.</th>
               <th>{settings.language === 'Arabic' ? 'التاريخ والوقت' : 'DATE & TIME'}</th>
               <th>{t('customer', settings.language)}</th>
               <th>{t('whatsapp', settings.language)}</th>

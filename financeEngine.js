@@ -110,10 +110,16 @@ function calculateCustomerFinancialState({
     0
   );
 
-  const refundDebits = allRefunds.reduce(
-    (sum, refund) => sum + toAmount(refund.amount),
-    0
-  );
+  // A returned order is removed from the customer's open charges and its
+  // original receipt is excluded above.  Its refund is the other side of
+  // that cancelled receipt, not a new customer debt.  Counting it here as a
+  // debit would inflate the customer balance by the refunded amount.
+  //
+  // Refunds against an active order are different: they do reduce what the
+  // shop has collected for that still-live invoice, so they remain debits.
+  const refundDebits = allRefunds
+    .filter((refund) => !returnedOrderIds.has(refund?.orderId))
+    .reduce((sum, refund) => sum + toAmount(refund.amount), 0);
 
   const sourceAllocations = new Map();
   allAllocations.forEach((allocation) => {

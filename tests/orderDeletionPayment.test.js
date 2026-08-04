@@ -44,4 +44,18 @@ const {
   assert.equal(getRefundableOrderPaymentAmount(order, payments, allocations), 1000);
 }
 
+// A previous receipt can be cancelled and the same order paid again later.
+// Only the net live tender is refundable; the stale paidAmount cache must not
+// restore a payment that was already reversed.
+{
+  const order = { totalAmount: 555, paidAmount: 245 };
+  const payments = [
+    { method: 'Cash', amount: 555 },
+    { method: 'Cash', amount: -555 },
+    { method: 'Bank', amount: 245 }
+  ];
+
+  assert.equal(getRefundableOrderPaymentAmount(order, payments, []), 245);
+}
+
 console.log('order deletion payment tests passed');

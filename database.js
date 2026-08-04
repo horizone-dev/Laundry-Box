@@ -1776,7 +1776,17 @@ function refreshCustomerFinancialCaches(connection, targetCustomerId = null, tim
     SET balance = ?, advanceBalance = ?, isSynced = 0, updatedAt = ?
     WHERE id = ?
   `);
+  // customer_ledger.balance is a display snapshot written with deletion and
+  // refund audit rows.  It is not a source of truth, so repair it from the
+  // same canonical calculation whenever the customer cache is repaired.
+  const hasCustomerLedger = Boolean(connection.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'customer_ledger'"
+  ).get());
+  const updateLedgerBalance = hasCustomerLedger
+    ? connection.prepare('UPDATE customer_ledger SET balance = ? WHERE customerId = ?')
+    : null;
   let updated = 0;
+  let ledgerUpdated = 0;
   let skippedForReview = 0;
 
   customers.forEach(({ id }) => {
@@ -1790,13 +1800,18 @@ function refreshCustomerFinancialCaches(connection, targetCustomerId = null, tim
     }
     const balanceChanged = Math.abs(state.savedBalance - state.balance) > EPSILON;
     const advanceChanged = Math.abs(state.savedAdvance - state.availableAdvance) > EPSILON;
-    if (!balanceChanged && !advanceChanged) return;
+    if (balanceChanged || advanceChanged) {
+      update.run(state.balance, state.availableAdvance, timestamp, id);
+      updated += 1;
+    }
 
-    update.run(state.balance, state.availableAdvance, timestamp, id);
-    updated += 1;
+    if (updateLedgerBalance) {
+      const result = updateLedgerBalance.run(state.balance, id);
+      ledgerUpdated += result.changes || 0;
+    }
   });
 
-  return { inspected: customers.length, updated, skippedForReview };
+  return { inspected: customers.length, updated, ledgerUpdated, skippedForReview };
 }
 
 function auditFinancialIntegrity(connection, targetCustomerId = null) {
@@ -1808,14 +1823,18 @@ function auditFinancialIntegrity(connection, targetCustomerId = null) {
     ambiguousConvertedDeletes: [],
     overAllocatedSources: [],
     orphanAllocations: [],
-    invalidOrderAmounts: []
+    invalidOrderAmounts: [],
+    discountAccountRows: [],
+    duplicatePaymentCancellations: []
   };
   const totals = {
     balanceMismatches: 0,
     ambiguousConvertedDeletes: 0,
     overAllocatedSources: 0,
     orphanAllocations: 0,
-    invalidOrderAmounts: 0
+    invalidOrderAmounts: 0,
+    discountAccountRows: 0,
+    duplicatePaymentCancellations: 0
   };
 
   customers.forEach(({ id, name }) => {
@@ -1873,6 +1892,32 @@ function auditFinancialIntegrity(connection, targetCustomerId = null) {
   totals.orphanAllocations = orphanAllocations.length;
   samples.orphanAllocations = orphanAllocations.slice(0, 50);
 
+  // Discounts are invoice adjustments, never cash/bank movements. Any such
+  // Accounts row is legacy/corrupt data and needs review, not auto-deletion.
+  const discountAccountRows = connection.prepare(`
+    SELECT id, accountType, type, category, amount, description, date
+    FROM account_transactions
+    WHERE category IN ('Discount Given', 'Discount Reversal')
+       OR (category = 'Payment Cancellation' AND description LIKE '%Discount%')
+    ORDER BY date DESC
+  `).all();
+  totals.discountAccountRows = discountAccountRows.length;
+  samples.discountAccountRows = discountAccountRows.slice(0, 50);
+
+  // A payment event needs one cancellation ledger row. Matching cancellation
+  // rows in the same minute/account/amount indicate a duplicate reversal.
+  const duplicateCancellations = connection.prepare(`
+    SELECT accountType, amount, SUBSTR(date, 1, 16) AS eventMinute,
+           COUNT(*) AS count, GROUP_CONCAT(id) AS transactionIds
+    FROM account_transactions
+    WHERE category = 'Payment Cancellation'
+    GROUP BY accountType, amount, SUBSTR(date, 1, 16)
+    HAVING COUNT(*) > 1
+    ORDER BY eventMinute DESC
+  `).all();
+  totals.duplicatePaymentCancellations = duplicateCancellations.length;
+  samples.duplicatePaymentCancellations = duplicateCancellations.slice(0, 50);
+
   return {
     generatedAt: new Date().toISOString(),
     customerId: targetCustomerId,
@@ -1921,9 +1966,11 @@ function getOrderDiscountCredit(order, linkedPayments = []) {
 
 function getRefundableOrderPaymentAmount(order, linkedPayments = [], allocations = []) {
   const totalAmount = Math.max(0, toAmount(order?.totalAmount));
-  const directTender = linkedPayments
+  const directPayments = linkedPayments
     .filter((payment) => !['System Auto', 'Discount', 'Advance', 'Refund Advance'].includes(payment.method))
-    .reduce((sum, payment) => sum + Math.max(0, toAmount(payment.amount)), 0);
+  const directTender = directPayments
+    .reduce((sum, payment) => sum + toAmount(payment.amount), 0);
+  const hasTenderReversal = directPayments.some((payment) => toAmount(payment.amount) < -EPSILON);
   const appliedAdvance = allocations
     .reduce((sum, allocation) => sum + Math.max(0, toAmount(allocation.amountUsed)), 0);
   const paidCredit = Math.max(0, toAmount(order?.paidAmount));
@@ -1931,9 +1978,15 @@ function getRefundableOrderPaymentAmount(order, linkedPayments = [], allocations
 
   // A payment receipt can be present even when a legacy order cache is stale.
   // Conversely, a legacy order can have paidAmount without individual receipts.
-  // Either way, refund only real tender/advance and never discount credit.
+  // When a receipt has already been reversed, however, the payment rows are
+  // authoritative: using an older paidAmount cache would refund money that
+  // was cancelled before the latest settlement.
   const fromOrderCache = Math.max(0, paidCredit - discountCredit);
-  return roundCurrency(Math.min(totalAmount, Math.max(directTender + appliedAdvance, fromOrderCache)));
+  const recordedTender = Math.max(0, directTender) + appliedAdvance;
+  const refundableAmount = hasTenderReversal
+    ? recordedTender
+    : Math.max(recordedTender, fromOrderCache);
+  return roundCurrency(Math.min(totalAmount, refundableAmount));
 }
 
 function recordOrderDiscountReversal(connection, {
@@ -2186,7 +2239,7 @@ function softDeleteOrderLegacy({ orderId, deletedBy, deleteReason, deleteAction 
         VALUES (?, ?, ?, ?, NULL, ?, 'OUT', ?, ?, ?, ?)
       `).run(
         cashLedgerId, shopId, order.branchId || null, orderId, refundId, refundMethod, actualPaidAmt,
-        `Refund for Deleted Order ${billNumber || '#' + orderId}`, now
+        `Refund for Deleted Order #${orderId}`, now
       );
 
       // Record in account_transactions so Expense/Return reflects in cashbook
@@ -2197,7 +2250,7 @@ function softDeleteOrderLegacy({ orderId, deletedBy, deleteReason, deleteAction 
         VALUES (?, ?, ?, 'EXPENSE', 'Return', ?, ?, ?, 0, ?, 'Zap', ?)
       `).run(
         txnId, shopId, refundMethod === 'Bank' ? 'BANK' : 'CASH', actualPaidAmt,
-        `Refund - Deleted Order ${billNumber || '#' + orderId}`, now.replace('T', ' ').substring(0, 19),
+        `Refund - Deleted Order #${orderId}`, now.replace('T', ' ').substring(0, 19),
         now, deletedBy
       );
     }
@@ -2376,12 +2429,12 @@ function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'ref
       db.prepare(`
         INSERT INTO cash_ledger (id, shopId, branchId, orderId, paymentId, refundId, type, paymentMethod, amount, description, createdAt)
         VALUES (?, ?, ?, ?, NULL, ?, 'OUT', ?, ?, ?, ?)
-      `).run(`CASH-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, order.branchId || null, orderId, refundId, refundMethod, actualPaidAmt, `Refund for Deleted Order ${order.billNumber || '#' + orderId}`, now);
+      `).run(`CASH-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, order.branchId || null, orderId, refundId, refundMethod, actualPaidAmt, `Refund for Deleted Order #${orderId}`, now);
       db.prepare(`
         INSERT INTO account_transactions
           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy)
         VALUES (?, ?, ?, 'EXPENSE', 'Return', ?, ?, ?, 0, ?, 'Zap', ?, ?)
-      `).run(`TXN-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, getRefundAccountType(refundMethod), actualPaidAmt, `Refund - Deleted Order ${order.billNumber || '#' + orderId}`, now.replace('T', ' ').substring(0, 19), now, getRefundAccountType(refundMethod) === 'BANK' ? bankAccountId : null, deletedBy);
+      `).run(`TXN-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, getRefundAccountType(refundMethod), actualPaidAmt, `Refund - Deleted Order #${orderId}`, now.replace('T', ' ').substring(0, 19), now, getRefundAccountType(refundMethod) === 'BANK' ? bankAccountId : null, deletedBy);
     }
 
     db.prepare(`
@@ -2460,12 +2513,12 @@ function refundDeletedOrder({ orderId, refundMethod = 'Cash', bankAccountId = nu
       db.prepare(`
         INSERT INTO cash_ledger (id, shopId, branchId, orderId, paymentId, refundId, type, paymentMethod, amount, description, createdAt)
         VALUES (?, ?, ?, ?, NULL, ?, 'OUT', ?, ?, ?, ?)
-      `).run(`CASH-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, liveOrder.branchId || null, orderId, refundId, refundMethod, paidAmount, `Refund for Deleted Order ${deletedOrder.billNumber || '#' + orderId}`, now);
+      `).run(`CASH-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, liveOrder.branchId || null, orderId, refundId, refundMethod, paidAmount, `Refund for Deleted Order #${orderId}`, now);
       db.prepare(`
         INSERT INTO account_transactions
           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy)
         VALUES (?, ?, ?, 'EXPENSE', 'Return', ?, ?, ?, 0, ?, 'Zap', ?, ?)
-      `).run(`TXN-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, getRefundAccountType(refundMethod), paidAmount, `Refund - Deleted Order ${deletedOrder.billNumber || '#' + orderId}`, now.replace('T', ' ').substring(0, 19), now, getRefundAccountType(refundMethod) === 'BANK' ? bankAccountId : null, refundedBy);
+      `).run(`TXN-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, getRefundAccountType(refundMethod), paidAmount, `Refund - Deleted Order #${orderId}`, now.replace('T', ' ').substring(0, 19), now, getRefundAccountType(refundMethod) === 'BANK' ? bankAccountId : null, refundedBy);
     }
 
     db.prepare(`
@@ -2484,7 +2537,7 @@ function refundDeletedOrder({ orderId, refundMethod = 'Cash', bankAccountId = nu
       db.prepare(`
         INSERT INTO customer_ledger (id, shopId, customerId, orderId, transactionType, debit, credit, balance, description, createdAt)
         VALUES (?, ?, ?, ?, 'REFUND', ?, 0, ?, ?, ?)
-      `).run(`CUST-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, customerId, orderId, paidAmount, customerState?.balance || 0, `Refund for Deleted Order ${deletedOrder.billNumber || '#' + orderId}`, now);
+      `).run(`CUST-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, customerId, orderId, paidAmount, customerState?.balance || 0, `Refund for Deleted Order #${orderId}`, now);
     }
 
     db.prepare(`

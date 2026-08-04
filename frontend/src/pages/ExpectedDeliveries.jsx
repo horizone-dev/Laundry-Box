@@ -681,7 +681,7 @@ export default function ExpectedDeliveries() {
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Order ID</th>
+              <th>Invoice No.</th>
               <th>Customer</th>
               <th>Created Date</th>
               <th>Expected Date & Time</th>
