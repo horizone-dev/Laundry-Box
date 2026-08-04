@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   settleOrderPayment: (payload) => ipcRenderer.invoke('settle-order-payment', payload),
   reclassifyPaidOrderEdit: (payload) => ipcRenderer.invoke('reclassify-paid-order-edit', payload),
   postAccountEntry: (payload) => ipcRenderer.invoke('post-account-entry', payload),
+  postExpense: (payload) => ipcRenderer.invoke('post-expense', payload),
+  deleteExpense: (expenseId) => ipcRenderer.invoke('delete-expense', expenseId),
   transferAccountFunds: (payload) => ipcRenderer.invoke('transfer-account-funds', payload),
   editDiscountReceipt: (payload) => ipcRenderer.invoke('edit-discount-receipt', payload),
   openExternal: (url) => ipcRenderer.send('open-external', url),

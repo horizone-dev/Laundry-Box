@@ -449,7 +449,7 @@ export default function Dashboard() {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
     if (user.role) {
       role = user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ');
-      showFinancials = user.role === 'admin' || user.role === 'super_admin';
+      showFinancials = user.role === 'admin' || user.role === 'super_admin' || user.role === 'manager';
     }
   } catch (e) {}
   const getLateOrdersCount = () => {
@@ -496,7 +496,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── Top Metrics Grid ────────────────────── */}
-      <div className={styles.statsGrid} style={{ gridTemplateColumns: showFinancials ? 'repeat(6, 1fr)' : 'repeat(4, 1fr)' }}>
+      <div className={`${styles.statsGrid} ${showFinancials ? styles.sixCols : styles.fourCols}`}>
         {showFinancials && (
           <KPIItem title="Today Revenue" value={<><CurrencySymbol size={16} /> {stats.revenue.toFixed(2)}</>} trend={stats.revenueTrend.val} isUp={stats.revenueTrend.isUp} icon={<DollarSign size={20} />} iconBg="#ECFDF4" iconColor="#10B981" />
         )}
@@ -510,7 +510,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── Middle Row ────────────────────────────────────── */}
-      <div className={styles.middleRow} style={{ gridTemplateColumns: showFinancials ? '2fr 1fr' : '1fr' }}>
+      <div className={`${styles.middleRow} ${!showFinancials ? styles.twoCols : ''}`}>
         
         {/* Left: Revenue Trend */}
         {showFinancials && (

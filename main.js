@@ -857,6 +857,55 @@ ipcMain.handle('post-account-entry', (event, payload = {}) => {
   }
 });
 
+// Expenses are a paired financial record. Keep the report row and the account
+// movement in one SQLite transaction so neither screen can drift from the other.
+ipcMain.handle('post-expense', (event, payload = {}) => {
+  try {
+    const db = getDB();
+    const amount = Number(payload.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Amount must be greater than zero');
+    const id = payload.id || `EXP-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    const timestamp = payload.updatedAt || new Date().toISOString();
+    const date = payload.date || timestamp.replace('T', ' ').substring(0, 19);
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO expenses (id, shopId, title, amount, taxAmount, isTaxEnabled, taxMethod, category, date, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, payload.shopId || 'SHOP_01', payload.title || 'Expense', amount,
+        Number(payload.taxAmount) || 0, payload.isTaxEnabled ? 1 : 0, payload.taxMethod || 'inclusive',
+        payload.category || 'Other', date, timestamp);
+      db.prepare(`
+        INSERT INTO account_transactions
+          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy, createdById, createdByRole)
+        VALUES (?, ?, ?, 'EXPENSE', ?, ?, ?, ?, 0, ?, 'Zap', ?, ?, ?, ?)
+      `).run(id, payload.shopId || 'SHOP_01', payload.paymentSource || 'CASH', payload.category || 'Other', amount,
+        payload.title || 'Expense', date, timestamp, payload.bankAccountId || null,
+        payload.actor?.name || payload.actor?.id || 'System', payload.actor?.id || 'SYSTEM', payload.actor?.role || 'system');
+    })();
+    return { success: true, id };
+  } catch (err) {
+    console.error('Expense posting failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('delete-expense', (event, expenseId) => {
+  try {
+    if (!expenseId) throw new Error('Expense ID is required');
+    const db = getDB();
+    db.transaction(() => {
+      db.prepare('DELETE FROM expenses WHERE id = ?').run(expenseId);
+      // Current expense records deliberately share their exact ID with the
+      // ledger row. Do not use a description wildcard here.
+      db.prepare('DELETE FROM account_transactions WHERE id = ?').run(expenseId);
+    })();
+    return { success: true };
+  } catch (err) {
+    console.error('Expense deletion failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('transfer-account-funds', (event, payload = {}) => {
   try {
     const db = getDB();
@@ -938,7 +987,10 @@ ipcMain.handle('db-query', (event, { query, params }) => {
       return { success: true, data: info };
     }
   } catch (err) {
-    console.error('DB Error:', err);
+    // Suppress expected migration errors (e.g. "duplicate column name" from ADD COLUMN checks)
+    if (!err.message?.includes('duplicate column name') && !err.message?.includes('duplicate table name')) {
+      console.error('DB Error:', err);
+    }
     return { success: false, error: err.message };
   }
 });
@@ -1111,6 +1163,27 @@ ipcMain.handle('get-paginated-transactions', (event, { currentPage, pageSize, se
     // Exclude system auto-allocated transactions (same as frontend)
     conditions.push("description NOT LIKE '%System Auto%'");
     conditions.push("category != 'System Auto'");
+    // Account Settlement rows are allocation details (for example, an opening
+    // balance portion). The parent customer payment is already recorded as a
+    // settlement receipt, so do not show the allocation a second time.
+    conditions.push("category != 'Account Settlement'");
+    // Discounts are pricing adjustments, not cash/bank movement. They belong
+    // to the order/customer statement, never the Accounts ledger.
+    conditions.push("category NOT IN ('Discount Given', 'Discount Reversal')");
+    // When a receipt was used entirely to clear an opening/account due, its
+    // matching Credit Settlement row is only the parent allocation wrapper.
+    // Hide that wrapper too. Genuine advances and payments with a remaining
+    // order/settlement amount do not have an equal opening-due allocation and
+    // remain visible.
+    conditions.push(`NOT (
+      category = 'Credit Settlement' AND EXISTS (
+        SELECT 1 FROM account_transactions AS opening_txn
+        WHERE opening_txn.category = 'Account Settlement'
+          AND SUBSTR(opening_txn.date, 1, 19) = SUBSTR(account_transactions.date, 1, 19)
+          AND opening_txn.accountType = account_transactions.accountType
+          AND ABS(IFNULL(opening_txn.amount, 0) - IFNULL(account_transactions.amount, 0)) < 0.01
+      )
+    )`);
 
     // Account type filter
     if (accountType === 'CASH') {
@@ -2508,7 +2581,7 @@ ipcMain.handle('get-printers', async (event) => {
   return [];
 });
 
-ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent, pageSize }) => {
+ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent, pageSize, copies }) => {
   console.log("[main.js] print-invoice received options: printerName =", printerName, "silent =", silent, "pageSize =", pageSize);
   if (printerName && printerName !== 'System Default Printer') {
     try {
@@ -2578,23 +2651,38 @@ ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent, 
     // Short layout settle delay
     await new Promise(resolve => setTimeout(resolve, 150));
 
-    const result = await new Promise((resolve) => {
-      printWin.webContents.print({
-        silent: silent === true,   // Only suppress dialog when explicitly told to print silently
-        printBackground: true,
-        margins: { marginType: 'none' },
-        scaleFactor: 100,
-        pageSize: pageSize || 'A5', // Pass options custom size or string format
-        deviceName: (printerName === 'System Default Printer' || !printerName) ? '' : printerName
-      }, (success, failureReason) => {
-        if (success) {
-          resolve({ success: true });
-        } else {
-          resolve({ success: false, error: failureReason || 'Unknown printer hardware error' });
-        }
+    const numCopies = (silent === true) ? Math.max(1, parseInt(copies) || 1) : 1;
+    let finalResult = { success: false, error: 'No copies printed' };
+
+    for (let i = 0; i < numCopies; i++) {
+      console.log(`[main.js] Printing copy ${i + 1} of ${numCopies}...`);
+      const result = await new Promise((resolve) => {
+        printWin.webContents.print({
+          silent: silent === true,   // Only suppress dialog when explicitly told to print silently
+          printBackground: true,
+          margins: { marginType: 'none' },
+          scaleFactor: 100,
+          pageSize: pageSize || 'A5', // Pass options custom size or string format
+          copies: 1,                  // Print 1 copy at a time so the OS spooler triggers printer's auto-cutter between jobs
+          deviceName: (printerName === 'System Default Printer' || !printerName) ? '' : printerName
+        }, (success, failureReason) => {
+          if (success) {
+            resolve({ success: true });
+          } else {
+            resolve({ success: false, error: failureReason || 'Unknown printer hardware error' });
+          }
+        });
       });
-    });
-    return result;
+      finalResult = result;
+      if (!result.success) {
+        break; // Stop loop if a copy fails
+      }
+      if (i < numCopies - 1) {
+        // Wait 400ms between print jobs to ensure the printer queue processes them separately
+        await new Promise(r => setTimeout(r, 400));
+      }
+    }
+    return finalResult;
   } catch (err) {
     console.error('Print-Invoice error:', err);
     return { success: false, error: err.message };

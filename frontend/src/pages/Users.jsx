@@ -4,7 +4,7 @@ import {
   Mail, Phone, ShieldCheck, UserCheck, Trash2, Edit2, Lock, X, CheckCircle, Settings
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../services/api';
 import { DEFAULT_SHOP_ID, API_BASE_URL } from '../constants';
 import { useSettings } from '../store/SettingsContext';
 import styles from './Users.module.css';
@@ -85,8 +85,8 @@ const Users = () => {
     try {
       setLoading(true);
       const [usersRes, rolesRes] = await Promise.all([
-        axios.get(`${AUTH_API}/users`),
-        axios.get(ROLE_API)
+        api.get(`${AUTH_API}/users`),
+        api.get(ROLE_API)
       ]);
       setUsers(usersRes.data);
       setRoles(rolesRes.data);
@@ -98,7 +98,7 @@ const Users = () => {
   };
 
   const handleDelete = async (id) => {
-    if (id === user._id) {
+    if (id === user.id || id === user._id) {
       alert("You cannot delete your own account while logged in!");
       return;
     }
@@ -108,7 +108,7 @@ const Users = () => {
     }
     if (window.confirm('Are you sure you want to delete this user?')) {
       try {
-        await axios.delete(`${AUTH_API}/users/${id}`);
+        await api.delete(`${AUTH_API}/users/${id}`);
         setUsers(users.filter(u => u._id !== id));
       } catch (err) {
         const errorMsg = err.response?.data?.error || "Failed to delete user";
@@ -124,15 +124,16 @@ const Users = () => {
       if (!payload.phone) delete payload.phone;
       
       if (editingUser) {
-        await axios.put(`${AUTH_API}/users/${editingUser._id}`, payload);
-        if (user._id && editingUser._id === user._id) {
+        await api.put(`${AUTH_API}/users/${editingUser._id}`, payload);
+        const loggedInUserId = user.id || user._id;
+        if (loggedInUserId && editingUser._id === loggedInUserId) {
           const updatedUser = { ...user, ...payload };
           delete updatedUser.password;
           sessionStorage.setItem('user', JSON.stringify(updatedUser));
           window.dispatchEvent(new Event('user-profile-updated'));
         }
       } else {
-        await axios.post(`${AUTH_API}/register`, {
+        await api.post(`${AUTH_API}/register`, {
           ...payload,
           shopId: user.shopId || DEFAULT_SHOP_ID,
           userId: `USER_${Date.now()}`
@@ -150,7 +151,7 @@ const Users = () => {
   const handleUpdatePermissions = async (e) => {
     e.preventDefault();
     try {
-      await axios.put(`${ROLE_API}/${editingRole._id}/permissions`, {
+      await api.put(`${ROLE_API}/${editingRole._id}/permissions`, {
         permissions: editingRole.permissions
       });
       setShowPermissionModal(false);

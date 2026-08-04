@@ -141,9 +141,10 @@ export default function Expenses() {
     
     if (window.electronAPI?.dbQuery) {
       try {
-        await window.electronAPI.dbQuery('DELETE FROM expenses WHERE id = ?', [id]);
-        // Also delete from transactions
-        await window.electronAPI.dbQuery('DELETE FROM account_transactions WHERE id = ? OR description LIKE ?', [id, `%${id}%`]);
+        const result = window.electronAPI.deleteExpense
+          ? await window.electronAPI.deleteExpense(id)
+          : await window.electronAPI.dbQuery('DELETE FROM expenses WHERE id = ?', [id]);
+        if (!result?.success) throw new Error(result?.error || 'Expense could not be deleted');
         fetchExpenses();
       } catch (err) {
         console.error("Delete expense error:", err);
@@ -172,41 +173,21 @@ export default function Expenses() {
           ? (parseFloat(formData.amount) + taxAmount)
           : parseFloat(formData.amount);
 
-        await window.electronAPI.dbQuery(
-          'INSERT INTO expenses (id, shopId, title, amount, taxAmount, isTaxEnabled, taxMethod, category, date, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, DEFAULT_SHOP_ID, formData.title, totalAmount, taxAmount, formData.isTaxEnabled ? 1 : 0, formData.taxMethod, categoryToSave, formData.date, getLocalISOString()]
-        );
-
-        // Also record in Accounts (using the same ID for linking)
-        const _nowE = new Date();
-        const txnTimestamp = `${_nowE.getFullYear()}-${String(_nowE.getMonth()+1).padStart(2,'0')}-${String(_nowE.getDate()).padStart(2,'0')} ${String(_nowE.getHours()).padStart(2,'0')}:${String(_nowE.getMinutes()).padStart(2,'0')}`;
-        
         const userSession = JSON.parse(sessionStorage.getItem('user') || '{}');
         const creatorName = userSession.name || userSession.username || 'System';
         const creatorId = userSession.id || 'SYSTEM';
         const creatorRole = userSession.role || 'system';
 
-        await window.electronAPI.dbQuery(
-          `INSERT INTO account_transactions 
-           (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, createdBy, createdById, createdByRole) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            id, 
-            DEFAULT_SHOP_ID, 
-            formData.paymentSource, 
-            'EXPENSE', 
-            categoryToSave, 
-            totalAmount, 
-            formData.title, 
-            txnTimestamp, 
-            0, 
-            getLocalISOString(), 
-            'Zap',
-            creatorName,
-            creatorId,
-            creatorRole
-          ]
-        );
+        const result = window.electronAPI.postExpense
+          ? await window.electronAPI.postExpense({
+            id, shopId: DEFAULT_SHOP_ID, title: formData.title, amount: totalAmount,
+            taxAmount, isTaxEnabled: formData.isTaxEnabled, taxMethod: formData.taxMethod,
+            category: categoryToSave, date: formData.date, updatedAt: getLocalISOString(),
+            paymentSource: formData.paymentSource,
+            actor: { name: creatorName, id: creatorId, role: creatorRole }
+          })
+          : { success: false, error: 'Secure expense service is unavailable' };
+        if (!result?.success) throw new Error(result?.error || 'Expense could not be saved');
 
         fetchExpenses();
         setShowModal(false);

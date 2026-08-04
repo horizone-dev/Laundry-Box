@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+﻿import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { DEFAULT_SHOP_ID } from '../constants';
 
 const SettingsContext = createContext();
+const electronAPI = window.electronAPI || window.parent?.electronAPI;
 
 export function SettingsProvider({ children }) {
   const [isSettingsDirty, setIsSettingsDirty] = useState(false);
@@ -32,7 +33,7 @@ export function SettingsProvider({ children }) {
     taxRate: 5,
     isTaxEnabled: true,
     taxMethod: 'inclusive',
-    invoiceTemplate: 'standard',
+    invoiceTemplate: 'compact 2',
     posLayoutTemplate: 'standard',
     waCountryCode: '971',
     currencySymbol: '',
@@ -56,9 +57,9 @@ export function SettingsProvider({ children }) {
     language: 'English',
     dateFormat: 'DD/MM/YYYY',
     timeFormat: '12h',
-    autoPrint: false,
+    autoPrint: true,
     autoPrintCopies: 1,
-    workflowEnabled: true,
+    workflowEnabled: false,
     zReportMode: 'day_close_only',
     zReportClosingType: 'Day Close',
     defaultPaymentMethod: 'Cash',
@@ -153,9 +154,9 @@ export function SettingsProvider({ children }) {
     branchName: '',          // e.g., "Dubai Mall Branch" — shown on web dashboard
     branchApiKey: '',        // Cryptographically secure sync API key
     // ─── System Configuration Module toggles ─────────────────────
-    workflowEnabled: true,
+    workflowEnabled: false,
     zReportEnabled: true,
-    noModPayEnabled: true,
+    noModPayEnabled: false,
     paymentHistoryEnabled: true,
     zReportClosingType: 'Day Close',
     zReportAutoCloseEnabled: false,
@@ -176,17 +177,17 @@ export function SettingsProvider({ children }) {
   }, []);
 
   const fetchSettings = async () => {
-    if (window.electronAPI?.dbQuery) {
+    if (electronAPI?.dbQuery) {
       try {
-        const result = await window.electronAPI.dbQuery('SELECT * FROM shops LIMIT 1', []);
+        const result = await electronAPI.dbQuery('SELECT * FROM shops LIMIT 1', []);
         if (result.success && result.data.length > 0) {
           const shop = result.data[0];
           const shopSettings = typeof shop.settings === 'string' ? JSON.parse(shop.settings) : shop.settings;
 
           let defaultBackupPath = shopSettings?.autoBackupPath || '';
-          if (!defaultBackupPath && window.electronAPI?.getDesktopPath) {
+          if (!defaultBackupPath && electronAPI?.getDesktopPath) {
             try {
-              defaultBackupPath = await window.electronAPI.getDesktopPath();
+              defaultBackupPath = await electronAPI.getDesktopPath();
             } catch (err) {
               console.error("Failed to get desktop path:", err);
             }
@@ -217,7 +218,7 @@ export function SettingsProvider({ children }) {
             taxRate: shopSettings?.taxRate || 5,
             isTaxEnabled: shopSettings?.isTaxEnabled ?? true,
             taxMethod: shopSettings?.taxMethod || 'inclusive',
-            invoiceTemplate: shopSettings?.invoiceTemplate || 'standard',
+            invoiceTemplate: shopSettings?.invoiceTemplate || 'compact 2',
             posLayoutTemplate: shopSettings?.posLayoutTemplate || 'standard',
             waCountryCode: shopSettings?.waCountryCode || '971',
             currencySymbol: shopSettings?.currencySymbol || 'د.إ',
@@ -241,7 +242,7 @@ export function SettingsProvider({ children }) {
             language: shopSettings?.language || 'English',
             dateFormat: shopSettings?.dateFormat || 'DD/MM/YYYY',
             timeFormat: shopSettings?.timeFormat || '12h',
-            autoPrint: shopSettings?.autoPrint ?? false,
+            autoPrint: shopSettings?.autoPrint ?? true,
             autoPrintCopies: shopSettings?.autoPrintCopies ?? 1,
             defaultPaymentMethod: shopSettings?.defaultPaymentMethod || 'Cash',
             cardCommission: shopSettings?.cardCommission ?? 0,
@@ -336,9 +337,9 @@ export function SettingsProvider({ children }) {
             branchApiKey: shopSettings?.branchApiKey || '',
             branchId:     shopSettings?.branchId     || 'BRANCH_01',
             // System Configuration Module toggles
-            workflowEnabled: shopSettings?.workflowEnabled ?? true,
+            workflowEnabled: shopSettings?.workflowEnabled ?? false,
             zReportEnabled: shopSettings?.zReportEnabled ?? true,
-            noModPayEnabled: shopSettings?.noModPayEnabled ?? true,
+            noModPayEnabled: shopSettings?.noModPayEnabled ?? false,
             paymentHistoryEnabled: shopSettings?.paymentHistoryEnabled ?? true,
             zReportClosingType: shopSettings?.zReportClosingType || 'Day Close',
             zReportAutoCloseEnabled: shopSettings?.zReportAutoCloseEnabled ?? false,
@@ -380,7 +381,7 @@ export function SettingsProvider({ children }) {
     }
 
 
-    if (window.electronAPI?.dbQuery) {
+    if (electronAPI?.dbQuery) {
       try {
         const settingsJson = JSON.stringify({
           companyNameAr: updated.companyNameAr,
@@ -530,7 +531,7 @@ export function SettingsProvider({ children }) {
           branchId:     updated.branchId     || 'BRANCH_01',
         }));
 
-        await window.electronAPI.dbQuery(
+        await electronAPI.dbQuery(
           'UPDATE shops SET name = ?, settings = ?, updatedAt = ? WHERE shopId = ?',
           [updated.companyName, settingsJson, new Date().toISOString(), DEFAULT_SHOP_ID]
         );

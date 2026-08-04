@@ -91,8 +91,15 @@
 /* Stats KPI Grid */
 .statsGrid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
   gap: 0.5rem;
+}
+
+.statsGrid.sixCols {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.statsGrid.fourCols {
+  grid-template-columns: repeat(4, 1fr);
 }
 
 .kpiCardItem {
@@ -190,6 +197,10 @@
   display: grid;
   grid-template-columns: 2fr 1.2fr 0.8fr;
   gap: 0.75rem;
+}
+
+.middleRow.twoCols {
+  grid-template-columns: 1.2fr 0.8fr;
 }
 
 .card {
@@ -752,13 +763,15 @@
 
 /* Responsive Queries */
 @media (max-width: 1400px) {
-  .statsGrid {
+  .statsGrid.sixCols,
+  .statsGrid.fourCols {
     grid-template-columns: repeat(3, 1fr);
   }
   .footerRow {
     grid-template-columns: repeat(3, 1fr);
   }
-  .middleRow {
+  .middleRow,
+  .middleRow.twoCols {
     grid-template-columns: 1fr;
   }
   .bottomRow {
@@ -772,7 +785,8 @@
     align-items: flex-start;
     gap: 1rem;
   }
-  .statsGrid {
+  .statsGrid.sixCols,
+  .statsGrid.fourCols {
     grid-template-columns: repeat(2, 1fr);
   }
   .footerRow {
@@ -781,7 +795,8 @@
 }
 
 @media (max-width: 480px) {
-  .statsGrid {
+  .statsGrid.sixCols,
+  .statsGrid.fourCols {
     grid-template-columns: 1fr;
   }
   .footerRow {

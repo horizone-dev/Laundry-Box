@@ -3073,13 +3073,14 @@ export default function POS() {
       {/* Success Modal */}
       {showSuccessModal && lastOrderInfo && (
         <div className={styles.modalOverlay}>
-          {printReceipt && settings.billingPrinter && (
+          {printReceipt && (
             <iframe 
               src={`#/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=true&isPos=true`} 
               style={{ display: 'none' }} 
               title="Silent Print Frame"
             />
           )}
+
           <div className={styles.successModal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.successHeader}>
               <div className={styles.checkIcon}>
@@ -3151,10 +3152,10 @@ export default function POS() {
                 <button
                   className={styles.printSuccessBtn}
                   onClick={() => {
-                    navigate(`/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=force&isPos=true`);
+                    navigate(`/invoice/${lastOrderInfo.orderId.replace('#', '')}?print=false&isPos=true`);
                   }}
                 >
-                  <Printer size={20} /> Print Receipt
+                  <FileText size={20} /> View Receipt
                 </button>
                 <button
                   className={styles.doneBtn}

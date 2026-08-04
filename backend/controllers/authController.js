@@ -341,6 +341,10 @@ exports.updateUser = async (req, res) => {
 
 exports.deleteUser = async (req, res) => {
   try {
+    if (req.user && req.user.id === req.params.id) {
+      return res.status(400).json({ error: 'You cannot delete your own account while logged in!' });
+    }
+
     if (!isMongoConnected()) {
       await initLocalDb();
       const users = loadLocalUsers();

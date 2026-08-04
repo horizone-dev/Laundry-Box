@@ -1470,7 +1470,7 @@ export default function Customers() {
 
       // 1. Fetch individual payment records to group updates by orderId
       const pToDelRes = await window.electronAPI.dbQuery(
-        `SELECT id, amount, method, orderId, createdAt FROM payments WHERE id IN (${idsToDelete.map(() => '?').join(',')})`,
+        `SELECT id, amount, method, orderId, createdAt, paymentReference FROM payments WHERE id IN (${idsToDelete.map(() => '?').join(',')})`,
         idsToDelete
       );
       let paymentsToDelete = pToDelRes.success ? pToDelRes.data : [];
@@ -1481,7 +1481,7 @@ export default function Customers() {
       for (const pDel of paymentsToDelete) {
         if (pDel.orderId) {
           const timePrefix = pDel.createdAt ? pDel.createdAt.substring(0, 19) : '';
-          let query = "SELECT id, amount, method, orderId, createdAt FROM payments WHERE orderId = ? AND method = 'Discount'";
+          let query = "SELECT id, amount, method, orderId, createdAt, paymentReference FROM payments WHERE orderId = ? AND method = 'Discount'";
           let params = [pDel.orderId];
           if (timePrefix) {
             query += " AND createdAt LIKE ?";
@@ -1504,6 +1504,11 @@ export default function Customers() {
         idsToDelete.push(...discountIds);
         paymentsToDelete = [...paymentsToDelete, ...discountPayments];
       }
+
+      // One customer settlement may be allocated to several orders.  Keep the
+      // deletion labelled as a settlement event, not as an order payment.
+      const isCustomerSettlementEvent = Boolean(payment.isSettlementGroup) ||
+        paymentsToDelete.some(p => !p.orderId);
 
       // If an unlinked advance is deleted, undo every invoice allocation that
       // used it and remove the matching System Auto receipt. Without this, an
@@ -1648,8 +1653,9 @@ export default function Customers() {
       const payDate = new Date(payment.createdAt);
       const datePrefix = `${payDate.getFullYear()}-${String(payDate.getMonth() + 1).padStart(2, '0')}-${String(payDate.getDate()).padStart(2, '0')} ${String(payDate.getHours()).padStart(2, '0')}:${String(payDate.getMinutes()).padStart(2, '0')}`;
 
-      const _nowC = new Date();
-      const txnTimestamp = `${_nowC.getFullYear()}-${String(_nowC.getMonth() + 1).padStart(2, '0')}-${String(_nowC.getDate()).padStart(2, '0')} ${String(_nowC.getHours()).padStart(2, '0')}:${String(_nowC.getMinutes()).padStart(2, '0')}`;
+      // Keep the ledger timestamp in the same local-time format as every
+      // other account entry, including seconds for correct ordering.
+      const txnTimestamp = timestamp.replace('T', ' ').substring(0, 19);
 
       for (const pDel of paymentsToDelete) {
         const txnRes = await window.electronAPI.dbQuery(
@@ -1663,6 +1669,8 @@ export default function Customers() {
           const creatorName = currentUser.name || currentUser.username || 'System';
           const creatorId = currentUser.id || 'SYSTEM';
           const creatorRole = currentUser.role || 'system';
+          const payTypeLabel = isCustomerSettlementEvent ? 'Customer Settlement Payment Deleted' : 'Order Payment Deleted';
+          const revDescription = `${payTypeLabel} – ${pDel.method || 'Cash'} for ${selectedCustomer.name}`;
 
           await window.electronAPI.dbQuery(
             `INSERT INTO account_transactions 
@@ -1672,10 +1680,12 @@ export default function Customers() {
               revTxnId,
               origTxn.shopId || DEFAULT_SHOP_ID,
               origTxn.accountType || ((pDel.method === 'Bank' || pDel.method === 'Card' || pDel.method === 'UPI') ? 'BANK' : 'CASH'),
-              origTxn.type === 'INCOME' ? 'EXPENSE' : 'INCOME',
+              // Deleting a customer payment always removes money from the
+              // account ledger, regardless of a legacy source row's type.
+              'EXPENSE',
               'Payment Cancellation',
               pDel.amount,
-              `Deleted: Payment ${getReceiptNumber(pDel)} for ${selectedCustomer.name}`,
+              revDescription,
               txnTimestamp,
               0,
               timestamp,
@@ -1704,7 +1714,7 @@ export default function Customers() {
               'EXPENSE',
               'Payment Cancellation',
               pDel.amount,
-              `Deleted: Payment ${getReceiptNumber(pDel)} for ${selectedCustomer.name}`,
+              `${isCustomerSettlementEvent ? 'Customer Settlement Payment Deleted' : 'Order Payment Deleted'} \u2013 ${pDel.method || 'Cash'} for ${selectedCustomer.name}`,
               txnTimestamp,
               0,
               timestamp,
@@ -2560,7 +2570,11 @@ export default function Customers() {
 
         // Payments received (credit)
         const paymentCredits = allPaymentsRaw
-          .filter(p => p.method !== 'System Auto' && p.method !== 'Advance')
+          .filter(p => {
+            if (p.method === 'System Auto' || p.method === 'Advance') return false;
+            if (p.method === 'Discount' && (p.orderId || p.discountScope === 'order')) return false;
+            return true;
+          })
           .reduce((sum, p) => sum + (p.amount || 0), 0);
         runningBalance -= paymentCredits;
 
@@ -2760,6 +2774,7 @@ export default function Customers() {
         const result = await window.electronAPI.refundDeletedOrder({
           orderId: orderToRefund.id,
           refundMethod: selectedRefundMethod,
+          bankAccountId: selectedRefundMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null,
           refundedBy
         });
         if (!result?.success) throw new Error(result?.error || 'Failed to process refund');
@@ -3840,13 +3855,13 @@ export default function Customers() {
                     <h4 style={{ fontSize: '0.82rem', color: '#475569', marginBottom: '0.5rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       Usage / Allocation Breakdown
                     </h4>
-                    <div style={{ background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0', overflow: 'hidden' }}>
+                    <div style={{ background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0', maxHeight: '180px', overflowY: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                         <thead>
-                          <tr style={{ background: '#F1F5F9', borderBottom: '1px solid #E2E8F0' }}>
-                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Applied To</th>
-                            <th style={{ textAlign: 'right', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Amount</th>
-                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Type</th>
+                          <tr style={{ background: '#F1F5F9', borderBottom: '1px solid #E2E8F0', position: 'sticky', top: 0, zIndex: 1 }}>
+                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600, background: '#F1F5F9' }}>Applied To</th>
+                            <th style={{ textAlign: 'right', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600, background: '#F1F5F9' }}>Amount</th>
+                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600, background: '#F1F5F9' }}>Type</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -5376,13 +5391,13 @@ export default function Customers() {
                     <h4 style={{ fontSize: '0.82rem', color: '#475569', marginBottom: '0.5rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       Usage / Allocation Breakdown
                     </h4>
-                    <div style={{ background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0', overflow: 'hidden' }}>
+                    <div style={{ background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0', maxHeight: '180px', overflowY: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                         <thead>
-                          <tr style={{ background: '#F1F5F9', borderBottom: '1px solid #E2E8F0' }}>
-                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Applied To</th>
-                            <th style={{ textAlign: 'right', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Amount</th>
-                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600 }}>Type</th>
+                          <tr style={{ background: '#F1F5F9', borderBottom: '1px solid #E2E8F0', position: 'sticky', top: 0, zIndex: 1 }}>
+                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600, background: '#F1F5F9' }}>Applied To</th>
+                            <th style={{ textAlign: 'right', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600, background: '#F1F5F9' }}>Amount</th>
+                            <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#475569', fontWeight: 600, background: '#F1F5F9' }}>Type</th>
                           </tr>
                         </thead>
                         <tbody>

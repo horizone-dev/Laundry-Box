@@ -192,6 +192,7 @@ export default function DeletedOrders() {
         const result = await window.electronAPI.refundDeletedOrder({
           orderId: orderToRefund.id,
           refundMethod: selectedRefundMethod,
+          bankAccountId: selectedRefundMethod === 'Bank' ? (settings.defaultBankId || settings.bankAccounts?.[0]?.id || null) : null,
           refundedBy
         });
         if (!result?.success) throw new Error(result?.error || 'Failed to process refund');

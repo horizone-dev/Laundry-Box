@@ -898,6 +898,24 @@ function initDB(appPath) {
       END;
     `);
 
+    // Correct legacy account rows written in UTC by the old settlement flow.
+    // Only a row whose displayed time still equals its UTC timestamp is moved.
+    const utcLedgerRows = db.prepare("SELECT id, date, updatedAt FROM account_transactions WHERE updatedAt LIKE '%Z' AND date IS NOT NULL AND date != ''").all();
+    const padTime = (value) => String(value).padStart(2, '0');
+    const repairUtcLedger = db.prepare('UPDATE account_transactions SET date = ?, updatedAt = ? WHERE id = ?');
+    utcLedgerRows.forEach((row) => {
+      const instant = new Date(row.updatedAt);
+      if (Number.isNaN(instant.getTime())) return;
+      const utcMinute = `${instant.getUTCFullYear()}-${padTime(instant.getUTCMonth() + 1)}-${padTime(instant.getUTCDate())} ${padTime(instant.getUTCHours())}:${padTime(instant.getUTCMinutes())}`;
+      const displayedMinute = String(row.date).replace('T', ' ').substring(0, 16);
+      const localDate = `${instant.getFullYear()}-${padTime(instant.getMonth() + 1)}-${padTime(instant.getDate())} ${padTime(instant.getHours())}:${padTime(instant.getMinutes())}:${padTime(instant.getSeconds())}`;
+      const offsetMinutes = -instant.getTimezoneOffset();
+      const sign = offsetMinutes >= 0 ? '+' : '-';
+      const absoluteOffset = Math.abs(offsetMinutes);
+      const localIso = `${localDate.replace(' ', 'T')}.${String(instant.getMilliseconds()).padStart(3, '0')}${sign}${padTime(Math.floor(absoluteOffset / 60))}:${padTime(absoluteOffset % 60)}`;
+      repairUtcLedger.run(displayedMinute === utcMinute ? localDate : row.date, localIso, row.id);
+    });
+
     // ─── Payment Sequence Migration ──────────────────────────────────
     db.exec(`
       CREATE TABLE IF NOT EXISTS payment_sequence (
@@ -1115,7 +1133,11 @@ function legacyMutatingDataHealer(db, targetCustomerId = null) {
       // 2. Fetch payments sum
       const payments = paymentsStmt.all(custId);
       const paymentSum = payments
-        .filter(p => p.method !== 'Refund Advance' && p.method !== 'Advance' && p.method !== 'System Auto')
+        .filter(p => {
+          if (p.method === 'Refund Advance' || p.method === 'Advance' || p.method === 'System Auto') return false;
+          if (p.method === 'Discount' && (p.orderId || p.discountScope === 'order')) return false;
+          return true;
+        })
         .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
 
       // 3. Fetch refunds sum
@@ -1935,7 +1957,7 @@ function recordOrderDiscountReversal(connection, {
     shopId || 'SHOP_01',
     discountAmount,
     `Discount reversal - Deleted Order ${billNumber || '#' + orderId}`,
-    timestamp.replace('T', ' ').substring(0, 16),
+    timestamp.replace('T', ' ').substring(0, 19),
     timestamp,
     actor || 'System'
   );
@@ -2175,7 +2197,7 @@ function softDeleteOrderLegacy({ orderId, deletedBy, deleteReason, deleteAction 
         VALUES (?, ?, ?, 'EXPENSE', 'Return', ?, ?, ?, 0, ?, 'Zap', ?)
       `).run(
         txnId, shopId, refundMethod === 'Bank' ? 'BANK' : 'CASH', actualPaidAmt,
-        `Refund - Deleted Order ${billNumber || '#' + orderId}`, now.replace('T', ' ').substring(0, 16),
+        `Refund - Deleted Order ${billNumber || '#' + orderId}`, now.replace('T', ' ').substring(0, 19),
         now, deletedBy
       );
     }
@@ -2214,7 +2236,7 @@ function softDeleteOrderLegacy({ orderId, deletedBy, deleteReason, deleteAction 
   return executeTransaction();
 }
 
-function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'refund', refundMethod = 'CASH', discountAction = 'delete' }) {
+function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'refund', refundMethod = 'CASH', bankAccountId = null, discountAction = 'delete' }) {
   if (!db) throw new Error('Database not initialized');
 
   return db.transaction(() => {
@@ -2362,9 +2384,9 @@ function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'ref
       `).run(`CASH-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, order.branchId || null, orderId, refundId, refundMethod, actualPaidAmt, `Refund for Deleted Order ${order.billNumber || '#' + orderId}`, now);
       db.prepare(`
         INSERT INTO account_transactions
-          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, createdBy)
-        VALUES (?, ?, ?, 'EXPENSE', 'Return', ?, ?, ?, 0, ?, 'Zap', ?)
-      `).run(`TXN-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, getRefundAccountType(refundMethod), actualPaidAmt, `Refund - Deleted Order ${order.billNumber || '#' + orderId}`, now.replace('T', ' ').substring(0, 16), now, deletedBy);
+          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy)
+        VALUES (?, ?, ?, 'EXPENSE', 'Return', ?, ?, ?, 0, ?, 'Zap', ?, ?)
+      `).run(`TXN-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, getRefundAccountType(refundMethod), actualPaidAmt, `Refund - Deleted Order ${order.billNumber || '#' + orderId}`, now.replace('T', ' ').substring(0, 19), now, getRefundAccountType(refundMethod) === 'BANK' ? bankAccountId : null, deletedBy);
     }
 
     db.prepare(`
@@ -2382,7 +2404,7 @@ function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'ref
   })();
 }
 
-function refundDeletedOrder({ orderId, refundMethod = 'Cash', refundedBy = 'System' }) {
+function refundDeletedOrder({ orderId, refundMethod = 'Cash', bankAccountId = null, refundedBy = 'System' }) {
   if (!db) throw new Error('Database not initialized');
 
   return db.transaction(() => {
@@ -2446,9 +2468,9 @@ function refundDeletedOrder({ orderId, refundMethod = 'Cash', refundedBy = 'Syst
       `).run(`CASH-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, liveOrder.branchId || null, orderId, refundId, refundMethod, paidAmount, `Refund for Deleted Order ${deletedOrder.billNumber || '#' + orderId}`, now);
       db.prepare(`
         INSERT INTO account_transactions
-          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, createdBy)
-        VALUES (?, ?, ?, 'EXPENSE', 'Return', ?, ?, ?, 0, ?, 'Zap', ?)
-      `).run(`TXN-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, getRefundAccountType(refundMethod), paidAmount, `Refund - Deleted Order ${deletedOrder.billNumber || '#' + orderId}`, now.replace('T', ' ').substring(0, 16), now, refundedBy);
+          (id, shopId, accountType, type, category, amount, description, date, isSynced, updatedAt, icon, bankAccountId, createdBy)
+        VALUES (?, ?, ?, 'EXPENSE', 'Return', ?, ?, ?, 0, ?, 'Zap', ?, ?)
+      `).run(`TXN-REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`, shopId, getRefundAccountType(refundMethod), paidAmount, `Refund - Deleted Order ${deletedOrder.billNumber || '#' + orderId}`, now.replace('T', ' ').substring(0, 19), now, getRefundAccountType(refundMethod) === 'BANK' ? bankAccountId : null, refundedBy);
     }
 
     db.prepare(`

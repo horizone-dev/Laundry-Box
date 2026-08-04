@@ -9,7 +9,15 @@ const PAYMENT_ACCOUNT_TYPES = {
 };
 
 function nowIso() {
-  return new Date().toISOString();
+  // Account ledger dates are displayed as local shop time. Do not store a UTC
+  // clock value here, otherwise a UAE payment at 22:42 appears as 18:42.
+  const now = new Date();
+  const offsetMs = -now.getTimezoneOffset() * 60000;
+  const sign = offsetMs >= 0 ? '+' : '-';
+  const absoluteOffsetMinutes = Math.abs(now.getTimezoneOffset());
+  const hours = String(Math.floor(absoluteOffsetMinutes / 60)).padStart(2, '0');
+  const minutes = String(absoluteOffsetMinutes % 60).padStart(2, '0');
+  return new Date(now.getTime() + offsetMs).toISOString().replace('Z', `${sign}${hours}:${minutes}`);
 }
 
 function toAmount(value) {

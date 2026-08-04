@@ -5,7 +5,7 @@ import {
   Plus, Search, Filter, Calendar, Printer, Download,
   DollarSign, Receipt, CreditCard, ChevronRight,
   ArrowLeftRight, Trash2, CheckCircle, HelpCircle,
-  Zap, Share2, Lock, Bell
+  Zap, Share2, Lock, Bell, X
 } from 'lucide-react';
 import CurrencySymbol from '../components/CurrencySymbol';
 import { useSettings } from '../store/SettingsContext';
@@ -55,6 +55,9 @@ export default function Accounts() {
       : ['Payments', 'Refunds'];
   }, [settings.noModPayEnabled, settings.enablePaymentLinks]);
   const [transactions, setTransactions] = useState([]);
+  const [detailModal, setDetailModal] = useState(null); // { g, matchedCustomer, paymentTypeLabel, methodLabel, methodsInfo, isCancellation, dateDisplay, timeDisplay }
+  const [detailPayments, setDetailPayments] = useState([]); // fetched from payments table for modal
+  const [detailLoading, setDetailLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalTransactionCount, setTotalTransactionCount] = useState(0);
   const [paginatedTransactions, setPaginatedTransactions] = useState([]);
@@ -120,9 +123,21 @@ export default function Accounts() {
   const [receivablesTotal, setReceivablesTotal] = useState(1450.00);
   const [advancesTotal, setAdvancesTotal] = useState(320.00);
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateRange, setDateRange] = useState('Today');
+  const [dateRange, setDateRange] = useState('All');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
+  const visibleAccountTransactions = useMemo(
+    () => paginatedTransactions.filter(t => !['Discount Given', 'Discount Reversal'].includes(t.category)),
+    [paginatedTransactions]
+  );
+  const visibleAccountIncome = useMemo(
+    () => visibleAccountTransactions.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + (Number(t.amount) || 0), 0),
+    [visibleAccountTransactions]
+  );
+  const visibleAccountExpense = useMemo(
+    () => visibleAccountTransactions.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + (Number(t.amount) || 0), 0),
+    [visibleAccountTransactions]
+  );
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -153,7 +168,7 @@ export default function Accounts() {
         const bankAccts = settings.bankAccounts || [];
         const res = await window.electronAPI.getPaginatedTransactions({
           currentPage,
-          pageSize: 20,
+          pageSize: 1000,
           searchTerm,
           dateRange,
           customStart,
@@ -218,9 +233,52 @@ export default function Accounts() {
     }
   }, [settings.bankAccounts, activeBankAccountId]);
 
+  // Opens the Eye detail modal, fetching payment rows from DB for the given group
+  const openDetailModal = async (modalData) => {
+    setDetailModal(modalData);
+    setDetailPayments([]);
+    setDetailLoading(true);
+    try {
+      const { g, matchedCustomer, isCancellation } = modalData;
+      const dateKey = g.dateKey; // "YYYY-MM-DD HH:MM" 16-char
+      if (matchedCustomer) {
+        let pmtRes;
+        if (isCancellation) {
+          // For deleted payments, find the original payments from around that time
+          // Use the timestamp from representative entry
+          const repDate = String(g.representative.date || '').substring(0, 16);
+          pmtRes = await window.electronAPI.dbQuery(
+            `SELECT p.*, o.id as linkedOrderId FROM payments p 
+             LEFT JOIN orders o ON p.orderId = o.id
+             WHERE p.customerId = ? AND p.method != 'Discount' AND p.method != 'Advance' AND p.method != 'System Auto'
+             AND SUBSTR(p.createdAt, 1, 16) = ?
+             ORDER BY p.createdAt ASC`,
+            [matchedCustomer.id, repDate]
+          );
+        } else {
+          pmtRes = await window.electronAPI.dbQuery(
+            `SELECT p.*, o.id as linkedOrderId FROM payments p 
+             LEFT JOIN orders o ON p.orderId = o.id
+             WHERE p.customerId = ? AND p.method != 'Discount' AND p.method != 'Advance' AND p.method != 'System Auto'
+             AND SUBSTR(p.createdAt, 1, 16) = ?
+             ORDER BY p.createdAt ASC`,
+            [matchedCustomer.id, dateKey]
+          );
+        }
+        if (pmtRes?.success && pmtRes.data.length > 0) {
+          setDetailPayments(pmtRes.data);
+        }
+      }
+    } catch (err) {
+      console.error('openDetailModal fetch error:', err);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   const [formData, setFormData] = useState({
     type: 'INCOME',
-    category: 'Service Payment',
+    category: 'Other Income',
     amount: '',
     description: '',
     icon: 'DollarSign'
@@ -422,7 +480,12 @@ export default function Accounts() {
   };
 
   /* ─── Balance Calculations ────────────────────────── */
-  const cashTxns = useMemo(() => transactions.filter(t => t.accountType === 'CASH'), [transactions]);
+  // A discount changes an invoice value, not money held in an account.
+  const accountBalanceTransactions = useMemo(
+    () => transactions.filter(t => !['Discount Given', 'Discount Reversal'].includes(t.category)),
+    [transactions]
+  );
+  const cashTxns = useMemo(() => accountBalanceTransactions.filter(t => t.accountType === 'CASH'), [accountBalanceTransactions]);
 
   const cashBalance = useMemo(() => {
     const income = cashTxns.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + t.amount, 0);
@@ -430,7 +493,7 @@ export default function Accounts() {
     return income - expense;
   }, [cashTxns]);
 
-  const gatewayTxns = useMemo(() => transactions.filter(t => t.accountType === 'GATEWAY'), [transactions]);
+  const gatewayTxns = useMemo(() => accountBalanceTransactions.filter(t => t.accountType === 'GATEWAY'), [accountBalanceTransactions]);
 
   const gatewayBalance = useMemo(() => {
     const income = gatewayTxns.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + t.amount, 0);
@@ -448,7 +511,7 @@ export default function Accounts() {
 
     let unassigned = 0;
 
-    transactions.forEach(t => {
+    accountBalanceTransactions.forEach(t => {
       if (t.accountType === 'BANK') {
         const amt = t.type === 'INCOME' ? t.amount : -t.amount;
         if (t.bankAccountId && balances[t.bankAccountId] !== undefined) {
@@ -466,7 +529,7 @@ export default function Accounts() {
     }
 
     return balances;
-  }, [transactions, settings.bankAccounts]);
+  }, [accountBalanceTransactions, settings.bankAccounts]);
 
   const bankBalance = useMemo(() => {
     return Object.values(bankBalances).reduce((sum, val) => sum + val, 0);
@@ -476,7 +539,9 @@ export default function Accounts() {
   const handleOpenAddModal = (txnType) => {
     setFormData({
       type: txnType,
-      category: txnType === 'INCOME' ? 'Service Payment' : 'Supplies',
+      // Manual income does not create a customer receipt or reduce an invoice.
+      // Default it to non-sales income so it cannot be mistaken for collection.
+      category: txnType === 'INCOME' ? 'Other Income' : 'Supplies',
       amount: '',
       description: '',
       icon: txnType === 'INCOME' ? 'DollarSign' : 'Receipt'
@@ -761,6 +826,14 @@ export default function Accounts() {
 
   const handleDeleteTransaction = async (id) => {
     alert("Restricted: Deleting transactions is not allowed to maintain account integrity.");
+  };
+
+  // Delete all account_transactions + payments for a Sales Settlement group (same timestamp-second)
+  const handleDeleteSettlementGroup = async (dateKey, customerId) => {
+    // A timestamp is not a financial identifier: deleting by time could remove
+    // another customer's receipt and would leave the invoice paid/due values
+    // unchanged. Settlements must be reversed through an audited workflow.
+    alert('Settlement deletion is disabled to protect account integrity. Use the customer statement / refund workflow to post an audited reversal.');
   };
 
   const filteredCustomers = useMemo(() => {
@@ -1510,11 +1583,11 @@ export default function Accounts() {
               <table className={styles.ledgerTable}>
                 <thead>
                   <tr>
-                    <th>CREATED</th>
+                    <th>DATE &amp; TIME</th>
                     <th>COMMENT</th>
                     <th className={styles.numCol}>TYPE</th>
                     <th className={styles.numCol}>AMOUNT</th>
-                    <th className={styles.actionCol} data-noprint="true"></th>
+
                   </tr>
                 </thead>
                 <tbody>
@@ -1522,41 +1595,193 @@ export default function Accounts() {
                     <tr>
                       <td colSpan="5" className={styles.emptyRow}>Loading entries…</td>
                     </tr>
-                  ) : filteredTransactions.length === 0 ? (
+                  ) : visibleAccountTransactions.length === 0 ? (
                     <tr>
                       <td colSpan="5" className={styles.emptyRow}>No transactions found matching criteria.</td>
                     </tr>
-                  ) : (
-                    paginatedTransactions.map(t => {
-                      // Retrieve transaction creator directly from database fields, fallback to System/Unknown
-                      let roleLabel = '';
-                      if (t.createdByRole) {
-                        if (t.createdByRole === 'super_admin') roleLabel = 'Super Admin';
-                        else if (t.createdByRole === 'manager') roleLabel = 'Manager';
-                        else if (t.createdByRole === 'cashier') roleLabel = 'Cashier';
-                      }
+                  ) : (() => {
+                    // Group Sales Settlement, Credit Settlement, and Payment Cancellation rows by date/timestamp, category, type, and customer
+                    const groups = {};
+                    const orderedRows = [];
+                    for (const t of visibleAccountTransactions) {
+                      const groupableCategories = ['Sales Settlement', 'Credit Settlement', 'Payment Cancellation'];
+                      if (groupableCategories.includes(t.category)) {
+                        // Extract customer to separate groups by customer
+                        const descLower = String(t.description || '').toLowerCase();
+                        const matchedCust = [...dbCustomers]
+                          .sort((a, b) => b.name.length - a.name.length)
+                          .find(c => descLower.includes(c.name.toLowerCase()));
+                        const customerId = matchedCust ? matchedCust.id : 'unknown';
+                        const dateKey = String(t.date || '').substring(0, 16); // group by minute
 
-                      let displayCreator = '';
-                      if (roleLabel && t.createdBy && t.createdBy !== 'System' && t.createdBy !== 'Unknown') {
-                        displayCreator = `${roleLabel}: ${t.createdBy}`;
+                        // Key does NOT include t.type so mixed INCOME/EXPENSE reversals from
+                        // the same deletion event (e.g. cash reversal + discount reversal) merge.
+                        const groupKey = `${customerId}:${t.category}:${dateKey}`;
+                        if (!groups[groupKey]) {
+                          groups[groupKey] = {
+                            category: t.category,
+                            type: t.type,
+                            customer: matchedCust,
+                            rows: [],
+                            netTotal: 0,
+                            representative: t,
+                            dateKey
+                          };
+                          orderedRows.push({ isGroup: true, key: groupKey, group: groups[groupKey] });
+                        }
+                        groups[groupKey].rows.push(t);
+                        // Use signed amounts: EXPENSE entries reduce total, INCOME entries add
+                        const signed = t.type === 'EXPENSE' ? -(t.amount || 0) : (t.amount || 0);
+                        groups[groupKey].netTotal += signed;
                       } else {
-                        displayCreator = t.createdBy || (t.category === 'Sales Settlement' || t.category === 'Sales' ? 'System' : 'Unknown');
+                        orderedRows.push({ isGroup: false, key: t.id, txn: t });
+                      }
+                    }
+
+                    return orderedRows.map(entry => {
+                      if (entry.isGroup) {
+                        const g = entry.group;
+                        const rep = g.representative;
+                        const dateStr = String(rep.date || '');
+                        const dateDisplay = formatDate(dateStr);
+                        const timeDisplay = new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const matchedCustomer = g.customer;
+                        const isCancellation = g.category === 'Payment Cancellation';
+
+                        const methodsInfo = g.rows
+                          // Only include rows that are the "positive" side (INCOME for settlements, EXPENSE for cancellations) for method breakdown
+                          .filter(r => isCancellation ? r.type === 'EXPENSE' : r.type === 'INCOME')
+                          .map(r => {
+                            const m = (r.description || '').match(/via ([^\s]+)$/) || (r.description || '').match(/\(([^)]+)\)$/) || (r.description || '').match(/– ([^\s]+) \(/);
+                            return { method: m ? m[1].replace('(Deleted)', '').trim() : 'Cash', amount: r.amount };
+                          });
+                        const uniqueMethods = [...new Set(methodsInfo.map(m => m.method))];
+                        const methodLabel = uniqueMethods.length > 0 ? uniqueMethods.join(' + ') : 'Cash';
+
+                        // Show the customer payment event only. Its individual
+                        // order/opening-balance allocations are never displayed.
+                        const groupDescriptions = g.rows.map(r => String(r.description || '').toLowerCase());
+                        const isCustomerOrderPayment = g.category === 'Sales Settlement' || groupDescriptions.some(d =>
+                          d.includes('order payment') || d.includes('settlement for order') || d.includes('quick settlement for order')
+                        );
+                        const isCustomerSettlement = !isCustomerOrderPayment && (
+                          g.category === 'Credit Settlement' ||
+                          (g.category === 'Payment Cancellation' && g.rows.length > 1) ||
+                          groupDescriptions.some(d =>
+                            d.startsWith('settlement from') || d.includes('customer settlement') || d.includes('customer settled')
+                          )
+                        );
+                        const paymentTypeLabel = isCancellation && isCustomerSettlement
+                          ? 'Customer Settlement Payment Deleted'
+                          : (isCustomerSettlement ? 'Customer Settlement Payment' : 'Customer Order Payment');
+                        const cancellationLabel = isCustomerSettlement ? 'Customer Settlement Payment Deleted' : 'Customer Order Payment Deleted';
+
+                        // Derive display type from net signed total
+                        const netTotal = g.netTotal;
+                        const displayIsIncome = netTotal >= 0;
+                        const displayAmt = Math.abs(netTotal);
+
+                        return (
+                          <tr key={entry.key} className={styles.ledgerRow}>
+                            <td>
+                              <div className={styles.createdCell}>
+                                <div className={styles.creatorBold}>{dateDisplay}</div>
+                                <div className={styles.dateGray}>{timeDisplay}</div>
+                              </div>
+                            </td>
+                            <td>
+                              <div className={styles.commentCell}>
+                                <div className={styles.commentMain}>
+                                  {isCancellation ? (
+                                    matchedCustomer ? (
+                                      <>
+                                        Deleted: {paymentTypeLabel} —{' '}
+                                        <span className={styles.billLink} onClick={() => navigate(`/reports/customer-statement/${matchedCustomer.id}`)}>
+                                          {matchedCustomer.name}
+                                        </span>
+                                      </>
+                                    ) : (
+                                      cancellationLabel
+                                    )
+                                  ) : (
+                                    matchedCustomer ? (
+                                      <>
+                                        {paymentTypeLabel} —{' '}
+                                        <span className={styles.billLink} onClick={() => navigate(`/reports/customer-statement/${matchedCustomer.id}`)}>
+                                          {matchedCustomer.name}
+                                        </span>
+                                      </>
+                                    ) : (
+                                      paymentTypeLabel
+                                    )
+                                  )}
+                                </div>
+                                <div className={styles.commentSub}>
+                                  {methodLabel}
+                                  {isCancellation && (
+                                    <span style={{ marginLeft: '6px', background: '#FEE2E2', color: '#DC2626', borderRadius: '4px', padding: '1px 5px', fontSize: '10px', fontWeight: 700 }}>
+                                      DELETED
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className={styles.numCol}>
+                              <span className={`${styles.typeBadge} ${displayIsIncome ? styles.incomeBadge : styles.expenseBadge}`}>
+                                {displayIsIncome ? 'INCOME' : 'EXPENSE'}
+                              </span>
+                            </td>
+                            <td className={`${styles.numCol} ${displayIsIncome ? styles.incomeAmt : styles.expenseAmt}`}>
+                              {displayIsIncome ? '+' : '-'}{displayAmt.toFixed(2)} <span className={styles.currencyMini}>{settings.currencySymbol || 'AED'}</span>
+                            </td>
+                          </tr>
+                        );
                       }
 
+                      // Non-settlement rows
+                      const t = entry.txn;
+                      const dateStr = String(t.date || '');
+                      const isCancellation = t.category === 'Payment Cancellation';
+                      const cancellationIsSettlement = isCancellation && /customer settlement|customer settled/i.test(t.description || '');
+                      const cancellationCustomerMatch = isCancellation
+                        ? (t.description || '').match(/for (.+)$/)
+                        : null;
+                      const cancellationCustomerName = cancellationCustomerMatch ? cancellationCustomerMatch[1].trim() : null;
+                      const cancellationCustomer = cancellationCustomerName
+                        ? dbCustomers.find(c => c.name.toLowerCase() === cancellationCustomerName.toLowerCase())
+                        : null;
                       return (
                         <tr key={t.id} className={styles.ledgerRow}>
                           <td>
                             <div className={styles.createdCell}>
-                              <div className={styles.creatorBold}>{displayCreator}</div>
+                              <div className={styles.creatorBold}>{formatDate(dateStr)}</div>
                               <div className={styles.dateGray}>
-                                {formatDate(t.date)} {new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </div>
                             </div>
                           </td>
                           <td>
                             <div className={styles.commentCell}>
-                              <div className={styles.commentMain}>{renderDescriptionWithLinks(t.description)}</div>
-                              <div className={styles.commentSub}>{t.category}</div>
+                              <div className={styles.commentMain}>
+                                {isCancellation && cancellationCustomer ? (
+                                  <>
+                                    {cancellationIsSettlement ? 'Customer Settlement Payment Deleted for ' : 'Order Payment Deleted for '}
+                                    <span className={styles.billLink} onClick={() => navigate(`/reports/customer-statement/${cancellationCustomer.id}`)}>
+                                      {cancellationCustomer.name}
+                                    </span>
+                                  </>
+                                ) : (
+                                  renderDescriptionWithLinks(t.description)
+                                )}
+                              </div>
+                              <div className={styles.commentSub}>
+                                {t.category}
+                                {isCancellation && (
+                                  <span style={{ marginLeft: '6px', background: '#FEE2E2', color: '#DC2626', borderRadius: '4px', padding: '1px 5px', fontSize: '10px', fontWeight: 700 }}>
+                                    DELETED
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className={styles.numCol}>
@@ -1567,41 +1792,26 @@ export default function Accounts() {
                           <td className={`${styles.numCol} ${t.type === 'INCOME' ? styles.incomeAmt : styles.expenseAmt}`}>
                             {t.type === 'INCOME' ? '+' : '-'}{t.amount.toFixed(2)} <span className={styles.currencyMini}>{settings.currencySymbol || 'AED'}</span>
                           </td>
-                          <td className={styles.actionCol} data-noprint="true">
-                            <button className={styles.deleteRowBtn} onClick={() => handleDeleteTransaction(t.id)}>
-                              <Trash2 size={15} />
-                            </button>
-                          </td>
                         </tr>
                       );
-                    })
-                  )}
+                    });
+                  })()
+                  }
+
                 </tbody>
                 <tfoot>
                   <tr className={styles.footerTotalsRow}>
                     <td colSpan="2" className={styles.totalsLabel}>TOTALS</td>
                     <td className={styles.numCol}>
-                      <div className={styles.totalsText}>In: +{filteredIncome.toFixed(2)}</div>
-                      <div className={styles.totalsText}>Out: -{filteredExpense.toFixed(2)}</div>
+                      <div className={styles.totalsText}>In: +{visibleAccountIncome.toFixed(2)}</div>
+                      <div className={styles.totalsText}>Out: -{visibleAccountExpense.toFixed(2)}</div>
                     </td>
                     <td className={`${styles.numCol} ${styles.totalBalance}`}>
-                      {(filteredIncome - filteredExpense).toFixed(2)} <span className={styles.currencyMini}>{settings.currencySymbol || 'AED'}</span>
+                      {(visibleAccountIncome - visibleAccountExpense).toFixed(2)} <span className={styles.currencyMini}>{settings.currencySymbol || 'AED'}</span>
                     </td>
-                    <td className={styles.actionCol} data-noprint="true"></td>
                   </tr>
                 </tfoot>
               </table>
-              {/* Pagination Controls */}
-              {!loading && (
-                <Pagination
-                  currentPage={currentPage}
-                  totalPages={Math.ceil(totalTransactionCount / 20)}
-                  onPageChange={setCurrentPage}
-                  totalItems={totalTransactionCount}
-                  pageSize={20}
-                  itemLabel="transactions"
-                />
-              )}
             </div>
 
           </div>
@@ -1944,9 +2154,6 @@ export default function Accounts() {
                   >
                     {formData.type === 'INCOME' ? (
                       <>
-                        <option value="Service Payment">Service Payment</option>
-                        <option value="Credit Settlement">Credit Settlement</option>
-                        <option value="Refund Return">Refund Return</option>
                         <option value="Opening Balance">Opening Balance</option>
                         <option value="Other Income">Other Income</option>
                       </>
@@ -2239,6 +2446,123 @@ export default function Accounts() {
           </div>
         </div>
       )}
+
+      {/* ─── Payment Detail Modal ───────────────────────────── */}
+      {detailModal && (() => {
+        const { g, matchedCustomer, paymentTypeLabel, methodLabel, methodsInfo, isCancellation, dateDisplay, timeDisplay } = detailModal;
+        const accentColor = isCancellation ? '#F87171' : '#34D399';
+        const accentBg = isCancellation ? 'rgba(248,113,113,0.1)' : 'rgba(52,211,153,0.1)';
+        const accentBorder = isCancellation ? 'rgba(248,113,113,0.3)' : 'rgba(52,211,153,0.3)';
+
+        // Group detailPayments by METHOD only — no per-order breakdown shown.
+        // If a settlement covered 5 orders all paid in Cash, collapse to one row: Cash → 1000.
+        const methodMap = {};
+        if (detailPayments.length > 0) {
+          for (const p of detailPayments) {
+            const m = p.method || 'Cash';
+            if (!methodMap[m]) methodMap[m] = 0;
+            methodMap[m] += Math.abs(parseFloat(p.amount) || 0);
+          }
+        } else {
+          // Fallback to methodsInfo from account_transactions description
+          for (const m of methodsInfo) {
+            if (!methodMap[m.method]) methodMap[m.method] = 0;
+            methodMap[m.method] += m.amount;
+          }
+        }
+        const displayRows = Object.entries(methodMap).map(([method, amount]) => ({ method, amount }));
+        const grandTotal = displayRows.reduce((s, r) => s + r.amount, 0);
+        const isAllSettlement = paymentTypeLabel === 'Customer Settled';
+
+        return (
+          <div
+            onClick={() => setDetailModal(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{ background: '#1E293B', borderRadius: '16px', padding: '0', width: '90%', maxWidth: '500px', boxShadow: '0 24px 64px rgba(0,0,0,0.6)', border: '1px solid #334155', overflow: 'hidden' }}
+            >
+              {/* Coloured Header Strip */}
+              <div style={{ background: isCancellation ? 'rgba(248,113,113,0.15)' : 'rgba(52,211,153,0.12)', padding: '18px 24px', borderBottom: `1px solid ${accentBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: accentColor, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '4px' }}>
+                    {isCancellation ? '🗑 Payment Deleted' : '✅ Payment Received'}
+                  </div>
+                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#F1F5F9' }}>
+                    {isCancellation ? '-' : '+'}{grandTotal.toFixed(2)} <span style={{ fontSize: '13px', fontWeight: 500, color: '#94A3B8' }}>{settings.currencySymbol || 'AED'}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748B', marginTop: '4px' }}>{dateDisplay} · {timeDisplay}</div>
+                </div>
+                <button onClick={() => setDetailModal(null)} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: '6px', borderRadius: '6px', display: 'flex', alignItems: 'center' }}>
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div style={{ padding: '20px 24px' }}>
+                {/* Customer */}
+                {matchedCustomer && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', padding: '10px 12px', background: '#0F172A', borderRadius: '8px' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '10px', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>Customer</div>
+                      <div
+                        style={{ fontSize: '14px', fontWeight: 600, color: '#60A5FA', cursor: 'pointer' }}
+                        onClick={() => { navigate(`/reports/customer-statement/${matchedCustomer.id}`); setDetailModal(null); }}
+                      >
+                        {matchedCustomer.name}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '10px', color: '#64748B', marginBottom: '2px' }}>TYPE</div>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: isAllSettlement ? '#A78BFA' : '#FB923C', background: isAllSettlement ? 'rgba(167,139,250,0.1)' : 'rgba(251,146,60,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
+                        {paymentTypeLabel}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Payment Rows — Statement Style */}
+                <div style={{ fontSize: '11px', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
+                  {isCancellation ? 'Reversed Payments' : 'Payment Breakdown'}
+                </div>
+
+                {detailLoading ? (
+                  <div style={{ textAlign: 'center', padding: '20px', color: '#64748B', fontSize: '13px' }}>Loading details…</div>
+                ) : (
+                  <div style={{ background: '#0F172A', borderRadius: '10px', overflow: 'hidden', marginBottom: '16px', border: '1px solid #1E293B' }}>
+                    {displayRows.map((r, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', borderBottom: i < displayRows.length - 1 ? '1px solid #1E293B' : 'none' }}>
+                        <span style={{ fontSize: '13px', color: '#CBD5E1', fontWeight: 500 }}>{r.method}</span>
+                        <span style={{ fontSize: '14px', fontWeight: 700, color: isCancellation ? '#F87171' : accentColor }}>
+                          {isCancellation ? '-' : '+'}{r.amount.toFixed(2)} <span style={{ fontSize: '11px', fontWeight: 400, color: '#64748B' }}>{settings.currencySymbol || 'AED'}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Total */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: accentBg, borderRadius: '8px', border: `1px solid ${accentBorder}`, marginBottom: '16px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#E2E8F0' }}>TOTAL</span>
+                  <span style={{ fontSize: '20px', fontWeight: 800, color: accentColor }}>
+                    {isCancellation ? '-' : '+'}{grandTotal.toFixed(2)} <span style={{ fontSize: '12px' }}>{settings.currencySymbol || 'AED'}</span>
+                  </span>
+                </div>
+
+                {/* Actions */}
+                {matchedCustomer && (
+                  <button
+                    onClick={() => { navigate(`/reports/customer-statement/${matchedCustomer.id}`); setDetailModal(null); }}
+                    style={{ width: '100%', padding: '11px', background: '#3B82F6', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: 'pointer', letterSpacing: '0.3px' }}
+                  >
+                    View Customer Statement →
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

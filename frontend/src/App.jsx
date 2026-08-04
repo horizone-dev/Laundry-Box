@@ -45,6 +45,7 @@ function App() {
       <HashRouter>
       <Routes>
         <Route path="/login" element={<Login onLogin={setIsAuthenticated} />} />
+        <Route path="/invoice/:id" element={<Invoice />} />
         <Route 
           path="/*" 
           element={
@@ -87,7 +88,6 @@ function App() {
           <Route path="users" element={<Users />} />
           <Route path="accounts/:type" element={<Accounts />} />
           <Route path="settlement" element={<Settlement />} />
-          <Route path="invoice/:id" element={<Invoice />} />
           <Route path="customer-statement" element={<CustomerStatement />} />
           <Route path="customer-statement/:customerId" element={<CustomerStatement />} />
           <Route path="overdue-statement/:customerId" element={<OverdueStatement />} />

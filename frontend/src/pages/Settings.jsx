@@ -29,16 +29,15 @@ export default function Settings() {
   const tabParam = queryParams.get('tab');
 
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
-  const isSuperAdmin = user.role === 'super_admin' || user.role === 'admin';
+  const isSuperAdmin = user.role === 'super_admin';
+  const isAdmin = user.role === 'admin';
   const isManager = user.role === 'manager';
-  const isAuthorized = isSuperAdmin || isManager;
+  const isAuthorized = isSuperAdmin || isAdmin || isManager;
 
   const [activeTab, setActiveTab] = useState(
-    isSuperAdmin
+    (user.role === 'super_admin' || user.role === 'admin')
       ? (tabParam || 'System Configuration')
-      : (tabParam === 'Maintenance' && !(isSuperAdmin || isManager)) || (tabParam === 'Software Update' && !(isSuperAdmin || isManager))
-        ? 'General'
-        : (tabParam || 'General')
+      : (tabParam || 'General')
   );
   const {
     settings,
@@ -92,16 +91,20 @@ export default function Settings() {
     }
   };
 
-  // Store initial settings copy when component mounts
+  // Store initial settings copy once settings are successfully loaded from DB
   useEffect(() => {
-    if (settings) {
+    if (settings && settings.isLoaded && !originalSettings) {
       setOriginalSettings(JSON.parse(JSON.stringify(settings)));
     }
+  }, [settings, originalSettings]);
+
+  // Cleanup settings dirty state on unmount
+  useEffect(() => {
     return () => {
       setIsSettingsDirty(false);
       setOriginalSettings(null);
     };
-  }, []);
+  }, [setIsSettingsDirty, setOriginalSettings]);
 
   // Update isSettingsDirty flag by comparing current settings with originalSettings
   useEffect(() => {
@@ -369,23 +372,57 @@ export default function Settings() {
 
   if (!isAuthorized) return null;
 
-  const tabs = isSuperAdmin
-    ? ['System Configuration', 'Nomod', 'Maintenance']
-    : [
-      'General',
-      ...(settings.workflowEnabled ? ['Order Workflow'] : []),
-      'Company Info',
-      'Tax Settings',
-      'Bill Templates',
-      'Bank',
-      ...(isManager ? ['Nomod'] : []),
-      'WhatsApp Config',
-      'Damage Notes',
-      'Printers',
-      ...(isManager ? ['Maintenance', 'Software Update'] : []),
-      'Email Reports',
-      ...(isManager ? ['System Reset'] : [])
-    ];
+  const tabs = React.useMemo(() => {
+    const arr = [];
+    
+    // 1. System Configuration (Super Admin & Admin only)
+    if (isSuperAdmin || isAdmin) {
+      arr.push('System Configuration');
+    }
+    
+    // 2. General
+    arr.push('General');
+    
+    // 3. Order Workflow (if enabled)
+    if (settings?.workflowEnabled) {
+      arr.push('Order Workflow');
+    }
+    
+    // 4. Company Info, Tax Settings, Bill Templates, Bank
+    arr.push('Company Info', 'Tax Settings', 'Bill Templates', 'Bank');
+    
+    // 5. Nomod (Super Admin only)
+    if (isSuperAdmin) {
+      arr.push('Nomod');
+    }
+    
+    // 6. WhatsApp Config, Damage Notes, Printers
+    arr.push('WhatsApp Config', 'Damage Notes', 'Printers');
+    
+    // 7. Maintenance, Software Update (Super Admin & Admin only)
+    if (isSuperAdmin || isAdmin) {
+      arr.push('Maintenance', 'Software Update');
+    }
+    
+    // 8. Email Reports (Super Admin & Admin only)
+    if (isSuperAdmin || isAdmin) {
+      arr.push('Email Reports');
+    }
+    
+    // 9. System Reset (Super Admin & Admin only)
+    if (isSuperAdmin || isAdmin) {
+      arr.push('System Reset');
+    }
+    
+    return arr;
+  }, [isSuperAdmin, isAdmin, settings?.workflowEnabled]);
+
+  // Adjust activeTab if not allowed or not matching the list
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.includes(activeTab)) {
+      setActiveTab(tabs.includes('System Configuration') ? 'System Configuration' : 'General');
+    }
+  }, [tabs, activeTab]);
 
   const onCropComplete = (croppedArea, croppedAreaPixels) => {
     setCroppedAreaPixels(croppedAreaPixels);
@@ -526,7 +563,7 @@ export default function Settings() {
         enableManagerOverride: true,
         workflowEnabled: true,
         zReportEnabled: true,
-        noModPayEnabled: true,
+        noModPayEnabled: false,
         paymentHistoryEnabled: true,
         zReportClosingType: 'Day Close',
         posLayoutTemplate: 'standard',
@@ -580,7 +617,7 @@ export default function Settings() {
     if (toReset.billTemplates) {
       newSettings = {
         ...newSettings,
-        invoiceTemplate: 'standard',
+        invoiceTemplate: 'compact 2',
         deliveryMethods: [
           { name: 'Hanger', nameAr: 'علاقة', isDefault: true },
           { name: 'Folded', nameAr: 'مطوي', isDefault: false },
@@ -1030,7 +1067,7 @@ export default function Settings() {
         <div className={styles.mainContent}>
 
 
-          {activeTab === 'Nomod' && (
+          {activeTab === 'Nomod' && isSuperAdmin && (
             <div className={styles.profileContainer}>
               <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
                 <h2 className={styles.cardTitle}>Nomod Payment Gateway Settings</h2>
@@ -3080,7 +3117,7 @@ export default function Settings() {
             </div>
           )}
 
-          {activeTab === 'Maintenance' && (
+          {activeTab === 'Maintenance' && (isSuperAdmin || isAdmin) && (
             <div className={styles.profileContainer}>
               <div className={styles.card}>
                 <div className={styles.cardHeader}>
@@ -3318,7 +3355,7 @@ export default function Settings() {
             </div>
           )}
 
-          {activeTab === 'Software Update' && (
+          {activeTab === 'Software Update' && (isSuperAdmin || isAdmin) && (
             <div className={styles.profileContainer}>
               <style>{`
                 @keyframes spin {
@@ -3509,11 +3546,11 @@ export default function Settings() {
             </div>
           )}
 
-          {activeTab === 'Email Reports' && (
+          {activeTab === 'Email Reports' && (isSuperAdmin || isAdmin) && (
             <EmailReportsSettings registerSave={(saveFn) => { emailSaveRef.current = saveFn; }} setIsSettingsDirty={setIsSettingsDirty} />
           )}
 
-          {activeTab === 'System Configuration' && (
+          {activeTab === 'System Configuration' && (isSuperAdmin || isAdmin) && (
             <div className={styles.profileContainer}>
               <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
                 <h2 className={styles.cardTitle}>System Configuration</h2>
@@ -3538,18 +3575,20 @@ export default function Settings() {
                     />
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '1rem' }}>
-                    <div style={{ flex: 1 }}>
-                      <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>NoMOD Pay</h4>
-                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Enable digital payment links and gateway accounts via NoMOD</p>
+                  {isSuperAdmin && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '1rem' }}>
+                      <div style={{ flex: 1 }}>
+                        <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>NoMOD Pay</h4>
+                        <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Enable digital payment links and gateway accounts via NoMOD</p>
+                      </div>
+                      <div
+                        className={`${styles.switch} ${settings.noModPayEnabled ? styles.switchOn : ''}`}
+                        onClick={() => updateSettings({ noModPayEnabled: !settings.noModPayEnabled })}
+                      >
+                        <div className={styles.switchHandle}></div>
+                      </div>
                     </div>
-                    <div
-                      className={`${styles.switch} ${settings.noModPayEnabled ? styles.switchOn : ''}`}
-                      onClick={() => updateSettings({ noModPayEnabled: !settings.noModPayEnabled })}
-                    >
-                      <div className={styles.switchHandle}></div>
-                    </div>
-                  </div>
+                  )}
 
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F1F5F9', paddingBottom: '1rem' }}>
                     <div style={{ flex: 1 }}>
@@ -3663,7 +3702,7 @@ export default function Settings() {
             </div>
           )}
 
-          {activeTab === 'System Reset' && (
+          {activeTab === 'System Reset' && (isSuperAdmin || isAdmin) && (
 
             <div className={styles.profileContainer}>
               <div className={styles.card} style={{ marginBottom: '1.5rem' }}>

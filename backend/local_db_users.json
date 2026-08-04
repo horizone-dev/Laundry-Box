@@ -1,33 +1,33 @@
 [
   {
-    "_id": "local_admin_default",
-    "name": "admin",
-    "phone": "+971000000000",
-    "userId": "admin",
-    "password": "$2b$10$8dZeMh.sHEa2X932AMUlzuAYFTYjwiN9aO1pPG3zvbAdGGGGs7DRC",
-    "pin": "$2b$10$GHWXrdVSdpWDWml9QNC1Wu5PSwE6gwA8L9laH3UlS1WmNSnxI05sO",
-    "role": "admin",
-    "shopId": "SHOP_01",
-    "createdAt": "2026-08-03T12:00:00.000Z"
-  },
-  {
     "_id": "local_admin_1",
     "name": "Horizon inc",
     "phone": "+9710588851680",
     "userId": "super admin",
-    "password": "$2b$10$7BnktCXPIJwYrLsAvgka/Ota.NxX03vYvAOIbgDhxABNeMEjOt1Zm",
-    "pin": "$2b$10$JyP5GH5a9qHkEOA/Bp/IQOA/6UqsX8a4jau84MczQsR0EWJfi4aYC",
+    "password": "$2b$10$cga3xjK8HziTbcquvHEioOK1Ik4q4qc0AvFCWqMF4BmayZfvVwleW",
+    "pin": "$2b$10$G2MKYeNwOJbIxWSUVxxfie2MMp66YeTyTIU7f2E.CeK7.o/9oLtGW",
     "role": "super_admin",
     "shopId": "SHOP_01",
     "createdAt": "2026-06-20T07:43:00.000Z"
+  },
+  {
+    "_id": "local_admin_default",
+    "name": "admin",
+    "phone": "+971000000000",
+    "userId": "admin",
+    "password": "$2b$10$fpAjDkqArFjD1waFE365neCJbGNMfI9y8Venwt3Ul9i4JOiqXnrS.",
+    "pin": "$2b$10$hsdBFrF0JS0Ze9jMtoTazePL5aVvacMU93ijoE41eLPMbkYdsUGOG",
+    "role": "admin",
+    "shopId": "SHOP_01",
+    "createdAt": "2026-08-03T12:00:00.000Z"
   },
   {
     "_id": "local_cashier_1",
     "name": "Cashier Test",
     "phone": "+971000000000",
     "userId": "cashier",
-    "password": "$2b$10$ZZdRGx4o2r9dbsmptINEauzAlOU1YWCgbfsXE6633mZPIhVDqgVLC",
-    "pin": "$2b$10$j9bLHRKgJRh7STquvqj9nutDp3/AykiybpFjkU1VUL0/b.q7ZOymO",
+    "password": "$2b$10$fpAjDkqArFjD1waFE365neCJbGNMfI9y8Venwt3Ul9i4JOiqXnrS.",
+    "pin": "$2b$10$hsdBFrF0JS0Ze9jMtoTazePL5aVvacMU93ijoE41eLPMbkYdsUGOG",
     "role": "cashier",
     "shopId": "SHOP_01",
     "createdAt": "2026-06-20T07:43:00.000Z"
@@ -37,21 +37,10 @@
     "name": "Manager Test",
     "phone": "+9710599999999",
     "userId": "manager",
-    "password": "$2b$10$N1O775dd8hmZLJR2i6Fwjubab0HUs3W7USEHribaB8qa2KvPxAGhe",
-    "pin": "$2b$10$gkMqD/woff4grJjhZ1qvJOW80UGMNAc5jBcgEi6QeN.RcJ1MlR1FK",
+    "password": "$2b$10$gILxUpZ.wzAUtgseciXdC.syeZJlE3PdBguRpdOqVTPk0VTVe.uqe",
+    "pin": "$2b$10$cpDFgVquQcXctSBpPv4fAebSCeAZtclV.8lsDfLcNBgWrUGOJbl5G",
     "role": "manager",
     "shopId": "SHOP_01",
     "createdAt": "2026-06-25T11:40:00.000Z"
-  },
-  {
-    "_id": "local_user_1784581154921",
-    "shopId": "SHOP_01",
-    "name": "dfafhjhfd",
-    "phone": "",
-    "userId": "USER_1784581154444",
-    "password": "$2b$10$BIEtna0JuvIubGKHhFQIVe/SCzhoJ8EDJnREVvpwEBeewRNY4RQgC",
-    "pin": "$2b$10$W82rV6t7Bk0/BzNAdwmxFeut6eAXORfqc.XvOZLbWG6D.zblGpk/a",
-    "role": "manager",
-    "createdAt": "2026-07-20T20:59:14.921Z"
   }
 ]
