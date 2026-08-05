@@ -557,7 +557,7 @@ export default function Settlement() {
                 bankAccountId: ['Card', 'UPI', 'Bank'].includes(split.method) ? bankAccountId : null
               })),
             discount,
-            cardCommissionRate: settings.cardCommission || 0,
+            cardCommissionRate: settings.cardCommissionEnabled ? (Number(settings.cardCommission) || 0) : 0,
             actor: {
               id: currentUser.id || 'SYSTEM',
               name: currentUser.name || currentUser.username || 'System',
@@ -745,7 +745,7 @@ export default function Settlement() {
           );
 
           // Record card commission if applicable
-          if (split.method === 'Card' && settings.cardCommission > 0) {
+          if (split.method === 'Card' && settings.cardCommissionEnabled && settings.cardCommission > 0) {
             const commissionRate = parseFloat(settings.cardCommission || 0);
             const commissionAmount = split.amount * (commissionRate / 100);
             const commTxnId = `TXN-COMM-${Date.now()}-${split.method}`;
@@ -1479,7 +1479,7 @@ export default function Settlement() {
                             html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
                             css: '',
                             printerName: settings.billingPrinter,
-                            silent: settings.silentPrinting !== false
+                            silent: !!settings.billingPrinter
                           });
                         } else {
                           const win = window.open('', '', 'width=400,height=400');

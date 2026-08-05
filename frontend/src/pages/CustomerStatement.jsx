@@ -705,6 +705,7 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
           date: r.createdAt,
           type: 'refund',
           ref: r.id || 'REFUND',
+          orderId: r.orderId || '',
           description: `Refund Voucher (${r.refundMethod || 'Cash'})`,
           itemsSummary: r.reason ? `${r.reason}${cleanOrderRef ? ` for ${cleanOrderRef}` : ''}` : `Refund for ${cleanOrderRef}`,
           debit: r.amount || 0,
@@ -1210,8 +1211,10 @@ export default function CustomerStatement({ customerIdProp, selectedCustomerProp
                             <span
                               className={`${styles.refText} ${styles.refLink}`}
                               onClick={() => {
-                                const orderIdClean = row.ref.replace('REF-', '').replace('#', '');
-                                navigate(`/invoice/${orderIdClean}`);
+                                const orderId = row.type === 'refund'
+                                  ? row.orderId
+                                  : row.ref.replace('REF-', '').replace('#', '');
+                                if (orderId) navigate(`/invoice/${orderId}`);
                               }}
                             >
                               {row.ref}

@@ -863,7 +863,7 @@ export default function Customers() {
             shopId: DEFAULT_SHOP_ID,
             splits: centralSplits.map((split) => ({ ...split, bankAccountId: bankForMethod(split.method) })),
             discount: discountAmt,
-            cardCommissionRate: settings.cardCommission || 0,
+            cardCommissionRate: settings.cardCommissionEnabled ? (Number(settings.cardCommission) || 0) : 0,
             actor: {
               id: currentUser.id || 'SYSTEM',
               name: currentUser.name || currentUser.username || 'System',
@@ -1076,7 +1076,7 @@ export default function Customers() {
             ]
           );
 
-          if (split.method === 'Card' && settings.cardCommission > 0) {
+          if (split.method === 'Card' && settings.cardCommissionEnabled && settings.cardCommission > 0) {
             const commissionRate = parseFloat(settings.cardCommission || 0);
             const commissionAmount = split.amount * (commissionRate / 100);
             const commTxnId = `TXN-COMM-${Date.now()}-${split.method}`;
@@ -1449,11 +1449,14 @@ export default function Customers() {
       alert('This is an advance amount already applied to an order. It cannot be edited or deleted as a normal payment.');
       return;
     }
-    if (!window.confirm("Are you sure you want to delete this payment/discount? The customer balance will increase.")) return;
+    const deletingDiscountOnly = payment.method === 'Discount';
+    const confirmationMessage = deletingDiscountOnly
+      ? 'Are you sure you want to delete this discount? The customer due may increase.'
+      : 'Are you sure you want to delete this payment? The customer balance will increase.';
+    if (!window.confirm(confirmationMessage)) return;
 
     setLoading(true);
     const timestamp = getLocalISOString();
-    const deletingDiscountOnly = payment.method === 'Discount';
     // A settlement group can contain its tender receipts as well as a discount
     // receipt.  Removing the customer's money must never silently remove the
     // discount as well: they are two different financial actions.
@@ -1461,7 +1464,10 @@ export default function Customers() {
       ? [...payment.paymentIds]
       : [payment.id];
     const timePrefix = payment.createdAt ? String(payment.createdAt).substring(0, 19) : '';
-    if (timePrefix && selectedCustomer?.id) {
+    // A discount can share a timestamp with the cash/bank settlement that it
+    // accompanied.  They are separate financial records: deleting a discount
+    // must never select or reverse the customer's tender payment.
+    if (!deletingDiscountOnly && timePrefix && selectedCustomer?.id) {
       const sameTimeRes = await window.electronAPI.dbQuery(
         "SELECT id FROM payments WHERE customerId = ? AND createdAt LIKE ? AND method != 'System Auto' AND method != 'Discount'",
         [selectedCustomer.id, `${timePrefix}%`]
@@ -1486,7 +1492,10 @@ export default function Customers() {
       );
       let paymentsToDelete = pToDelRes.success ? pToDelRes.data : [];
 
-      if (!deletingDiscountOnly) {
+      if (deletingDiscountOnly) {
+        paymentsToDelete = paymentsToDelete.filter((row) => row.method === 'Discount');
+        idsToDelete = paymentsToDelete.map((row) => row.id);
+      } else {
         paymentsToDelete = paymentsToDelete.filter((row) => row.method !== 'Discount');
         idsToDelete = paymentsToDelete.map((row) => row.id);
       }
@@ -1508,7 +1517,7 @@ export default function Customers() {
       const autoPaymentIdsToDelete = [];
 
       const orderUpdates = {};
-      paymentsToDelete.forEach(pDel => {
+      if (!deletingDiscountOnly) paymentsToDelete.forEach(pDel => {
         if (pDel.orderId) {
           if (!orderUpdates[pDel.orderId]) {
             orderUpdates[pDel.orderId] = {
@@ -1757,11 +1766,11 @@ export default function Customers() {
       }
       fetchCustomers();
       window.dispatchEvent(new CustomEvent('database-updated', { detail: { customerId: selectedCustomer.id } }));
-      alert("Payment record deleted successfully!");
+      alert(deletingDiscountOnly ? 'Discount deleted successfully!' : 'Payment record deleted successfully!');
     } catch (err) {
       await window.electronAPI.dbQuery("ROLLBACK");
       console.error("Delete payment error:", err);
-      alert("Failed to delete payment.");
+      alert(deletingDiscountOnly ? 'Failed to delete discount.' : 'Failed to delete payment.');
     } finally {
       setLoading(false);
     }
@@ -2276,41 +2285,9 @@ export default function Customers() {
           [`CUST-DISC-EDIT-${Date.now()}-${Math.floor(Math.random() * 100000)}`, DEFAULT_SHOP_ID, targetCustId, bill.id, oldDisc, `Invoice No. #${bill.id} discount deleted (Reversed ${oldDisc.toFixed(2)})`, timestamp]
         );
 
-        // REDISTRIBUTE PAYMENTS
-        const orderPayRes = await window.electronAPI.dbQuery(
-          `SELECT * FROM payments WHERE orderId = ? AND method != 'Discount' LIMIT 1`,
-          [bill.id]
-        );
-        const orderPayment = orderPayRes.success && orderPayRes.data[0] ? orderPayRes.data[0] : null;
-
-        if (orderPayment) {
-          const unlinkPayRes = await window.electronAPI.dbQuery(
-            `SELECT * FROM payments WHERE customerId = ? AND orderId IS NULL AND createdAt = ? AND method != 'Discount' LIMIT 1`,
-            [targetCustId, orderPayment.createdAt]
-          );
-          const unlinkedPayment = unlinkPayRes.success && unlinkPayRes.data[0] ? unlinkPayRes.data[0] : null;
-
-          const shortage = oldDisc;
-          if (unlinkedPayment) {
-            const transferAmount = Math.min(shortage, unlinkedPayment.amount);
-            if (transferAmount > 0.005) {
-              await window.electronAPI.dbQuery(
-                `UPDATE payments SET amount = amount + ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
-                [transferAmount, timestamp, orderPayment.id]
-              );
-              await window.electronAPI.dbQuery(
-                `UPDATE payments SET amount = amount - ?, isSynced = 0, updatedAt = ? WHERE id = ?`,
-                [transferAmount, timestamp, unlinkedPayment.id]
-              );
-              if (unlinkedPayment.amount - transferAmount <= 0.005) {
-                await window.electronAPI.dbQuery(
-                  `DELETE FROM payments WHERE id = ?`,
-                  [unlinkedPayment.id]
-                );
-              }
-            }
-          }
-        }
+        // Removing a discount changes only the invoice value and its discount
+        // audit trail. Customer tender/advance payments are real money and
+        // must never be redistributed or deleted by this action.
       }
 
       await window.electronAPI.dbQuery("COMMIT");
@@ -5062,10 +5039,6 @@ export default function Customers() {
                     <div>
                       <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Card</label>
                       <input type="number" placeholder="0.00" value={splitCard} onChange={(e) => setSplitCard(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>UPI</label>
-                      <input type="number" placeholder="0.00" value={splitUPI} onChange={(e) => setSplitUPI(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #CBD5E1', marginTop: '0.25rem' }} />
                     </div>
                     <div>
                       <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Bank</label>

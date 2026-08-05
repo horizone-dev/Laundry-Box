@@ -45,7 +45,8 @@ export default function Settings() {
     isSettingsDirty,
     setIsSettingsDirty,
     originalSettings,
-    setOriginalSettings
+    setOriginalSettings,
+    flushSettingsSave
   } = useSettings();
 
   const isCompactTemplate = settings?.invoiceTemplate === 'compact' || settings?.invoiceTemplate === 'compact 2';
@@ -554,6 +555,7 @@ export default function Settings() {
         autoPrint: false,
         defaultPaymentMethod: 'Cash',
         cardCommission: 0,
+        cardCommissionEnabled: true,
         cardDefaultAccountId: '',
         upiDefaultAccountId: '',
         overdueDays: 7,
@@ -567,7 +569,6 @@ export default function Settings() {
         paymentHistoryEnabled: true,
         zReportClosingType: 'Day Close',
         posLayoutTemplate: 'standard',
-        silentPrinting: true,
         pdfDownloadPath: ''
       };
     }
@@ -630,6 +631,10 @@ export default function Settings() {
         invoiceShowBilingual: true,
         invoiceShowTreatmentPrice: true,
         invoiceShowAddonPrice: true,
+        invoiceShowPrevBalance: true,
+        invoiceShowDelivery: true,
+        invoiceShowWebsite: true,
+        invoiceShowEmail: true,
         invoiceTermsText: '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.'
       };
     }
@@ -957,19 +962,44 @@ export default function Settings() {
     id: '#AG-PREVIEW',
     date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
     customer: 'John Doe',
+    customerPhone: '+971 50 123 4567',
     residency: 'Sample Residency, Suite 101',
     status: 'PAID',
     items: [
-      { name: 'Standard Wash & Fold', sub: 'Regular treatment', qty: 10, price: 1.5, total: 15.0 },
-      { name: 'Business Shirt', sub: 'Laundered & Pressed', qty: 5, price: 3.5, total: 17.5 }
+      {
+        name: 'Standard Wash & Fold',
+        nameAr: 'غسيل وطي عادي',
+        sub: 'Regular treatment',
+        types: [{ name: 'Regular Wash', price: 1.5 }],
+        qty: 10,
+        price: 1.5,
+        total: 15.0,
+        addons: [{ name: 'Stain Removal', price: 2.5 }]
+      },
+      {
+        name: 'Business Shirt',
+        nameAr: 'قميص أعمال',
+        sub: 'Laundered & Pressed',
+        types: [{ name: 'Wash & Press', price: 3.5 }],
+        qty: 5,
+        price: 3.5,
+        total: 17.5,
+        addons: [{ name: 'Express Service', price: 3 }]
+      }
     ],
     subtotal: 32.5,
     tax: 2.6,
     total: 35.1,
+    paidAmount: 35.1,
+    totalBalance: 0,
+    paymentMethod: 'Card',
+    paymentStatus: 'Paid',
     expectedDeliveryDate: new Date(Date.now() + 86400000).toISOString()
   };
 
   const handleSaveAllChanges = async () => {
+    await flushSettingsSave?.();
+
     if (activeTab === 'Email Reports' && emailSaveRef.current) {
       const emailSuccess = await emailSaveRef.current();
       if (!emailSuccess) {
@@ -1310,18 +1340,6 @@ export default function Settings() {
                 <h2 className={styles.cardTitle}>Automation & Defaults</h2>
                 <div className={styles.formGrid}>
                   <div className={styles.formGroup}>
-                    <label>Auto-Print Receipt</label>
-                    <div className={styles.toggleRow}>
-                      <span className={styles.toggleLabel}>Automatically trigger print dialog after order</span>
-                      <div
-                        className={`${styles.switch} ${settings.autoPrint ? styles.switchOn : ''}`}
-                        onClick={() => updateSettings({ autoPrint: !settings.autoPrint })}
-                      >
-                        <div className={styles.switchHandle}></div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className={styles.formGroup}>
                     <label>Laundry Workflow Module</label>
                     <div className={styles.toggleRow}>
                       <span className={styles.toggleLabel}>Enable status tracking workflow menu in sidebar (Washing, Drying, Ironing, Ready, etc.)</span>
@@ -1346,13 +1364,25 @@ export default function Settings() {
                     />
                   </div>
                   <div className={styles.formGroup}>
-                    <label>Card Commission (%)</label>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                      <label>Card Commission (%)</label>
+                      <div
+                        className={`${styles.switch} ${(settings.cardCommissionEnabled ?? true) ? styles.switchOn : ''}`}
+                        onClick={() => updateSettings({ cardCommissionEnabled: !(settings.cardCommissionEnabled ?? true) })}
+                        role="switch"
+                        aria-checked={settings.cardCommissionEnabled ?? true}
+                        title="Enable or disable card commission"
+                      >
+                        <div className={styles.switchHandle}></div>
+                      </div>
+                    </div>
                     <input
                       type="number"
                       step="0.01"
                       className={styles.inputField}
                       value={settings.cardCommission ?? ''}
                       onChange={(e) => updateSettings({ cardCommission: e.target.value })}
+                      disabled={!(settings.cardCommissionEnabled ?? true)}
                     />
                   </div>
                 </div>
@@ -1404,40 +1434,6 @@ export default function Settings() {
                         <CustomSelect
                           value={settings.cardDefaultAccountId || ''}
                           onChange={(e) => updateSettings({ cardDefaultAccountId: e.target.value })}
-                          options={[
-                            { value: '', label: 'Select Account' },
-                            ...(settings.bankAccounts || []).map((acc) => ({
-                              value: acc.id,
-                              label: `${acc.bankName} (${acc.accountNumber})`
-                            }))
-                          ]}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* UPI Method */}
-                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '0.75rem 1rem', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', minHeight: '120px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0F172A' }}>UPI / QR Payment</div>
-                        <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '2px' }}>Accept UPI payments using QR codes.</div>
-                      </div>
-                      <label className={styles.switch}>
-                        <input
-                          type="checkbox"
-                          checked={settings.paymentMethodUpiEnabled ?? true}
-                          onChange={(e) => updateSettings({ paymentMethodUpiEnabled: e.target.checked })}
-                        />
-                        <span className={`${styles.slider} ${styles.round}`}></span>
-                      </label>
-                    </div>
-                    {(settings.paymentMethodUpiEnabled ?? true) && (
-                      <div className={styles.formGroup} style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'block' }}>Default Bank Account</label>
-                        <CustomSelect
-                          value={settings.upiDefaultAccountId || ''}
-                          onChange={(e) => updateSettings({ upiDefaultAccountId: e.target.value })}
                           options={[
                             { value: '', label: 'Select Account' },
                             ...(settings.bankAccounts || []).map((acc) => ({
@@ -2336,6 +2332,7 @@ export default function Settings() {
                     { label: 'Bank Transfer Details', sub: 'Payment bank accounts', key: 'invoiceShowBankDetails' },
                     { label: 'Treatment Prices', sub: 'Show prices of treatments on invoice', key: 'invoiceShowTreatmentPrice' },
                     { label: 'Add-on Prices', sub: 'Show prices of add-ons on invoice', key: 'invoiceShowAddonPrice' },
+                    { label: 'Arabic Service Name', sub: 'Show the saved Arabic name below each service', key: 'invoiceShowArabicServiceName' },
                     ...(settings.invoiceTemplate === 'compact 2' ? [
                       { label: 'Previous Balance', sub: 'Show customer statement balance', key: 'invoiceShowPrevBalance' },
                       { label: 'Expected Delivery / Ready for Collection', sub: 'Show expected delivery date', key: 'invoiceShowDelivery' },
@@ -2951,7 +2948,7 @@ export default function Settings() {
                             html: testHtml,
                             css: '',
                             printerName: printer,
-                            silent: settings.silentPrinting !== false
+                            silent: true
                           });
                           if (res.success) {
                             alert("Test receipt sent successfully!");
@@ -3014,7 +3011,7 @@ export default function Settings() {
                             html: testHtml,
                             css: '',
                             printerName: printer,
-                            silent: settings.silentPrinting !== false
+                            silent: true
                           });
                           if (res.success) {
                             alert("Test tag print sent successfully!");
@@ -3071,19 +3068,6 @@ export default function Settings() {
                           { value: '5', label: '5 Copies' }
                         ]}
                       />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
-                      <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: '#1E293B' }}>Silent Printing</h4>
-                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: '#64748B' }}>Send prints directly to hardware without prompting the OS print dialog window</p>
-                    </div>
-                    <div
-                      className={`${styles.switch} ${settings.silentPrinting ? styles.switchOn : ''}`}
-                      onClick={() => updateSettings({ silentPrinting: !settings.silentPrinting })}
-                    >
-                      <div className={styles.switchHandle}></div>
                     </div>
                   </div>
 

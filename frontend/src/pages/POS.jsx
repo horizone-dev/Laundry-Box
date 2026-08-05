@@ -37,6 +37,10 @@ export default function POS() {
   };
   const [searchParams] = useSearchParams();
   const { settings } = useSettings();
+  const isArabic = settings.language === 'Arabic';
+  const getServiceDisplayName = (service) => (
+    isArabic && service?.nameAr ? service.nameAr : service?.name
+  );
   const [services, setServices] = useState([]);
   const [serviceTypes, setServiceTypes] = useState([]);
   const [addons, setAddons] = useState([]);
@@ -799,6 +803,7 @@ export default function POS() {
         id: editingCartIdx !== null ? cart[editingCartIdx].id : Date.now().toString(),
         serviceId: selectedService.id,
         name: selectedService.name.trim(),
+        nameAr: selectedService.nameAr || '',
         price: finalPrice,
         type: joinedTypeName,
         types: actualTypes,
@@ -841,6 +846,7 @@ export default function POS() {
         id: editingCartIdx !== null ? cart[editingCartIdx].id : Date.now().toString(),
         serviceId: selectedService.id,
         name: selectedService.name.trim(),
+        nameAr: selectedService.nameAr || '',
         price: finalPrice,
         type: joinedTypeName, // legacy fallback type string
         types: selectedTypes,  // new types array
@@ -1417,7 +1423,7 @@ export default function POS() {
                   );
 
                   // Record card commission if applicable
-                  if (method.name === 'Card' && settings.cardCommission > 0) {
+                  if (method.name === 'Card' && settings.cardCommissionEnabled && settings.cardCommission > 0) {
                     const commissionRate = parseFloat(settings.cardCommission || 0);
                     const commissionAmount = method.value * (commissionRate / 100);
                     const commTxnId = `TXN-COMM-${Date.now()}`;
@@ -1693,7 +1699,7 @@ export default function POS() {
             );
 
             // Record card commission if applicable
-            if (method.name === 'Card' && settings.cardCommission > 0) {
+            if (method.name === 'Card' && settings.cardCommissionEnabled && settings.cardCommission > 0) {
                const commissionRate = parseFloat(settings.cardCommission || 0);
                const commissionAmount = method.value * (commissionRate / 100);
                const commTxnId = `TXN-COMM-${Date.now()}`;
@@ -2327,7 +2333,8 @@ export default function POS() {
         <div className={styles.itemsGrid}>
           {services
             .filter(s => {
-              const matchesSearch = s.name.toLowerCase().includes(itemSearch.toLowerCase());
+              const searchValue = itemSearch.toLowerCase();
+              const matchesSearch = s.name.toLowerCase().includes(searchValue) || (s.nameAr || '').toLowerCase().includes(searchValue);
               const matchesCategory = selectedCategory === 'All' || s.category === selectedCategory;
               return matchesSearch && (itemSearch ? true : matchesCategory);
             })
@@ -2340,8 +2347,7 @@ export default function POS() {
                     ) : getIcon(service.icon, 36)}
                   </div>
                 )}
-                <span className={styles.itemName}>{service.name}</span>
-                <span className={styles.itemPrice}><CurrencySymbol size={16} /> {service.price.toFixed(2)}</span>
+                <span className={styles.itemName} dir={isArabic ? 'rtl' : undefined}>{getServiceDisplayName(service)}</span>
               </div>
             ))}
 
@@ -2532,7 +2538,7 @@ export default function POS() {
                 })()}
               </div>
               <div className={styles.cartItemDetails}>
-                <span className={styles.cartItemName}>{item.name}</span>
+                <span className={styles.cartItemName} dir={isArabic ? 'rtl' : undefined}>{getServiceDisplayName(item)}</span>
                 <span className={styles.cartItemMeta}>
                   {(() => {
                     const treatments = item.type || '';
@@ -2632,7 +2638,7 @@ export default function POS() {
                   {selectedService.isTemporary ? <Package size={24} /> : getIcon(selectedService.icon, 24)}
                 </div>
                 <div>
-                  <h2>{selectedService.isTemporary ? 'Add Custom Temporary Item' : selectedService.name}</h2>
+                  <h2 dir={isArabic ? 'rtl' : undefined}>{selectedService.isTemporary ? 'Add Custom Temporary Item' : getServiceDisplayName(selectedService)}</h2>
                   <p>{selectedService.isTemporary ? 'Enter name, price, and options' : selectedService.category || 'Configure Service Options'}</p>
                 </div>
               </div>
@@ -3303,7 +3309,7 @@ export default function POS() {
                             html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
                             css: '',
                             printerName: settings.billingPrinter,
-                            silent: settings.silentPrinting !== false
+                            silent: !!settings.billingPrinter
                           });
                         } else {
                           const win = window.open('', '', 'width=400,height=400');
@@ -3503,7 +3509,7 @@ export default function POS() {
                                 html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
                                 css: '',
                                 printerName: settings.billingPrinter,
-                                silent: settings.silentPrinting !== false
+                                silent: !!settings.billingPrinter
                               });
                             } else {
                               const win = window.open('', '', 'width=400,height=400');
@@ -3672,24 +3678,27 @@ export default function POS() {
                             key={fld.id}
                             onClick={() => setActivePaymentField(fld.id)}
                             style={{
-                              background: activePaymentField === fld.id ? '#EFF6FF' : 'white',
-                              border: activePaymentField === fld.id ? '2px solid #2563EB' : '1px solid #E2E8F0',
-                              borderRadius: '10px', padding: '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem',
+                              background: fld.id === 'nomod' ? '#ECFDF5' : (activePaymentField === fld.id ? '#EFF6FF' : 'white'),
+                              border: activePaymentField === fld.id ? `2px solid ${fld.id === 'nomod' ? '#059669' : '#2563EB'}` : `1px solid ${fld.id === 'nomod' ? '#A7F3D0' : '#E2E8F0'}`,
+                              boxShadow: activePaymentField === fld.id ? `0 0 0 3px ${fld.id === 'nomod' ? 'rgba(5,150,105,0.12)' : 'rgba(37,99,235,0.10)'}` : 'none',
+                              borderRadius: '10px', padding: fld.id === 'nomod' ? '0.7rem 0.85rem' : '0.5rem 0.75rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.3rem',
                               gridColumn: fld.id === 'nomod' && checkoutFieldsList.length % 3 !== 0 && checkoutFieldsList.length % 4 !== 0 ? 'span 2' : 'span 1'
                             }}
                           >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: fld.id === 'nomod' ? '#047857' : '#475569', fontSize: '0.8rem', fontWeight: 700 }}>
                               {fld.icon} {fld.label}
+                              {fld.id === 'nomod' && <span style={{ marginLeft: 'auto', fontSize: '0.67rem', background: '#D1FAE5', color: '#047857', padding: '0.12rem 0.38rem', borderRadius: '999px' }}>PAY LINK</span>}
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', fontWeight: 700, color: '#1E293B' }}>
-                              <CurrencySymbol size={12} />
+                            <div style={{ display: 'flex', alignItems: 'center', fontSize: fld.id === 'nomod' ? '1.2rem' : '1rem', fontWeight: 800, color: fld.id === 'nomod' ? '#065F46' : '#1E293B' }}>
+                              <CurrencySymbol size={fld.id === 'nomod' ? 16 : 12} />
                               <input 
                                 type="number" 
+                                inputMode="decimal"
                                 placeholder="0.00" 
                                 value={fld.value} 
                                 onChange={(e) => fld.setter(e.target.value)} 
                                 onFocus={() => setActivePaymentField(fld.id)}
-                                style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.25rem', fontWeight: 700 }}
+                                style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', marginLeft: '0.3rem', fontWeight: 800, fontSize: fld.id === 'nomod' ? '1.2rem' : '1rem', color: fld.id === 'nomod' ? '#065F46' : '#1E293B' }}
                               />
                             </div>
                           </div>
@@ -3721,7 +3730,7 @@ export default function POS() {
 
               <div className={styles.checkoutBottom} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '1.5rem', marginTop: '0.5rem' }}>
                 <div>
-                  <h3 className={styles.modalSectionTitle} style={{ marginBottom: '0.5rem' }}>Enter Amount for {activePaymentField.toUpperCase()}</h3>
+                  <h3 className={styles.modalSectionTitle} style={{ marginBottom: '0.5rem' }}>Enter Amount for {activePaymentField === 'nomod' ? 'Nomod Payment Link' : activePaymentField.toUpperCase()}</h3>
                   <div className={styles.numpad}>
                     {[1, 2, 3, 4, 5, 6, 7, 8, 9, '.', 0].map(n => (
                       <button key={n} className={styles.numBtn} onClick={() => handleKeypadPress(n)}>{n}</button>

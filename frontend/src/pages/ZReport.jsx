@@ -499,6 +499,9 @@ export default function ZReport() {
     });
 
     totalCollected = cashSales + cardSales + bankTransfer + nomodSales + partialPayments + otherPayments;
+    const cardCommissionExpense = transactions
+      .filter(t => t.type === 'EXPENSE' && String(t.category || '').toLowerCase() === 'card commission')
+      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
     // 5. Cash Drawer Reconciliation Calculations
     let cashCreditCollections = 0;
@@ -609,6 +612,7 @@ export default function ZReport() {
       partialPayments,
       otherPayments,
       totalCollected,
+      cardCommissionExpense,
       cashCreditCollections,
       cashAdvancePayments,
       cashInTrans,
@@ -869,6 +873,11 @@ export default function ZReport() {
                     <td>Card Terminal</td>
                     <td className="text-right"><CurrencySymbol /> {metrics.cardSales.toFixed(2)}</td>
                     <td className="text-right">{metrics.totalCollected > 0 ? ((metrics.cardSales/metrics.totalCollected)*100).toFixed(1) : 0}%</td>
+                  </tr>
+                  <tr style={{ color: '#DC2626' }}>
+                    <td>Card Commission Expense</td>
+                    <td className="text-right">- <CurrencySymbol /> {metrics.cardCommissionExpense.toFixed(2)}</td>
+                    <td className="text-right">-</td>
                   </tr>
                   <tr>
                     <td>Bank Transfer</td>
@@ -1151,6 +1160,10 @@ export default function ZReport() {
                 </tr>
               </thead>
               <tbody>
+                <tr style={{ color: '#DC2626' }}>
+                  <td>Card Commission</td>
+                  <td className="text-right">- <CurrencySymbol /> {metrics.cardCommissionExpense.toFixed(2)}</td>
+                </tr>
                 {expenses.length === 0 ? (
                   <tr><td colSpan="2" className="text-center">No expenses logged today</td></tr>
                 ) : (

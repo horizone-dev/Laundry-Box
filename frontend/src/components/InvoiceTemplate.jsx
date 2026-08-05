@@ -93,6 +93,9 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
     orderPaymentBreakdown = {};
   }
   const orderSettlementDiscount = parseFloat(orderPaymentBreakdown.orderDiscount || orderPaymentBreakdown.settlementDiscount || orderPaymentBreakdown.discount || 0) || 0;
+  // Invoice-only display value: show a settlement discount under the existing
+  // Discount row without changing the stored order/payment calculations.
+  const invoiceDiscount = Math.max(0, computedDiscount) + orderSettlementDiscount;
   const advanceDeducted = (order.previousBalance || 0) < 0 ? Math.min(computedTotal, Math.abs(order.previousBalance)) : 0;
   const manualPaid = Math.max(0, (order.paidAmount || 0) - advanceDeducted - orderSettlementDiscount);
 
@@ -207,14 +210,22 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
   };
 
   const isCompact = settings.invoiceTemplate === 'compact';
+  const isStandard = settings.invoiceTemplate === 'standard';
   const showLogo = settings.invoiceShowLogo !== false;
-  const hasLogo = showLogo && !!settings.logo;
+  // Compact 2 should follow the same behaviour as the other templates: show
+  // the bundled logo when the shop has not uploaded a custom one yet.
+  const hasLogo = showLogo;
   const showQrCode = settings.invoiceShowQrCode !== false;
   const showBilingual = settings.invoiceShowBilingual !== false;
   const showTerms = settings.invoiceShowTerms !== false;
   const showBankDetails = settings.invoiceShowBankDetails !== false;
   const showDelivery = settings.invoiceShowDelivery !== false;
   const termsText = settings.invoiceTermsText || '';
+  const configuredBankAccounts = (settings.bankAccounts || []).filter(account => account.isActive !== false);
+  // Keep the Settings preview informative even before a real bank account is added.
+  const previewBankAccounts = configuredBankAccounts.length > 0
+    ? configuredBankAccounts
+    : (isPreview ? [{ id: 'preview-bank', bankName: 'Sample Bank', accountNumber: '000123456789', iban: 'AE00 0000 0000 0000 0000 000' }] : []);
 
   // ── Customization settings ──
   const accentColor = settings.invoiceAccentColor || '#2563EB';
@@ -334,7 +345,12 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
         <div className={styles.horizonHeaderWrap} style={!hasLogo ? { justifyContent: 'center', textAlign: 'center' } : {}}>
           {hasLogo && (
             <div className={styles.horizonLogoBox}>
-              <img src={settings.logo} alt="Logo" className={styles.horizonLogo} />
+              <img
+                src={settings.logo || defaultLogo}
+                alt="Logo"
+                className={styles.horizonLogo}
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
             </div>
           )}
           <div className={styles.horizonHeader} style={!hasLogo ? { textAlign: 'center' } : {}}>
@@ -431,6 +447,11 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                         onChange={(v) => updateItem(idx, 'name', v)}
                         className={styles.horizonItemName}
                       />
+                      {!editMode && settings?.invoiceShowArabicServiceName && (item.nameAr || item.serviceNameAr || item.arabicName || item.nameArabic) && (
+                        <span className={styles.horizonItemSubText} lang="ar" dir="rtl" style={{ direction: 'rtl', unicodeBidi: 'plaintext' }}>
+                          {item.nameAr || item.serviceNameAr || item.arabicName || item.nameArabic}
+                        </span>
+                      )}
                       {servicesText && (
                         <span className={styles.horizonItemSubText}>
                           ◦ {servicesText}
@@ -484,9 +505,6 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           </tbody>
         </table>
 
-        {/* Divider line before totals */}
-        <div className={styles.horizonLineDivider}></div>
-
         {/* Totals side */}
         <div className={styles.horizonTotalsBlock}>
           <div className={styles.horizonTotalRow}>
@@ -499,15 +517,8 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           </div>
           <div className={styles.horizonTotalRow}>
             <span>{formatLabel('Discounts', 'الخصومات')}:</span>
-            <span>{(parseFloat(order.discount) || 0).toFixed(2)}</span>
+            <span>{((parseFloat(order.discount) || 0) + orderSettlementDiscount).toFixed(2)}</span>
           </div>
-          
-          {orderSettlementDiscount > 0.01 && (
-            <div className={styles.horizonTotalRow} style={{ color: '#DC2626' }}>
-              <span>Order Settlement Discount:</span>
-              <span>- {orderSettlementDiscount.toFixed(2)}</span>
-            </div>
-          )}
           <div className={styles.horizonTotalDashedLine}></div>
 
           <div className={styles.horizonGrandTotalRow}>
@@ -526,7 +537,6 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                 if (breakdown) {
                   if (breakdown.cash > 0) activeMethods.push('CASH');
                   if (breakdown.card > 0) activeMethods.push('CARD');
-                  if (breakdown.upi > 0) activeMethods.push('UPI');
                   if (breakdown.bank > 0) activeMethods.push('BANK');
                 }
                 if (activeMethods.length > 0) return activeMethods.join(' / ');
@@ -571,6 +581,30 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
           );
         })()}
 
+        {/* Payment bank accounts */}
+        {showBankDetails && previewBankAccounts.length > 0 && (
+          <div className={styles.horizonBankDetails}>
+            <div className={styles.horizonBankHeader}>
+              <span>BANK TRANSFER DETAILS</span>
+            </div>
+            {previewBankAccounts.map((account, index) => (
+                <div key={account.id || index} className={styles.horizonBankAccount}>
+                  <div className={styles.horizonBankName}>{account.bankName || 'Bank'}</div>
+                  <div className={styles.horizonBankNumberRow}>
+                    <span>A/C No.</span>
+                    <strong>{account.accountNumber || '-'}</strong>
+                  </div>
+                  {account.iban && (
+                    <div className={styles.horizonBankNumberRow}>
+                      <span>IBAN</span>
+                      <strong>{account.iban}</strong>
+                    </div>
+                  )}
+                </div>
+            ))}
+          </div>
+        )}
+
         {/* Bullet guidelines */}
         {showTerms && termsText && (
           <div className={styles.horizonGuidelinesList}>
@@ -585,7 +619,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
 
         {/* Compliance QR corner */}
         {showQrCode && (
-          <div className={styles.horizonQrContainer}>
+          <div className={styles.horizonQrContainer} data-print-qr="true">
             <div className={styles.horizonTrackText} style={{ marginBottom: '0.35rem', textAlign: 'center', fontSize: '0.78rem', fontWeight: 800 }}>
               Tracking Code: {order.id}
             </div>
@@ -639,7 +673,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <div className={styles.thermalCompanyMeta} dir="rtl">{fullAddressAr}</div>
             )}
             {settings.phone && <div className={styles.thermalCompanyMeta}>Tel: {settings.phone}</div>}
-            {settings.email && <div className={styles.thermalCompanyMeta}>{settings.email}</div>}
+            {settings.email && settings.invoiceShowEmail !== false && <div className={styles.thermalCompanyMeta}>{settings.email}</div>}
           </div>
           {showQrCode && (
             <div className={styles.thermalQrCorner}>
@@ -661,7 +695,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <h2 style={{ fontSize: standardNameFontSize, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: '1.2' }}>{settings.companyName || 'Laundry Box'}</h2>
               <p className={styles.companyAddress}>{fullAddress || 'Address not set'}</p>
               {settings.phone && <p className={styles.companyContact}>Tel: {settings.phone}</p>}
-              {settings.email && <p className={styles.companyContact}>Email: {settings.email}</p>}
+              {settings.email && settings.invoiceShowEmail !== false && <p className={styles.companyContact}>Email: {settings.email}</p>}
             </div>
           </div>
           {showBilingual && (
@@ -669,7 +703,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <h2>{settings.companyNameAr || 'محل غسيل ملابس'}</h2>
               <p className={styles.companyAddress}>{fullAddressAr || 'العنوان غير محدد'}</p>
               {settings.phone && <p className={styles.companyContact}>هاتف: {settings.phone}</p>}
-              {settings.email && <p className={styles.companyContact}>البريد: {settings.email}</p>}
+              {settings.email && settings.invoiceShowEmail !== false && <p className={styles.companyContact}>البريد: {settings.email}</p>}
             </div>
           )}
         </div>
@@ -698,6 +732,20 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             <span className={styles.metaLabelEnAr}>{formatLabel('Invoice No', 'رقم الفاتورة')}:</span>
             <span className={styles.metaValue}>{settings.invoicePrefix || ''}{order.id}</span>
           </div>
+          {isStandard && (
+            <>
+              <div className={styles.metaRow}>
+                <span className={styles.metaLabelEnAr}>Name:</span>
+                <span className={styles.metaValue}>{order.customer || 'Walk-in Customer'}</span>
+              </div>
+              {order.customerPhone && (
+                <div className={styles.metaRow}>
+                  <span className={styles.metaLabelEnAr}>Mobile No:</span>
+                  <span className={styles.metaValue}>{order.customerPhone}</span>
+                </div>
+              )}
+            </>
+          )}
 
         </div>
         <div className={styles.metaRightColumn}>
@@ -705,18 +753,17 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             <span className={styles.metaLabelEnAr}>Date & Time:</span>
             <span className={styles.metaValue} style={{ fontSize: '0.82rem' }}>{order.date}</span>
           </div>
-          {settings.invoiceShowDelivery !== false && order.expectedDeliveryDate && (
+          {showDelivery && order.expectedDeliveryDate && (
             <div className={styles.metaRow}>
               <span className={styles.metaLabelEnAr}>Exp. Delivery:</span>
-              <span className={styles.metaValue} style={{ color: '#E11D48', fontWeight: 'bold' }}>{order.expectedDeliveryDate}</span>
+              <span className={styles.metaValue} style={{ color: '#E11D48', fontWeight: 'bold' }}>{formatExpectedDate(order.expectedDeliveryDate)}</span>
             </div>
           )}
         </div>
       </div>
 
       {/* 4. Customer Details */}
-      <div className={styles.customerBlockBilingual}>
-        <h3>{formatLabel('CUSTOMER DETAILS', 'تفاصيل العميل')}</h3>
+      {!isStandard && <div className={styles.customerBlockBilingual}>
         <div className={styles.customerGrid}>
           <div className={styles.customerItem}>
             <span className={styles.customerLabelEn}>{formatLabel('Name', 'الاسم')}:</span>
@@ -735,7 +782,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* 4b. Special Instructions */}
       {order.specialInstructions && !isCompact && (
@@ -774,6 +821,9 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <div key={idx} className={styles.thermalItem}>
                 {/* Service name — wraps naturally */}
                 <div className={styles.thermalItemName}>{item.name}</div>
+                {settings?.invoiceShowArabicServiceName && item.nameAr && (
+                  <div className={styles.thermalItemTypes} style={{ direction: 'rtl' }}>{item.nameAr}</div>
+                )}
                 {typesList.length > 0 && (
                   <div className={styles.thermalItemTypes}>
                     {(() => {
@@ -885,6 +935,9 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                       onChange={(v) => updateItem(idx, 'name', v)}
                       className={styles.itemName}
                     />
+                    {!editMode && settings?.invoiceShowArabicServiceName && item.nameAr && (
+                      <div style={{ fontSize: '0.75rem', color: '#64748B', direction: 'rtl', textAlign: 'left', marginTop: '0.1rem' }}>{item.nameAr}</div>
+                    )}
                     {item.description && (
                       <div style={{ fontSize: '0.75rem', color: '#DC2626', fontWeight: 600, marginTop: '0.15rem', display: 'block' }}>
                         ⚠️ {item.description}
@@ -982,7 +1035,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                       align="center"
                     />
                   ) : (
-                    <><CurrencySymbol size={11} /> {item.price.toFixed(2)}</>
+                    <><CurrencySymbol size={11} /> {(parseFloat(item.price) || 0).toFixed(2)}</>
                   )}
                 </td>
 
@@ -1032,16 +1085,16 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
       {isCompact ? (
         /* ── Thermal: single-column totals ── */
         <div className={styles.thermalTotalsBlock}>
-          {computedDiscount > 0.01 && (
+          {invoiceDiscount > 0.01 && (
             <div className={styles.thermalTotalRow}>
               <span>{formatLabel('Items Total', 'إجمالي المواد')}</span>
               <span><CurrencySymbol size={10} /> {itemsTotal.toFixed(2)}</span>
             </div>
           )}
-          {computedDiscount > 0.01 && (
+          {invoiceDiscount > 0.01 && (
             <div className={styles.thermalTotalRow}>
               <span>{formatLabel('Discount', 'الخصم')}</span>
-              <span className={styles.thermalTotalRed}>- <CurrencySymbol size={10} /> {computedDiscount.toFixed(2)}</span>
+              <span className={styles.thermalTotalRed}>- <CurrencySymbol size={10} /> {invoiceDiscount.toFixed(2)}</span>
             </div>
           )}
           <div className={styles.thermalTotalRow}>
@@ -1057,12 +1110,6 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             <span><CurrencySymbol size={11} /> {computedTotal.toFixed(2)}</span>
           </div>
           <div className={styles.thermalDividerDash} />
-          {orderSettlementDiscount > 0.01 && (
-            <div className={styles.thermalTotalRow}>
-              <span>Order Settlement Discount</span>
-              <span className={styles.thermalTotalRed}>- <CurrencySymbol size={10} /> {orderSettlementDiscount.toFixed(2)}</span>
-            </div>
-          )}
           {manualPaid > 0 && (
             <div className={styles.thermalTotalRow}>
               <span>{formatLabel('Paid', 'المدفوع')}</span>
@@ -1099,10 +1146,10 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             </div>
           )}
           {/* Bank details */}
-          {showBankDetails && settings.bankAccounts && settings.bankAccounts.length > 0 && (
+          {showBankDetails && configuredBankAccounts.length > 0 && (
             <div className={styles.thermalBankBlock}>
               <div className={styles.thermalBankTitle}>BANK TRANSFER DETAILS</div>
-              {settings.bankAccounts.map((account, bidx) => (
+              {configuredBankAccounts.map((account, bidx) => (
                 <div key={account.id || bidx} className={styles.thermalBankRow}>
                   <strong>{account.bankName}</strong>: {account.accountNumber}
                   {account.iban && <span className={styles.thermalBankIban}>IBAN: {account.iban}</span>}
@@ -1114,7 +1161,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
       ) : (
         /* ── Standard: two-column totals with QR + bank ── */
         <div className={styles.bottomBilingualSection}>
-          {(showQrCode || (showBankDetails && settings.bankAccounts && settings.bankAccounts.length > 0)) && (
+          {(showQrCode || (showBankDetails && configuredBankAccounts.length > 0)) && (
             <div className={styles.trackingAndBankDetails}>
               {showQrCode && (
                 <div className={styles.complianceQrBox}>
@@ -1123,10 +1170,10 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                   </div>
                 </div>
               )}
-              {showBankDetails && settings.bankAccounts && settings.bankAccounts.length > 0 && (
+              {showBankDetails && configuredBankAccounts.length > 0 && (
                 <div className={styles.bankTransferDetailsBox}>
                   <h4>BANK TRANSFER DETAILS</h4>
-                  {settings.bankAccounts.map((account, idx) => (
+                  {configuredBankAccounts.map((account, idx) => (
                     <div
                       key={account.id || idx}
                       className={`${styles.bankAccountRow} ${settings.defaultBankId === account.id ? styles.defaultBankRow : ''}`}
@@ -1153,16 +1200,16 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                 <span>INVOICE CHARGES</span>
                 {showBilingual && <span>رسوم الفاتورة</span>}
               </div>
-              {computedDiscount > 0.01 && (
+              {invoiceDiscount > 0.01 && (
                 <div className={styles.totalRowBilingual}>
                   <span>{formatLabel('Items Total', 'إجمالي المواد')}</span>
                   <span className={styles.totalVal}><CurrencySymbol size={11} /> {itemsTotal.toFixed(2)}</span>
                 </div>
               )}
-              {computedDiscount > 0.01 && (
+              {invoiceDiscount > 0.01 && (
                 <div className={styles.totalRowBilingual}>
                   <span>{formatLabel('Discount', 'الخصم')}</span>
-                  <span className={styles.totalVal} style={{ color: '#DC2626' }}>- <CurrencySymbol size={11} /> {computedDiscount.toFixed(2)}</span>
+                  <span className={styles.totalVal} style={{ color: '#DC2626' }}>- <CurrencySymbol size={11} /> {invoiceDiscount.toFixed(2)}</span>
                 </div>
               )}
               <div className={styles.totalRowBilingual}>
@@ -1201,7 +1248,6 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                 const hasBreakdown = breakdown && (
                   (breakdown.cash && breakdown.cash > 0) ||
                   (breakdown.card && breakdown.card > 0) ||
-                  (breakdown.upi && breakdown.upi > 0) ||
                   (breakdown.bank && breakdown.bank > 0)
                 );
                 if (hasBreakdown) {

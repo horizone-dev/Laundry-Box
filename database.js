@@ -101,6 +101,7 @@ function initDB(appPath) {
       id TEXT PRIMARY KEY,
       shopId TEXT,
       name TEXT,
+      nameAr TEXT DEFAULT '',
       price REAL,
       icon TEXT,
       image TEXT,
@@ -610,6 +611,18 @@ function initDB(appPath) {
     if (!servicesCols.some(col => col.name === 'sortOrder')) {
       db.exec("ALTER TABLE services ADD COLUMN sortOrder INTEGER DEFAULT 0;");
     }
+    if (!servicesCols.some(col => col.name === 'nameAr')) {
+      db.exec("ALTER TABLE services ADD COLUMN nameAr TEXT DEFAULT '';");
+    }
+    // Older preset services saved English and Arabic together as
+    // "English Name / الاسم العربي". Split those values into the new fields.
+    db.exec(`
+      UPDATE services
+      SET nameAr = TRIM(SUBSTR(name, INSTR(name, ' / ') + 3)),
+          name = TRIM(SUBSTR(name, 1, INSTR(name, ' / ') - 1))
+      WHERE (nameAr IS NULL OR TRIM(nameAr) = '')
+        AND INSTR(name, ' / ') > 0;
+    `);
 
     const serviceTypesCols = db.prepare("PRAGMA table_info(service_types)").all();
     if (!serviceTypesCols.some(col => col.name === 'sortOrder')) {
@@ -924,6 +937,9 @@ function initDB(appPath) {
       CREATE TABLE IF NOT EXISTS discount_sequence (
         id INTEGER PRIMARY KEY AUTOINCREMENT
       );
+      CREATE TABLE IF NOT EXISTS refund_sequence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT
+      );
     `);
     const seqRow = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'payment_sequence'").get();
     if (!seqRow) {
@@ -946,6 +962,40 @@ function initDB(appPath) {
         db.prepare("INSERT INTO payment_sequence (id) VALUES (?)").run(seedVal);
         console.log(`[Sequence Migration] Seeded payment_sequence with ID ${seedVal}`);
       }
+    }
+
+    // Start the refund sequence after existing records without rewriting their
+    // IDs, which are referenced by the cash ledger.
+    const refundSeqRow = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'refund_sequence'").get();
+    if (!refundSeqRow) {
+      const totalRefunds = db.prepare("SELECT COUNT(*) AS count FROM refunds").get().count;
+      if (totalRefunds > 0) db.prepare("INSERT INTO refund_sequence (id) VALUES (?)").run(totalRefunds);
+    }
+
+    // Replace legacy timestamp-based refund IDs with one consistent voucher
+    // reference everywhere the refund is recorded.
+    const refundRows = db.prepare("SELECT id FROM refunds ORDER BY createdAt ASC, id ASC").all();
+    const isSequentialRefundId = (id) => /^REF-\d{7}$/.test(id || '');
+    if (refundRows.some(row => !isSequentialRefundId(row.id))) {
+      const normalizeRefundIds = db.transaction(() => {
+        const updateRefundId = db.prepare("UPDATE refunds SET id = ? WHERE id = ?");
+        const updateLedgerRefundId = db.prepare("UPDATE cash_ledger SET refundId = ? WHERE refundId = ?");
+
+        refundRows.forEach((row, index) => {
+          const temporaryId = `TMP-REF-${index + 1}`;
+          updateRefundId.run(temporaryId, row.id);
+          updateLedgerRefundId.run(temporaryId, row.id);
+        });
+        refundRows.forEach((row, index) => {
+          const temporaryId = `TMP-REF-${index + 1}`;
+          const normalizedId = `REF-${String(index + 1).padStart(7, '0')}`;
+          updateRefundId.run(normalizedId, temporaryId);
+          updateLedgerRefundId.run(normalizedId, temporaryId);
+        });
+        db.prepare("DELETE FROM refund_sequence").run();
+        if (refundRows.length > 0) db.prepare("INSERT INTO refund_sequence (id) VALUES (?)").run(refundRows.length);
+      });
+      normalizeRefundIds();
     }
 
     // Alter table payments to add paymentReference column if missing
@@ -1814,6 +1864,13 @@ function refreshCustomerFinancialCaches(connection, targetCustomerId = null, tim
   return { inspected: customers.length, updated, ledgerUpdated, skippedForReview };
 }
 
+function getNextRefundId(db) {
+  const info = db.prepare("INSERT INTO refund_sequence DEFAULT VALUES").run();
+  const nextId = info.lastInsertRowid;
+  db.prepare("DELETE FROM refund_sequence WHERE id < ?").run(nextId);
+  return `REF-${String(nextId).padStart(7, '0')}`;
+}
+
 function auditFinancialIntegrity(connection, targetCustomerId = null) {
   const customers = targetCustomerId
     ? connection.prepare('SELECT id, name FROM customers WHERE id = ?').all(targetCustomerId)
@@ -2227,7 +2284,7 @@ function softDeleteOrderLegacy({ orderId, deletedBy, deleteReason, deleteAction 
 
     // 6. Cash Ledger & Refund recording
     if (actualPaidAmt > 0 && refundImmediately) {
-      const refundId = `REF-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const refundId = getNextRefundId(db);
       db.prepare(`
         INSERT INTO refunds (id, shopId, orderId, customerId, amount, refundMethod, reason, createdBy, createdAt)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2421,7 +2478,7 @@ function softDeleteOrder({ orderId, deletedBy, deleteReason, deleteAction = 'ref
     }
 
     if (actualPaidAmt > 0.005 && refundImmediately) {
-      const refundId = `REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      const refundId = getNextRefundId(db);
       db.prepare(`
         INSERT INTO refunds (id, shopId, orderId, customerId, amount, refundMethod, reason, createdBy, createdAt)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2505,7 +2562,7 @@ function refundDeletedOrder({ orderId, refundMethod = 'Cash', bankAccountId = nu
 
     let refundId = null;
     if (paidAmount > 0.005) {
-      refundId = `REF-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      refundId = getNextRefundId(db);
       db.prepare(`
         INSERT INTO refunds (id, shopId, orderId, customerId, amount, refundMethod, reason, createdBy, createdAt)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)

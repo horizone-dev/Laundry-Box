@@ -120,8 +120,12 @@ export default function SalesReport() {
   // Database Data States
   const [orders, setOrders] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [settlementDiscounts, setSettlementDiscounts] = useState([]);
   const [returns, setReturns] = useState([]);
+  const [deletedTransactions, setDeletedTransactions] = useState([]);
+  const [deletedOrders, setDeletedOrders] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [transactions, setTransactions] = useState([]);
   const [customersMap, setCustomersMap] = useState({});
   const [loading, setLoading] = useState(true);
 
@@ -171,17 +175,51 @@ export default function SalesReport() {
       );
       if (paymentsRes.success) setPayments(paymentsRes.data);
 
+      const settlementDiscountsRes = await window.electronAPI.dbQuery(
+        `SELECT * FROM payments
+         WHERE method = 'Discount' AND discountScope = 'settlement'
+           AND COALESCE(status, '') NOT IN ('FAILED', 'CANCELLED', 'EXPIRED', 'VOIDED')
+         ORDER BY createdAt DESC`, []
+      );
+      if (settlementDiscountsRes.success) setSettlementDiscounts(settlementDiscountsRes.data);
+
       // 4. Fetch Returns from refunds
       const returnsRes = await window.electronAPI.dbQuery(
-        "SELECT * FROM refunds ORDER BY createdAt DESC", []
+        `SELECT r.*,
+                COALESCE(o.billNumber, d.billNumber, r.orderId) AS billNumber,
+                COALESCE(c.name, d.customerName, 'Walk-in') AS customerName
+         FROM refunds r
+         LEFT JOIN orders o ON o.id = r.orderId
+         LEFT JOIN deleted_orders d ON d.id = r.orderId
+         LEFT JOIN customers c ON c.id = r.customerId
+         ORDER BY r.createdAt DESC`, []
       );
       if (returnsRes.success) setReturns(returnsRes.data);
+
+      const deletedTransactionsRes = await window.electronAPI.dbQuery(
+        `SELECT p.*, c.name AS customerName
+         FROM payments p
+         LEFT JOIN customers c ON c.id = p.customerId
+         WHERE p.paymentReference LIKE 'DEL-%'
+         ORDER BY p.createdAt DESC`, []
+      );
+      if (deletedTransactionsRes.success) setDeletedTransactions(deletedTransactionsRes.data);
+
+      const deletedOrdersRes = await window.electronAPI.dbQuery(
+        "SELECT * FROM deleted_orders ORDER BY deletedAt DESC", []
+      );
+      if (deletedOrdersRes.success) setDeletedOrders(deletedOrdersRes.data);
 
       // 5. Fetch Expenses
       const expensesRes = await window.electronAPI.dbQuery(
         "SELECT * FROM expenses ORDER BY date DESC", []
       );
       if (expensesRes.success) setExpenses(expensesRes.data);
+
+      const transactionsRes = await window.electronAPI.dbQuery(
+        "SELECT * FROM account_transactions WHERE category = 'Card Commission' ORDER BY date DESC", []
+      );
+      if (transactionsRes.success) setTransactions(transactionsRes.data);
 
     } catch (err) {
       console.error("Failed to load reports data:", err);
@@ -336,20 +374,24 @@ export default function SalesReport() {
         }
       }
 
+      const method = p.method?.toUpperCase();
+      const isSuccessfulNomodPayment = method === 'NOMOD' && ['SUCCESS', 'PAID'].includes(p.status?.toUpperCase());
+      const amount = Number(p.amount || 0);
+      // Pending or failed Nomod links are not collected payments and must not appear in this report.
+      if (method === 'NOMOD' && !isSuccessfulNomodPayment) return;
+
       if (!dailyPaymentsMap[datePart]) {
-        dailyPaymentsMap[datePart] = { date: datePart, cash: 0, card: 0, upi: 0, bank: 0, total: 0, tax: 0 };
+        dailyPaymentsMap[datePart] = { date: datePart, cash: 0, card: 0, bank: 0, nomod: 0, total: 0, tax: 0 };
       }
 
-      const method = p.method?.toUpperCase();
-      const amount = Number(p.amount || 0);
       dailyPaymentsMap[datePart].total += amount;
 
       if (method === 'CASH') {
         dailyPaymentsMap[datePart].cash += amount;
       } else if (method === 'CARD') {
         dailyPaymentsMap[datePart].card += amount;
-      } else if (method === 'UPI') {
-        dailyPaymentsMap[datePart].upi += amount;
+      } else if (isSuccessfulNomodPayment) {
+        dailyPaymentsMap[datePart].nomod += amount;
       } else {
         dailyPaymentsMap[datePart].bank += amount;
       }
@@ -376,58 +418,43 @@ export default function SalesReport() {
   const paymentsTotals = useMemo(() => {
     let cash = 0;
     let card = 0;
-    let upi = 0;
     let bank = 0;
+    let nomod = 0;
     let total = 0;
     let tax = 0;
 
     paymentsData.forEach(d => {
       cash += d.cash;
       card += d.card;
-      upi += d.upi;
       bank += d.bank;
+      nomod += d.nomod;
       total += d.total;
       tax += d.tax;
     });
 
-    return { cash, card, upi, bank, total, tax };
+    return { cash, card, bank, nomod, total, tax };
   }, [paymentsData]);
 
-  // 4. Invoices Data (Grouped Daily)
+  // 4. Invoices Data (one row per invoice)
   const invoicesData = useMemo(() => {
     const filtered = filterByDateBounds(orders, 'createdAt');
-    const dailyInvoiceMap = {};
-
-    filtered.forEach(o => {
-      let datePart = 'N/A';
-      if (o.createdAt) {
-        if (o.createdAt.includes('T')) {
-          datePart = o.createdAt.split('T')[0];
-        } else if (o.createdAt.includes(' ')) {
-          datePart = o.createdAt.split(' ')[0];
-        } else {
-          datePart = o.createdAt;
-        }
-      }
-
-      if (!dailyInvoiceMap[datePart]) {
-        dailyInvoiceMap[datePart] = { date: datePart, count: 0, subtotal: 0, discount: 0, tax: 0, total: 0 };
-      }
-
-      const vat = calculateOrderTax(o, settings);
-      const subtotal = o.totalAmount - vat;
-      const discount = calculateOrderDiscount(o, settings);
-
-      dailyInvoiceMap[datePart].count += 1;
-      dailyInvoiceMap[datePart].subtotal += subtotal;
-      dailyInvoiceMap[datePart].discount += discount;
-      dailyInvoiceMap[datePart].tax += vat;
-      dailyInvoiceMap[datePart].total += (o.totalAmount || 0);
-    });
-
-    return Object.values(dailyInvoiceMap)
-      .filter(d => d.date.includes(searchTerm))
-      .sort((a, b) => b.date.localeCompare(a.date));
+    const query = searchTerm.toLowerCase();
+    return filtered.map(o => {
+      const tax = calculateOrderTax(o, settings);
+      return {
+        id: o.id,
+        invoiceNumber: o.id,
+        date: o.createdAt,
+        subtotal: Number(o.totalAmount || 0) - tax,
+        discount: calculateOrderDiscount(o, settings),
+        tax,
+        total: Number(o.totalAmount || 0)
+      };
+    }).filter(o => (
+      String(o.invoiceNumber).toLowerCase().includes(query) ||
+      String(o.id).toLowerCase().includes(query) ||
+      String(o.date || '').includes(searchTerm)
+    )).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   }, [orders, settings, dateRange, customStart, customEnd, searchTerm]);
 
   // 5. Credit Sales Data (Grouped Daily)
@@ -482,36 +509,82 @@ export default function SalesReport() {
       }
 
       if (!dailyPaidCreditsMap[datePart]) {
-        dailyPaidCreditsMap[datePart] = { date: datePart, count: 0, total: 0 };
+        dailyPaidCreditsMap[datePart] = { date: datePart, count: 0, total: 0, discount: 0 };
       }
 
       dailyPaidCreditsMap[datePart].count += 1;
       dailyPaidCreditsMap[datePart].total += Number(p.amount || 0);
     });
 
+    filterByDateBounds(settlementDiscounts, 'createdAt').forEach(discount => {
+      const datePart = String(discount.createdAt || 'N/A').replace('T', ' ').split(' ')[0];
+      if (!dailyPaidCreditsMap[datePart]) {
+        dailyPaidCreditsMap[datePart] = { date: datePart, count: 0, total: 0, discount: 0 };
+      }
+      dailyPaidCreditsMap[datePart].discount += Number(discount.amount || 0);
+    });
+
     return Object.values(dailyPaidCreditsMap)
       .filter(d => d.date.includes(searchTerm))
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [payments, dateRange, customStart, customEnd, searchTerm]);
+  }, [payments, settlementDiscounts, dateRange, customStart, customEnd, searchTerm]);
 
   // 7. Returns Data
   const returnsData = useMemo(() => {
-    const filtered = filterByDateBounds(returns, 'returnedAt');
+    const filtered = filterByDateBounds(returns, 'createdAt');
     return filtered.filter(r => {
       const custName = r.customerName || 'Walk-in Customer';
       return (
-        r.billNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        String(r.orderId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         r.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         custName.toLowerCase().includes(searchTerm.toLowerCase())
       );
     });
   }, [returns, dateRange, customStart, customEnd, searchTerm]);
 
+  const deletedTransactionsData = useMemo(() => {
+    const query = searchTerm.toLowerCase();
+    const paymentAndDiscountDeletes = filterByDateBounds(deletedTransactions, 'createdAt')
+      .map(transaction => ({
+        id: transaction.id,
+        date: transaction.createdAt,
+        reference: transaction.paymentReference,
+        customerName: transaction.customerName || 'Walk-in',
+        item: String(transaction.method || '').toLowerCase() === 'discount' ? 'Discount' : 'Payment',
+        method: transaction.method || 'N/A',
+        amount: Math.abs(Number(transaction.amount || 0))
+      }))
+      .filter(transaction => (
+        String(transaction.reference || '').toLowerCase().includes(query) ||
+        String(transaction.customerName || '').toLowerCase().includes(query) ||
+        String(transaction.item || '').toLowerCase().includes(query) ||
+        String(transaction.method || '').toLowerCase().includes(query)
+      ));
+    const orderDeletes = filterByDateBounds(deletedOrders, 'deletedAt')
+      .map(order => ({
+        id: `ORDER-DEL-${order.id}`,
+        date: order.deletedAt,
+        reference: `ORDER-DEL-${order.id}`,
+        customerName: order.customerName || 'Walk-in',
+        item: 'Order',
+        method: order.refundStatus || order.returnStatus || 'Deleted',
+        amount: Number(order.totalAmount || 0)
+      }))
+      .filter(order => (
+        String(order.reference).toLowerCase().includes(query) ||
+        String(order.customerName).toLowerCase().includes(query) ||
+        String(order.item).toLowerCase().includes(query) ||
+        String(order.method).toLowerCase().includes(query)
+      ));
+    return [...paymentAndDiscountDeletes, ...orderDeletes]
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  }, [deletedTransactions, deletedOrders, dateRange, customStart, customEnd, searchTerm]);
+
   // 8. Summary Data (Dynamic based on selected date range)
   const daySummaryData = useMemo(() => {
     const dayOrders = filterByDateBounds(orders, 'createdAt');
     const dayPayments = filterByDateBounds(payments, 'createdAt');
-    const dayReturns = filterByDateBounds(returns, 'returnedAt');
+    const dayReturns = filterByDateBounds(returns, 'createdAt');
     const dayExpenses = filterByDateBounds(expenses, 'date');
 
     // Summary calculations
@@ -524,18 +597,20 @@ export default function SalesReport() {
     let cashCollected = 0;
     let cardCollected = 0;
     let bankCollected = 0;
-    let upiCollected = 0;
     dayPayments.forEach(p => {
       const method = p.method?.toUpperCase();
       if (method === 'CASH') cashCollected += p.amount;
       else if (method === 'CARD') cardCollected += p.amount;
-      else if (method === 'UPI') upiCollected += p.amount;
       else bankCollected += p.amount; // Bank or bank transfer
     });
-    const totalCollections = cashCollected + cardCollected + bankCollected + upiCollected;
+    const totalCollections = cashCollected + cardCollected + bankCollected;
 
     // Expenses total
     const totalExpenses = dayExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const cardCommissionExpense = filterByDateBounds(
+      transactions.filter(t => t.type === 'EXPENSE' && String(t.category || '').toLowerCase() === 'card commission'),
+      'date'
+    ).reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
     // Credit Issued
     const creditSalesTotal = dayOrders.reduce((sum, o) => sum + (o.paymentStatus === 'Credit' || o.dueAmount > 0 ? o.dueAmount : 0), 0);
@@ -546,7 +621,7 @@ export default function SalesReport() {
       .reduce((sum, p) => sum + p.amount, 0);
 
     // Returned amount
-    const returnsTotalValue = dayReturns.reduce((sum, r) => sum + (r.totalAmount || 0), 0);
+    const returnsTotalValue = dayReturns.reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
     return {
       totalInvoices,
@@ -556,15 +631,15 @@ export default function SalesReport() {
       cashCollected,
       cardCollected,
       bankCollected,
-      upiCollected,
       totalCollections,
       totalExpenses,
+      cardCommissionExpense,
       creditSalesTotal,
       creditSettlementsTotal,
       returnsTotalValue,
-      netCashFlow: totalCollections - totalExpenses
+      netCashFlow: totalCollections - totalExpenses - cardCommissionExpense
     };
-  }, [orders, payments, returns, expenses, dateRange, customStart, customEnd]);
+  }, [orders, payments, returns, expenses, transactions, dateRange, customStart, customEnd]);
 
   // Select appropriate data list depending on active tab
   const getTabItems = () => {
@@ -576,6 +651,7 @@ export default function SalesReport() {
       case 'creditSales': return creditSalesData;
       case 'paidCredits': return paidCreditsData;
       case 'returns': return returnsData;
+      case 'deletedTransactions': return deletedTransactionsData;
       default: return [];
     }
   };
@@ -611,21 +687,20 @@ export default function SalesReport() {
       headers = ['Item Name', 'Category', 'Quantity Sold', 'Revenue'];
       rows = salesItemData.map(i => [i.name, i.category, i.qty, i.total.toFixed(2)]);
     } else if (activeTab === 'payments') {
-      headers = ['Date', 'Cash Collected', 'Card Collected', 'UPI Collected', 'Bank Collected', 'VAT', 'Total Collected'];
+      headers = ['Date', 'Cash Collected', 'Card Collected', 'Bank Collected', 'Nomod Collected', 'Total Collected'];
       rows = paymentsData.map(p => [
         p.date,
         p.cash.toFixed(2),
         p.card.toFixed(2),
-        p.upi.toFixed(2),
         p.bank.toFixed(2),
-        p.tax.toFixed(2),
+        p.nomod.toFixed(2),
         p.total.toFixed(2)
       ]);
     } else if (activeTab === 'invoices') {
-      headers = ['Date', 'Invoice Count', 'Sub Total', 'Discount', 'VAT', 'Total Amount'];
+      headers = ['Date', 'Invoice Number', 'Sub Total', 'Discount', 'VAT', 'Total Amount'];
       rows = invoicesData.map(i => [
         i.date,
-        i.count,
+        i.invoiceNumber,
         i.subtotal.toFixed(2),
         i.discount.toFixed(2),
         i.tax.toFixed(2),
@@ -640,21 +715,33 @@ export default function SalesReport() {
         c.dueAmount.toFixed(2)
       ]);
     } else if (activeTab === 'paidCredits') {
-      headers = ['Date', 'Settlements Count', 'Total Settled'];
+      headers = ['Date', 'Settlements Count', 'Total Settled', 'Settlement Discount'];
       rows = paidCreditsData.map(p => [
         p.date,
         p.count,
-        p.total.toFixed(2)
+        p.total.toFixed(2),
+        p.discount.toFixed(2)
       ]);
     } else if (activeTab === 'returns') {
-      headers = ['Order Date', 'Date Returned', 'Bill Number', 'Customer', 'Refund Method', 'Refunded Total'];
+      headers = ['Refund ID', 'Order Date', 'Date Returned', 'Invoice Number', 'Customer', 'Refund Method', 'Refunded Total'];
       rows = returnsData.map(r => [
+        r.id,
         r.createdAt,
-        r.returnedAt || r.deletedAt,
-        r.billNumber,
+        r.returnedAt || r.deletedAt || r.createdAt,
+        r.orderId,
         r.customerName || 'Walk-in',
         r.refundMethod || 'N/A',
-        r.totalAmount.toFixed(2)
+        Number(r.amount || 0).toFixed(2)
+      ]);
+    } else if (activeTab === 'deletedTransactions') {
+      headers = ['Deleted Date', 'Deletion Reference', 'Customer', 'Deleted Item', 'Method', 'Amount Deleted'];
+      rows = deletedTransactionsData.map(transaction => [
+        transaction.date,
+        transaction.reference,
+        transaction.customerName,
+        transaction.item,
+        transaction.method,
+        transaction.amount.toFixed(2)
       ]);
     } else if (activeTab === 'daySummary' && daySummaryData) {
       headers = ['Metric', 'Amount'];
@@ -664,9 +751,9 @@ export default function SalesReport() {
         ['Total Collected', daySummaryData.totalCollections.toFixed(2)],
         ['- Cash Collected', daySummaryData.cashCollected.toFixed(2)],
         ['- Card Collected', daySummaryData.cardCollected.toFixed(2)],
-        ['- UPI Collected', daySummaryData.upiCollected.toFixed(2)],
         ['- Bank Collected', daySummaryData.bankCollected.toFixed(2)],
         ['Total Expenses', daySummaryData.totalExpenses.toFixed(2)],
+        ['Card Commission Expense', daySummaryData.cardCommissionExpense.toFixed(2)],
         ['Credit Issued', daySummaryData.creditSalesTotal.toFixed(2)],
         ['Credit Settlements Collected', daySummaryData.creditSettlementsTotal.toFixed(2)],
         ['Returns Volume', daySummaryData.returnsTotalValue.toFixed(2)],
@@ -702,13 +789,14 @@ export default function SalesReport() {
   // PDF DOWNLOAD
   const handleDownloadPDF = async () => {
     const activeTabLabel = [
-      { id: 'daily', label: 'Daily Base Sale' },
+      { id: 'daily', label: 'Day-wise Sales' },
       { id: 'items', label: 'Sales Item' },
       { id: 'payments', label: 'Payment' },
       { id: 'invoices', label: 'Invoice' },
       { id: 'creditSales', label: 'Credit Sales' },
       { id: 'paidCredits', label: 'Paid Credits' },
       { id: 'returns', label: 'Return' },
+      { id: 'deletedTransactions', label: 'Deleted Reports' },
       { id: 'daySummary', label: 'Summary' },
     ].find(t => t.id === activeTab)?.label || 'Report';
 
@@ -832,13 +920,14 @@ export default function SalesReport() {
       {/* TABS SELECTOR */}
       <div className={styles.tabsContainer}>
         {[
-          { id: 'daily', label: 'Daily Base Sale' },
+          { id: 'daily', label: 'Day-wise Sales' },
           { id: 'items', label: 'Sales Item' },
           { id: 'payments', label: 'Payment' },
           { id: 'invoices', label: 'Invoice' },
           { id: 'creditSales', label: 'Credit Sales' },
           { id: 'paidCredits', label: 'Paid Credits' },
           { id: 'returns', label: 'Return' },
+          { id: 'deletedTransactions', label: 'Deleted Reports' },
           { id: 'daySummary', label: 'Summary' },
         ].map(t => (
           <button
@@ -1048,9 +1137,8 @@ export default function SalesReport() {
                         <th>DATE</th>
                         <th className="num-col">CASH</th>
                         <th className="num-col">CARD</th>
-                        <th className="num-col">UPI</th>
                         <th className="num-col">BANK</th>
-                        <th className="num-col">VAT</th>
+                        <th className="num-col">NOMOD</th>
                         <th className="num-col">TOTAL COLLECTED</th>
                       </tr>
                     </thead>
@@ -1064,14 +1152,11 @@ export default function SalesReport() {
                           <td className="num-col" style={{ fontWeight: 600, color: '#8B5CF6' }}>
                             {p.card.toFixed(2)}
                           </td>
-                          <td className="num-col" style={{ fontWeight: 600, color: '#F59E0B' }}>
-                            {p.upi.toFixed(2)}
-                          </td>
                           <td className="num-col" style={{ fontWeight: 600, color: '#10B981' }}>
                             {p.bank.toFixed(2)}
                           </td>
-                          <td className="num-col" style={{ fontWeight: 600, color: '#2563EB' }}>
-                            {p.tax.toFixed(2)}
+                          <td className="num-col" style={{ fontWeight: 600, color: '#0F766E' }}>
+                            {p.nomod.toFixed(2)}
                           </td>
                           <td className="num-col" style={{ fontWeight: 800, color: '#166534' }}>
                             {p.total.toFixed(2)}
@@ -1080,7 +1165,7 @@ export default function SalesReport() {
                       ))}
                       {paginatedItems.length === 0 && (
                         <tr>
-                          <td colSpan="7" style={{ padding: '3rem', textAlign: 'center', color: '#94A3B8', fontWeight: 600 }}>
+                          <td colSpan="6" style={{ padding: '3rem', textAlign: 'center', color: '#94A3B8', fontWeight: 600 }}>
                             No payment records found.
                           </td>
                         </tr>
@@ -1092,9 +1177,8 @@ export default function SalesReport() {
                           <td style={{ fontWeight: 800 }}>TOTAL</td>
                           <td className="num-col" style={{ fontWeight: 800, color: '#3B82F6' }}>{paymentsTotals.cash.toFixed(2)}</td>
                           <td className="num-col" style={{ fontWeight: 800, color: '#8B5CF6' }}>{paymentsTotals.card.toFixed(2)}</td>
-                          <td className="num-col" style={{ fontWeight: 800, color: '#F59E0B' }}>{paymentsTotals.upi.toFixed(2)}</td>
                           <td className="num-col" style={{ fontWeight: 800, color: '#10B981' }}>{paymentsTotals.bank.toFixed(2)}</td>
-                          <td className="num-col" style={{ fontWeight: 800, color: '#2563EB' }}>{paymentsTotals.tax.toFixed(2)}</td>
+                          <td className="num-col" style={{ fontWeight: 800, color: '#0F766E' }}>{paymentsTotals.nomod.toFixed(2)}</td>
                           <td className="num-col" style={{ fontWeight: 900, color: '#166534' }}>{paymentsTotals.total.toFixed(2)}</td>
                         </tr>
                       </tfoot>
@@ -1110,7 +1194,7 @@ export default function SalesReport() {
                     <thead>
                       <tr>
                         <th>DATE</th>
-                        <th className="num-col">BILLS</th>
+                        <th>INVOICE NO.</th>
                         <th className="num-col">SUB TOTAL</th>
                         <th className="num-col">DISCOUNT</th>
                         <th className="num-col">VAT</th>
@@ -1119,9 +1203,9 @@ export default function SalesReport() {
                     </thead>
                     <tbody>
                       {paginatedItems.map((o, i) => (
-                        <tr key={i}>
+                        <tr key={o.id || i}>
                           <td style={{ fontWeight: 700 }}>{formatDate(o.date)}</td>
-                          <td className="num-col" style={{ fontWeight: 600 }}>{o.count}</td>
+                          <td style={{ fontWeight: 700 }}>{o.invoiceNumber}</td>
                           <td className="num-col" style={{ fontWeight: 700 }}>{o.subtotal.toFixed(2)}</td>
                           <td className="num-col" style={{ fontWeight: 700, color: o.discount > 0 ? '#D97706' : '#64748B' }}>{o.discount.toFixed(2)}</td>
                           <td className="num-col" style={{ fontWeight: 700, color: '#2563EB' }}>{o.tax.toFixed(2)}</td>
@@ -1140,8 +1224,8 @@ export default function SalesReport() {
                       <tfoot>
                         <tr style={{ background: '#F8FAFC', borderTop: '2px solid #E2E8F0', fontWeight: 800 }}>
                           <td style={{ fontWeight: 800 }}>TOTAL</td>
-                          <td className="num-col" style={{ fontWeight: 800 }}>
-                            {invoicesData.reduce((sum, o) => sum + (o.count || 0), 0)}
+                          <td style={{ fontWeight: 800 }}>
+                            {invoicesData.length} INVOICES
                           </td>
                           <td className="num-col" style={{ fontWeight: 800 }}>
                             {invoicesData.reduce((sum, o) => sum + (o.subtotal || 0), 0).toFixed(2)}
@@ -1220,6 +1304,7 @@ export default function SalesReport() {
                         <th>DATE</th>
                         <th className="num-col">SETTLEMENTS</th>
                         <th className="num-col">TOTAL SETTLED</th>
+                        <th className="num-col">SETTLEMENT DISCOUNT</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1230,11 +1315,14 @@ export default function SalesReport() {
                           <td className="num-col" style={{ color: '#166534', fontWeight: 800 }}>
                             {p.total.toFixed(2)}
                           </td>
+                          <td className="num-col" style={{ color: '#D97706', fontWeight: 800 }}>
+                            {p.discount.toFixed(2)}
+                          </td>
                         </tr>
                       ))}
                       {paginatedItems.length === 0 && (
                         <tr>
-                          <td colSpan="3" style={{ padding: '3rem', textAlign: 'center', color: '#94A3B8', fontWeight: 600 }}>
+                          <td colSpan="4" style={{ padding: '3rem', textAlign: 'center', color: '#94A3B8', fontWeight: 600 }}>
                             No credit payments settled yet.
                           </td>
                         </tr>
@@ -1249,6 +1337,9 @@ export default function SalesReport() {
                           </td>
                           <td className="num-col" style={{ fontWeight: 900, color: '#166534' }}>
                             {paidCreditsData.reduce((sum, p) => sum + (p.total || 0), 0).toFixed(2)}
+                          </td>
+                          <td className="num-col" style={{ fontWeight: 900, color: '#D97706' }}>
+                            {paidCreditsData.reduce((sum, p) => sum + (p.discount || 0), 0).toFixed(2)}
                           </td>
                         </tr>
                       </tfoot>
@@ -1265,7 +1356,8 @@ export default function SalesReport() {
                       <tr>
                         <th>ORDER DATE</th>
                         <th>DATE RETURNED</th>
-                        <th>BILL NO</th>
+                        <th>REFUND ID</th>
+                        <th>INVOICE NO.</th>
                         <th>CUSTOMER</th>
                         <th>REFUND METHOD</th>
                         <th className="num-col">REFUNDED TOTAL</th>
@@ -1275,18 +1367,19 @@ export default function SalesReport() {
                       {paginatedItems.map((r, i) => (
                         <tr key={i}>
                           <td>{formatDate(r.createdAt)}</td>
-                          <td>{formatDate(r.returnedAt || r.deletedAt)}</td>
-                          <td style={{ fontWeight: 700 }}>{r.billNumber}</td>
+                          <td>{formatDate(r.returnedAt || r.deletedAt || r.createdAt)}</td>
+                          <td style={{ fontWeight: 700 }}>{r.id}</td>
+                          <td style={{ fontWeight: 700 }}>{r.orderId}</td>
                           <td>{r.customerName || 'Walk-in'}</td>
                           <td style={{ fontWeight: 700 }}>{r.refundMethod || 'N/A'}</td>
                           <td className="num-col" style={{ color: '#B91C1C', fontWeight: 800 }}>
-                            {r.totalAmount.toFixed(2)}
+                            {Number(r.amount || 0).toFixed(2)}
                           </td>
                         </tr>
                       ))}
                       {paginatedItems.length === 0 && (
                         <tr>
-                          <td colSpan="6" style={{ padding: '3rem', textAlign: 'center', color: '#94A3B8', fontWeight: 600 }}>
+                          <td colSpan="7" style={{ padding: '3rem', textAlign: 'center', color: '#94A3B8', fontWeight: 600 }}>
                             No return records found.
                           </td>
                         </tr>
@@ -1295,9 +1388,9 @@ export default function SalesReport() {
                     {paginatedItems.length > 0 && (
                       <tfoot>
                         <tr style={{ background: '#F8FAFC', borderTop: '2px solid #E2E8F0', fontWeight: 800 }}>
-                          <td colSpan="5" style={{ fontWeight: 800 }}>TOTAL</td>
+                          <td colSpan="6" style={{ fontWeight: 800 }}>TOTAL</td>
                           <td className="num-col" style={{ fontWeight: 900, color: '#B91C1C' }}>
-                            {returnsData.reduce((sum, r) => sum + (r.totalAmount || 0), 0).toFixed(2)}
+                            {returnsData.reduce((sum, r) => sum + Number(r.amount || 0), 0).toFixed(2)}
                           </td>
                         </tr>
                       </tfoot>
@@ -1306,7 +1399,48 @@ export default function SalesReport() {
                 </div>
               )}
 
-              {/* 8. SUMMARY */}
+              {/* 8. DELETED TRANSACTIONS */}
+              {activeTab === 'deletedTransactions' && (
+                <div className="table-container">
+                  <table className="base-table">
+                    <thead>
+                      <tr>
+                        <th>DELETED DATE</th>
+                        <th>DELETION REFERENCE</th>
+                        <th>CUSTOMER</th>
+                        <th>DELETED ITEM</th>
+                        <th>METHOD</th>
+                        <th className="num-col">AMOUNT DELETED</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedItems.map(transaction => (
+                        <tr key={transaction.id}>
+                          <td>{formatDate(transaction.date)}</td>
+                          <td style={{ fontWeight: 700 }}>{transaction.reference}</td>
+                          <td>{transaction.customerName}</td>
+                          <td>{transaction.item}</td>
+                          <td>{transaction.method}</td>
+                          <td className="num-col" style={{ color: '#B91C1C', fontWeight: 800 }}>{transaction.amount.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                      {paginatedItems.length === 0 && (
+                        <tr><td colSpan="6" style={{ padding: '3rem', textAlign: 'center', color: '#94A3B8', fontWeight: 600 }}>No deleted payment or discount records found.</td></tr>
+                      )}
+                    </tbody>
+                    {paginatedItems.length > 0 && (
+                      <tfoot>
+                        <tr style={{ background: '#F8FAFC', borderTop: '2px solid #E2E8F0', fontWeight: 800 }}>
+                          <td colSpan="5">TOTAL</td>
+                          <td className="num-col" style={{ color: '#B91C1C' }}>{deletedTransactionsData.reduce((sum, transaction) => sum + transaction.amount, 0).toFixed(2)}</td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              )}
+
+              {/* 9. SUMMARY */}
               {activeTab === 'daySummary' && daySummaryData && (
                 <div className={styles.daySummaryContainer}>
                   <div className={styles.daySummaryGrid}>
@@ -1347,10 +1481,6 @@ export default function SalesReport() {
                         <span>{daySummaryData.cardCollected.toFixed(2)}</span>
                       </div>
                       <div className={styles.rowItem}>
-                        <span>UPI Collected</span>
-                        <span>{daySummaryData.upiCollected.toFixed(2)}</span>
-                      </div>
-                      <div className={styles.rowItem}>
                         <span>Bank Transfer Collected</span>
                         <span>{daySummaryData.bankCollected.toFixed(2)}</span>
                       </div>
@@ -1383,6 +1513,10 @@ export default function SalesReport() {
                         <span>Total Operating Expenses</span>
                         <span style={{ color: '#B91C1C' }}>{daySummaryData.totalExpenses.toFixed(2)}</span>
                       </div>
+                      <div className={styles.rowItem}>
+                        <span>Card Commission Expense</span>
+                        <span style={{ color: '#B91C1C' }}>{daySummaryData.cardCommissionExpense.toFixed(2)}</span>
+                      </div>
                     </div>
 
                     <div className={styles.summarySection}>
@@ -1398,6 +1532,10 @@ export default function SalesReport() {
                         <span>Operating Expenses</span>
                         <span>-{daySummaryData.totalExpenses.toFixed(2)}</span>
                       </div>
+                      <div className={styles.rowItem}>
+                        <span>Card Commission</span>
+                        <span>-{daySummaryData.cardCommissionExpense.toFixed(2)}</span>
+                      </div>
                       <div className={`${styles.netBox} ${daySummaryData.netCashFlow < 0 ? styles.negative : ''}`}>
                         <span style={{ fontWeight: 800 }}>NET CASH FLOW</span>
                         <span style={{ fontWeight: 900 }}>
@@ -1410,7 +1548,7 @@ export default function SalesReport() {
               )}
 
               {/* PAGINATION (Only for non Day Summary tab) */}
-              {activeTab !== 'daySummary' && totalPages > 1 && (
+              {activeTab !== 'daySummary' && currentTabItems.length > 0 && (
                 <div id="report-pagination-container">
                   <Pagination
                     currentPage={currentPage}

@@ -200,7 +200,7 @@ export default function Services({ defaultTab = 'list' }) {
 
   const handleOpenModal = (type) => {
     if (type === 'service') {
-      setFormData({ name: '', price: '', category: categories[0]?.name || CATEGORIES.LAUNDRY, taxRate: '', image: null, defaultDeliveryMethod: 'Hanger', icon: 'Shirt' });
+      setFormData({ name: '', nameAr: '', price: '', category: categories[0]?.name || CATEGORIES.LAUNDRY, taxRate: '', image: null, defaultDeliveryMethod: 'Hanger', icon: 'Shirt' });
       // Pre-fill types pricing grid with empty values
       const defaultMap = {};
       types.forEach(t => {
@@ -355,6 +355,15 @@ export default function Services({ defaultTab = 'list' }) {
       let params = [];
 
       if (showModal === 'service') {
+        const normalizedName = (formData.name || '').trim().toLocaleLowerCase();
+        const duplicate = services.some(service =>
+          service.id !== editId && (service.name || '').trim().toLocaleLowerCase() === normalizedName
+        );
+        if (duplicate) {
+          alert('A service with this name already exists. Please use a different service name.');
+          return;
+        }
+
         const pricingArray = selectedTypesList.map(typeId => ({
           serviceTypeId: typeId,
           price: parseFloat(typePricingMap[typeId] || 0)
@@ -363,11 +372,11 @@ export default function Services({ defaultTab = 'list' }) {
         const basePrice = pricingArray.length > 0 ? pricingArray[0].price : 0;
 
         if (editId) {
-          query = 'UPDATE services SET name=?, price=?, image=?, icon=?, category=?, taxRate=?, pricing=?, defaultDeliveryMethod=?, updatedAt=? WHERE id=?';
-          params = [formData.name, basePrice, formData.image, formData.icon || 'Shirt', formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, formData.defaultDeliveryMethod || 'Hanger', timestamp, editId];
+          query = 'UPDATE services SET name=?, nameAr=?, price=?, image=?, icon=?, category=?, taxRate=?, pricing=?, defaultDeliveryMethod=?, updatedAt=? WHERE id=?';
+          params = [formData.name.trim(), (formData.nameAr || '').trim(), basePrice, formData.image, formData.icon || 'Shirt', formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, formData.defaultDeliveryMethod || 'Hanger', timestamp, editId];
         } else {
-          query = 'INSERT INTO services (id, shopId, name, price, image, icon, category, taxRate, pricing, defaultDeliveryMethod, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-          params = [id, shopId, formData.name, basePrice, formData.image, formData.icon || 'Shirt', formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, formData.defaultDeliveryMethod || 'Hanger', timestamp];
+          query = 'INSERT INTO services (id, shopId, name, nameAr, price, image, icon, category, taxRate, pricing, defaultDeliveryMethod, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+          params = [id, shopId, formData.name.trim(), (formData.nameAr || '').trim(), basePrice, formData.image, formData.icon || 'Shirt', formData.category, formData.taxRate ? parseFloat(formData.taxRate) : null, pricingJson, formData.defaultDeliveryMethod || 'Hanger', timestamp];
         }
       } else if (showModal === 'category') {
         if (editId) {
@@ -578,6 +587,7 @@ export default function Services({ defaultTab = 'list' }) {
                         )}
                         <div>
                           <div className={styles.itemName}>{s.name}</div>
+                          {s.nameAr && <div style={{ fontSize: '0.8rem', color: '#64748B', direction: 'rtl', textAlign: 'left', marginTop: '0.1rem' }}>{s.nameAr}</div>}
                           <div className={styles.listItemMeta}>
                             <span className={styles.badge}>{s.category}</span>
                             <span className={styles.badge} style={{ background: '#ECFDF5', color: '#047857', border: '1px solid #A7F3D0' }}>
@@ -932,6 +942,16 @@ export default function Services({ defaultTab = 'list' }) {
                 </div>
 
                 <div className={styles.formGroup}>
+                  <label>Arabic Name (Optional)</label>
+                  <input
+                    type="text"
+                    dir="rtl"
+                    value={formData.nameAr || ''}
+                    onChange={e => setFormData({ ...formData, nameAr: e.target.value })}
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
                   <label>Category</label>
                   <select
                     value={formData.category || ''}
@@ -1267,7 +1287,8 @@ export default function Services({ defaultTab = 'list' }) {
                       onClick={() => {
                         setFormData({
                           ...formData,
-                          name: `${preset.name} / ${preset.nameAr}`,
+                          name: preset.name,
+                          nameAr: preset.nameAr,
                           image: dataUri,
                           category: preset.category || formData.category,
                           icon: 'Shirt'

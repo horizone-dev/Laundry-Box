@@ -100,8 +100,8 @@ export default function RevenueReport() {
   const stats = [
     { label: 'Total Collected', value: totalRevenue, icon: DollarSign, color: '#10B981', bg: '#ECFDF5' },
     { label: 'Cash Payments', value: filteredPayments.filter(p => p.method === 'Cash' || p.method === 'CASH').reduce((s, p) => s + p.amount, 0), icon: Wallet, color: '#3B82F6', bg: '#EFF6FF' },
-    { label: 'Bank/Card', value: filteredPayments.filter(p => ['BANK', 'BANK TRANSFER', 'CARD'].includes(p.method?.toUpperCase())).reduce((s, p) => s + p.amount, 0), icon: Landmark, color: '#8B5CF6', bg: '#F5F3FF' },
-    { label: 'Digital/Other', value: filteredPayments.filter(p => ['UPI', 'WALLET', 'ONLINE'].includes(p.method?.toUpperCase())).reduce((s, p) => s + p.amount, 0), icon: Smartphone, color: '#F59E0B', bg: '#FFFBEB' },
+    { label: 'Bank/Card', value: filteredPayments.filter(p => ['BANK', 'BANK TRANSFER', 'CARD', 'UPI'].includes(p.method?.toUpperCase())).reduce((s, p) => s + p.amount, 0), icon: Landmark, color: '#8B5CF6', bg: '#F5F3FF' },
+    { label: 'Digital/Other', value: filteredPayments.filter(p => ['WALLET', 'ONLINE'].includes(p.method?.toUpperCase())).reduce((s, p) => s + p.amount, 0), icon: Smartphone, color: '#F59E0B', bg: '#FFFBEB' },
   ];
 
   const handleExportCSV = () => {
@@ -249,7 +249,6 @@ export default function RevenueReport() {
                <option value="Cash">Cash</option>
                <option value="Bank">Bank Transfer</option>
                <option value="Card">Card</option>
-               <option value="UPI">UPI</option>
              </select>
           </div>
         </div>
@@ -285,10 +284,10 @@ export default function RevenueReport() {
                           const m = p.method?.toUpperCase();
                           if (m === 'CASH') return <Wallet size={14} color="#3B82F6" />;
                           if (m === 'CARD') return <CreditCard size={14} color="#8B5CF6" />;
-                          if (m === 'UPI') return <Smartphone size={14} color="#F59E0B" />;
+                          if (m === 'UPI') return <Landmark size={14} color="#10B981" />;
                           return <Landmark size={14} color="#10B981" />;
                         })()}
-                        <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{p.method}</span>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{p.method?.toUpperCase() === 'UPI' ? 'Bank Transfer' : p.method}</span>
                       </div>
                     </td>
                     <td>

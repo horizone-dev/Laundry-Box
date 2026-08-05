@@ -1032,7 +1032,7 @@ export default function Orders() {
           shopId: DEFAULT_SHOP_ID,
           splits: canonicalSplits,
           discount: Number(discVal) || 0,
-          cardCommissionRate: Number(settings.cardCommission) || 0,
+          cardCommissionRate: settings.cardCommissionEnabled ? (Number(settings.cardCommission) || 0) : 0,
           actor: {
             id: userSession.id || 'SYSTEM',
             name: userSession.name || userSession.username || 'System',
@@ -1173,7 +1173,7 @@ export default function Orders() {
               ]
             );
 
-            if (split.method === 'Card' && settings.cardCommission > 0) {
+            if (split.method === 'Card' && settings.cardCommissionEnabled && settings.cardCommission > 0) {
               const commissionRate = parseFloat(settings.cardCommission || 0);
               const commissionAmount = split.amount * (commissionRate / 100);
               const commTxnId = `TXN-COMM-${Date.now()}`;
@@ -2257,10 +2257,6 @@ export default function Orders() {
                     <input type="number" value={cardAmount} onChange={e => setCardAmount(e.target.value)} style={{ width: '120px', padding: '0.4rem', border: '1px solid #CBD5E1', borderRadius: '6px' }} />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>UPI Amount</label>
-                    <input type="number" value={upiAmount} onChange={e => setUpiAmount(e.target.value)} style={{ width: '120px', padding: '0.4rem', border: '1px solid #CBD5E1', borderRadius: '6px' }} />
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>Bank Transfer</label>
                     <input type="number" value={bankAmount} onChange={e => setBankAmount(e.target.value)} style={{ width: '120px', padding: '0.4rem', border: '1px solid #CBD5E1', borderRadius: '6px' }} />
                   </div>
@@ -2620,7 +2616,7 @@ export default function Orders() {
                             html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
                             css: '',
                             printerName: settings.billingPrinter,
-                            silent: settings.silentPrinting !== false
+                            silent: !!settings.billingPrinter
                           });
                         } else {
                           const win = window.open('', '', 'width=400,height=400');

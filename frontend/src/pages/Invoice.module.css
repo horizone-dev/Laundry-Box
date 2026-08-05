@@ -1725,6 +1725,24 @@
   }
   .thermalItem { page-break-inside: avoid; break-inside: avoid; }
   .thermalTotalsBlock { page-break-inside: avoid; break-inside: avoid; }
+
+  /* Chromium's hidden print window needs explicit SVG layout rules for QR codes. */
+  .template_horizon [data-print-qr="true"],
+  .template_horizon [data-print-qr="true"] svg {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+  .template_horizon [data-print-qr="true"] svg {
+    display: block !important;
+    width: 85px !important;
+    height: 85px !important;
+  }
+  .template_horizon .horizonItemSubText[lang="ar"] {
+    font-family: Tahoma, Arial, sans-serif !important;
+    direction: rtl !important;
+    unicode-bidi: plaintext !important;
+  }
 }
 
 /* ── Template: Horizon Premium / Compact 2 ── */
@@ -1940,6 +1958,61 @@
   font-size: 0.8rem;
   font-weight: 600;
   margin: 0.1rem 0;
+}
+
+.horizonBankDetails {
+  border: 1px solid #0F172A;
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 0.55rem 0;
+  text-align: left;
+}
+
+.horizonBankHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  background: #0F172A;
+  color: #FFFFFF;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+}
+
+.horizonBankAccount {
+  padding: 0.42rem 0.6rem;
+  border-top: 1px solid #CBD5E1;
+  background: #F8FAFC;
+}
+
+.horizonBankAccount:first-of-type {
+  border-top: none;
+}
+
+.horizonBankName {
+  color: #0F172A;
+  font-size: 0.78rem;
+  font-weight: 800;
+  margin-bottom: 0.18rem;
+}
+
+.horizonBankNumberRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #475569;
+  font-size: 0.67rem;
+  line-height: 1.45;
+}
+
+.horizonBankNumberRow strong {
+  color: #0F172A;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: right;
+  word-break: break-word;
 }
 
 .horizonCollectionBox {

@@ -2120,7 +2120,7 @@ const timestamp = getLocalISOString();
                           html: `<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><img src="${canvas.toDataURL()}" style="width:300px;height:300px;"/></div>`,
                           css: '',
                           printerName: settings.billingPrinter,
-                          silent: settings.silentPrinting !== false
+                          silent: !!settings.billingPrinter
                         });
                       } else {
                         const win = window.open('', '', 'width=400,height=400');

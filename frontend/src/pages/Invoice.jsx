@@ -407,7 +407,9 @@ export default function Invoice() {
           @page { margin: ${pageMargin}; ${pageSizeRule} }
         `,
         printerName,
-        silent: settings.silentPrinting !== false && !!printerName,   // Respect settings.silentPrinting; show dialog if false
+        // A chosen printer always prints silently. Leaving it as “Ask Every Time”
+        // keeps the OS print dialog.
+        silent: !!printerName,
         pageSize: pageSizeArg,
         copies: Math.max(1, copies || 1)
       });

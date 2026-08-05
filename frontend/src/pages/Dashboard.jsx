@@ -393,15 +393,60 @@ export default function Dashboard() {
     return formatDate(dateStr);
   };
 
+  // Recent payments should show the recorded clock time, not a relative label.
+  const getPaymentTime = (dateStr) => {
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  };
+
   // Payments processing helper
   const processRecentPayments = (allPayments, allOrders) => {
-    if (allPayments.length > 0) {
-      return allPayments.slice(0, 3).map(p => ({
-        ref: p.orderId ? (p.orderId.startsWith('#') ? p.orderId : `#${p.orderId}`) : `PAY-${p.id.slice(-5)}`,
-        amount: p.amount,
-        method: `Paid by ${p.method || 'Cash'}`,
-        timeLabel: getTimeAgo(p.createdAt)
-      }));
+    // Discounts and advance allocations are accounting adjustments, not money
+    // received from a customer, so they must not appear in Recent Payments.
+    const receiptedPayments = allPayments.filter(p => (
+      Number(p.amount || 0) > 0 &&
+      !['discount', 'advance', 'refund advance', 'system auto'].includes(String(p.method || '').toLowerCase()) &&
+      !['failed', 'cancelled', 'expired', 'voided'].includes(String(p.status || '').toLowerCase())
+    ));
+
+    if (receiptedPayments.length > 0) {
+      // A customer settlement is allocated internally across outstanding orders.
+      // Those allocation rows share the same settlement timestamp, customer and
+      // method, so present them as one receipt instead of separate order lines.
+      const groupedPayments = [];
+      const settlementGroups = new Map();
+
+      receiptedPayments.forEach(p => {
+        const isSettlement = String(p.paymentReference || '').toUpperCase().startsWith('SET-');
+        if (!isSettlement) {
+          groupedPayments.push({
+            ref: p.orderId ? (p.orderId.startsWith('#') ? p.orderId : `#${p.orderId}`) : `PAY-${p.id.slice(-5)}`,
+            amount: Number(p.amount || 0),
+            method: `Paid by ${p.method || 'Cash'}`,
+            timeLabel: getPaymentTime(p.createdAt)
+          });
+          return;
+        }
+
+        const groupKey = `${p.createdAt}|${p.customerId || ''}|${p.method || ''}`;
+        const existing = settlementGroups.get(groupKey);
+        if (existing) {
+          existing.amount += Number(p.amount || 0);
+          return;
+        }
+
+        const settlement = {
+          ref: p.customerName ? `Settlement · ${p.customerName}` : 'Settlement',
+          amount: Number(p.amount || 0),
+          method: `Paid by ${p.method || 'Cash'}`,
+          timeLabel: getPaymentTime(p.createdAt)
+        };
+        settlementGroups.set(groupKey, settlement);
+        groupedPayments.push(settlement);
+      });
+
+      return groupedPayments.slice(0, 3);
     }
     
     // Fallback: extract from recently paid orders
@@ -410,7 +455,7 @@ export default function Dashboard() {
       ref: o.id,
       amount: o.totalAmount,
       method: `Paid by ${o.paymentMethod || 'Cash'}`,
-      timeLabel: getTimeAgo(o.updatedAt)
+      timeLabel: getPaymentTime(o.updatedAt)
     }));
   };
 

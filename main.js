@@ -1618,11 +1618,11 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
               const amount = linkRecord.amount;
 
               const bills = db.prepare(`
-                SELECT id, totalAmount, paidAmount, dueAmount 
+                SELECT id, totalAmount, paidAmount, dueAmount, status 
                 FROM orders 
                 WHERE customerId = ? 
-                  AND paymentStatus IN ('Pending', 'Partial') 
-                  AND status != 'Cancelled' 
+                  AND IFNULL(dueAmount, 0) > 0
+                  AND IFNULL(status, '') NOT IN ('Cancelled', 'Deleted')
                 ORDER BY createdAt ASC
               `).all(customerId);
 
@@ -1636,16 +1636,21 @@ async function checkPaymentStatusInternal(orderId, checkoutId) {
                 const newPaid = (bill.paidAmount || 0) + allocate;
                 const newDue = due - allocate;
                 const newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+                const newWorkflowStatus = newDue <= 0 && ['Payment Pending', 'Pending', 'Credit'].includes(bill.status)
+                  ? 'Confirmed'
+                  : bill.status;
 
                 db.prepare(`
                   UPDATE orders 
                   SET paidAmount = ?, 
                       dueAmount = ?, 
                       paymentStatus = ?, 
+                      paymentMethod = 'Nomod',
+                      status = ?,
                       isSynced = 0, 
                       updatedAt = ? 
                   WHERE id = ?
-                `).run(newPaid, newDue, newStatus, nowStr, bill.id);
+                `).run(newPaid, newDue, newStatus, newWorkflowStatus, nowStr, bill.id);
 
                 const payId = `PAY-NOMOD-SETTLE-${bill.id}-${checkoutId}`;
                 const exists = db.prepare('SELECT COUNT(*) as count FROM payments WHERE id = ?').get(payId).count;
@@ -2433,7 +2438,7 @@ ipcMain.on('check-for-updates', async (event) => {
         headers['Authorization'] = `token ${token}`;
       }
 
-      const response = await fetch('https://api.github.com/repos/horizone-dev/Laundry-Box/releases/latest', {
+      const response = await fetch('https://api.github.com/repos/horizone-dev/Laundry-Box-Updates/releases/latest', {
         headers
       });
 

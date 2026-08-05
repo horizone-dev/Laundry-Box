@@ -35,6 +35,7 @@ export function SettingsProvider({ children }) {
     taxMethod: 'inclusive',
     invoiceTemplate: 'compact 2',
     posLayoutTemplate: 'standard',
+    posShowArabicServiceName: false,
     waCountryCode: '971',
     currencySymbol: '',
     activationCode: '',
@@ -64,6 +65,7 @@ export function SettingsProvider({ children }) {
     zReportClosingType: 'Day Close',
     defaultPaymentMethod: 'Cash',
     cardCommission: 0,
+    cardCommissionEnabled: true,
     cardDefaultAccountId: '',
     upiDefaultAccountId: '',
     overdueDays: 7,
@@ -85,6 +87,11 @@ export function SettingsProvider({ children }) {
     invoiceShowBilingual: true,
     invoiceShowTreatmentPrice: true,
     invoiceShowAddonPrice: true,
+    invoiceShowArabicServiceName: false,
+    invoiceShowPrevBalance: true,
+    invoiceShowDelivery: true,
+    invoiceShowWebsite: true,
+    invoiceShowEmail: true,
     invoiceTermsText: '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.',
     invoiceDocTitle: 'TAX INVOICE',
     invoiceDocTitleAr: 'فاتورة ضريبية',
@@ -94,7 +101,7 @@ export function SettingsProvider({ children }) {
     invoiceFontSize: 'normal',
     paymentMethodCashEnabled: true,
     paymentMethodCardEnabled: true,
-    paymentMethodUpiEnabled: true,
+    paymentMethodUpiEnabled: false,
     paymentMethodBankEnabled: true,
     billingPrinter: '',
     tagPrinter: '',
@@ -161,13 +168,15 @@ export function SettingsProvider({ children }) {
     zReportClosingType: 'Day Close',
     zReportAutoCloseEnabled: false,
     zReportAutoCloseTime: '23:59',
-    silentPrinting: true,
     pdfDownloadPath: '',
     pdfPageSize: 'A5',
     receiptPrintSize: 'auto',
   });
 
   const settingsRef = useRef(settings);
+  // Settings controls can be changed rapidly. Queue writes so an older request
+  // can never finish after a newer one and overwrite the latest configuration.
+  const settingsSaveQueueRef = useRef(Promise.resolve());
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
@@ -225,6 +234,7 @@ export function SettingsProvider({ children }) {
             taxMethod: shopSettings?.taxMethod || 'inclusive',
             invoiceTemplate: shopSettings?.invoiceTemplate || 'compact 2',
             posLayoutTemplate: shopSettings?.posLayoutTemplate || 'standard',
+            posShowArabicServiceName: shopSettings?.posShowArabicServiceName ?? false,
             waCountryCode: shopSettings?.waCountryCode || '971',
             currencySymbol: shopSettings?.currencySymbol || 'د.إ',
             activationCode: shopSettings?.activationCode || '',
@@ -251,6 +261,7 @@ export function SettingsProvider({ children }) {
             autoPrintCopies: shopSettings?.autoPrintCopies ?? 1,
             defaultPaymentMethod: shopSettings?.defaultPaymentMethod || 'Cash',
             cardCommission: shopSettings?.cardCommission ?? 0,
+            cardCommissionEnabled: shopSettings?.cardCommissionEnabled ?? true,
             cardDefaultAccountId: shopSettings?.cardDefaultAccountId || '',
             upiDefaultAccountId: shopSettings?.upiDefaultAccountId || '',
             overdueDays: shopSettings?.overdueDays ?? 7,
@@ -272,6 +283,11 @@ export function SettingsProvider({ children }) {
             invoiceShowBilingual: shopSettings?.invoiceShowBilingual ?? true,
             invoiceShowTreatmentPrice: shopSettings?.invoiceShowTreatmentPrice ?? true,
             invoiceShowAddonPrice: shopSettings?.invoiceShowAddonPrice ?? true,
+            invoiceShowArabicServiceName: shopSettings?.invoiceShowArabicServiceName ?? false,
+            invoiceShowPrevBalance: shopSettings?.invoiceShowPrevBalance ?? true,
+            invoiceShowDelivery: shopSettings?.invoiceShowDelivery ?? true,
+            invoiceShowWebsite: shopSettings?.invoiceShowWebsite ?? true,
+            invoiceShowEmail: shopSettings?.invoiceShowEmail ?? true,
             invoiceTermsText: shopSettings?.invoiceTermsText ?? '1. Please present this invoice at the time of pickup.\n2. We are not responsible for color fading or shrinkage.\n3. Orders must be collected within 30 days.',
             invoiceDocTitle: shopSettings?.invoiceDocTitle || 'TAX INVOICE',
             invoiceDocTitleAr: shopSettings?.invoiceDocTitleAr || 'فاتورة ضريبية',
@@ -281,7 +297,7 @@ export function SettingsProvider({ children }) {
             invoiceFontSize: shopSettings?.invoiceFontSize || 'normal',
             paymentMethodCashEnabled: shopSettings?.paymentMethodCashEnabled ?? true,
             paymentMethodCardEnabled: shopSettings?.paymentMethodCardEnabled ?? true,
-            paymentMethodUpiEnabled: shopSettings?.paymentMethodUpiEnabled ?? true,
+            paymentMethodUpiEnabled: false,
             paymentMethodBankEnabled: shopSettings?.paymentMethodBankEnabled ?? true,
             billingPrinter: shopSettings?.billingPrinter || '',
             tagPrinter: shopSettings?.tagPrinter || '',
@@ -349,14 +365,13 @@ export function SettingsProvider({ children }) {
             zReportClosingType: shopSettings?.zReportClosingType || 'Day Close',
             zReportAutoCloseEnabled: shopSettings?.zReportAutoCloseEnabled ?? false,
             zReportAutoCloseTime: shopSettings?.zReportAutoCloseTime || '23:59',
-            silentPrinting: shopSettings?.silentPrinting ?? true,
             pdfDownloadPath: shopSettings?.pdfDownloadPath || '',
             pdfPageSize: shopSettings?.pdfPageSize || 'A5',
             receiptPrintSize: shopSettings?.receiptPrintSize || 'auto',
           });
           window.localStorage.setItem('billingPrinter', shopSettings?.billingPrinter || '');
           window.localStorage.setItem('tagPrinter', shopSettings?.tagPrinter || '');
-          window.localStorage.setItem('silentPrinting', (shopSettings?.silentPrinting ?? true) !== false ? 'true' : 'false');
+          window.localStorage.removeItem('silentPrinting');
           // Also mirror dashboard settings to localStorage for syncService
           window.localStorage.setItem('laundry_settings', JSON.stringify({
             branchName:   shopSettings?.branchName   || '',
@@ -381,12 +396,10 @@ export function SettingsProvider({ children }) {
     if (newSettings.hasOwnProperty('tagPrinter')) {
       window.localStorage.setItem('tagPrinter', newSettings.tagPrinter || '');
     }
-    if (newSettings.hasOwnProperty('silentPrinting')) {
-      window.localStorage.setItem('silentPrinting', newSettings.silentPrinting !== false ? 'true' : 'false');
-    }
 
 
     if (electronAPI?.dbQuery) {
+      const persistSettings = async () => {
       try {
         const settingsJson = JSON.stringify({
           companyNameAr: updated.companyNameAr,
@@ -429,6 +442,7 @@ export function SettingsProvider({ children }) {
           autoPrintCopies: updated.autoPrintCopies,
           defaultPaymentMethod: updated.defaultPaymentMethod,
           cardCommission: updated.cardCommission,
+          cardCommissionEnabled: updated.cardCommissionEnabled,
           cardDefaultAccountId: updated.cardDefaultAccountId,
           upiDefaultAccountId: updated.upiDefaultAccountId,
           overdueDays: updated.overdueDays,
@@ -446,6 +460,11 @@ export function SettingsProvider({ children }) {
           invoiceShowBilingual: updated.invoiceShowBilingual,
           invoiceShowTreatmentPrice: updated.invoiceShowTreatmentPrice,
           invoiceShowAddonPrice: updated.invoiceShowAddonPrice,
+          invoiceShowArabicServiceName: updated.invoiceShowArabicServiceName,
+          invoiceShowPrevBalance: updated.invoiceShowPrevBalance,
+          invoiceShowDelivery: updated.invoiceShowDelivery,
+          invoiceShowWebsite: updated.invoiceShowWebsite,
+          invoiceShowEmail: updated.invoiceShowEmail,
           invoiceTermsText: updated.invoiceTermsText,
           invoiceDocTitle: updated.invoiceDocTitle,
           invoiceDocTitleAr: updated.invoiceDocTitleAr,
@@ -459,7 +478,6 @@ export function SettingsProvider({ children }) {
           paymentMethodBankEnabled: updated.paymentMethodBankEnabled,
           billingPrinter: updated.billingPrinter,
           tagPrinter: updated.tagPrinter,
-          silentPrinting: updated.silentPrinting,
           pdfDownloadPath: updated.pdfDownloadPath,
           pdfPageSize: updated.pdfPageSize,
           receiptPrintSize: updated.receiptPrintSize,
@@ -520,6 +538,7 @@ export function SettingsProvider({ children }) {
           branchApiKey: updated.branchApiKey,
           branchId:     updated.branchId,
           posLayoutTemplate: updated.posLayoutTemplate,
+          posShowArabicServiceName: updated.posShowArabicServiceName,
           // System Configuration Module toggles
           workflowEnabled: updated.workflowEnabled,
           zReportEnabled: updated.zReportEnabled,
@@ -536,15 +555,27 @@ export function SettingsProvider({ children }) {
           branchId:     updated.branchId     || 'BRANCH_01',
         }));
 
-        await electronAPI.dbQuery(
+        const saveResult = await electronAPI.dbQuery(
           'UPDATE shops SET name = ?, settings = ?, updatedAt = ? WHERE shopId = ?',
           [updated.companyName, settingsJson, new Date().toISOString(), DEFAULT_SHOP_ID]
         );
+        if (!saveResult?.success) {
+          throw new Error(saveResult?.error || 'Unable to save settings');
+        }
       } catch (err) {
         console.error("Failed to save settings:", err);
       }
+      };
+
+      settingsSaveQueueRef.current = settingsSaveQueueRef.current
+        .catch(() => undefined)
+        .then(persistSettings);
+      return settingsSaveQueueRef.current;
     }
+    return updated;
   };
+
+  const flushSettingsSave = () => settingsSaveQueueRef.current.catch(() => undefined);
 
   const formatDate = (dateVal) => {
     if (!dateVal) return 'N/A';
@@ -587,7 +618,7 @@ export function SettingsProvider({ children }) {
   };
 
   return (
-    <SettingsContext.Provider value={{ settings, updateSettings, fetchSettings, formatDate, isSettingsDirty, setIsSettingsDirty, originalSettings, setOriginalSettings }}>
+    <SettingsContext.Provider value={{ settings, updateSettings, flushSettingsSave, fetchSettings, formatDate, isSettingsDirty, setIsSettingsDirty, originalSettings, setOriginalSettings }}>
       {children}
     </SettingsContext.Provider>
   );

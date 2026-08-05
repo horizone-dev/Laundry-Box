@@ -471,7 +471,7 @@ export default function Workflow() {
           orderId: selectedOrder.id,
           shopId: DEFAULT_SHOP_ID,
           splits: [{ method: payMethod, amount: amountToPay, bankAccountId }],
-          cardCommissionRate: Number(settings.cardCommission) || 0,
+          cardCommissionRate: settings.cardCommissionEnabled ? (Number(settings.cardCommission) || 0) : 0,
           actor: {
             id: userSession.id || 'SYSTEM',
             name: userSession.name || userSession.username || 'System',
@@ -539,7 +539,7 @@ export default function Workflow() {
         );
 
         // Record card commission if applicable
-        if (payMethod === 'Card' && settings.cardCommission > 0) {
+        if (payMethod === 'Card' && settings.cardCommissionEnabled && settings.cardCommission > 0) {
           const commissionRate = parseFloat(settings.cardCommission || 0);
           const commissionAmount = amountToPay * (commissionRate / 100);
           const commTxnId = `TXN-COMM-${Date.now()}`;

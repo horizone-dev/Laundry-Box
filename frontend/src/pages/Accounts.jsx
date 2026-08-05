@@ -51,8 +51,8 @@ export default function Accounts() {
   const [notified, setNotified] = useState(false);
   const tabs = useMemo(() => {
     return (settings.noModPayEnabled !== false && settings.enablePaymentLinks !== false)
-      ? ['Payments', 'Payment links', 'Refunds']
-      : ['Payments', 'Refunds'];
+      ? ['Payments', 'Payment links']
+      : ['Payments'];
   }, [settings.noModPayEnabled, settings.enablePaymentLinks]);
   const [transactions, setTransactions] = useState([]);
   const [detailModal, setDetailModal] = useState(null); // { g, matchedCustomer, paymentTypeLabel, methodLabel, methodsInfo, isCancellation, dateDisplay, timeDisplay }
@@ -330,58 +330,26 @@ export default function Accounts() {
         if (res.success) {
           setTransactions(res.data);
 
-          // Fetch order-customer lookup
-          const orderCustomerRes = await window.electronAPI.dbQuery(`
-            SELECT o.id, c.name AS customerName 
-            FROM orders o 
-            LEFT JOIN customers c ON o.customerId = c.id
-            UNION ALL
-            SELECT id, customerName 
-            FROM deleted_orders
+          // Refund records are the source of truth. Account transaction descriptions
+          // are only cashbook entries and can be incomplete or duplicated.
+          const refundsRes = await window.electronAPI.dbQuery(`
+            SELECT r.*, COALESCE(c.name, 'Walk-in Customer') AS customerName
+            FROM refunds r
+            LEFT JOIN customers c ON c.id = r.customerId
+            ORDER BY r.createdAt DESC
           `, []);
-
-          const orderCustomerMap = {};
-          if (orderCustomerRes.success) {
-            orderCustomerRes.data.forEach(row => {
-              orderCustomerMap[row.id] = row.customerName;
-            });
-          }
-
-          // Build refunds list dynamically from returns/refund transactions
-          const returnTxns = res.data.filter(t => t.category === 'Return' || t.category === 'Refund Return');
-          const mappedRefunds = returnTxns.map(t => {
-            const descStr = t.description || '';
-            const orderIdMatch = descStr.match(/(?:Bill|Invoice)\s*(?:#|##)?([A-Za-z0-9_-]+)/i);
-            const orderId = orderIdMatch ? orderIdMatch[1] : '';
-
-            let reason = 'Damaged Garment';
-            if (descStr.startsWith('Return - Bill') || descStr.startsWith('Return - Invoice')) {
-              reason = 'Order Deleted';
-            } else {
-              const reasonParts = descStr.split(' - ');
-              if (reasonParts.length > 1) {
-                reason = reasonParts[1];
-              }
-            }
-
-            let accountLabel = 'Cash';
-            if (t.accountType === 'BANK') {
-              const bank = settings.bankAccounts?.find(b => b.id === t.bankAccountId);
-              accountLabel = bank ? bank.bankName : 'Bank';
-            }
-
-            return {
-              id: t.id,
-              date: t.date,
-              orderId: orderId,
-              customerName: orderCustomerMap[orderId] || 'Walk-in Customer',
-              amount: t.amount,
-              reason: reason,
-              account: accountLabel,
+          if (refundsRes.success) {
+            setRefunds(refundsRes.data.map(r => ({
+              id: r.id,
+              date: r.createdAt ? formatDate(r.createdAt) : '—',
+              orderId: r.orderId || '',
+              customerName: r.customerName,
+              amount: Number(r.amount || 0),
+              reason: r.reason || 'Not specified',
+              account: r.refundMethod || 'Cash',
               status: 'Processed'
-            };
-          });
-          setRefunds(mappedRefunds);
+            })));
+          }
         }
 
         // Fetch Customers
@@ -928,6 +896,10 @@ export default function Accounts() {
     const linkId = `LNK-${Date.now().toString().slice(-4)}`;
     const orderRef = linkFormData.description.trim() || `Ref #${Math.floor(1000 + Math.random() * 9000)}`;
     const amountVal = parseFloat(linkFormData.amount);
+    if (!Number.isFinite(amountVal) || amountVal <= 0) {
+      alert('Enter a valid payment amount.');
+      return;
+    }
 
     let checkoutId = linkId;
     let checkoutUrl = '';
@@ -2121,9 +2093,7 @@ export default function Accounts() {
                   <th>ORDER NUMBER</th>
                   <th>CUSTOMER</th>
                   <th>AMOUNT REFUNDED</th>
-                  <th>REASON</th>
                   <th>PAID FROM</th>
-                  <th>STATUS</th>
                 </tr>
               </thead>
               <tbody>
@@ -2134,13 +2104,7 @@ export default function Accounts() {
                     <td><span className={styles.billLink} onClick={() => navigate(`/invoice/${r.orderId}`)}>#{r.orderId}</span></td>
                     <td>{r.customerName}</td>
                     <td style={{ color: '#DC2626', fontWeight: 700 }}>-{r.amount.toFixed(2)} {settings.currencySymbol || 'AED'}</td>
-                    <td>{r.reason}</td>
                     <td>{r.account}</td>
-                    <td>
-                      <span className={styles.badgePaid}>
-                        {r.status.toUpperCase()}
-                      </span>
-                    </td>
                   </tr>
                 ))}
               </tbody>
