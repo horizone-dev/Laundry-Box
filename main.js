@@ -567,9 +567,6 @@ function validateQueryCreditLimit(db, query, params) {
     const setMatch = cleanQuery.match(/UPDATE\s+orders\s+SET\s+(.+?)(?:\s+WHERE|$)/i);
     if (setMatch) {
       const setClause = setMatch[1];
-      if (setClause.toLowerCase().includes('paymentbreakdown')) {
-        return; // Discount adjustments/deletions on existing orders do not trigger credit limit blocks
-      }
       const dueAmount = getParamValue(setClause, 'dueAmount', params);
 
       if (dueAmount !== null) {
@@ -2645,6 +2642,31 @@ ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent, 
     // Short layout settle delay
     await new Promise(resolve => setTimeout(resolve, 150));
 
+    // POS drivers frequently cap very long fixed-size pages (the previous
+    // 80 mm × 600 mm setting), which makes a receipt stop halfway through.
+    // Size thermal paper to the rendered receipt instead, with a small safe
+    // bottom allowance for the printer cutter.
+    let resolvedPageSize = pageSize || 'A5';
+    if (pageSize && typeof pageSize === 'object' && pageSize.width === 80000) {
+      const receiptHeightPx = await printWin.webContents.executeJavaScript(`
+        Math.max(
+          document.body.scrollHeight,
+          document.documentElement.scrollHeight,
+          document.body.offsetHeight,
+          document.documentElement.offsetHeight
+        )
+      `);
+      // Chromium uses CSS pixels at 96 DPI; Electron custom paper sizes are
+      // expressed in microns. Keep within broadly supported thermal limits.
+      const receiptHeightMicrons = Math.max(
+        120000,
+        Math.min(500000, Math.ceil((Number(receiptHeightPx) || 0) * (25400 / 96) + 8000))
+      );
+      resolvedPageSize = { width: 80000, height: receiptHeightMicrons };
+      await printWin.webContents.insertCSS(`@page { size: 80mm ${receiptHeightMicrons / 1000}mm !important; margin: 0 !important; }`);
+      console.log(`[main.js] Thermal receipt height: ${receiptHeightPx}px / ${receiptHeightMicrons} microns`);
+    }
+
     const numCopies = (silent === true) ? Math.max(1, parseInt(copies) || 1) : 1;
     let finalResult = { success: false, error: 'No copies printed' };
 
@@ -2656,7 +2678,7 @@ ipcMain.handle('print-invoice', async (event, { html, css, printerName, silent, 
           printBackground: true,
           margins: { marginType: 'none' },
           scaleFactor: 100,
-          pageSize: pageSize || 'A5', // Pass options custom size or string format
+          pageSize: resolvedPageSize, // Use the rendered height for continuous thermal paper
           copies: 1,                  // Print 1 copy at a time so the OS spooler triggers printer's auto-cutter between jobs
           deviceName: (printerName === 'System Default Printer' || !printerName) ? '' : printerName
         }, (success, failureReason) => {

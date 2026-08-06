@@ -43,6 +43,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
 
   // ── Items state (drag + edit) ──
   const [items, setItems] = useState(order.items || []);
+  const [serviceArabicNames, setServiceArabicNames] = useState({ byId: {}, byName: {} });
   const dragIndex = useRef(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
 
@@ -50,6 +51,26 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
   useEffect(() => {
     setItems(order.items || []);
   }, [order.items, order.id]);
+
+  // Older orders did not store nameAr in their item JSON. Look up the current
+  // service translation so those receipts also print Arabic service names.
+  useEffect(() => {
+    if (!window.electronAPI?.dbQuery || !items.some(item => !item.nameAr && !item.serviceNameAr && !item.arabicName && !item.nameArabic)) return;
+
+    window.electronAPI.dbQuery(
+      "SELECT id, name, nameAr FROM services WHERE nameAr IS NOT NULL AND TRIM(nameAr) <> ''",
+      []
+    ).then((result) => {
+      if (!result?.success) return;
+      const byId = {};
+      const byName = {};
+      result.data.forEach((service) => {
+        if (service.id && service.nameAr) byId[service.id] = service.nameAr;
+        if (service.name && service.nameAr) byName[service.name.trim().toLowerCase()] = service.nameAr;
+      });
+      setServiceArabicNames({ byId, byName });
+    }).catch(() => {});
+  }, [items]);
 
   // ── Computed totals from items ──
   const itemsTotal = items.reduce((s, i) => s + ((parseFloat(i.qty) || 0) * (parseFloat(i.price) || 0)), 0);
@@ -216,6 +237,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
   // the bundled logo when the shop has not uploaded a custom one yet.
   const hasLogo = showLogo;
   const showQrCode = settings.invoiceShowQrCode !== false;
+  const showPaymentDetails = settings.invoiceShowPaymentDetails !== false;
   const showBilingual = settings.invoiceShowBilingual !== false;
   const showTerms = settings.invoiceShowTerms !== false;
   const showBankDetails = settings.invoiceShowBankDetails !== false;
@@ -262,6 +284,29 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
     const isCompactTemplate = settings.invoiceTemplate === 'compact' || settings.invoiceTemplate === 'compact 2' || settings.invoiceTemplate === 'horizon';
     return showBilingual && !isCompactTemplate ? `${en} / ${ar}` : en;
   };
+
+  const getArabicServiceName = (item) => item?.nameAr
+    || item?.serviceNameAr
+    || item?.arabicName
+    || item?.nameArabic
+    || serviceArabicNames.byId[item?.serviceId]
+    || serviceArabicNames.byName[String(item?.name || '').trim().toLowerCase()]
+    || '';
+  const paymentMode = (() => {
+    const methods = [];
+    if (orderPaymentBreakdown.cash > 0) methods.push('CASH');
+    if (orderPaymentBreakdown.card > 0) methods.push('CARD');
+    if (orderPaymentBreakdown.upi > 0) methods.push('UPI');
+    if (orderPaymentBreakdown.bank > 0) methods.push('BANK');
+    return methods.length > 0 ? methods.join(' / ') : (order.paymentMethod || 'NOT PAID').toUpperCase();
+  })();
+  const paymentStatusLabel = (() => {
+    const status = String(order.paymentStatus || '').toLowerCase();
+    if (status === 'credit' || String(order.paymentMethod || '').toLowerCase() === 'credit') return 'CREDIT';
+    if (status === 'partial' || (order.paidAmount > 0 && order.paidAmount < computedTotal)) return 'PARTIAL';
+    if (status === 'paid' || (computedTotal > 0 && (order.paidAmount || 0) >= computedTotal)) return 'FULL';
+    return 'UNPAID';
+  })();
 
   const formatExpectedDate = (rawDate) => {
     if (!rawDate) return '';
@@ -321,20 +366,10 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
     }
   };
 
-  const getInvoiceStatus = () => {
-    const payStatus = order.paymentStatus?.toLowerCase();
-    const isPaid = payStatus === 'paid' || (order.total !== undefined && (order.total - (order.paidAmount || 0)) <= 0);
-    if (isPaid) return 'Paid';
-    if (payStatus === 'credit') return 'Credit';
-    if (payStatus === 'partial') return 'Partial';
-    return order.status;
-  };
-
   const isCompact2 = settings.invoiceTemplate === 'compact 2' || settings.invoiceTemplate === 'horizon';
 
   if (isCompact2) {
     const totalBalanceVal = (order.totalBalance !== undefined) ? order.totalBalance : (order.dueAmount || 0);
-    const invoiceStatus = getInvoiceStatus().toUpperCase();
     const formattedDate = order.date || '';
 
     return (
@@ -447,9 +482,9 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                         onChange={(v) => updateItem(idx, 'name', v)}
                         className={styles.horizonItemName}
                       />
-                      {!editMode && settings?.invoiceShowArabicServiceName && (item.nameAr || item.serviceNameAr || item.arabicName || item.nameArabic) && (
+                      {!editMode && settings?.invoiceShowArabicServiceName !== false && getArabicServiceName(item) && (
                         <span className={styles.horizonItemSubText} lang="ar" dir="rtl" style={{ direction: 'rtl', unicodeBidi: 'plaintext' }}>
-                          {item.nameAr || item.serviceNameAr || item.arabicName || item.nameArabic}
+                          {getArabicServiceName(item)}
                         </span>
                       )}
                       {servicesText && (
@@ -528,27 +563,17 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
 
           <div className={styles.horizonTotalDashedLine}></div>
 
-          <div className={styles.horizonStatusRow}>
+          <div className={styles.horizonStatusRow} style={{ display: showPaymentDetails ? undefined : 'none' }}>
             <span>{formatLabel('PAYMODE', 'طريقة الدفع')}:</span>
             <span style={{ textTransform: 'uppercase' }}>
-              {(() => {
-                const breakdown = order.paymentBreakdown;
-                const activeMethods = [];
-                if (breakdown) {
-                  if (breakdown.cash > 0) activeMethods.push('CASH');
-                  if (breakdown.card > 0) activeMethods.push('CARD');
-                  if (breakdown.bank > 0) activeMethods.push('BANK');
-                }
-                if (activeMethods.length > 0) return activeMethods.join(' / ');
-                return order.paymentMethod || 'CASH';
-              })()}
+              {paymentMode}
             </span>
           </div>
 
-          {invoiceStatus === 'PAID' && (
+          {showPaymentDetails && (
             <div className={styles.horizonStatusRow}>
               <span>{formatLabel('STATUS', 'الحالة')}:</span>
-              <span style={{ fontWeight: 800 }}>{invoiceStatus}</span>
+              <span style={{ fontWeight: 800 }}>{paymentStatusLabel}</span>
             </div>
           )}
         </div>
@@ -821,8 +846,8 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
               <div key={idx} className={styles.thermalItem}>
                 {/* Service name — wraps naturally */}
                 <div className={styles.thermalItemName}>{item.name}</div>
-                {settings?.invoiceShowArabicServiceName && item.nameAr && (
-                  <div className={styles.thermalItemTypes} style={{ direction: 'rtl' }}>{item.nameAr}</div>
+                {settings?.invoiceShowArabicServiceName !== false && getArabicServiceName(item) && (
+                  <div className={styles.thermalItemTypes} lang="ar" dir="rtl" style={{ direction: 'rtl' }}>{getArabicServiceName(item)}</div>
                 )}
                 {typesList.length > 0 && (
                   <div className={styles.thermalItemTypes}>
@@ -935,8 +960,8 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                       onChange={(v) => updateItem(idx, 'name', v)}
                       className={styles.itemName}
                     />
-                    {!editMode && settings?.invoiceShowArabicServiceName && item.nameAr && (
-                      <div style={{ fontSize: '0.75rem', color: '#64748B', direction: 'rtl', textAlign: 'left', marginTop: '0.1rem' }}>{item.nameAr}</div>
+                    {!editMode && settings?.invoiceShowArabicServiceName !== false && getArabicServiceName(item) && (
+                      <div lang="ar" dir="rtl" style={{ fontSize: '0.75rem', color: '#64748B', direction: 'rtl', textAlign: 'left', marginTop: '0.1rem' }}>{getArabicServiceName(item)}</div>
                     )}
                     {item.description && (
                       <div style={{ fontSize: '0.75rem', color: '#DC2626', fontWeight: 600, marginTop: '0.15rem', display: 'block' }}>
@@ -1140,9 +1165,9 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
             <span><CurrencySymbol size={12} /> {(order.totalBalance || 0).toFixed(2)}</span>
           </div>
           {/* Payment method */}
-          {order.paymentMethod && order.paymentMethod !== 'Not Paid' && (
+          {showPaymentDetails && (
             <div className={styles.thermalPayMethod}>
-              {formatLabel('Via', 'عبر')}: {order.paymentMethod}
+              {formatLabel('Paymode', 'طريقة الدفع')}: {paymentMode} · {paymentStatusLabel}
             </div>
           )}
           {/* Bank details */}
@@ -1243,7 +1268,7 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                   <span className={styles.totalVal}><CurrencySymbol size={11} /> {manualPaid.toFixed(2)}</span>
                 </div>
               )}
-              {(() => {
+              {showPaymentDetails && (() => {
                 const breakdown = order.paymentBreakdown;
                 const hasBreakdown = breakdown && (
                   (breakdown.cash && breakdown.cash > 0) ||
@@ -1292,6 +1317,12 @@ export default function InvoiceTemplate({ order, settings, isPreview = false, on
                 }
                 return null;
               })()}
+              {showPaymentDetails && (
+                <div className={styles.totalRowBilingual} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                  <span>{formatLabel('Payment Status', 'حالة الدفع')}</span>
+                  <span style={{ fontWeight: 700 }}>{paymentStatusLabel}</span>
+                </div>
+              )}
               {(order.previousBalance || 0) < 0 ? (
                 <>
                   <div className={styles.totalRowBilingual}>

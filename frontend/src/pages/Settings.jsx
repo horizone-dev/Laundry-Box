@@ -22,6 +22,45 @@ import defaultLogo from '../assets/logo.png';
 import CustomSelect from '../components/CustomSelect';
 import styles from './Settings.module.css';
 
+// Release notes are supplied by the update server. Older releases use HTML
+// lists, so turn them into React elements rather than displaying the tags.
+const parseReleaseNotes = (releaseNotes) => {
+  const notes = String(releaseNotes || '').trim();
+  if (!notes) return { items: [], text: '' };
+
+  if (/<(?:ul|ol|li)\b/i.test(notes)) {
+    const document = new DOMParser().parseFromString(notes, 'text/html');
+    const toItems = (list) => Array.from(list.children)
+      .filter((child) => child.tagName === 'LI')
+      .map((item) => ({
+        text: Array.from(item.childNodes)
+          .filter((node) => node.nodeType === Node.TEXT_NODE || !['UL', 'OL'].includes(node.nodeName))
+          .map((node) => node.textContent)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim(),
+        children: Array.from(item.children)
+          .filter((child) => ['UL', 'OL'].includes(child.tagName))
+          .flatMap(toItems)
+      }));
+    const rootList = document.body.querySelector('ul, ol');
+    if (rootList) return { items: toItems(rootList), text: '' };
+  }
+
+  return { items: [], text: notes.replace(/<[^>]*>/g, '').trim() };
+};
+
+const ReleaseNotesList = ({ items }) => (
+  <ul style={{ margin: 0, paddingLeft: '1.25rem', display: 'grid', gap: '0.5rem' }}>
+    {items.map((item, index) => (
+      <li key={`${item.text}-${index}`}>
+        {item.text}
+        {item.children.length > 0 && <ReleaseNotesList items={item.children} />}
+      </li>
+    ))}
+  </ul>
+);
+
 export default function Settings() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -631,6 +670,8 @@ export default function Settings() {
         invoiceShowBilingual: true,
         invoiceShowTreatmentPrice: true,
         invoiceShowAddonPrice: true,
+        invoiceShowArabicServiceName: true,
+        invoiceShowPaymentDetails: true,
         invoiceShowPrevBalance: true,
         invoiceShowDelivery: true,
         invoiceShowWebsite: true,
@@ -2333,6 +2374,7 @@ export default function Settings() {
                     { label: 'Treatment Prices', sub: 'Show prices of treatments on invoice', key: 'invoiceShowTreatmentPrice' },
                     { label: 'Add-on Prices', sub: 'Show prices of add-ons on invoice', key: 'invoiceShowAddonPrice' },
                     { label: 'Arabic Service Name', sub: 'Show the saved Arabic name below each service', key: 'invoiceShowArabicServiceName' },
+                    { label: 'Payment Mode & Status', sub: 'Show payment method and Full, Partial, or Credit status', key: 'invoiceShowPaymentDetails' },
                     ...(settings.invoiceTemplate === 'compact 2' ? [
                       { label: 'Previous Balance', sub: 'Show customer statement balance', key: 'invoiceShowPrevBalance' },
                       { label: 'Expected Delivery / Ready for Collection', sub: 'Show expected delivery date', key: 'invoiceShowDelivery' },
@@ -3437,9 +3479,18 @@ export default function Settings() {
                       {updateStatus.releaseNotes && (
                         <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '1.5rem', borderRadius: '12px' }}>
                           <h5 style={{ color: '#334155', margin: '0 0 0.75rem 0', fontWeight: 600 }}>What's New in this Version:</h5>
-                          <pre style={{ margin: 0, fontFamily: 'inherit', fontSize: '0.875rem', color: '#475569', whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
-                            {updateStatus.releaseNotes}
-                          </pre>
+                          {(() => {
+                            const releaseNotes = parseReleaseNotes(updateStatus.releaseNotes);
+                            return releaseNotes.items.length > 0 ? (
+                              <div style={{ fontSize: '0.875rem', color: '#475569', lineHeight: '1.6' }}>
+                                <ReleaseNotesList items={releaseNotes.items} />
+                              </div>
+                            ) : (
+                              <p style={{ margin: 0, fontSize: '0.875rem', color: '#475569', whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
+                                {releaseNotes.text}
+                              </p>
+                            );
+                          })()}
                         </div>
                       )}
 

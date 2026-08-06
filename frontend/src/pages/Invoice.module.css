@@ -1707,8 +1707,8 @@
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
-    max-width: 270px !important;
-    width: 270px !important;
+    max-width: 80mm !important;
+    width: 80mm !important;
     font-size: 0.72rem !important;
     background: white !important;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
@@ -1718,8 +1718,8 @@
     border: none !important;
     padding: 0.2rem 0.1rem !important;
     margin: 0 !important;
-    max-width: 270px !important;
-    width: 270px !important;
+    max-width: 80mm !important;
+    width: 80mm !important;
     background: white !important;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
   }

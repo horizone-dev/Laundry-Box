@@ -411,11 +411,10 @@ export default function POS() {
       if (oldOrderRes.success && oldOrderRes.data.length > 0) {
         const oldOrder = oldOrderRes.data[0];
         if (oldOrder.customerId === selectedCustomer.id) {
-          if (actionType === 'completePayment') {
-            oldDueAmount = oldOrder.dueAmount || 0;
-          } else {
-            oldDueAmount = oldOrder.totalAmount || 0;
-          }
+          // The customer's balance contains the unpaid part of an existing
+          // invoice, never its full total. Comparing against totalAmount here
+          // skipped the warning for some partial-payment edits.
+          oldDueAmount = oldOrder.dueAmount || 0;
         }
       }
     }
@@ -423,7 +422,10 @@ export default function POS() {
     const totalPaidNow = parseFloat(cashAmount || 0) + parseFloat(cardAmount || 0) + parseFloat(upiAmount || 0) + parseFloat(bankAmount || 0) + parseFloat(nomodAmount || 0);
     const isCreditOrPartial = paymentMethod === 'credit' || totalPaidNow < total;
     if (actionType === 'saveOrder' || (actionType === 'completePayment' && isCreditOrPartial)) {
-      const orderAmount = actionType === 'completePayment' ? Math.max(0, total - totalPaidNow) : total;
+      const availableAdvance = selectedCustomer.balance < 0 ? Math.abs(selectedCustomer.balance) : 0;
+      const orderAmount = actionType === 'completePayment'
+        ? Math.max(0, total - totalPaidNow)
+        : Math.max(0, total - Math.min(total, availableAdvance));
       const netIncrease = orderAmount - oldDueAmount;
 
       if (netIncrease <= 0) return false;
@@ -2541,8 +2543,13 @@ export default function POS() {
                 <span className={styles.cartItemName} dir={isArabic ? 'rtl' : undefined}>{getServiceDisplayName(item)}</span>
                 <span className={styles.cartItemMeta}>
                   {(() => {
-                    const treatments = item.type || '';
-                    const addonsList = (item.addons || []).join(' + ');
+                    const treatments = Array.isArray(item.types) && item.types.length > 0
+                      ? item.types.map(type => typeof type === 'string' ? type : type?.name).filter(Boolean).join(' + ')
+                      : (item.type || '');
+                    const addonsList = (item.addons || [])
+                      .map(addon => typeof addon === 'string' ? addon : addon?.name)
+                      .filter(Boolean)
+                      .join(' + ');
                     const baseMeta = [treatments, addonsList].filter(Boolean).join(' + ');
                     return baseMeta + (item.deliveryMethod ? ` (${item.deliveryMethod})` : '');
                   })()}
@@ -3180,7 +3187,7 @@ export default function POS() {
         </div>
       )}
       {showCreditWarning && creditWarningDetails && (
-        <div className={styles.modalOverlay}>
+        <div className={styles.modalOverlay} style={{ position: 'fixed', zIndex: 2147483647 }}>
           <div className={styles.statusModal} style={{ maxWidth: '450px', borderRadius: '24px', background: 'white', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)', padding: '2rem' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '1.5rem' }}>
               <AlertTriangle size={24} color="#EF4444" style={{ marginTop: '2px' }} />
